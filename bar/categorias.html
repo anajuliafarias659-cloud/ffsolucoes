@@ -14,6 +14,7 @@ body{
   background:#020617;
   color:#fff;
 }
+
 .topo{
   background:#0f172a;
   padding:16px 24px;
@@ -21,28 +22,38 @@ body{
   justify-content:space-between;
   align-items:center;
 }
+
 .container{
   padding:32px;
   max-width:900px;
   margin:auto;
 }
-input, button{
+
+button, input{
   padding:12px;
   border-radius:10px;
   border:none;
+  font-weight:bold;
 }
+
 input{
   width:260px;
 }
+
 button{
   background:#22c55e;
-  color:#000;
-  font-weight:bold;
   cursor:pointer;
 }
+
+.btn-danger{
+  background:#ef4444;
+  color:#fff;
+}
+
 .lista{
   margin-top:24px;
 }
+
 .item{
   background:#0f172a;
   padding:14px 18px;
@@ -51,10 +62,6 @@ button{
   justify-content:space-between;
   align-items:center;
   margin-bottom:10px;
-}
-.desativar{
-  background:#ef4444;
-  color:#fff;
 }
 </style>
 </head>
@@ -68,59 +75,162 @@ button{
 
 <div class="container">
 
-  <h3>Nova categoria</h3>
-  <input id="nome" placeholder="Ex: Bebidas">
-  <button onclick="criar()">Salvar</button>
+  <div id="statusCategorias" style="margin-bottom:20px"></div>
+
+  <div id="boxCriar">
+    <h3>Nova categoria</h3>
+    <input id="nome" placeholder="Ex: Bebidas">
+    <button onclick="criar()">Salvar</button>
+  </div>
 
   <div class="lista" id="lista"></div>
 
 </div>
 
 <script>
-/* 🔐 admin logado */
+// ===============================
+// 🔐 ADMIN
+// ===============================
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin){
+if(!admin || !admin.app_id){
   alert("Sessão expirada");
   location.href = "../auth/login.html";
 }
 
-/* ✅ Supabase REAL */
-const supabaseClient = window.supabase.createClient(
+// ===============================
+// 🔗 SUPABASE
+// ===============================
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ➕ criar categoria */
-async function criar(){
-  const nome = document.getElementById("nome").value.trim();
-  if(!nome) return alert("Informe o nome da categoria");
+// ===============================
+// ⚙️ CONFIG DO BAR
+// ===============================
+let usarCategorias = true;
 
-  const { error } = await supabaseClient
-    .from("categorias")
-    .insert({
-      app_id: admin.app_id,
-      nome,
-      ativo: true
-    });
+async function carregarConfig(){
+  const { data, error } = await sb
+    .from("apps")
+    .select("usar_categorias")
+    .eq("id", admin.app_id)
+    .single();
 
   if(error){
     console.error(error);
-    alert("Erro ao salvar categoria");
+    alert("Erro ao carregar configuração do bar");
     return;
   }
 
-  document.getElementById("nome").value = "";
+  usarCategorias = data.usar_categorias;
+  renderConfig();
+}
+
+// ===============================
+// 🧠 UI CONFIG
+// ===============================
+function renderConfig(){
+  const status = document.getElementById("statusCategorias");
+  const boxCriar = document.getElementById("boxCriar");
+
+  if(!usarCategorias){
+    status.innerHTML = `
+      <p style="color:#f87171">
+        🚫 Este bar NÃO usa categorias
+      </p>
+      <button class="btn-danger" onclick="ativarCategorias()">
+        Ativar categorias
+      </button>
+    `;
+    boxCriar.style.display = "none";
+  }else{
+    status.innerHTML = `
+      <p style="color:#4ade80">
+        ✅ Este bar usa categorias
+      </p>
+      <button class="btn-danger" onclick="desativarCategorias()">
+        Desativar categorias
+      </button>
+    `;
+    boxCriar.style.display = "block";
+  }
+}
+
+// ===============================
+// 🔁 TOGGLE
+// ===============================
+async function desativarCategorias(){
+  if(!confirm("Esse bar NÃO usará categorias. Continuar?")) return;
+
+  const { error } = await sb
+    .from("apps")
+    .update({ usar_categorias:false })
+    .eq("id", admin.app_id);
+
+  if(error){
+    console.error(error);
+    alert("Erro ao atualizar");
+    return;
+  }
+
+  usarCategorias = false;
+  renderConfig();
+}
+
+async function ativarCategorias(){
+  const { error } = await sb
+    .from("apps")
+    .update({ usar_categorias:true })
+    .eq("id", admin.app_id);
+
+  if(error){
+    console.error(error);
+    alert("Erro ao atualizar");
+    return;
+  }
+
+  usarCategorias = true;
+  renderConfig();
   listar();
 }
 
-/* 📋 listar categorias */
+// ===============================
+// ➕ CRUD CATEGORIAS
+// ===============================
+async function criar(){
+  const nome = document.getElementById("nome").value.trim();
+  if(!nome) return alert("Informe o nome");
+
+  const { error } = await sb.from("categorias").insert({
+    app_id: admin.app_id,
+    nome,
+    ativo:true
+  });
+
+  if(error){
+    console.error(error);
+    alert("Erro ao salvar");
+    return;
+  }
+
+  document.getElementById("nome").value="";
+  listar();
+}
+
 async function listar(){
-  const { data, error } = await supabaseClient
+  if(!usarCategorias){
+    document.getElementById("lista").innerHTML =
+      "<p>Categorias desativadas para este bar</p>";
+    return;
+  }
+
+  const { data, error } = await sb
     .from("categorias")
     .select("*")
     .eq("app_id", admin.app_id)
     .eq("ativo", true)
-    .order("created_at", { ascending: true });
+    .order("created_at");
 
   if(error){
     console.error(error);
@@ -130,7 +240,7 @@ async function listar(){
   const lista = document.getElementById("lista");
   lista.innerHTML = "";
 
-  if(data.length === 0){
+  if(!data.length){
     lista.innerHTML = "<p>Nenhuma categoria cadastrada</p>";
     return;
   }
@@ -140,26 +250,28 @@ async function listar(){
     div.className="item";
     div.innerHTML = `
       <b>${cat.nome}</b>
-      <button class="desativar" onclick="desativar('${cat.id}')">Desativar</button>
+      <button class="btn-danger" onclick="desativar('${cat.id}')">
+        Desativar
+      </button>
     `;
     lista.appendChild(div);
   });
 }
 
-/* ❌ desativar */
 async function desativar(id){
   if(!confirm("Desativar categoria?")) return;
 
-  await supabaseClient
-    .from("categorias")
+  await sb.from("categorias")
     .update({ ativo:false })
     .eq("id", id);
 
   listar();
 }
 
-/* init */
-listar();
+// ===============================
+// 🚀 INIT
+// ===============================
+carregarConfig().then(listar);
 </script>
 
 </body>
