@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Mesa</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:1200px;margin:auto;padding:24px}
+.box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
+
+input,button{padding:10px;border-radius:8px;border:none}
+button{background:#22c55e;font-weight:bold;cursor:pointer}
+
+.busca{width:100%;margin-bottom:16px}
+
+.lista-produtos{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:10px;
+}
+
+.produto{
+  background:#020617;
+  border:1px solid #1e293b;
+  padding:12px;
+  border-radius:10px;
+}
+
+.qtd{
+  display:flex;
+  gap:6px;
+  margin-top:8px;
+}
+
+.qtd button{width:32px;height:32px;padding:0}
+
+.item{
+  display:flex;
+  justify-content:space-between;
+  border-bottom:1px solid #1e293b;
+  padding:6px 0;
+}
+
+.sem-estoque{color:#f87171;font-size:13px}
+</style>
+</head>
+
+<body>
+
+<script>
+// ================= SUPABASE =================
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+// ================= ADMIN =================
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin || !admin.app_id){
+  alert("Sessão expirada");
+  location.href="../auth/login.html";
+}
+
+// ================= MESA =================
+const mesaIndex = Number(new URLSearchParams(location.search).get("mesa"));
+if(!mesaIndex || mesaIndex < 1){
+  alert("Mesa inválida");
+  throw new Error("Mesa inválida");
+}
+
+let mesaId = null;
+let pedidoId = null;
+let produtos = [];
+</script>
+
+<div class="topo">
+  <h2>Mesa <span id="mesaLabel"></span></h2>
+  <button onclick="history.back()">Voltar</button>
+</div>
+
+<div class="container">
+
+  <div class="box">
+    <input class="busca" id="busca" placeholder="Buscar produto..." oninput="renderProdutos()">
+    <div id="produtos" class="lista-produtos"></div>
+  </div>
+
+  <div class="box">
+    <h3>Consumo</h3>
+    <div id="itens"></div>
+  </div>
+
+  <div class="box">
+    <button onclick="fecharConta()">Fechar Conta</button>
+  </div>
+
+</div>
+
+<script>
+document.getElementById("mesaLabel").innerText = mesaIndex;
+
+/* ================= MESA ================= */
+async function carregarMesa(){
+  const pos = mesaIndex - 1;
+
+  const { data } = await sb
+    .from("mesas")
+    .select("id")
+    .eq("app_id", admin.app_id)
+    .order("created_at", { ascending:true })
+    .range(pos, pos)
+    .maybeSingle();
+
+  if(!data){
+    alert("Mesa não encontrada");
+    throw new Error("Mesa não encontrada");
+  }
+
+  mesaId = data.id;
+}
+
+/* ================= PEDIDO ================= */
+async function carregarPedido(){
+  if(!mesaId) await carregarMesa();
+
+  const { data } = await sb
+    .from("pedidos")
+    .select("id")
+    .eq("app_id", admin.app_id)
+    .eq("mesa_id", mesaId)
+    .eq("fechado", false)
+    .maybeSingle();
+
+  if(data){
+    pedidoId = data.id;
+  } else {
+    const { data: novo } = await sb
+      .from("pedidos")
+      .insert({
+        app_id: admin.app_id,
+        mesa_id: mesaId,
+        status: "aberto",
+        fechado: false
+      })
+      .select("id")
+      .single();
+
+    pedidoId = novo.id;
+  }
+
+  carregarProdutos();
+  carregarItens();
+}
+
+/* ================= PRODUTOS ================= */
+async function carregarProdutos(){
+  const { data } = await sb
+    .from("produtos")
+    .select("id,nome,preco,estoque")
+    .eq("app_id", admin.app_id)
+    .eq("ativo", true);
+
+  produtos = data || [];
+  renderProdutos();
+}
+
+/* ================= RENDER ================= */
+function renderProdutos(){
+  const termo = document.getElementById("busca").value.toLowerCase();
+  const div = document.getElementById("produtos");
+  div.innerHTML = "";
+
+  produtos
+    .filter(p => p.nome.toLowerCase().includes(termo))
+    .forEach(p=>{
+      if(p.estoque <= 0){
+        div.innerHTML += `
+          <div class="produto">
+            <b>${p.nome}</b><br>
+            R$ ${Number(p.preco).toFixed(2)}
+            <div class="sem-estoque">Sem estoque</div>
+          </div>`;
+        return;
+      }
+
+      div.innerHTML += `
+        <div class="produto">
+          <b>${p.nome}</b><br>
+          R$ ${Number(p.preco).toFixed(2)}
+
+          <div class="qtd">
+            <button onclick="alterarQtd('${p.id}',-1)">−</button>
+            <span id="qtd-${p.id}">1</span>
+            <button onclick="alterarQtd('${p.id}',1)">+</button>
+            <button onclick="addProduto('${p.id}')">Adicionar</button>
+          </div>
+        </div>`;
+    });
+}
+
+/* ================= QTD ================= */
+function alterarQtd(id, delta){
+  const el = document.getElementById(`qtd-${id}`);
+  if(!el) return;
+  let v = Number(el.innerText) + delta;
+  if(v < 1) v = 1;
+  el.innerText = v;
+}
+
+/* ================= ADD PRODUTO (COM CONTROLE) ================= */
+async function addProduto(produtoId){
+  const qtd = Number(document.getElementById(`qtd-${produtoId}`).innerText);
+  const produto = produtos.find(p => p.id === produtoId);
+
+  if(!produto){
+    alert("Produto não encontrado");
+    return;
+  }
+
+  if(qtd > produto.estoque){
+    alert(`Estoque insuficiente. Disponível: ${produto.estoque}`);
+    return;
+  }
+
+  const { data: item } = await sb
+    .from("pedido_itens")
+    .select("id, quantidade")
+    .eq("app_id", admin.app_id)
+    .eq("pedido_id", pedidoId)
+    .eq("produto_id", produtoId)
+    .maybeSingle();
+
+  if(item){
+    await sb
+      .from("pedido_itens")
+      .update({ quantidade: item.quantidade + qtd })
+      .eq("id", item.id);
+  } else {
+    await sb
+      .from("pedido_itens")
+      .insert({
+        app_id: admin.app_id,
+        pedido_id: pedidoId,
+        produto_id: produtoId,
+        nome_produto: produto.nome,
+        preco: produto.preco,
+        quantidade: qtd
+      });
+  }
+
+  // 🔥 BAIXA ESTOQUE
+  await sb
+    .from("produtos")
+    .update({ estoque: produto.estoque - qtd })
+    .eq("id", produtoId);
+
+  carregarProdutos();
+  carregarItens();
+}
+
+/* ================= CONSUMO ================= */
+async function carregarItens(){
+  const { data: itens } = await sb
+    .from("pedido_itens")
+    .select("nome_produto, preco, quantidade")
+    .eq("app_id", admin.app_id)
+    .eq("pedido_id", pedidoId);
+
+  const div = document.getElementById("itens");
+  div.innerHTML = "";
+  let total = 0;
+
+  if(!itens || itens.length === 0){
+    div.innerHTML = "<i>Sem consumo</i>";
+    return;
+  }
+
+  itens.forEach(i=>{
+    const sub = i.quantidade * i.preco;
+    total += sub;
+    div.innerHTML += `
+      <div class="item">
+        <span>${i.quantidade}x ${i.nome_produto}</span>
+        <span>R$ ${sub.toFixed(2)}</span>
+      </div>`;
+  });
+
+  div.innerHTML += `<strong>Total: R$ ${total.toFixed(2)}</strong>`;
+}
+
+/* ================= FECHAR ================= */
+async function fecharConta(){
+  await sb
+    .from("pedidos")
+    .update({ fechado: true, status: "fechado" })
+    .eq("app_id", admin.app_id)
+    .eq("id", pedidoId);
+
+  location.href = `pagamento.html?pedido=${pedidoId}`;
+}
+
+/* ================= INIT ================= */
+carregarPedido();
+</script>
+
+</body>
+</html>
