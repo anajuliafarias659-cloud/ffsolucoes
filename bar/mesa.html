@@ -2,278 +2,197 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Mesa</title>
+<title>Cardápio</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between;align-items:center}
-.container{max-width:1200px;margin:auto;padding:24px}
-.box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
-input,button{padding:10px;border-radius:8px;border:none}
-button{background:#22c55e;font-weight:bold;cursor:pointer}
-.busca{width:100%;margin-bottom:16px}
-
-.lista-produtos{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-  gap:10px
+:root{
+  --bg:#f8fafc;
+  --card:#ffffff;
+  --primary:#16a34a;
+  --text:#020617;
 }
-.produto{background:#020617;border:1px solid #1e293b;padding:12px;border-radius:10px}
-.qtd{display:flex;gap:6px;margin-top:8px}
-.qtd button{width:32px;height:32px;padding:0}
-
-.item{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1e293b;padding:8px 0}
-.controles button{margin-left:4px;padding:4px 8px}
-.remover{background:#ef4444;color:#fff}
-.btn-liberar{background:#ef4444}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text)}
+header{background:#020617;color:#fff;padding:22px 16px 26px;text-align:center;border-radius:0 0 22px 22px}
+.container{max-width:600px;margin:auto;padding:16px}
+.produto{background:#fff;border-radius:14px;padding:10px 12px;display:flex;gap:14px;margin-bottom:12px;box-shadow:0 4px 14px rgba(0,0,0,.06)}
+.produto img{width:72px;height:72px;border-radius:10px;object-fit:cover}
+.produto-info{flex:1}
+.preco{color:var(--primary);font-weight:700}
+.produto button{background:var(--primary);border:none;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
+.carrinho-btn{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#020617;color:#fff;padding:14px 20px;border-radius:30px;font-weight:600;cursor:pointer}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end}
+.modal-content{background:#fff;width:100%;max-width:600px;margin:auto;border-radius:22px 22px 0 0;padding:20px}
+.item{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.item button{padding:4px 10px;border:none;border-radius:8px;font-weight:bold}
 </style>
 </head>
 
 <body>
 
+<header>
+  <h1 id="nome">Cardápio</h1>
+</header>
+
+<div class="container" id="conteudo"></div>
+
+<div class="carrinho-btn" onclick="abrirCarrinho()">
+  🛒 Pedido (<span id="qtd">0</span>)
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-content">
+    <h3>🧾 Seu pedido</h3>
+    <div id="lista"></div>
+    <button onclick="enviarPedido()">Enviar pedido</button>
+  </div>
+</div>
+
 <script>
-/* ===== SUPABASE ===== */
+/* ===== CONFIG ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== PARAMS ===== */
 const params = new URLSearchParams(location.search);
 const app_id = params.get("app_id");
-const numeroMesa = Number(params.get("mesa"));
+const mesa_ui = params.get("mesa") || "—"; // só pra UI
 
-if(!app_id || !numeroMesa){
-  alert("Link inválido");
-  throw new Error("Parâmetros ausentes");
+if(!app_id){
+  document.body.innerHTML="<h2 style='text-align:center'>❌ QR inválido</h2>";
+  throw new Error("app_id ausente");
 }
 
-/* ===== STATE ===== */
-let mesaId = null;
-let pedidoId = null;
-let produtos = [];
-</script>
+document.getElementById("nome").innerText = `Cardápio · Mesa ${mesa_ui}`;
 
-<div class="topo">
-  <h2>Mesa <span id="mesaLabel"></span></h2>
-  <button onclick="history.back()">Voltar</button>
-</div>
+const STORAGE_KEY = `carrinho_${app_id}_${mesa_ui}`;
+let carrinho = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
 
-<div class="container">
-
-  <div class="box">
-    <input class="busca" id="busca" placeholder="Buscar produto..." oninput="renderProdutos()">
-    <div id="produtos" class="lista-produtos"></div>
-  </div>
-
-  <div class="box">
-    <h3>Consumo</h3>
-    <div id="itens"></div>
-  </div>
-
-  <div class="box">
-    <button onclick="fecharConta()">Fechar Conta</button>
-    <button onclick="liberarMesa()" id="btnLiberar" class="btn-liberar" style="display:none">
-      Liberar Mesa
-    </button>
-  </div>
-
-</div>
-
-<script>
-document.getElementById("mesaLabel").innerText = numeroMesa;
-
-/* ===== MESA ===== */
-async function carregarMesa(){
-  const { data, error } = await sb
-    .from("mesas")
-    .select("id")
-    .eq("app_id", app_id)
-    .eq("numero_mesa", numeroMesa)
-    .single();
-
-  if(error){
-    alert("Mesa não encontrada");
-    throw error;
-  }
-  mesaId = data.id;
+/* ===== UTIL ===== */
+function salvarCarrinho(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(carrinho));
+  atualizarQtd();
 }
-
-/* ===== PEDIDO (BUSCA SEM CRIAR) ===== */
-async function carregarPedido(){
-  await carregarMesa();
-
-  const { data } = await sb
-    .from("pedidos")
-    .select("id")
-    .eq("app_id", app_id)
-    .eq("mesa_id", mesaId)
-    .eq("status", "aberto")
-    .eq("tipo", "mesa")
-    .maybeSingle();
-
-  pedidoId = data?.id || null;
-
-  carregarProdutos();
-  carregarItens();
-}
-
-/* ===== GARANTIR PEDIDO (RPC — ÚNICO CAMINHO) ===== */
-async function garantirPedido(){
-  if(pedidoId) return;
-
-  const { data, error } = await sb.rpc("garantir_pedido_aberto", {
-    p_app_id: app_id,
-    p_mesa_id: mesaId
-  });
-
-  if(error){
-    console.error(error);
-    alert("Erro ao garantir pedido");
-    throw error;
-  }
-  pedidoId = data;
+function atualizarQtd(){
+  document.getElementById("qtd").innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
 /* ===== PRODUTOS ===== */
 async function carregarProdutos(){
-  const { data } = await sb
+  const { data, error } = await sb
     .from("produtos")
-    .select("id,nome,preco")
+    .select("id,nome,preco,foto")
     .eq("app_id", app_id)
-    .eq("ativo", true);
+    .eq("ativo", true)
+    .order("nome");
 
-  produtos = data || [];
-  renderProdutos();
-}
-
-function renderProdutos(){
-  const termo = document.getElementById("busca").value.toLowerCase();
-  const div = document.getElementById("produtos");
-  div.innerHTML = "";
-
-  produtos
-    .filter(p => p.nome.toLowerCase().includes(termo))
-    .forEach(p=>{
-      div.innerHTML += `
-        <div class="produto">
-          <b>${p.nome}</b><br>
-          R$ ${p.preco.toFixed(2)}
-          <div class="qtd">
-            <button onclick="addProduto('${p.id}', -1)">−</button>
-            <button onclick="addProduto('${p.id}', 1)">+</button>
-          </div>
-        </div>`;
-    });
-}
-
-/* ===== ADD / REMOVE ===== */
-async function addProduto(produtoId, delta){
-  const produto = produtos.find(p=>p.id===produtoId);
-  if(!produto) return;
-
-  await garantirPedido();
-
-  const { data: item } = await sb
-    .from("pedido_itens")
-    .select("id,quantidade")
-    .eq("pedido_id", pedidoId)
-    .eq("produto_id", produtoId)
-    .maybeSingle();
-
-  if(item){
-    const nova = item.quantidade + delta;
-    if(nova <= 0){
-      await sb.from("pedido_itens").delete().eq("id", item.id);
-    }else{
-      await sb.from("pedido_itens").update({ quantidade:nova }).eq("id", item.id);
-    }
-  }else if(delta > 0){
-    await sb.from("pedido_itens").insert({
-      app_id,
-      pedido_id: pedidoId,
-      produto_id: produtoId,
-      nome_produto: produto.nome,
-      preco: produto.preco,
-      quantidade: 1
-    });
-  }
-
-  carregarItens();
-}
-
-/* ===== ITENS ===== */
-async function carregarItens(){
-  if(!pedidoId){
-    document.getElementById("itens").innerHTML = "<i>Sem consumo</i>";
-    document.getElementById("btnLiberar").style.display = "inline-block";
+  if(error){
+    alert(error.message);
     return;
   }
 
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id,produto_id,nome_produto,preco,quantidade")
-    .eq("pedido_id", pedidoId);
-
-  const div = document.getElementById("itens");
-  const btnLiberar = document.getElementById("btnLiberar");
-  div.innerHTML = "";
-
-  let total = 0;
-
-  if((data||[]).length === 0){
-    btnLiberar.style.display = "inline-block";
-  }else{
-    btnLiberar.style.display = "none";
-  }
-
-  (data||[]).forEach(i=>{
-    total += i.preco * i.quantidade;
-    div.innerHTML += `
-      <div class="item">
-        <span>${i.quantidade}x ${i.nome_produto}</span>
-        <span class="controles">
-          <button onclick="addProduto('${i.produto_id}', -1)">−</button>
-          <button onclick="addProduto('${i.produto_id}', 1)">+</button>
-          <button class="remover" onclick="removerItem('${i.id}')">🗑️</button>
-        </span>
+  const conteudo = document.getElementById("conteudo");
+  conteudo.innerHTML="";
+  data.forEach(p=>{
+    conteudo.innerHTML+=`
+      <div class="produto">
+        ${p.foto ? `<img src="${p.foto}">` : ""}
+        <div class="produto-info">
+          <b>${p.nome}</b>
+          <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+        </div>
+        <button onclick='add(${JSON.stringify(p)})'>+</button>
       </div>`;
   });
-
-  if(total > 0){
-    div.innerHTML += `<strong>Total: R$ ${total.toFixed(2)}</strong>`;
-  }
 }
 
-async function removerItem(id){
-  await sb.from("pedido_itens").delete().eq("id", id);
-  carregarItens();
+/* ===== CARRINHO ===== */
+function add(p){
+  const item = carrinho.find(i=>i.id===p.id);
+  if(item) item.qtd++;
+  else carrinho.push({...p,qtd:1});
+  salvarCarrinho();
+}
+function remover(id){
+  const item = carrinho.find(i=>i.id===id);
+  if(!item) return;
+  item.qtd--;
+  if(item.qtd<=0) carrinho = carrinho.filter(i=>i.id!==id);
+  salvarCarrinho();
+  abrirCarrinho();
+}
+function abrirCarrinho(){
+  modal.style.display="flex";
+  lista.innerHTML="";
+  carrinho.forEach(i=>{
+    lista.innerHTML+=`
+      <div class="item">
+        <span>${i.qtd}x ${i.nome}</span>
+        <div>
+          <button onclick="remover('${i.id}')">-</button>
+          <b>R$ ${(i.qtd*i.preco).toFixed(2)}</b>
+        </div>
+      </div>`;
+  });
 }
 
-/* ===== AÇÕES ===== */
-function fecharConta(){
-  if(!pedidoId){
-    alert("Nenhum consumo");
+/* ===== ENVIO (SEM MESA NO INSERT) ===== */
+async function enviarPedido(){
+  if(!carrinho.length){
+    alert("Carrinho vazio");
     return;
   }
-  location.href = `pagamento.html?pedido=${pedidoId}`;
-}
 
-async function liberarMesa(){
-  if(!pedidoId){
-    location.href = "mesas.html";
+  const total = carrinho.reduce((s,i)=>s+i.qtd*i.preco,0);
+
+  const { data: pedido, error } = await sb
+    .from("pedidos")
+    .insert({
+      app_id: app_id,
+      total: total,
+      status: "aberto"
+    })
+    .select()
+    .single();
+
+  if(error){
+    console.error(error);
+    alert("ERRO PEDIDO: " + error.message);
     return;
   }
-  if(!confirm("Liberar mesa sem consumo?")) return;
 
-  await sb.from("pedidos").delete().eq("id", pedidoId);
-  location.href = "mesas.html";
+  const itens = carrinho.map(i=>({
+    pedido_id: pedido.id,
+    produto_id: i.id,
+    nome: i.nome,
+    qtd: i.qtd,
+    preco: i.preco
+  }));
+
+  const { error: eItens } = await sb
+    .from("itens_pedido")
+    .insert(itens);
+
+  if(eItens){
+    console.error(eItens);
+    alert("ERRO ITENS: " + eItens.message);
+    return;
+  }
+
+  alert("Pedido enviado 🔥");
+  carrinho = [];
+  localStorage.removeItem(STORAGE_KEY);
+  atualizarQtd();
+  modal.style.display="none";
 }
 
-/* START */
-carregarPedido();
+/* ===== INIT ===== */
+modal.onclick = e=>{ if(e.target===modal) modal.style.display="none"; };
+atualizarQtd();
+carregarProdutos();
 </script>
 
 </body>
