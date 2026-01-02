@@ -86,7 +86,6 @@ if(!numeroMesa){
 
 let mesaId = null;
 let pedidoId = null;
-let pedidoAtendido = false;
 let produtos = [];
 </script>
 
@@ -117,7 +116,6 @@ let produtos = [];
 </div>
 
 <script>
-
 document.getElementById("mesaLabel").innerText = numeroMesa;
 
 /* ===== MESA ===== */
@@ -143,15 +141,15 @@ async function carregarPedido(){
 
   const { data } = await sb
     .from("pedidos")
-    .select("id, atendido")
+    .select("id")
     .eq("app_id", admin.app_id)
     .eq("mesa_id", mesaId)
     .eq("status", "aberto")
+    .eq("tipo", "mesa")
     .maybeSingle();
 
   if(data){
     pedidoId = data.id;
-    pedidoAtendido = data.atendido;
   }else{
     const { data: novo } = await sb
       .from("pedidos")
@@ -159,13 +157,13 @@ async function carregarPedido(){
         app_id: admin.app_id,
         mesa_id: mesaId,
         status: "aberto",
+        tipo: "mesa",     // 🔥 CORREÇÃO PRINCIPAL
         atendido: false
       })
       .select("id")
       .single();
 
     pedidoId = novo.id;
-    pedidoAtendido = false;
   }
 
   carregarProdutos();
@@ -219,7 +217,6 @@ async function addProduto(produtoId, delta){
 
   if(item){
     const novaQtd = item.quantidade + delta;
-
     if(novaQtd <= 0){
       await sb.from("pedido_itens").delete().eq("id", item.id);
     }else{
@@ -237,10 +234,6 @@ async function addProduto(produtoId, delta){
       quantidade: 1
     });
   }
-
-  // qualquer mudança invalida atendimento
-  await sb.from("pedidos").update({ atendido:false }).eq("id", pedidoId);
-  pedidoAtendido = false;
 
   carregarItens();
 }
@@ -286,14 +279,10 @@ async function carregarItens(){
 /* ===== REMOVE ITEM ===== */
 async function removerItem(id){
   await sb.from("pedido_itens").delete().eq("id", id);
-
-  await sb.from("pedidos").update({ atendido:false }).eq("id", pedidoId);
-  pedidoAtendido = false;
-
   carregarItens();
 }
 
-/* ===== LIBERAR MESA (SEM CONSUMO) ===== */
+/* ===== LIBERAR MESA ===== */
 async function liberarMesa(){
   if(!confirm("Liberar mesa sem consumo?")) return;
 
