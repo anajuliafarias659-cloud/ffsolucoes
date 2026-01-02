@@ -10,7 +10,7 @@
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
 .container{padding:32px;max-width:1200px;margin:auto}
 
 .btn{
@@ -39,6 +39,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 
 .card.livre{border-color:#22c55e}
 .card.ocupada{border-color:#ef4444}
+.card.reservada{border-color:#facc15}
 
 .status{
   margin:6px 0 10px;
@@ -50,6 +51,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 
 .status.livre{background:#22c55e;color:#022c22}
 .status.ocupada{background:#ef4444}
+.status.reservada{background:#facc15;color:#000}
 
 .qr{
   background:#020617;
@@ -105,66 +107,65 @@ if(!admin?.app_id){
 <script>
 async function carregarMesas(){
 
-  const { data: mesas } = await sb
+  const { data: mesas, error } = await sb
     .from("mesas")
-    .select("id, numero_mesa")
+    .select("id, numero_mesa, status")
     .eq("app_id", admin.app_id)
-    .eq("ativa", true)
     .order("numero_mesa");
 
-  const { data: pedidos } = await sb
-    .from("pedidos")
-    .select("mesa_id")
-    .eq("app_id", admin.app_id)
-    .eq("status", "aberto");
-
-  const ocupadas = new Set((pedidos||[]).map(p=>p.mesa_id));
+  if(error){
+    console.error(error);
+    alert("Erro ao carregar mesas");
+    return;
+  }
 
   const grid = document.getElementById("listaMesas");
   grid.innerHTML = "";
 
   mesas.forEach(m=>{
-    const ocupada = ocupadas.has(m.id);
-    const status = ocupada ? "ocupada" : "livre";
+    const statusUI = m.status || "livre";
 
     const div = document.createElement("div");
-    div.className = `card ${status}`;
+    div.className = `card ${statusUI}`;
 
     div.innerHTML = `
       <h3>Mesa ${m.numero_mesa}</h3>
-      <span class="status ${status}">${status.toUpperCase()}</span>
+      <span class="status ${statusUI}">${statusUI.toUpperCase()}</span>
 
       <div class="qr">
         <canvas id="qr-${m.id}"></canvas>
       </div>
 
       <button class="btn-abrir">Abrir Mesa</button>
-      <button class="btn-remover">🗑️ Apagar Mesa</button>
+      <button class="btn-remover">🗑️ Remover Mesa</button>
     `;
 
     grid.appendChild(div);
 
+    // QR CORRETO
     QRCode.toCanvas(
       document.getElementById(`qr-${m.id}`),
       `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/mesa.html?mesa=${m.numero_mesa}&app=${admin.app_id}`,
       { width:120 }
     );
 
+    // abrir mesa
     div.querySelector(".btn-abrir").onclick = () => {
       location.href = `mesa.html?mesa=${m.numero_mesa}`;
     };
 
+    // remover mesa (soft delete via status)
     div.querySelector(".btn-remover").onclick = async () => {
-      if(ocupada){
-        alert("❌ Não é possível apagar mesa ocupada");
+      if(m.status === "ocupada"){
+        alert("❌ Mesa ocupada não pode ser removida");
         return;
       }
 
-      if(!confirm(`Apagar Mesa ${m.numero_mesa}?`)) return;
+      if(!confirm(`Remover Mesa ${m.numero_mesa}?`)) return;
 
       await sb
         .from("mesas")
-        .update({ ativa:false })
+        .update({ status: "reservada" }) 
         .eq("id", m.id);
 
       carregarMesas();
@@ -172,7 +173,7 @@ async function carregarMesas(){
   });
 }
 
-// ➕ CRIAR NOVA MESA
+// ➕ adicionar mesa (100% compatível com CHECK)
 async function adicionarMesa(){
   const { data } = await sb
     .from("mesas")
@@ -184,11 +185,19 @@ async function adicionarMesa(){
 
   const proximo = (data?.numero_mesa || 0) + 1;
 
-  await sb.from("mesas").insert({
-    app_id: admin.app_id,
-    numero_mesa: proximo,
-    ativa: true
-  });
+  const { error } = await sb
+    .from("mesas")
+    .insert({
+      app_id: admin.app_id,
+      numero_mesa: proximo,
+      status: "livre"
+    });
+
+  if(error){
+    console.error(error);
+    alert("Erro ao adicionar mesa");
+    return;
+  }
 
   carregarMesas();
 }
