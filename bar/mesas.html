@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Mesas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.voltar{background:#1e293b;color:#fff;border:none;padding:10px 16px;border-radius:10px;cursor:pointer}
+.container{padding:32px;max-width:1200px;margin:auto}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:20px
+}
+
+.card{
+  background:#0f172a;
+  padding:16px;
+  border-radius:18px;
+  text-align:center;
+  border:2px solid transparent
+}
+
+.card.livre{border-color:#22c55e}
+.card.ocupada{border-color:#ef4444}
+
+.status{
+  margin:6px 0 10px;
+  padding:4px 10px;
+  border-radius:8px;
+  font-weight:bold;
+  font-size:13px
+}
+
+.status.livre{background:#22c55e;color:#022c22}
+.status.ocupada{background:#ef4444}
+
+.qr{
+  background:#020617;
+  border-radius:14px;
+  padding:10px;
+  margin:12px 0;
+  display:flex;
+  justify-content:center
+}
+
+button{
+  width:100%;
+  margin-top:6px;
+  padding:8px;
+  border:none;
+  border-radius:8px;
+  font-weight:bold;
+  cursor:pointer
+}
+
+.btn-abrir{background:#2563eb;color:#fff}
+.btn-remover{background:#ef4444;color:#fff}
+</style>
+</head>
+
+<body>
+
+<script>
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin?.app_id){
+  alert("Acesso negado");
+  location.href="../auth/login.html";
+}
+</script>
+
+<div class="topo">
+  <h2>🪑 Mesas</h2>
+  <button class="voltar" onclick="location.href='admin.html'">Voltar</button>
+</div>
+
+<div class="container">
+  <div class="grid" id="listaMesas"></div>
+</div>
+
+<script>
+async function carregarMesas(){
+
+  // buscar mesas ativas do negócio
+  const { data: mesas, error } = await sb
+    .from("mesas")
+    .select("id, numero_mesa")
+    .eq("app_id", admin.app_id)
+    .eq("ativa", true)
+    .order("numero_mesa");
+
+  if(error){
+    alert("Erro ao carregar mesas");
+    return;
+  }
+
+  // pedidos abertos
+  const { data: pedidos } = await sb
+    .from("pedidos")
+    .select("mesa_id")
+    .eq("app_id", admin.app_id)
+    .eq("status", "aberto");
+
+  const ocupadas = new Set((pedidos||[]).map(p=>p.mesa_id));
+
+  const grid = document.getElementById("listaMesas");
+  grid.innerHTML = "";
+
+  mesas.forEach(m=>{
+    const ocupada = ocupadas.has(m.id);
+    const status = ocupada ? "ocupada" : "livre";
+
+    const div = document.createElement("div");
+    div.className = `card ${status}`;
+
+    div.innerHTML = `
+      <h3>Mesa ${m.numero_mesa}</h3>
+      <span class="status ${status}">${status.toUpperCase()}</span>
+
+      <div class="qr">
+        <canvas id="qr-${m.id}"></canvas>
+      </div>
+
+      <button class="btn-abrir">Abrir Mesa</button>
+      <button class="btn-remover">🗑️ Remover Mesa</button>
+    `;
+
+    grid.appendChild(div);
+
+    // QR
+    QRCode.toCanvas(
+      document.getElementById(`qr-${m.id}`),
+      `${location.origin}/cardapio/index.html?app=${admin.app_id}&mesa=${m.numero_mesa}`,
+      { width:120 }
+    );
+
+    // abrir mesa
+    div.querySelector(".btn-abrir").onclick = () => {
+      location.href = `mesa.html?mesa=${m.numero_mesa}`;
+    };
+
+    // remover mesa
+    div.querySelector(".btn-remover").onclick = async () => {
+      if(ocupada){
+        alert("❌ Não é possível remover uma mesa ocupada");
+        return;
+      }
+
+      if(!confirm(`Remover a Mesa ${m.numero_mesa}?`)) return;
+
+      await sb
+        .from("mesas")
+        .update({ ativa:false })
+        .eq("id", m.id);
+
+      carregarMesas();
+    };
+  });
+}
+
+carregarMesas();
+</script>
+
+</body>
+</html>
