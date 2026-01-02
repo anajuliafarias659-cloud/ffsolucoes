@@ -12,7 +12,6 @@
   --card:#ffffff;
   --primary:#16a34a;
   --text:#020617;
-  --muted:#64748b;
 }
 
 *{box-sizing:border-box}
@@ -37,9 +36,6 @@ header{
   margin:auto;
   padding:16px;
 }
-
-.categoria{margin-top:28px}
-.categoria h2{font-size:1.05rem;margin-bottom:12px}
 
 .produto{
   background:#fff;
@@ -144,33 +140,30 @@ const sb = supabase.createClient(
 
 const params = new URLSearchParams(location.search);
 const app_id = params.get("app_id");
-const mesa = params.get("mesa") || "—";
+const mesa = params.get("mesa") || "0";
 
 if(!app_id){
   document.body.innerHTML="<h2 style='text-align:center'>❌ QR inválido</h2>";
   throw new Error("app_id ausente");
 }
 
-let carrinho = [];
+const STORAGE_KEY = `carrinho_${app_id}_${mesa}`;
+let carrinho = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
 
-/* SITE */
-async function carregarSite(){
-  const { data } = await sb
-    .from("config_site")
-    .select("nome_site")
-    .eq("app_id", app_id)
-    .maybeSingle();
+function salvarCarrinho(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(carrinho));
+  atualizarQtd();
+}
 
-  if(data){
-    nome.innerText = `${data.nome_site} · Mesa ${mesa}`;
-  }
+function atualizarQtd(){
+  qtd.innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
 /* PRODUTOS */
 async function carregarProdutos(){
   const { data, error } = await sb
     .from("produtos")
-    .select("id,nome,preco,foto,categorias(nome)")
+    .select("id,nome,preco,foto")
     .eq("app_id", app_id)
     .eq("ativo", true)
     .order("nome");
@@ -180,31 +173,17 @@ async function carregarProdutos(){
     return;
   }
 
-  const grupos = {};
-  data.forEach(p=>{
-    const cat = p.categorias?.nome || "Outros";
-    (grupos[cat] ??= []).push(p);
-  });
-
   conteudo.innerHTML="";
-  Object.entries(grupos).forEach(([cat,prods])=>{
-    const div=document.createElement("div");
-    div.className="categoria";
-    div.innerHTML=`<h2>${cat}</h2>`;
-
-    prods.forEach(p=>{
-      div.innerHTML+=`
-        <div class="produto">
-          ${p.foto ? `<img src="${p.foto}">` : ""}
-          <div class="produto-info">
-            <b>${p.nome}</b>
-            <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-          </div>
-          <button onclick='add(${JSON.stringify(p)})'>+</button>
-        </div>`;
-    });
-
-    conteudo.appendChild(div);
+  data.forEach(p=>{
+    conteudo.innerHTML+=`
+      <div class="produto">
+        ${p.foto ? `<img src="${p.foto}">` : ""}
+        <div class="produto-info">
+          <b>${p.nome}</b>
+          <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+        </div>
+        <button onclick='add(${JSON.stringify(p)})'>+</button>
+      </div>`;
   });
 }
 
@@ -213,7 +192,7 @@ function add(p){
   const item = carrinho.find(i=>i.id===p.id);
   if(item) item.qtd++;
   else carrinho.push({...p,qtd:1});
-  atualizarQtd();
+  salvarCarrinho();
 }
 
 function remover(id){
@@ -221,12 +200,8 @@ function remover(id){
   if(!item) return;
   item.qtd--;
   if(item.qtd<=0) carrinho = carrinho.filter(i=>i.id!==id);
+  salvarCarrinho();
   abrirCarrinho();
-  atualizarQtd();
-}
-
-function atualizarQtd(){
-  qtd.innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
 function abrirCarrinho(){
@@ -244,20 +219,24 @@ function abrirCarrinho(){
   });
 }
 
-/* ENVIO REAL */
+/* ENVIO DO PEDIDO */
 async function enviarPedido(){
-  if(!carrinho.length) return alert("Carrinho vazio");
+  if(!carrinho.length){
+    alert("Carrinho vazio");
+    return;
+  }
 
   const total = carrinho.reduce((s,i)=>s+i.qtd*i.preco,0);
 
   const { data: pedido, error } = await sb
     .from("pedidos")
-    .insert({ app_id, mesa, status:"aberto", total })
+    .insert({ app_id, mesa, total, status:"aberto" })
     .select()
     .single();
 
   if(error){
     alert("Erro ao enviar pedido");
+    console.error(error);
     return;
   }
 
@@ -269,17 +248,26 @@ async function enviarPedido(){
     preco: i.preco
   }));
 
-  await sb.from("itens_pedido").insert(itens);
+  const { error: eItens } = await sb
+    .from("itens_pedido")
+    .insert(itens);
+
+  if(eItens){
+    alert("Erro ao salvar itens");
+    console.error(eItens);
+    return;
+  }
 
   alert("Pedido enviado 🔥");
   carrinho=[];
+  localStorage.removeItem(STORAGE_KEY);
   atualizarQtd();
   modal.style.display="none";
 }
 
 modal.onclick=e=>e.target===modal&&(modal.style.display="none");
 
-carregarSite();
+atualizarQtd();
 carregarProdutos();
 </script>
 
