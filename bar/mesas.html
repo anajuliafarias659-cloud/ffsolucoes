@@ -34,8 +34,11 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
   padding:16px;
   border-radius:18px;
   text-align:center;
-  border:2px solid transparent
+  border:2px solid transparent;
+  cursor:pointer;
+  transition:.15s;
 }
+.card:hover{transform:scale(1.02)}
 
 .card.livre{border-color:#22c55e}
 .card.ocupada{border-color:#ef4444}
@@ -47,7 +50,6 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
   font-weight:bold;
   font-size:13px
 }
-
 .status.livre{background:#22c55e;color:#022c22}
 .status.ocupada{background:#ef4444}
 
@@ -60,30 +62,40 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
   justify-content:center
 }
 
-.card button{
+/* Botão remover discreto */
+.btn-remover{
+  margin-top:8px;
   width:100%;
-  margin-top:6px;
+  background:#1e293b;
+  color:#94a3b8;
+  border:1px solid #334155;
   padding:8px;
-  border:none;
   border-radius:8px;
-  font-weight:bold;
-  cursor:pointer
+  font-weight:600;
+  cursor:pointer;
+  font-size:13px;
+  transition:.15s;
 }
-
-.btn-abrir{background:#2563eb;color:#fff}
-.btn-fechar{background:#22c55e;color:#022c22}
-.btn-remover{background:#ef4444;color:#fff}
+.btn-remover:hover{
+  background:#334155;
+  color:#e5e7eb;
+}
 </style>
 </head>
 
 <body>
 
 <script>
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* ===== SEGREDO PARA REMOVER MESA ===== */
+const SEGREDO_REMOVER_MESA = "4321"; // troque quando quiser
+
+/* ===== ADMIN ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin || !admin.app_id){
   alert("Acesso negado");
@@ -105,24 +117,39 @@ if(!admin || !admin.app_id){
 
 <script>
 async function carregarMesas(){
-  const { data: mesas, error } = await sb
+  const { data: mesas, error: e1 } = await sb
     .from("mesas")
-    .select("id, numero_mesa, status, ativa")
+    .select("id, numero_mesa")
     .eq("app_id", admin.app_id)
     .eq("ativa", true)
     .order("numero_mesa");
 
-  if(error){
-    console.error(error);
+  if(e1){
+    console.error(e1);
     alert("Erro ao carregar mesas");
     return;
   }
+
+  const { data: pedidos, error: e2 } = await sb
+    .from("pedidos")
+    .select("mesa_id")
+    .eq("app_id", admin.app_id)
+    .eq("status", "aberto");
+
+  if(e2){
+    console.error(e2);
+    alert("Erro ao carregar pedidos");
+    return;
+  }
+
+  const mesasOcupadas = new Set((pedidos||[]).map(p=>p.mesa_id));
 
   const grid = document.getElementById("listaMesas");
   grid.innerHTML = "";
 
   mesas.forEach(m=>{
-    const status = m.status || "livre";
+    const ocupada = mesasOcupadas.has(m.id);
+    const status = ocupada ? "ocupada" : "livre";
 
     const div = document.createElement("div");
     div.className = `card ${status}`;
@@ -135,71 +162,56 @@ async function carregarMesas(){
         <canvas id="qr-${m.id}"></canvas>
       </div>
 
-      ${status === "ocupada"
-        ? `<button class="btn-fechar">Fechar Mesa</button>`
-        : `<button class="btn-abrir">Abrir Mesa</button>`
-      }
-
-      <button class="btn-remover">🗑️ Remover Mesa</button>
+      ${!ocupada ? `<button class="btn-remover">Remover mesa</button>` : ``}
     `;
+
+    // clicar no card abre a mesa
+    div.onclick = () => {
+      location.href =
+        `mesa.html?mesa=${m.numero_mesa}&app_id=${admin.app_id}`;
+    };
 
     grid.appendChild(div);
 
-    // QR do cardápio público
+    // QR público
     QRCode.toCanvas(
       document.getElementById(`qr-${m.id}`),
       `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/public/?mesa=${m.numero_mesa}&app_id=${admin.app_id}`,
       { width:120 }
     );
 
-    // 👉 ABRIR MESA = MARCA OCUPADA + VAI PRO PEDIDO
-    const abrirBtn = div.querySelector(".btn-abrir");
-    if(abrirBtn){
-      abrirBtn.onclick = async () => {
-        await sb.from("mesas")
-          .update({ status:"ocupada" })
+    // remover mesa (com segredo)
+    const removerBtn = div.querySelector(".btn-remover");
+    if(removerBtn){
+      removerBtn.onclick = async (e) => {
+        e.stopPropagation();
+
+        const senha = prompt("🔒 Código para remover a mesa:");
+        if(senha !== SEGREDO_REMOVER_MESA){
+          alert("❌ Código incorreto");
+          return;
+        }
+
+        if(!confirm(`Remover Mesa ${m.numero_mesa}?`)) return;
+
+        const { error } = await sb.from("mesas")
+          .update({ ativa:false })
           .eq("id", m.id);
 
-        location.href =
-          `mesa.html?mesa=${m.numero_mesa}&app_id=${admin.app_id}`;
-      };
-    }
+        if(error){
+          console.error(error);
+          alert("Erro ao remover mesa");
+          return;
+        }
 
-    // FECHAR MESA (liberar)
-    const fecharBtn = div.querySelector(".btn-fechar");
-    if(fecharBtn){
-      fecharBtn.onclick = async () => {
-        await sb.from("mesas")
-          .update({ status:"livre" })
-          .eq("id", m.id);
         carregarMesas();
       };
     }
-
-    // REMOVER MESA
-    div.querySelector(".btn-remover").onclick = async () => {
-      if(status === "ocupada"){
-        alert("❌ Mesa ocupada não pode ser removida");
-        return;
-      }
-
-      if(!confirm(`Remover Mesa ${m.numero_mesa}?`)) return;
-
-      await sb.from("mesas")
-        .update({
-          ativa:false,
-          status:"livre"
-        })
-        .eq("id", m.id);
-
-      carregarMesas();
-    };
   });
 }
 
-// adicionar mesa (simples, como estava funcionando)
 async function adicionarMesa(){
-  const { data } = await sb
+  const { data, error } = await sb
     .from("mesas")
     .select("numero_mesa")
     .eq("app_id", admin.app_id)
@@ -207,14 +219,26 @@ async function adicionarMesa(){
     .limit(1)
     .maybeSingle();
 
+  if(error){
+    console.error(error);
+    alert("Erro ao calcular próxima mesa");
+    return;
+  }
+
   const proximo = (data?.numero_mesa || 0) + 1;
 
-  await sb.from("mesas").insert({
+  const { error: e2 } = await sb.from("mesas").insert({
     app_id: admin.app_id,
     numero_mesa: proximo,
-    status:"livre",
-    ativa:true
+    status: "livre",   // 👈 ESSENCIAL (evita 400)
+    ativa: true
   });
+
+  if(e2){
+    console.error(e2);
+    alert("Erro ao adicionar mesa");
+    return;
+  }
 
   carregarMesas();
 }
