@@ -25,7 +25,6 @@ body{
   color:var(--text);
 }
 
-/* HEADER */
 header{
   background:#020617;
   color:#fff;
@@ -48,14 +47,12 @@ header h1{
   margin:0;
 }
 
-/* CONTAINER */
 .container{
   max-width:600px;
   margin:auto;
   padding:16px;
 }
 
-/* CATEGORIA */
 .categoria{
   margin-top:28px;
 }
@@ -65,7 +62,6 @@ header h1{
   margin-bottom:12px;
 }
 
-/* PRODUTO (HORIZONTAL) */
 .produto{
   background:var(--card);
   border-radius:14px;
@@ -82,37 +78,29 @@ header h1{
   height:72px;
   border-radius:10px;
   object-fit:cover;
-  flex-shrink:0;
 }
 
-.produto-info{
-  flex:1;
-}
+.produto-info{flex:1}
 
 .produto-info b{
   font-size:.95rem;
   display:block;
-  margin-bottom:4px;
 }
 
 .preco{
   color:var(--primary);
   font-weight:700;
-  font-size:.9rem;
 }
 
-/* BOTÃO ADD */
 .produto button{
   background:var(--primary);
   border:none;
-  color:#022c22;
-  font-weight:700;
   border-radius:10px;
   padding:8px 10px;
+  font-weight:700;
   cursor:pointer;
 }
 
-/* CARRINHO FIXO */
 .carrinho-btn{
   position:fixed;
   bottom:16px;
@@ -123,11 +111,9 @@ header h1{
   padding:14px 20px;
   border-radius:30px;
   font-weight:600;
-  box-shadow:0 10px 30px rgba(0,0,0,.4);
   cursor:pointer;
 }
 
-/* MODAL */
 .modal{
   position:fixed;
   inset:0;
@@ -141,29 +127,8 @@ header h1{
   width:100%;
   max-width:600px;
   margin:auto;
-  border-top-left-radius:22px;
-  border-top-right-radius:22px;
+  border-radius:22px 22px 0 0;
   padding:20px;
-}
-
-.modal h3{
-  margin-top:0;
-}
-
-.item{
-  display:flex;
-  justify-content:space-between;
-  margin-bottom:10px;
-}
-
-.modal button{
-  width:100%;
-  padding:14px;
-  border:none;
-  border-radius:12px;
-  background:var(--primary);
-  font-weight:700;
-  cursor:pointer;
 }
 </style>
 </head>
@@ -181,7 +146,6 @@ header h1{
   🛒 Ver pedido (<span id="qtd">0</span>)
 </div>
 
-<!-- MODAL -->
 <div class="modal" id="modal">
   <div class="modal-content">
     <h3>🧾 Seu pedido</h3>
@@ -191,18 +155,22 @@ header h1{
 </div>
 
 <script>
-const sb = window.supabase.createClient(
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
 const params = new URLSearchParams(location.search);
-const app_id = params.get("app");
+const app_id = params.get("app_id"); // 🔥 CORRIGIDO
 const mesa = params.get("mesa") || "—";
 
-let carrinho = [];
+if(!app_id){
+  document.body.innerHTML="<h2 style='text-align:center'>❌ QR inválido</h2>";
+  throw new Error("app_id ausente");
+}
 
-/* SITE */
+let carrinho=[];
+
 async function carregarSite(){
   const { data } = await sb
     .from("config_site")
@@ -213,89 +181,69 @@ async function carregarSite(){
   if(data){
     nome.innerText = `${data.nome_site} · Mesa ${mesa}`;
     if(data.logo_url){
-      logo.src = data.logo_url;
+      logo.src=data.logo_url;
       logo.style.display="block";
     }
   }
 }
 
-/* PRODUTOS */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
-    .select(`
-      id,nome,preco,foto,
-      categorias(nome)
-    `)
+    .select("id,nome,preco,foto,categorias(nome)")
     .eq("app_id", app_id)
     .eq("ativo", true)
     .order("nome");
 
-  const grupos = {};
+  const grupos={};
+
   data.forEach(p=>{
-    const cat = p.categorias?.nome || "Outros";
-    grupos[cat] ??= [];
-    grupos[cat].push(p);
+    const cat=p.categorias?.nome||"Outros";
+    (grupos[cat]??=[]).push(p);
   });
 
   conteudo.innerHTML="";
-  Object.keys(grupos).forEach(cat=>{
-    const div = document.createElement("div");
+  Object.entries(grupos).forEach(([cat,prods])=>{
+    const div=document.createElement("div");
     div.className="categoria";
     div.innerHTML=`<h2>${cat}</h2>`;
-
-    grupos[cat].forEach(p=>{
+    prods.forEach(p=>{
       div.innerHTML+=`
         <div class="produto">
-          ${p.foto ? `<img src="${p.foto}">`:""}
+          ${p.foto?`<img src="${p.foto}">`:""}
           <div class="produto-info">
             <b>${p.nome}</b>
             <span class="preco">R$ ${Number(p.preco).toFixed(2)}</span>
           </div>
           <button onclick='add(${JSON.stringify(p)})'>+</button>
-        </div>
-      `;
+        </div>`;
     });
-
     conteudo.appendChild(div);
   });
 }
 
-/* CARRINHO */
 function add(p){
-  const item = carrinho.find(i=>i.id===p.id);
-  if(item) item.qtd++;
-  else carrinho.push({...p,qtd:1});
-  atualizar();
-}
-
-function atualizar(){
-  qtd.innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
+  const i=carrinho.find(x=>x.id===p.id);
+  i?i.qtd++:carrinho.push({...p,qtd:1});
+  qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
 function abrirCarrinho(){
   modal.style.display="flex";
   lista.innerHTML="";
   carrinho.forEach(i=>{
-    lista.innerHTML+=`
-      <div class="item">
-        <span>${i.qtd}x ${i.nome}</span>
-        <b>R$ ${(i.qtd*i.preco).toFixed(2)}</b>
-      </div>
-    `;
+    lista.innerHTML+=`<div>${i.qtd}x ${i.nome} — R$ ${(i.qtd*i.preco).toFixed(2)}</div>`;
   });
 }
 
 function enviarPedido(){
-  alert("Pedido pronto para integração 🔥\nMesa: "+mesa);
+  alert("Pedido enviado 🔥 Mesa "+mesa);
   carrinho=[];
-  atualizar();
+  qtd.innerText=0;
   modal.style.display="none";
 }
 
-modal.onclick=e=>{
-  if(e.target===modal) modal.style.display="none";
-};
+modal.onclick=e=>e.target===modal&&(modal.style.display="none");
 
 carregarSite();
 carregarProdutos();
