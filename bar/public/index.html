@@ -7,28 +7,27 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-/* (ESTILO ORIGINAL MANTIDO) */
 :root{
   --primary:#8b5e3c;
   --bg:#f6f1eb;
   --card:#ffffff;
   --text:#2e1f14;
-  --muted:#7a6a5c;
   --border:#e6ded5;
 }
 *{box-sizing:border-box;}
-body{margin:0;font-family:'Inter','Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);}
-.topo{position:relative;height:240px;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--border);}
-.banner{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
-.topo::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.25),rgba(0,0,0,.05));}
-.topo-conteudo{position:relative;text-align:center;color:#fff;}
-.logo{max-height:72px;margin-bottom:10px;}
-.container{max-width:1100px;margin:auto;padding:28px 16px 150px;display:grid;gap:20px;}
-.produto{background:#fff;border-radius:20px;padding:18px;display:flex;gap:16px;border:1px solid var(--border);}
-.add-btn{width:44px;height:44px;border-radius:50%;border:none;background:var(--primary);color:#fff;font-size:22px;font-weight:900;}
-.carrinho-btn{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:16px 34px;border-radius:999px;font-weight:900;}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-end;}
-.modal-content{background:#fff;width:100%;max-width:520px;margin:auto;border-radius:26px 26px 0 0;padding:26px;}
+body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);}
+.topo{height:220px;display:flex;align-items:center;justify-content:center;position:relative}
+.banner{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.topo::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.35)}
+.topo-conteudo{position:relative;color:#fff;text-align:center}
+.logo{max-height:70px;margin-bottom:10px}
+.container{max-width:1100px;margin:auto;padding:20px 16px 140px;display:grid;gap:16px}
+.produto{background:#fff;border-radius:16px;padding:14px;display:flex;gap:12px;border:1px solid var(--border)}
+.add-btn{width:42px;height:42px;border-radius:50%;border:none;background:var(--primary);color:#fff;font-size:22px;font-weight:900}
+.carrinho-btn{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:16px 30px;border-radius:999px;font-weight:900}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end}
+.modal-content{background:#fff;width:100%;max-width:520px;margin:auto;border-radius:26px 26px 0 0;padding:26px}
+input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);margin-bottom:12px}
 </style>
 </head>
 
@@ -60,90 +59,153 @@ body{margin:0;font-family:'Inter','Segoe UI',system-ui,sans-serif;background:var
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
+/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== PARAMS ===== */
+/* ================= PARAMS ================= */
 const params = new URLSearchParams(location.search);
 const app_id = params.get("app_id") || localStorage.getItem("app_id");
-const mesa_id = params.get("mesa"); // 🔥 AGORA É UUID
+const mesa_id = params.get("mesa"); // UUID da mesa (se existir)
 
-if(!app_id){document.body.innerHTML="Indisponível";throw"";}
-localStorage.setItem("app_id",app_id);
+if(!app_id){
+  document.body.innerHTML = "Indisponível";
+  throw "";
+}
+localStorage.setItem("app_id", app_id);
 
-let carrinho=[],produtos=[];
+/* ================= STATE ================= */
+let produtos = [];
+let carrinho = [];
 
-/* ===== CONFIG ===== */
-async function carregarConfig(){
-  const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).single();
-  if(!data) return;
-  nome.innerText=data.nome_site||"Cardápio";
-  if(data.logo_url){logo.src=data.logo_url;logo.style.display="block";}
-  if(data.banner_url){banner.src=data.banner_url;banner.style.display="block";}
+/* ================= CARRINHO PERSISTENTE ================= */
+function salvarCarrinho(){
+  localStorage.setItem("carrinho_"+app_id, JSON.stringify(carrinho));
+}
+function carregarCarrinho(){
+  const salvo = localStorage.getItem("carrinho_"+app_id);
+  if(salvo){
+    carrinho = JSON.parse(salvo);
+    qtd.innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
+  }
 }
 
-/* ===== PRODUTOS ===== */
+/* ================= CONFIG ================= */
+async function carregarConfig(){
+  const { data } = await sb
+    .from("config_site")
+    .select("*")
+    .eq("app_id", app_id)
+    .single();
+
+  if(!data) return;
+  nome.innerText = data.nome_site || "Cardápio";
+  if(data.logo_url){ logo.src=data.logo_url; logo.style.display="block"; }
+  if(data.banner_url){ banner.src=data.banner_url; banner.style.display="block"; }
+}
+
+/* ================= PRODUTOS ================= */
 async function carregarProdutos(){
-  const {data}=await sb.from("produtos")
+  const { data } = await sb
+    .from("produtos")
     .select("id,nome,preco,foto")
-    .eq("app_id",app_id).eq("ativo",true);
-  produtos=data||[];
-  conteudo.innerHTML="";
+    .eq("app_id", app_id)
+    .eq("ativo", true)
+    .order("nome");
+
+  produtos = data || [];
+  conteudo.innerHTML = "";
+
   produtos.forEach(p=>{
-    conteudo.innerHTML+=`
+    conteudo.innerHTML += `
       <div class="produto">
-        ${p.foto?`<img src="${p.foto}" width="90">`:""}
+        ${p.foto?`<img src="${p.foto}" width="80">`:""}
         <div style="flex:1">
-          <b>${p.nome}</b>
-          <span>R$ ${p.preco.toFixed(2)}</span>
+          <b>${p.nome}</b><br>
+          R$ ${p.preco.toFixed(2)}
         </div>
-        <button class="add-btn" onclick="add('${p.id}')">+</button>
-      </div>`;
+        <button class="add-btn" onclick="addProduto('${p.id}')">+</button>
+      </div>
+    `;
   });
 }
 
-function add(id){
-  const p=produtos.find(x=>x.id===id);
-  const i=carrinho.find(x=>x.id===id);
-  i?i.qtd++:carrinho.push({...p,qtd:1});
-  qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
+function addProduto(id){
+  const p = produtos.find(x=>x.id===id);
+  const i = carrinho.find(x=>x.id===id);
+  i ? i.qtd++ : carrinho.push({ ...p, qtd:1 });
+  qtd.innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
+  salvarCarrinho();
 }
 
 function abrirCarrinho(){
   modal.style.display="flex";
   lista.innerHTML="";
   carrinho.forEach(i=>{
-    lista.innerHTML+=`
-      <div>
-        ${i.qtd}x ${i.nome}
+    lista.innerHTML += `
+      <div style="display:flex;justify-content:space-between">
+        <span>${i.qtd}x ${i.nome}</span>
         <b>R$ ${(i.preco*i.qtd).toFixed(2)}</b>
-      </div>`;
+      </div>
+    `;
   });
 }
 
-/* ===== ENVIAR PEDIDO ===== */
-async function enviarPedido(){
-  const nome=cliente_nome.value.trim();
-  if(!nome){alert("Informe seu nome");return;}
+/* ================= BUSCAR PEDIDO ABERTO ================= */
+async function buscarPedidoAberto(){
+  let q = sb.from("pedidos")
+    .select("id")
+    .eq("app_id", app_id)
+    .eq("status", "aberto")
+    .eq("atendido", false);
 
-  const {data:pedido}=await sb.from("pedidos").insert({
-    app_id,
-    mesa_id: mesa_id || null,   // 🔥 CORRETO
-    origem: mesa_id ? "mesa" : "web",
-    cliente_nome: nome,
-    cliente_whatsapp: cliente_whatsapp.value||null,
-    cliente_localizacao: cliente_localizacao.value||null,
-    status:"aberto",
-    atendido:false
-  }).select().single();
+  if(mesa_id){
+    q = q.eq("mesa_id", mesa_id);
+  }else{
+    q = q.eq("cliente_nome", cliente_nome.value.trim());
+  }
+
+  const { data } = await q.maybeSingle();
+  return data;
+}
+
+/* ================= ENVIAR PEDIDO ================= */
+async function enviarPedido(){
+  const nomeCli = cliente_nome.value.trim();
+  if(!nomeCli){ alert("Informe seu nome"); return; }
+  if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
+
+  let pedidoId;
+  const existente = await buscarPedidoAberto();
+
+  if(existente){
+    pedidoId = existente.id;
+  }else{
+    const { data: pedido, error } = await sb
+      .from("pedidos")
+      .insert({
+        app_id,
+        mesa_id: mesa_id || null,
+        origem: mesa_id ? "mesa" : "web",
+        cliente_nome: nomeCli,
+        cliente_whatsapp: cliente_whatsapp.value || null,
+        cliente_localizacao: cliente_localizacao.value || null,
+        status: "aberto",
+        atendido: false
+      })
+      .select("id")
+      .single();
+
+    if(error){ alert("Erro ao criar pedido"); return; }
+    pedidoId = pedido.id;
+  }
 
   for(const i of carrinho){
     await sb.from("pedido_itens").insert({
       app_id,
-      pedido_id: pedido.id,
+      pedido_id: pedidoId,
       produto_id: i.id,
       nome_produto: i.nome,
       preco: i.preco,
@@ -152,12 +214,20 @@ async function enviarPedido(){
   }
 
   alert("Pedido enviado ☕");
-  carrinho=[];qtd.innerText=0;modal.style.display="none";
+  carrinho = [];
+  localStorage.removeItem("carrinho_"+app_id);
+  qtd.innerText = 0;
+  modal.style.display="none";
 }
 
-modal.onclick=e=>e.target===modal&&(modal.style.display="none");
+/* ================= START ================= */
+modal.onclick = e => e.target === modal && (modal.style.display="none");
 
-(async()=>{await carregarConfig();await carregarProdutos();})();
+(async()=>{
+  await carregarConfig();
+  await carregarProdutos();
+  carregarCarrinho();
+})();
 </script>
 
 </body>
