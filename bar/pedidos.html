@@ -93,10 +93,10 @@ function tempoDecorrido(data){
 }
 
 function labelOrigem(p){
-  if(p.origem === "garcom") return `Garçom • Mesa ${p.mesa_numero || ""}`;
-  if(p.origem === "mesa") return `Mesa ${p.mesa_numero || ""}`;
-  if(p.origem === "web") return "Pedido Web";
+  if(p.origem === "mesa") return `Mesa ${p.mesas?.numero_mesa || "-"}`;
+  if(p.origem === "garcom") return `Garçom • Mesa ${p.mesas?.numero_mesa || "-"}`;
   if(p.origem === "balcao") return "Balcão";
+  if(p.origem === "web") return "Pedido Web";
   return "Origem não identificada";
 }
 
@@ -108,12 +108,14 @@ async function carregarPedidos(){
     .select(`
       id,
       created_at,
-      mesa_numero,
-      cliente_nome,
-      cliente_whatsapp,
       origem,
       status,
-      atendido
+      atendido,
+      cliente_nome,
+      cliente_whatsapp,
+      mesas (
+        numero_mesa
+      )
     `)
     .eq("app_id", admin.app_id)
     .eq("status", "aberto")
@@ -138,22 +140,22 @@ async function carregarPedidos(){
     card.className = "pedido novo";
 
     card.innerHTML = `
-      <div class="info">${p.cliente_nome || "Cliente"}</div>
+      <div class="info">
+        ${p.origem === "mesa"
+          ? `Pedido da Mesa ${p.mesas?.numero_mesa || "-"}`
+          : p.cliente_nome || "Pedido"}
+      </div>
       <div class="origem">${labelOrigem(p)}</div>
       <div class="tempo">Tempo: ${tempoDecorrido(p.created_at)}</div>
     `;
 
-    /* 🔥 CORREÇÃO PRINCIPAL AQUI 🔥 */
-    const { data: itens, error: erroItens } = await sb
+    /* ===== ITENS DO PEDIDO ===== */
+    const { data: itens } = await sb
       .from("pedido_itens")
       .select("nome_produto, quantidade, preco")
       .eq("pedido_id", p.id)
-      .eq("app_id", admin.app_id)   // ✅ ESSENCIAL
-      .order("created_at", { ascending:true });
-
-    if(erroItens){
-      console.error(erroItens);
-    }
+      .eq("app_id", admin.app_id)
+      .order("created_at");
 
     let total = 0;
 
@@ -166,7 +168,7 @@ async function carregarPedidos(){
       item.className = "item";
       item.innerHTML = `
         <span>${qtd}x ${i.nome_produto}</span>
-        <span>R$ ${(preco * qtd).toFixed(2)}</span>
+        <span>R$ ${(preco*qtd).toFixed(2)}</span>
       `;
       card.appendChild(item);
     });
@@ -176,6 +178,7 @@ async function carregarPedidos(){
     totalDiv.innerText = "Total: R$ " + total.toFixed(2);
     card.appendChild(totalDiv);
 
+    /* ===== AÇÕES ===== */
     const acoes = document.createElement("div");
     acoes.className = "acoes";
 
@@ -202,8 +205,56 @@ async function carregarPedidos(){
     };
     acoes.appendChild(finalizar);
 
+    if(p.cliente_whatsapp){
+      const zap = document.createElement("button");
+      zap.className = "btn-zap";
+      zap.innerText = "WhatsApp";
+      zap.onclick = ()=>{
+        const msg =
+          `Olá ${p.cliente_nome || "cliente"}, seu pedido está em preparo.\n` +
+          `${labelOrigem(p)}\n` +
+          `Total: R$ ${total.toFixed(2)}`;
+        window.open(
+          `https://wa.me/${p.cliente_whatsapp}?text=${encodeURIComponent(msg)}`,
+          "_blank"
+        );
+      };
+      acoes.appendChild(zap);
+    }
+
+    const imprimir = document.createElement("button");
+    imprimir.className = "btn-print";
+    imprimir.innerText = "Imprimir";
+    imprimir.onclick = ()=>{
+      const w = window.open("", "_blank");
+      w.document.write(`<h2>Comanda</h2>`);
+      w.document.write(`<p>${labelOrigem(p)}</p><hr>`);
+      (itens || []).forEach(i=>{
+        const qtd = Number(i.quantidade) || 1;
+        const preco = Number(i.preco) || 0;
+        w.document.write(
+          `<p>${qtd}x ${i.nome_produto} - R$ ${(preco*qtd).toFixed(2)}</p>`
+        );
+      });
+      w.document.write(`<hr><b>Total: R$ ${total.toFixed(2)}</b>`);
+      w.print();
+    };
+    acoes.appendChild(imprimir);
+
+    const excluir = document.createElement("button");
+    excluir.className = "btn-excluir";
+    excluir.innerText = "Excluir";
+    excluir.onclick = async ()=>{
+      if(!confirm("Excluir pedido?")) return;
+      await sb.from("pedidos").delete().eq("id", p.id);
+      card.remove();
+      pedidosNaTela.delete(p.id);
+    };
+    acoes.appendChild(excluir);
+
     card.appendChild(acoes);
     lista.appendChild(card);
+
     setTimeout(()=>card.classList.remove("novo"),4000);
   }
 }
