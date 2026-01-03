@@ -43,21 +43,21 @@ const sb = supabase.createClient(
 /* ===== PARAMS ===== */
 const params = new URLSearchParams(location.search);
 const app_id = params.get("app_id");
-const numeroMesa = Number(params.get("mesa"));
+const mesa_id = params.get("mesa"); // UUID
 
-if(!app_id || !numeroMesa){
+if(!app_id || !mesa_id){
   alert("Link inválido");
   throw new Error("Parâmetros ausentes");
 }
 
 /* ===== STATE ===== */
-let mesaId = null;
+let mesaNumero = null;
 let pedidoId = null;
 let produtos = [];
 </script>
 
 <div class="topo">
-  <h2>Mesa <span id="mesaLabel"></span></h2>
+  <h2>Mesa <span id="mesaLabel">...</span></h2>
   <button onclick="history.back()">Voltar</button>
 </div>
 
@@ -83,25 +83,25 @@ let produtos = [];
 </div>
 
 <script>
-document.getElementById("mesaLabel").innerText = numeroMesa;
-
 /* ===== MESA ===== */
 async function carregarMesa(){
   const { data, error } = await sb
     .from("mesas")
-    .select("id")
+    .select("id, numero_mesa")
+    .eq("id", mesa_id)
     .eq("app_id", app_id)
-    .eq("numero_mesa", numeroMesa)
     .single();
 
   if(error){
     alert("Mesa não encontrada");
     throw error;
   }
-  mesaId = data.id;
+
+  mesaNumero = data.numero_mesa;
+  document.getElementById("mesaLabel").innerText = mesaNumero;
 }
 
-/* ===== PEDIDO (BUSCA SEM CRIAR) ===== */
+/* ===== PEDIDO ===== */
 async function carregarPedido(){
   await carregarMesa();
 
@@ -109,9 +109,8 @@ async function carregarPedido(){
     .from("pedidos")
     .select("id")
     .eq("app_id", app_id)
-    .eq("mesa_id", mesaId)
-    .eq("status", "aberto")
-    .eq("tipo", "mesa")
+    .eq("mesa_id", mesa_id)
+    .in("status", ["aberto","aceito","preparando"])
     .maybeSingle();
 
   pedidoId = data?.id || null;
@@ -120,20 +119,20 @@ async function carregarPedido(){
   carregarItens();
 }
 
-/* ===== GARANTIR PEDIDO (RPC — ÚNICO CAMINHO) ===== */
+/* ===== GARANTIR PEDIDO ===== */
 async function garantirPedido(){
   if(pedidoId) return;
 
   const { data, error } = await sb.rpc("garantir_pedido_aberto", {
     p_app_id: app_id,
-    p_mesa_id: mesaId
+    p_mesa_id: mesa_id
   });
 
   if(error){
-    console.error(error);
-    alert("Erro ao garantir pedido");
+    alert("Erro ao criar pedido");
     throw error;
   }
+
   pedidoId = data;
 }
 
