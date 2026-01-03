@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Cardápio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+:root{
+  --primary:#8b5e3c;     /* marrom café */
+  --bg:#f6f1eb;          /* bege vitrine */
+  --card:#ffffff;
+  --text:#2e1f14;
+  --muted:#7a6a5c;
+  --border:#e6ded5;
+}
+
+*{box-sizing:border-box;}
+
+body{
+  margin:0;
+  font-family:'Inter','Segoe UI',system-ui,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+
+/* ================= TOPO / BANNER ================= */
+.topo{
+  position:relative;
+  height:240px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-bottom:1px solid var(--border);
+}
+
+.banner{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  opacity:1;
+  filter:brightness(1.05) contrast(1.05) saturate(1.05);
+}
+
+/* overlay leve só pra leitura */
+.topo::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(
+    to bottom,
+    rgba(0,0,0,.25),
+    rgba(0,0,0,.05)
+  );
+  z-index:1;
+}
+
+.topo-conteudo{
+  position:relative;
+  z-index:2;
+  text-align:center;
+  color:#fff;
+  text-shadow:0 2px 10px rgba(0,0,0,.6);
+}
+
+.logo{
+  max-height:72px;
+  margin-bottom:10px;
+}
+
+.topo h1{
+  margin:0;
+  font-size:1.9rem;
+  font-weight:900;
+  color:#fff;
+}
+
+/* ================= CONTAINER ================= */
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:28px 16px 150px;
+  display:grid;
+  grid-template-columns:1fr;
+  gap:20px;
+  background:linear-gradient(
+    180deg,
+    #fdfbf8,
+    #f6f1eb
+  );
+}
+
+/* ================= PRODUTO ================= */
+.produto{
+  background:var(--card);
+  border-radius:20px;
+  padding:18px;
+  display:flex;
+  gap:16px;
+  border:1px solid var(--border);
+  box-shadow:0 12px 30px rgba(46,31,20,.06);
+}
+
+.produto img{
+  width:90px;
+  height:90px;
+  border-radius:16px;
+  object-fit:cover;
+  background:#f3ece5;
+}
+
+.produto b{
+  font-size:1.05rem;
+  font-weight:700;
+}
+
+.preco{
+  display:block;
+  margin-top:8px;
+  font-size:1.05rem;
+  font-weight:900;
+  color:var(--primary);
+}
+
+.add-btn{
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  border:none;
+  background:var(--primary);
+  color:#fff;
+  font-size:22px;
+  font-weight:900;
+  cursor:pointer;
+}
+
+.desabilitado{
+  color:#b45309;
+  font-size:.9rem;
+}
+
+/* ================= CARRINHO ================= */
+.carrinho-btn{
+  position:fixed;
+  bottom:22px;
+  left:50%;
+  transform:translateX(-50%);
+  background:var(--primary);
+  color:#fff;
+  padding:16px 34px;
+  border-radius:999px;
+  font-weight:900;
+  box-shadow:0 14px 35px rgba(139,94,60,.35);
+  z-index:10;
+}
+
+/* ================= MODAL ================= */
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(46,31,20,.45);
+  display:none;
+  align-items:flex-end;
+  z-index:20;
+}
+
+.modal-content{
+  background:#fff;
+  width:100%;
+  max-width:520px;
+  margin:auto;
+  border-radius:26px 26px 0 0;
+  padding:26px;
+}
+
+.item{
+  display:flex;
+  justify-content:space-between;
+  margin-bottom:10px;
+}
+
+input{
+  width:100%;
+  padding:12px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  margin-bottom:12px;
+}
+
+/* ================= RESPONSIVO ================= */
+@media (min-width:768px){
+  .container{ grid-template-columns:repeat(2,1fr); }
+}
+@media (min-width:1024px){
+  .container{ grid-template-columns:repeat(3,1fr); }
+}
+</style>
+</head>
+
+<body>
+
+<!-- TOPO -->
+<div class="topo">
+  <img id="banner" class="banner" style="display:none">
+  <div class="topo-conteudo">
+    <img id="logo" class="logo" style="display:none">
+    <h1 id="nome">Cardápio</h1>
+  </div>
+</div>
+
+<!-- PRODUTOS -->
+<div class="container" id="conteudo"></div>
+
+<!-- CARRINHO -->
+<div class="carrinho-btn" id="btnCarrinho" onclick="abrirCarrinho()">
+  🛒 Ver pedido (<span id="qtd">0</span>)
+</div>
+
+<!-- MODAL -->
+<div class="modal" id="modal">
+  <div class="modal-content">
+    <h3>🧾 Seu pedido</h3>
+    <input id="cliente_nome" placeholder="Seu nome">
+    <input id="cliente_whatsapp" placeholder="WhatsApp">
+    <input id="cliente_localizacao" placeholder="Bairro ou referência">
+    <div id="lista"></div>
+    <button onclick="enviarPedido()">Enviar pedido</button>
+  </div>
+</div>
+
+<script>
+/* ================= SUPABASE ================= */
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const params = new URLSearchParams(location.search);
+const app_id =
+  params.get("app_id") ||
+  params.get("app") ||
+  localStorage.getItem("app_id");
+
+if(!app_id){
+  document.body.innerHTML="<h2 style='text-align:center;margin-top:40px'>Cardápio indisponível</h2>";
+  throw new Error("app_id ausente");
+}
+localStorage.setItem("app_id", app_id);
+
+let carrinho=[];
+let config=null;
+
+function dentroDoHorario(){
+  if(!config.horario_abertura || !config.horario_fechamento) return true;
+  const agora=new Date();
+  const atual=agora.getHours()*60+agora.getMinutes();
+  const [ah,am]=config.horario_abertura.split(":").map(Number);
+  const [fh,fm]=config.horario_fechamento.split(":").map(Number);
+  return atual>=ah*60+am && atual<=fh*60+fm;
+}
+
+async function carregarConfig(){
+  const { data } = await sb
+    .from("config_site")
+    .select("*")
+    .eq("app_id",app_id)
+    .single();
+
+  config=data;
+  nome.innerText=data.nome_site||"Cardápio";
+
+  if(data.logo_url){
+    logo.src=data.logo_url;
+    logo.style.display="block";
+  }
+  if(data.banner_url){
+    banner.src=data.banner_url;
+    banner.style.display="block";
+  }
+}
+
+async function carregarProdutos(){
+  const { data:produtos } = await sb
+    .from("produtos")
+    .select("nome,preco,foto")
+    .eq("app_id",app_id)
+    .eq("ativo",true)
+    .order("nome");
+
+  const podeComprar=config.modo_cardapio==="venda" && dentroDoHorario();
+  conteudo.innerHTML="";
+
+  produtos.forEach(p=>{
+    conteudo.innerHTML+=`
+      <div class="produto">
+        ${p.foto?`<img src="${p.foto}">`:""}
+        <div style="flex:1">
+          <b>${p.nome}</b>
+          <span class="preco">R$ ${Number(p.preco).toFixed(2)}</span>
+        </div>
+        ${
+          podeComprar
+          ? `<button class="add-btn" onclick='add(${JSON.stringify(p)})'>+</button>`
+          : `<small class="desabilitado">Somente vitrine</small>`
+        }
+      </div>`;
+  });
+}
+
+function add(p){
+  const i=carrinho.find(x=>x.nome===p.nome);
+  if(i) i.quantidade++;
+  else carrinho.push({nome:p.nome,quantidade:1,preco:p.preco});
+  qtd.innerText=carrinho.reduce((s,i)=>s+i.quantidade,0);
+}
+
+function abrirCarrinho(){
+  modal.style.display="flex";
+  lista.innerHTML="";
+  carrinho.forEach(i=>{
+    lista.innerHTML+=`
+      <div class="item">
+        <span>${i.quantidade}x ${i.nome}</span>
+        <b>R$ ${(i.quantidade*i.preco).toFixed(2)}</b>
+      </div>`;
+  });
+}
+
+function enviarPedido(){
+  alert("Pedido enviado ☕");
+  carrinho=[];
+  qtd.innerText=0;
+  modal.style.display="none";
+}
+
+modal.onclick=e=>e.target===modal&&(modal.style.display="none");
+
+(async ()=>{
+  await carregarConfig();
+  await carregarProdutos();
+})();
+</script>
+
+</body>
+</html>
