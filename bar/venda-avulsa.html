@@ -35,11 +35,15 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= SESSÃO ================= */
+/* ================= SESSÃO (ADMIN OU FUNCIONÁRIO) ================= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin?.app_id){
+const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
+
+const app_id = funcionario?.app_id || admin?.app_id;
+
+if(!app_id){
   alert("Sessão expirada");
-  location.href="../auth/login.html";
+  location.href = "login-funcionario.html";
 }
 
 /* ================= VARIÁVEIS ================= */
@@ -77,31 +81,6 @@ let total = 0;
 </div>
 
 <script>
-
-function exigirPermissao(tiposPermitidos){
-  exigirPermissao(["garcom","caixa","atendente"]);
-  const admin = JSON.parse(localStorage.getItem("admin_logado"));
-  const usuario = JSON.parse(localStorage.getItem("usuario_logado"));
-
-
-  // admin do bar sempre pode
-  if(admin && admin.tipo === "bar") return;
-
-  // precisa estar logado como funcionário
-  if(!usuario){
-    alert("Sessão expirada");
-    location.href = "login-funcionario.html";
-    return;
-  }
-
-  // valida tipo
-  if(!tiposPermitidos.includes(usuario.tipo)){
-    alert("Acesso não autorizado");
-    location.href = "login-funcionario.html";
-  }
-}
-
-
 /* ================= PEDIDO ================= */
 async function iniciarPedido(){
   if(pedidoId) return;
@@ -109,7 +88,7 @@ async function iniciarPedido(){
   const { data, error } = await sb
     .from("pedidos")
     .insert({
-      app_id: admin.app_id,
+      app_id: app_id,
       tipo: "avulso",
       mesa_id: null,
       status: "aberto"
@@ -131,7 +110,7 @@ async function carregarProdutos(){
   const { data, error } = await sb
     .from("produtos")
     .select("id,nome,preco")
-    .eq("app_id", admin.app_id)
+    .eq("app_id", app_id)
     .eq("ativo", true)
     .order("nome");
 
@@ -203,7 +182,7 @@ async function addItem(p, qtd){
   if(!pedidoId) return;
 
   await sb.from("pedido_itens").insert({
-    app_id: admin.app_id,
+    app_id: app_id,
     pedido_id: pedidoId,
     produto_id: p.id,
     nome_produto: p.nome,
@@ -215,12 +194,13 @@ async function addItem(p, qtd){
 }
 
 async function carregarItens(){
-  if(!pedidoId) return; // 🔥 proteção definitiva
+  if(!pedidoId) return;
 
   const { data } = await sb
     .from("pedido_itens")
     .select("id,nome_produto,preco,quantidade")
-    .eq("pedido_id", pedidoId);
+    .eq("pedido_id", pedidoId)
+    .eq("app_id", app_id);
 
   const div = document.getElementById("itens");
   div.innerHTML = "";
@@ -244,7 +224,8 @@ async function carregarItens(){
 async function remover(id){
   await sb.from("pedido_itens")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("app_id", app_id);
 
   carregarItens();
 }
@@ -261,8 +242,8 @@ function irPagamento(){
 
 /* ================= START ================= */
 (async ()=>{
-  await iniciarPedido();   // cria pedido
-  if(!pedidoId) return;    // 🔥 se falhar, não continua
+  await iniciarPedido();
+  if(!pedidoId) return;
   await carregarProdutos();
   await carregarItens();
 })();
