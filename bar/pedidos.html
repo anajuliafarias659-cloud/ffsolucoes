@@ -85,11 +85,11 @@ const sb = supabase.createClient(
 
 /* ================= PARAMS ================= */
 const params = new URLSearchParams(location.search);
-let app_id = params.get("app_id") || localStorage.getItem("app_id");
+const app_id = params.get("app_id") || localStorage.getItem("app_id");
 
 if(!app_id){
   document.body.innerHTML = "<h2 style='padding:20px'>App inválido</h2>";
-  throw new Error("app_id não encontrado");
+  throw "";
 }
 
 localStorage.setItem("app_id", app_id);
@@ -102,17 +102,19 @@ async function carregarPedidos(){
     .select(`
       id,
       cliente_nome,
+      cliente_whatsapp,
       origem,
+      status,
       created_at,
-      pedido_itens!inner (
+      pedido_itens (
         nome_produto,
         quantidade,
         preco
       )
     `)
     .eq("app_id", app_id)
-    .eq("status", "aberto")
-    .order("created_at", { ascending: true });
+    .in("status", ["aberto","aceito"])
+    .order("created_at", { ascending:true });
 
   if(error){
     console.error(error);
@@ -152,25 +154,31 @@ async function carregarPedidos(){
         <div class="total">Total: R$ ${total.toFixed(2)}</div>
 
         <div class="acoes">
-          <button class="aceitar" onclick="aceitarPedido(${pedido.id})">Aceitar</button>
-          <button class="finalizar" onclick="finalizarPedido(${pedido.id})">Finalizar</button>
-          <button class="whatsapp" onclick="alert('Link do WhatsApp vem do sistema de pedidos')">WhatsApp</button>
+          <button class="aceitar" onclick="aceitarPedido('${pedido.id}')">Aceitar</button>
+          <button class="finalizar" onclick="finalizarPedido('${pedido.id}')">Finalizar</button>
+          <button class="whatsapp" onclick="whatsCliente('${pedido.id}')">WhatsApp</button>
           <button class="imprimir" onclick="window.print()">Imprimir</button>
-          <button class="excluir" onclick="excluirPedido(${pedido.id})">Excluir</button>
+          <button class="excluir" onclick="excluirPedido('${pedido.id}')">Excluir</button>
         </div>
       </div>
     `;
   });
 }
 
-/* ================= FUNÇÕES (NÃO MEXIDAS) ================= */
+/* ================= AÇÕES ================= */
 async function aceitarPedido(id){
-  await sb.from("pedidos").update({ status:"em_preparo" }).eq("id",id);
+  await sb.from("pedidos")
+    .update({ status:"aceito" })
+    .eq("id", id);
+
   carregarPedidos();
 }
 
 async function finalizarPedido(id){
-  await sb.from("pedidos").update({ status:"finalizado" }).eq("id",id);
+  await sb.from("pedidos")
+    .update({ status:"finalizado" })
+    .eq("id", id);
+
   carregarPedidos();
 }
 
@@ -180,15 +188,42 @@ async function excluirPedido(id){
   carregarPedidos();
 }
 
-function abrirWhats(link){
-  if(!link){
-    alert("Link do WhatsApp não disponível");
+/* ================= WHATSAPP ================= */
+async function whatsCliente(pedidoId){
+  const { data } = await sb
+    .from("pedidos")
+    .select(`
+      cliente_whatsapp,
+      pedido_itens (
+        nome_produto,
+        quantidade,
+        preco
+      )
+    `)
+    .eq("id", pedidoId)
+    .single();
+
+  if(!data?.cliente_whatsapp){
+    alert("WhatsApp do cliente não informado");
     return;
   }
-  window.open(link, "_blank");
+
+  let msg = "🍔 *Pedido aceito!*\n\n";
+  let total = 0;
+
+  data.pedido_itens.forEach(i=>{
+    const sub = i.preco * i.quantidade;
+    total += sub;
+    msg += `• ${i.quantidade}x ${i.nome_produto} — R$ ${sub.toFixed(2)}\n`;
+  });
+
+  msg += `\n💰 Total: R$ ${total.toFixed(2)}\n\nObrigado pelo pedido!`;
+
+  const num = data.cliente_whatsapp.replace(/\D/g,"");
+  window.open(`https://wa.me/55${num}?text=${encodeURIComponent(msg)}`, "_blank");
 }
 
-/* ================= AUTO UPDATE ================= */
+/* ================= AUTO REFRESH ================= */
 carregarPedidos();
 setInterval(carregarPedidos, 5000);
 </script>
