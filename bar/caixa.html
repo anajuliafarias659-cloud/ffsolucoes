@@ -43,14 +43,6 @@ if(!admin?.app_id || !admin?.id){
   location.href="../auth/login.html";
 }
 
-/*
-admin.id        -> funcionario_id
-admin.app_id    -> negócio
-admin.nivel     -> admin | funcionario
-*/
-
-let pagamentos = [];
-let despesas = [];
 let total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
 let totalSaidas = 0;
 </script>
@@ -86,7 +78,7 @@ let totalSaidas = 0;
       <tr>
         <th>Tipo</th>
         <th>Valor</th>
-        <th>Funcionário</th>
+        <th>Operador</th>
       </tr>
     </thead>
     <tbody id="lista"></tbody>
@@ -118,21 +110,39 @@ async function carregarCaixa(){
   totalSaidas = 0;
   lista.innerHTML = "";
 
-  /* ================= ENTRADAS ================= */
-  let queryPag = sb
-    .from("pagamentos")
-    .select("tipo,valor,funcionario_id")
-    .eq("app_id", admin.app_id)
-    .gte("created_at", inicio)
-    .lte("created_at", fim);
+  /* ================= PAGAMENTOS ================= */
 
-  if(admin.nivel !== "admin"){
-    queryPag = queryPag.eq("funcionario_id", admin.id);
+  let pagamentos = [];
+
+  if(admin.nivel === "admin"){
+    const { data } = await sb
+      .from("pagamentos")
+      .select("tipo,valor,funcionario_id")
+      .eq("app_id", admin.app_id)
+      .gte("created_at", inicio)
+      .lte("created_at", fim);
+    pagamentos = data || [];
+  } else {
+    const { data: meus } = await sb
+      .from("pagamentos")
+      .select("tipo,valor,funcionario_id")
+      .eq("app_id", admin.app_id)
+      .eq("funcionario_id", admin.id)
+      .gte("created_at", inicio)
+      .lte("created_at", fim);
+
+    const { data: semFunc } = await sb
+      .from("pagamentos")
+      .select("tipo,valor,funcionario_id")
+      .eq("app_id", admin.app_id)
+      .is("funcionario_id", null)
+      .gte("created_at", inicio)
+      .lte("created_at", fim);
+
+    pagamentos = [...(meus||[]), ...(semFunc||[])];
   }
 
-  const { data: pags } = await queryPag;
-
-  (pags||[]).forEach(p=>{
+  pagamentos.forEach(p=>{
     const tipo = p.tipo.toLowerCase();
     const valor = Number(p.valor)||0;
     if(total[tipo] !== undefined) total[tipo] += valor;
@@ -141,38 +151,57 @@ async function carregarCaixa(){
       <tr>
         <td>${p.tipo.toUpperCase()}</td>
         <td>R$ ${valor.toFixed(2)}</td>
-        <td>${admin.nivel === "admin" ? p.funcionario_id.slice(0,6) : "Você"}</td>
+        <td>${p.funcionario_id ? p.funcionario_id.slice(0,6) : "—"}</td>
       </tr>
     `;
   });
 
-  /* ================= SAÍDAS ================= */
-  let queryDesp = sb
-    .from("despesas")
-    .select("valor")
-    .eq("app_id", admin.app_id)
-    .gte("created_at", inicio)
-    .lte("created_at", fim);
+  /* ================= DESPESAS ================= */
 
-  if(admin.nivel !== "admin"){
-    queryDesp = queryDesp.eq("funcionario_id", admin.id);
+  let despesas = [];
+
+  if(admin.nivel === "admin"){
+    const { data } = await sb
+      .from("despesas")
+      .select("valor")
+      .eq("app_id", admin.app_id)
+      .gte("created_at", inicio)
+      .lte("created_at", fim);
+    despesas = data || [];
+  } else {
+    const { data: minhas } = await sb
+      .from("despesas")
+      .select("valor")
+      .eq("app_id", admin.app_id)
+      .eq("funcionario_id", admin.id)
+      .gte("created_at", inicio)
+      .lte("created_at", fim);
+
+    const { data: semFunc } = await sb
+      .from("despesas")
+      .select("valor")
+      .eq("app_id", admin.app_id)
+      .is("funcionario_id", null)
+      .gte("created_at", inicio)
+      .lte("created_at", fim);
+
+    despesas = [...(minhas||[]), ...(semFunc||[])];
   }
 
-  const { data: gastos } = await queryDesp;
-  totalSaidas = (gastos||[]).reduce((s,g)=>s + Number(g.valor),0);
+  totalSaidas = despesas.reduce((s,d)=>s + Number(d.valor),0);
 
   /* ================= TOTAIS ================= */
-  document.getElementById("tDinheiro").innerText = "R$ " + total.dinheiro.toFixed(2);
-  document.getElementById("tPix").innerText = "R$ " + total.pix.toFixed(2);
-  document.getElementById("tDebito").innerText = "R$ " + total.debito.toFixed(2);
-  document.getElementById("tCredito").innerText = "R$ " + total.credito.toFixed(2);
-  document.getElementById("tFiado").innerText = "R$ " + total.fiado.toFixed(2);
+  tDinheiro.innerText = "R$ " + total.dinheiro.toFixed(2);
+  tPix.innerText = "R$ " + total.pix.toFixed(2);
+  tDebito.innerText = "R$ " + total.debito.toFixed(2);
+  tCredito.innerText = "R$ " + total.credito.toFixed(2);
+  tFiado.innerText = "R$ " + total.fiado.toFixed(2);
 
   const totalCaixa =
     total.dinheiro + total.pix + total.debito + total.credito;
 
-  document.getElementById("totalCaixa").innerText = totalCaixa.toFixed(2);
-  document.getElementById("totalSaidas").innerText = totalSaidas.toFixed(2);
+  totalCaixaSpan.innerText = totalCaixa.toFixed(2);
+  totalSaidasSpan.innerText = totalSaidas.toFixed(2);
 }
 
 /* ================= FECHAR CAIXA ================= */
