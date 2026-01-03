@@ -4,272 +4,123 @@
 <meta charset="UTF-8">
 <title>Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between;align-items:center}
-.container{max-width:1200px;margin:auto;padding:24px}
-.box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
-
-input{padding:10px;border-radius:8px;border:none;width:100%;margin-bottom:12px}
-button{padding:10px 14px;border-radius:8px;border:none;font-weight:bold;cursor:pointer}
-
-.btn-ok{background:#22c55e}
-.btn-del{background:#ef4444;color:#fff}
-.btn-sec{background:#1e293b;color:#fff}
-
-.produtos{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-  gap:12px
-}
-.produto{background:#020617;border:1px solid #1e293b;padding:12px;border-radius:10px}
-.qtd{display:flex;gap:6px;margin-top:8px}
-.qtd button{width:32px;height:32px;padding:0}
-
-.item{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  border-bottom:1px solid #1e293b;
-  padding:8px 0
-}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:900px;margin:auto;padding:24px}
+.pedido{background:#0f172a;border-radius:18px;padding:18px;margin-bottom:20px}
+.itens{margin-top:12px}
+.item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b}
+.total{margin-top:12px;font-size:20px;font-weight:bold}
+.acoes{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}
+button{padding:12px 18px;border:none;border-radius:12px;font-weight:bold;cursor:pointer}
+.finalizar{background:#22c55e}
+.voltar{background:#1e293b;color:#fff}
 </style>
 </head>
 
 <body>
 
 <script>
-/* ===== SUPABASE ===== */
+/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== PARAMS ===== */
+/* ================= PARAMS ================= */
 const params = new URLSearchParams(location.search);
-const app_id = params.get("app_id");
-const mesa_id = params.get("mesa");
+const pedidoId = params.get("pedido") || localStorage.getItem("pedido_atual");
 
-if(!app_id || !mesa_id){
-  alert("Link inválido");
-  throw new Error("Parâmetros ausentes");
+if(!pedidoId){
+  alert("Pedido não encontrado");
+  location.href = "mesas.html";
 }
 
-/* ===== STATE ===== */
-let pedidoId = null;
-let produtos = [];
+localStorage.setItem("pedido_atual", pedidoId);
+
+/* ================= DOM ================= */
+let pedido = null;
 </script>
 
 <div class="topo">
-  <h2 id="titulo">Mesa</h2>
-  <button class="btn-sec" onclick="history.back()">Voltar</button>
+  <h2>🪑 Mesa</h2>
+  <button class="voltar" onclick="location.href='mesas.html'">Voltar</button>
 </div>
 
-<div class="container">
-
-  <div class="box">
-    <input placeholder="Buscar produto..." oninput="renderProdutos(this.value)">
-    <div class="produtos" id="listaProdutos"></div>
-  </div>
-
-  <div class="box">
-    <h3>Consumo</h3>
-    <div id="itens"></div>
-  </div>
-
-  <div class="box">
-    <button class="btn-ok" onclick="fecharConta()">Fechar Conta</button>
-    <button class="btn-del" onclick="liberarMesa()">Liberar Mesa</button>
-  </div>
-
+<div class="container" id="conteudo">
+  Carregando pedido...
 </div>
 
 <script>
-/* ===== MESA ===== */
-async function carregarMesa(){
-  const { data, error } = await sb
-    .from("mesas")
-    .select("numero_mesa")
-    .eq("id", mesa_id)
-    .single();
-
-  if(error){
-    alert("Mesa não encontrada");
-    throw error;
-  }
-
-  document.getElementById("titulo").innerText = `Mesa ${data.numero_mesa}`;
-}
-
-/* ===== PEDIDO ===== */
+/* ================= CARREGAR PEDIDO ================= */
 async function carregarPedido(){
-  const { data } = await sb
-    .from("pedidos")
-    .select("id")
-    .eq("app_id", app_id)
-    .eq("mesa_id", mesa_id)
-    .eq("status", "aberto")
-    .maybeSingle();
-
-  pedidoId = data?.id || null;
-}
-
-/* ===== GARANTIR PEDIDO ===== */
-async function garantirPedido(){
-  if(pedidoId) return;
-
   const { data, error } = await sb
     .from("pedidos")
-    .insert({
-      app_id,
-      mesa_id,
-      status: "aberto"
-    })
-    .select("id")
+    .select(`
+      id,
+      cliente_nome,
+      status,
+      pedido_itens (
+        nome_produto,
+        quantidade,
+        preco
+      )
+    `)
+    .eq("id", pedidoId)
     .single();
 
-  if(error){
-    alert("Erro ao criar pedido");
-    throw error;
-  }
-
-  pedidoId = data.id;
-}
-
-/* ===== PRODUTOS ===== */
-async function carregarProdutos(){
-  const { data } = await sb
-    .from("produtos")
-    .select("id,nome,preco")
-    .eq("app_id", app_id)
-    .eq("ativo", true);
-
-  produtos = data || [];
-  renderProdutos("");
-}
-
-function renderProdutos(busca){
-  const div = document.getElementById("listaProdutos");
-  div.innerHTML = "";
-
-  produtos
-    .filter(p => p.nome.toLowerCase().includes(busca.toLowerCase()))
-    .forEach(p=>{
-      div.innerHTML += `
-        <div class="produto">
-          <b>${p.nome}</b><br>
-          R$ ${p.preco.toFixed(2)}
-          <div class="qtd">
-            <button onclick="alterarProduto('${p.id}', -1)">−</button>
-            <button onclick="alterarProduto('${p.id}', 1)">+</button>
-          </div>
-        </div>`;
-    });
-}
-
-/* ===== ADD / REMOVE ===== */
-async function alterarProduto(produtoId, delta){
-  await garantirPedido();
-
-  const { data: item } = await sb
-    .from("pedido_itens")
-    .select("id,quantidade")
-    .eq("pedido_id", pedidoId)
-    .eq("produto_id", produtoId)
-    .maybeSingle();
-
-  if(item){
-    const nova = item.quantidade + delta;
-    if(nova <= 0){
-      await sb.from("pedido_itens").delete().eq("id", item.id);
-    }else{
-      await sb.from("pedido_itens").update({ quantidade:nova }).eq("id", item.id);
-    }
-  }else if(delta > 0){
-    const produto = produtos.find(p=>p.id===produtoId);
-    await sb.from("pedido_itens").insert({
-      app_id,
-      pedido_id: pedidoId,
-      produto_id: produtoId,
-      nome_produto: produto.nome,
-      preco: produto.preco,
-      quantidade: 1
-    });
-  }
-
-  carregarItens();
-}
-
-/* ===== ITENS ===== */
-async function carregarItens(){
-  if(!pedidoId){
-    document.getElementById("itens").innerHTML = "<i>Sem consumo</i>";
+  if(error || !data){
+    alert("Erro ao carregar pedido");
     return;
   }
 
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id,nome_produto,preco,quantidade")
-    .eq("pedido_id", pedidoId);
+  pedido = data;
+  renderPedido();
+}
 
-  const div = document.getElementById("itens");
-  div.innerHTML = "";
-
+function renderPedido(){
   let total = 0;
 
-  (data||[]).forEach(i=>{
-    total += i.preco * i.quantidade;
-    div.innerHTML += `
-      <div class="item">
-        <span>${i.quantidade}x ${i.nome_produto}</span>
-        <button class="btn-del" onclick="removerItem('${i.id}')">🗑️</button>
-      </div>`;
-  });
+  conteudo.innerHTML = `
+    <div class="pedido">
+      <h3>${pedido.cliente_nome || "Mesa"}</h3>
+      <div class="itens">
+        ${pedido.pedido_itens.map(i=>{
+          const sub = i.preco * i.quantidade;
+          total += sub;
+          return `
+            <div class="item">
+              <span>${i.quantidade}x ${i.nome_produto}</span>
+              <b>R$ ${sub.toFixed(2)}</b>
+            </div>
+          `;
+        }).join("")}
+      </div>
 
-  if(total > 0){
-    div.innerHTML += `<strong>Total: R$ ${total.toFixed(2)}</strong>`;
-  }
+      <div class="total">Total: R$ ${total.toFixed(2)}</div>
+
+      <div class="acoes">
+        <button class="finalizar" onclick="finalizarPedido()">Finalizar / Pagar</button>
+      </div>
+    </div>
+  `;
 }
 
-async function removerItem(id){
-  await sb.from("pedido_itens").delete().eq("id", id);
-  carregarItens();
+/* ================= FINALIZAR (CORRIGIDO) ================= */
+function finalizarPedido(){
+  // 🔒 NÃO fecha o pedido aqui
+  // salva para a tela de pagamentos
+  localStorage.setItem("pedido_pagamento", pedidoId);
+
+  // redireciona para pagamentos
+  location.href = "pagamentos.html";
 }
 
-/* ===== AÇÕES ===== */
-async function fecharConta(){
-  if(!pedidoId){
-    alert("Nenhum consumo");
-    return;
-  }
-
-  await sb.from("pedidos").update({ status:"fechado" }).eq("id", pedidoId);
-  alert("Conta fechada");
-  history.back();
-}
-
-async function liberarMesa(){
-  if(!pedidoId){
-    history.back();
-    return;
-  }
-
-  if(!confirm("Liberar mesa sem consumo?")) return;
-
-  await sb.from("pedidos").delete().eq("id", pedidoId);
-  history.back();
-}
-
-/* START */
-(async ()=>{
-  await carregarMesa();
-  await carregarPedido();
-  await carregarProdutos();
-  await carregarItens();
-})();
+/* ================= START ================= */
+carregarPedido();
 </script>
 
 </body>
