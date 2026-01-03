@@ -23,6 +23,7 @@ th,td{padding:8px;border-bottom:1px solid #1e293b;font-size:14px}
 th{color:#94a3b8}
 button{padding:10px 16px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer}
 button.sec{background:#1e293b;color:#fff}
+input,select{padding:10px;border-radius:10px;border:none;margin:6px 0;width:100%}
 small{font-size:14px}
 </style>
 </head>
@@ -36,13 +37,14 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= USUÁRIO LOGADO ================= */
+/* ================= LOGIN ================= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin?.app_id || !admin?.id){
   alert("Sessão expirada");
   location.href="../auth/login.html";
 }
 
+/* ================= DOM ================= */
 let total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
 let totalSaidas = 0;
 </script>
@@ -50,6 +52,7 @@ let totalSaidas = 0;
 <div class="topo">
   <h2>💰 Caixa</h2>
   <div>
+    <button onclick="abrirVendaAvulsa()">➕ Venda Avulsa</button>
     <button onclick="fecharCaixa()">🔒 Fechar Caixa</button>
     <button class="sec" onclick="location.href='admin.html'">Voltar</button>
   </div>
@@ -58,7 +61,7 @@ let totalSaidas = 0;
 <div class="container">
 
 <div class="box">
-  <label>📅 Data do caixa</label><br>
+  <label>📅 Data do caixa</label>
   <input type="date" id="dataCaixa">
   <button onclick="carregarCaixa()">Filtrar</button>
 </div>
@@ -94,122 +97,149 @@ let totalSaidas = 0;
 
 </div>
 
+<!-- ================= MODAL VENDA AVULSA ================= -->
+<div id="modalVenda" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
+  <div class="box" style="max-width:420px;width:100%">
+    <h3>➕ Venda Avulsa</h3>
+    <input id="vDesc" placeholder="Descrição">
+    <input id="vValor" type="number" placeholder="Valor">
+    <select id="vTipo">
+      <option value="dinheiro">Dinheiro</option>
+      <option value="pix">Pix</option>
+      <option value="debito">Débito</option>
+      <option value="credito">Crédito</option>
+    </select>
+    <button onclick="salvarVendaAvulsa()">Salvar</button>
+    <button class="sec" onclick="fecharVendaAvulsa()">Cancelar</button>
+  </div>
+</div>
+
 <script>
+/* ================= CAIXA ================= */
 async function carregarCaixa(){
+  try{
+    const data =
+      document.getElementById("dataCaixa").value ||
+      new Date().toISOString().split("T")[0];
+    document.getElementById("dataCaixa").value = data;
 
-  const data =
-    document.getElementById("dataCaixa").value ||
-    new Date().toISOString().split("T")[0];
+    const inicio = data + "T00:00:00";
+    const fim = data + "T23:59:59";
 
-  document.getElementById("dataCaixa").value = data;
+    total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
+    totalSaidas = 0;
+    lista.innerHTML = "";
 
-  const inicio = data + "T00:00:00";
-  const fim = data + "T23:59:59";
+    /* PAGAMENTOS */
+    let pagamentos = [];
 
-  total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
-  totalSaidas = 0;
-  lista.innerHTML = "";
+    if(admin.nivel === "admin"){
+      const { data } = await sb.from("pagamentos")
+        .select("tipo,valor,funcionario_id")
+        .eq("app_id", admin.app_id)
+        .gte("created_at", inicio)
+        .lte("created_at", fim);
+      pagamentos = data || [];
+    } else {
+      const { data: meus } = await sb.from("pagamentos")
+        .select("tipo,valor,funcionario_id")
+        .eq("app_id", admin.app_id)
+        .eq("funcionario_id", admin.id)
+        .gte("created_at", inicio)
+        .lte("created_at", fim);
 
-  /* ================= PAGAMENTOS ================= */
+      const { data: semFunc } = await sb.from("pagamentos")
+        .select("tipo,valor,funcionario_id")
+        .eq("app_id", admin.app_id)
+        .is("funcionario_id", null)
+        .gte("created_at", inicio)
+        .lte("created_at", fim);
 
-  let pagamentos = [];
+      pagamentos = [...(meus||[]), ...(semFunc||[])];
+    }
 
-  if(admin.nivel === "admin"){
-    const { data } = await sb
-      .from("pagamentos")
-      .select("tipo,valor,funcionario_id")
+    pagamentos.forEach(p=>{
+      const tipo = p.tipo.toLowerCase();
+      const valor = Number(p.valor)||0;
+      if(total[tipo] !== undefined) total[tipo] += valor;
+
+      lista.innerHTML += `
+        <tr>
+          <td>${p.tipo.toUpperCase()}</td>
+          <td>R$ ${valor.toFixed(2)}</td>
+          <td>${p.funcionario_id ? p.funcionario_id.slice(0,6) : "—"}</td>
+        </tr>
+      `;
+    });
+
+    /* DESPESAS */
+    let despesas = [];
+    const q = sb.from("despesas").select("valor")
       .eq("app_id", admin.app_id)
       .gte("created_at", inicio)
       .lte("created_at", fim);
-    pagamentos = data || [];
-  } else {
-    const { data: meus } = await sb
-      .from("pagamentos")
-      .select("tipo,valor,funcionario_id")
-      .eq("app_id", admin.app_id)
-      .eq("funcionario_id", admin.id)
-      .gte("created_at", inicio)
-      .lte("created_at", fim);
 
-    const { data: semFunc } = await sb
-      .from("pagamentos")
-      .select("tipo,valor,funcionario_id")
-      .eq("app_id", admin.app_id)
-      .is("funcionario_id", null)
-      .gte("created_at", inicio)
-      .lte("created_at", fim);
+    const { data: d } = admin.nivel === "admin"
+      ? await q
+      : await q.eq("funcionario_id", admin.id);
 
-    pagamentos = [...(meus||[]), ...(semFunc||[])];
+    despesas = d || [];
+    totalSaidas = despesas.reduce((s,x)=>s+Number(x.valor||0),0);
+
+    /* TOTAIS */
+    tDinheiro.innerText = "R$ " + total.dinheiro.toFixed(2);
+    tPix.innerText = "R$ " + total.pix.toFixed(2);
+    tDebito.innerText = "R$ " + total.debito.toFixed(2);
+    tCredito.innerText = "R$ " + total.credito.toFixed(2);
+    tFiado.innerText = "R$ " + total.fiado.toFixed(2);
+
+    document.getElementById("totalCaixa").innerText =
+      (total.dinheiro + total.pix + total.debito + total.credito).toFixed(2);
+    document.getElementById("totalSaidas").innerText =
+      totalSaidas.toFixed(2);
+
+  }catch(err){
+    console.error("Erro caixa:", err);
+    alert("Erro ao carregar caixa");
+  }
+}
+
+/* ================= VENDA AVULSA ================= */
+function abrirVendaAvulsa(){
+  modalVenda.style.display="flex";
+}
+function fecharVendaAvulsa(){
+  modalVenda.style.display="none";
+}
+
+async function salvarVendaAvulsa(){
+  const desc = vDesc.value.trim();
+  const valor = Number(vValor.value);
+  const tipo = vTipo.value;
+
+  if(!desc || !valor){
+    alert("Preencha corretamente");
+    return;
   }
 
-  pagamentos.forEach(p=>{
-    const tipo = p.tipo.toLowerCase();
-    const valor = Number(p.valor)||0;
-    if(total[tipo] !== undefined) total[tipo] += valor;
-
-    lista.innerHTML += `
-      <tr>
-        <td>${p.tipo.toUpperCase()}</td>
-        <td>R$ ${valor.toFixed(2)}</td>
-        <td>${p.funcionario_id ? p.funcionario_id.slice(0,6) : "—"}</td>
-      </tr>
-    `;
+  await sb.from("pagamentos").insert({
+    app_id: admin.app_id,
+    funcionario_id: admin.id,
+    tipo,
+    valor,
+    observacao: "Venda avulsa: " + desc
   });
 
-  /* ================= DESPESAS ================= */
-
-  let despesas = [];
-
-  if(admin.nivel === "admin"){
-    const { data } = await sb
-      .from("despesas")
-      .select("valor")
-      .eq("app_id", admin.app_id)
-      .gte("created_at", inicio)
-      .lte("created_at", fim);
-    despesas = data || [];
-  } else {
-    const { data: minhas } = await sb
-      .from("despesas")
-      .select("valor")
-      .eq("app_id", admin.app_id)
-      .eq("funcionario_id", admin.id)
-      .gte("created_at", inicio)
-      .lte("created_at", fim);
-
-    const { data: semFunc } = await sb
-      .from("despesas")
-      .select("valor")
-      .eq("app_id", admin.app_id)
-      .is("funcionario_id", null)
-      .gte("created_at", inicio)
-      .lte("created_at", fim);
-
-    despesas = [...(minhas||[]), ...(semFunc||[])];
-  }
-
-  totalSaidas = despesas.reduce((s,d)=>s + Number(d.valor),0);
-
-  /* ================= TOTAIS ================= */
-  tDinheiro.innerText = "R$ " + total.dinheiro.toFixed(2);
-  tPix.innerText = "R$ " + total.pix.toFixed(2);
-  tDebito.innerText = "R$ " + total.debito.toFixed(2);
-  tCredito.innerText = "R$ " + total.credito.toFixed(2);
-  tFiado.innerText = "R$ " + total.fiado.toFixed(2);
-
-  const totalCaixa =
-    total.dinheiro + total.pix + total.debito + total.credito;
-
-  totalCaixaSpan.innerText = totalCaixa.toFixed(2);
-  totalSaidasSpan.innerText = totalSaidas.toFixed(2);
+  vDesc.value = "";
+  vValor.value = "";
+  fecharVendaAvulsa();
+  carregarCaixa();
 }
 
 /* ================= FECHAR CAIXA ================= */
 async function fecharCaixa(){
   const data = document.getElementById("dataCaixa").value;
-  if(!data){ alert("Selecione a data"); return; }
-
-  if(!confirm("Deseja fechar o caixa deste dia?")) return;
+  if(!confirm("Deseja fechar o caixa do dia?")) return;
 
   await sb.from("fechamento_caixa").insert({
     app_id: admin.app_id,
@@ -228,7 +258,7 @@ async function fecharCaixa(){
   alert("Caixa fechado com sucesso ✅");
 }
 
-/* ================= START ================= */
+/* START */
 carregarCaixa();
 </script>
 
