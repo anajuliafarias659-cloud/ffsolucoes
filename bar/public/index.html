@@ -29,6 +29,7 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);}
 .modal-content{background:#fff;width:100%;max-width:520px;margin:auto;border-radius:26px 26px 0 0;padding:26px}
 input,button{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);margin-bottom:12px}
 button{background:var(--primary);color:#fff;font-weight:900;border:none}
+button:disabled{opacity:.6}
 </style>
 </head>
 
@@ -55,7 +56,7 @@ button{background:var(--primary);color:#fff;font-weight:900;border:none}
     <input id="cliente_whatsapp" placeholder="WhatsApp">
     <input id="cliente_endereco" placeholder="Bairro / referência">
     <div id="lista"></div>
-    <button onclick="enviarPedido()">Enviar pedido</button>
+    <button id="btnEnviar" onclick="enviarPedido()">Enviar pedido</button>
   </div>
 </div>
 
@@ -80,6 +81,7 @@ localStorage.setItem("app_id", app_id);
 /* ================= STATE ================= */
 let produtos = [];
 let carrinho = [];
+let enviandoPedido = false; // 🔒 TRAVA GLOBAL
 
 /* ================= CARRINHO ================= */
 function salvarCarrinho(){
@@ -154,70 +156,74 @@ function abrirCarrinho(){
   });
 }
 
-/* ================= ENVIAR PEDIDO (CORRIGIDO) ================= */
+/* ================= ENVIAR PEDIDO (FINAL) ================= */
 async function enviarPedido(){
-  if(carrinho.length === 0){
-    alert("Carrinho vazio");
-    return;
-  }
+  if(enviandoPedido) return;
+  enviandoPedido = true;
+  btnEnviar.disabled = true;
 
-  const nomeCli = cliente_nome.value.trim();
-  if(!mesa_id && !nomeCli){
-    alert("Informe seu nome");
-    return;
-  }
-
-  const confirmar = confirm("Confirmar envio do pedido?");
-  if(!confirmar) return;
-
-  /* 🔹 CRIA O PEDIDO */
-  const { data: pedido, error: erroPedido } = await sb
-    .from("pedidos")
-    .insert({
-      app_id,
-      mesa_id: mesa_id || null,
-      origem: mesa_id ? "mesa" : "web",
-      cliente_nome: nomeCli || null,
-      cliente_whatsapp: cliente_whatsapp.value || null,
-      cliente_endereco: cliente_endereco.value || null,
-      status: "aberto",
-      atendido: false
-    })
-    .select("id")
-    .single();
-
-  if(erroPedido){
-    alert("Erro ao criar pedido");
-    return;
-  }
-
-  const pedidoId = pedido.id;
-
-  /* 🔹 INSERE OS ITENS */
-  for(const i of carrinho){
-    const { error } = await sb.from("pedido_itens").insert({
-      app_id,
-      pedido_id: pedidoId,
-      mesa_id: mesa_id || null,
-      produto_id: i.id,
-      nome_produto: i.nome,
-      preco: i.preco,
-      quantidade: i.qtd
-    });
-
-    if(error){
-      /* 🚨 ROLLBACK — apaga pedido */
-      await sb.from("pedidos").delete().eq("id", pedidoId);
-      alert("Erro ao salvar itens. Pedido cancelado.");
+  try {
+    if(carrinho.length === 0){
+      alert("Carrinho vazio");
       return;
     }
-  }
 
-  alert("Pedido enviado com sucesso ☕");
-  carrinho = [];
-  localStorage.removeItem("carrinho_"+app_id);
-  qtd.innerText = 0;
-  modal.style.display="none";
+    if(!mesa_id && !cliente_nome.value.trim()){
+      alert("Informe seu nome");
+      return;
+    }
+
+    if(!confirm("Confirmar envio do pedido?")) return;
+
+    const { data: pedido, error: erroPedido } = await sb
+      .from("pedidos")
+      .insert({
+        app_id,
+        mesa_id: mesa_id || null,
+        origem: mesa_id ? "mesa" : "web",
+        cliente_nome: cliente_nome.value || null,
+        cliente_whatsapp: cliente_whatsapp.value || null,
+        cliente_endereco: cliente_endereco.value || null,
+        status: "aberto",
+        atendido: false
+      })
+      .select("id")
+      .single();
+
+    if(erroPedido){
+      alert(erroPedido.message);
+      return;
+    }
+
+    const pedidoId = pedido.id;
+
+    for(const i of carrinho){
+      const { error } = await sb.from("pedido_itens").insert({
+        app_id,
+        pedido_id: pedidoId,
+        produto_id: i.id,
+        nome_produto: i.nome,
+        preco: i.preco,
+        quantidade: i.qtd
+      });
+
+      if(error){
+        await sb.from("pedidos").delete().eq("id", pedidoId);
+        alert(error.message);
+        return;
+      }
+    }
+
+    alert("Pedido enviado com sucesso ☕");
+    carrinho = [];
+    localStorage.removeItem("carrinho_"+app_id);
+    qtd.innerText = 0;
+    modal.style.display="none";
+
+  } finally {
+    enviandoPedido = false;
+    btnEnviar.disabled = false;
+  }
 }
 
 /* ================= START ================= */
