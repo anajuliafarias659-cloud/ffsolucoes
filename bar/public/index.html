@@ -28,6 +28,7 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end}
 .modal-content{background:#fff;width:100%;max-width:520px;margin:auto;border-radius:26px 26px 0 0;padding:26px}
 input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);margin-bottom:12px}
+button{padding:12px;border-radius:12px;border:none;background:var(--primary);color:#fff;font-weight:900;width:100%}
 </style>
 </head>
 
@@ -68,7 +69,7 @@ const sb = supabase.createClient(
 /* ================= PARAMS ================= */
 const params = new URLSearchParams(location.search);
 const app_id = params.get("app_id") || localStorage.getItem("app_id");
-const mesa_id = params.get("mesa"); // UUID da mesa (se existir)
+const mesa_id = params.get("mesa_id");
 
 if(!app_id){
   document.body.innerHTML = "Indisponível";
@@ -80,7 +81,7 @@ localStorage.setItem("app_id", app_id);
 let produtos = [];
 let carrinho = [];
 
-/* ================= CARRINHO PERSISTENTE ================= */
+/* ================= CARRINHO ================= */
 function salvarCarrinho(){
   localStorage.setItem("carrinho_"+app_id, JSON.stringify(carrinho));
 }
@@ -153,7 +154,7 @@ function abrirCarrinho(){
   });
 }
 
-/* ================= BUSCAR PEDIDO ABERTO ================= */
+/* ================= PEDIDO ABERTO ================= */
 async function buscarPedidoAberto(){
   let q = sb.from("pedidos")
     .select("id")
@@ -162,24 +163,36 @@ async function buscarPedidoAberto(){
     .eq("atendido", false);
 
   if(mesa_id){
-  q = q.eq("mesa_id", mesa_id);
-}else{
-  q = q.eq("origem", "web");
-}
+    q = q.eq("mesa_id", mesa_id);
+  }else{
+    q = q.eq("origem", "web");
+  }
 
+  const { data } = await q.maybeSingle();
+  return data;
+}
 
 /* ================= ENVIAR PEDIDO ================= */
 async function enviarPedido(){
-  const nomeCli = cliente_nome.value.trim();
-  if(!nomeCli){ alert("Informe seu nome"); return; }
-  if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
+  if(carrinho.length === 0){
+    alert("Carrinho vazio");
+    return;
+  }
 
   let pedidoId;
   const existente = await buscarPedidoAberto();
 
   if(existente){
+    const continuar = confirm("Já existe um pedido em andamento.\nDeseja adicionar os itens nele?");
+    if(!continuar) return;
     pedidoId = existente.id;
   }else{
+    const nomeCli = cliente_nome.value.trim();
+    if(!nomeCli){
+      alert("Informe seu nome");
+      return;
+    }
+
     const { data: pedido, error } = await sb
       .from("pedidos")
       .insert({
@@ -195,7 +208,11 @@ async function enviarPedido(){
       .select("id")
       .single();
 
-    if(error){ alert("Erro ao criar pedido"); return; }
+    if(error){
+      alert("Erro ao criar pedido");
+      return;
+    }
+
     pedidoId = pedido.id;
   }
 
@@ -203,6 +220,7 @@ async function enviarPedido(){
     await sb.from("pedido_itens").insert({
       app_id,
       pedido_id: pedidoId,
+      mesa_id: mesa_id || null,
       produto_id: i.id,
       nome_produto: i.nome,
       preco: i.preco,
@@ -210,7 +228,7 @@ async function enviarPedido(){
     });
   }
 
-  alert("Pedido enviado ☕");
+  alert("Pedido enviado com sucesso ☕");
   carrinho = [];
   localStorage.removeItem("carrinho_"+app_id);
   qtd.innerText = 0;
@@ -229,4 +247,3 @@ modal.onclick = e => e.target === modal && (modal.style.display="none");
 
 </body>
 </html>
-
