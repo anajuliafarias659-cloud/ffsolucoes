@@ -1,23 +1,92 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF-8" />
 <title>Cardápio</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;font-family:Arial;background:#f8fafc}
-header{background:#020617;color:#fff;padding:22px;text-align:center}
-.container{max-width:600px;margin:auto;padding:16px}
-.produto{background:#fff;border-radius:14px;padding:10px 12px;display:flex;gap:14px;margin-bottom:12px}
-.produto img{width:72px;height:72px;border-radius:10px;object-fit:cover}
-.preco{color:#16a34a;font-weight:700}
-button{background:#16a34a;border:none;border-radius:10px;padding:6px 10px;font-weight:700;cursor:pointer}
-.carrinho-btn{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#020617;color:#fff;padding:14px 20px;border-radius:30px}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end}
-.modal-content{background:#fff;width:100%;max-width:600px;margin:auto;border-radius:22px 22px 0 0;padding:20px}
-.item{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #f8fafc;
+}
+header {
+  background: #020617;
+  color: #fff;
+  padding: 22px;
+  text-align: center;
+}
+.container {
+  max-width: 600px;
+  margin: auto;
+  padding: 16px;
+}
+
+.produto {
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.produto img {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+.preco {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+button {
+  background: #16a34a;
+  border: none;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.carrinho-btn {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #020617;
+  color: #fff;
+  padding: 14px 20px;
+  border-radius: 30px;
+  font-weight: 700;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  display: none;
+  align-items: flex-end;
+}
+
+.modal-content {
+  background: #fff;
+  width: 100%;
+  max-width: 600px;
+  margin: auto;
+  border-radius: 22px 22px 0 0;
+  padding: 20px;
+}
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
 </style>
 </head>
 
@@ -42,44 +111,46 @@ button{background:#16a34a;border:none;border-radius:10px;padding:6px 10px;font-w
 </div>
 
 <script>
+/* SUPABASE */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* PARAMS */
 const params = new URLSearchParams(location.search);
-const app_id = params.get("app_id");
-const mesaNumero = params.get("mesa");
+let app_id = params.get("app_id") || localStorage.getItem("app_id");
+const mesaNumero = params.get("mesa") || "-";
 
-if(!app_id || !mesaNumero){
-  document.body.innerHTML="<h2 style='text-align:center'>QR inválido</h2>";
-  throw new Error("QR inválido");
+if (!app_id) {
+  document.body.innerHTML = "<h2 style='text-align:center'>❌ QR inválido</h2>";
+  throw new Error("app_id ausente");
 }
+localStorage.setItem("app_id", app_id);
 
 document.getElementById("nome").innerText = `Cardápio · Mesa ${mesaNumero}`;
 
+/* ESTADO */
 let carrinho = [];
-let mesa_id = null;
 
-/* BUSCAR ID DA MESA */
-async function carregarMesa(){
+/* Função para pegar o mesa_id pelo numero da mesa */
+async function pegarMesaId(numeroMesa) {
   const { data, error } = await sb
     .from("mesas")
     .select("id")
     .eq("app_id", app_id)
-    .eq("numero_mesa", mesaNumero)
+    .eq("numero_mesa", numeroMesa)
     .single();
 
-  if(error){
+  if (error || !data) {
     alert("Mesa não encontrada");
-    throw error;
+    throw error || new Error("Mesa não encontrada");
   }
-
-  mesa_id = data.id;
+  return data.id;
 }
 
 /* PRODUTOS */
-async function carregarProdutos(){
+async function carregarProdutos() {
   const { data, error } = await sb
     .from("produtos")
     .select("id,nome,preco,foto")
@@ -87,16 +158,16 @@ async function carregarProdutos(){
     .eq("ativo", true)
     .order("nome");
 
-  if(error){
-    conteudo.innerHTML="Erro ao carregar produtos";
+  if (error) {
+    conteudo.innerHTML = "<p>Erro ao carregar produtos</p>";
     return;
   }
 
-  conteudo.innerHTML="";
-  data.forEach(p=>{
-    conteudo.innerHTML+=`
+  conteudo.innerHTML = "";
+  data.forEach((p) => {
+    conteudo.innerHTML += `
       <div class="produto">
-        ${p.foto?`<img src="${p.foto}">`:""}
+        ${p.foto ? `<img src="${p.foto}">` : ""}
         <div style="flex:1">
           <b>${p.nome}</b><br>
           <span class="preco">R$ ${Number(p.preco).toFixed(2)}</span>
@@ -107,35 +178,56 @@ async function carregarProdutos(){
 }
 
 /* CARRINHO */
-function add(p){
-  const item = carrinho.find(i=>i.nome_produto===p.nome);
-  if(item) item.quantidade++;
-  else carrinho.push({ nome_produto:p.nome, quantidade:1, preco:p.preco });
+function add(p) {
+  const item = carrinho.find((i) => i.nome === p.nome);
+  if (item) item.quantidade++;
+  else carrinho.push({ nome: p.nome, quantidade: 1, preco: p.preco });
   atualizarQtd();
 }
 
-function atualizarQtd(){
-  qtd.innerText = carrinho.reduce((s,i)=>s+i.quantidade,0);
+function remover(nome) {
+  const item = carrinho.find((i) => i.nome === nome);
+  if (!item) return;
+  item.quantidade--;
+  if (item.quantidade <= 0) {
+    carrinho = carrinho.filter((i) => i.nome !== nome);
+  }
+  abrirCarrinho();
+  atualizarQtd();
 }
 
-function abrirCarrinho(){
-  modal.style.display="flex";
-  lista.innerHTML="";
-  carrinho.forEach(i=>{
-    lista.innerHTML+=`
+function atualizarQtd() {
+  qtd.innerText = carrinho.reduce((s, i) => s + i.quantidade, 0);
+}
+
+function abrirCarrinho() {
+  modal.style.display = "flex";
+  lista.innerHTML = "";
+  carrinho.forEach((i) => {
+    lista.innerHTML += `
       <div class="item">
-        <span>${i.quantidade}x ${i.nome_produto}</span>
-        <b>R$ ${(i.quantidade*i.preco).toFixed(2)}</b>
+        <span>${i.quantidade}x ${i.nome}</span>
+        <div>
+          <button onclick="remover('${i.nome}')">-</button>
+          <b>R$ ${(i.quantidade * i.preco).toFixed(2)}</b>
+        </div>
       </div>`;
   });
 }
 
-/* ENVIAR PEDIDO */
-async function enviarPedido(){
-  if(!carrinho.length) return alert("Carrinho vazio");
+/* ENVIO */
+async function enviarPedido() {
+  if (!carrinho.length) {
+    alert("Carrinho vazio");
+    return;
+  }
 
-  const total = carrinho.reduce((s,i)=>s+i.quantidade*i.preco,0);
+  const total = carrinho.reduce((s, i) => s + i.quantidade * i.preco, 0);
 
+  // Pega o mesa_id do número da mesa
+  const mesa_id = await pegarMesaId(mesaNumero);
+
+  // Insere pedido com mesa_id correto
   const { data: pedido, error } = await sb
     .from("pedidos")
     .insert({
@@ -144,39 +236,40 @@ async function enviarPedido(){
       tipo: "mesa",
       status: "aberto",
       atendido: false,
-      total
+      total,
     })
     .select()
     .single();
 
-  if(error) return alert(error.message);
+  if (error) {
+    alert(error.message);
+    return;
+  }
 
-  const itens = carrinho.map(i=>({
+  // Insere os itens na tabela correta
+  const itens = carrinho.map((i) => ({
     pedido_id: pedido.id,
-    nome_produto: i.nome_produto,
+    nome_produto: i.nome,
     quantidade: i.quantidade,
-    preco: i.preco
+    preco: i.preco,
   }));
 
-  const { error: e2 } = await sb
-    .from("pedido_itens")
-    .insert(itens);
+  const { error: e2 } = await sb.from("pedido_itens").insert(itens);
 
-  if(e2) return alert(e2.message);
+  if (e2) {
+    alert(e2.message);
+    return;
+  }
 
-  alert("Pedido enviado para a cozinha 🍳");
-  carrinho=[];
+  alert("Pedido enviado 🔥");
+  carrinho = [];
   atualizarQtd();
-  modal.style.display="none";
+  modal.style.display = "none";
 }
 
-modal.onclick=e=>e.target===modal&&(modal.style.display="none");
-
 /* INIT */
-(async ()=>{
-  await carregarMesa();
-  await carregarProdutos();
-})();
+modal.onclick = (e) => e.target === modal && (modal.style.display = "none");
+carregarProdutos();
 </script>
 
 </body>
