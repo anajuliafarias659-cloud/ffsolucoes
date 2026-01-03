@@ -2,29 +2,22 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Caixa</title>
+<title>Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
-.container{max-width:1200px;margin:auto;padding:24px}
-.box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
-.card{background:#020617;border:1px solid #1e293b;border-radius:12px;padding:14px}
-.valor{font-size:22px;font-weight:bold;margin-top:6px}
-.tipo{font-size:13px;color:#94a3b8}
-.total{font-size:26px;font-weight:bold}
-.positivo{color:#22c55e}
-.negativo{color:#ef4444}
-table{width:100%;border-collapse:collapse;margin-top:10px}
-th,td{padding:8px;border-bottom:1px solid #1e293b;font-size:14px}
-th{color:#94a3b8}
-button{padding:10px 16px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer}
-button.sec{background:#1e293b;color:#fff}
-input,select{padding:10px;border-radius:10px;border:none;margin:6px 0;width:100%}
-small{font-size:14px}
+.container{max-width:900px;margin:auto;padding:24px}
+.pedido{background:#0f172a;border-radius:18px;padding:18px;margin-bottom:20px}
+.itens{margin-top:12px}
+.item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b}
+.total{margin-top:12px;font-size:20px;font-weight:bold}
+.acoes{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}
+button{padding:12px 18px;border:none;border-radius:12px;font-weight:bold;cursor:pointer}
+.finalizar{background:#22c55e}
+.voltar{background:#1e293b;color:#fff}
 </style>
 </head>
 
@@ -37,229 +30,97 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= LOGIN ================= */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin?.app_id || !admin?.id){
-  alert("Sessão expirada");
-  location.href="../auth/login.html";
+/* ================= PARAMS ================= */
+const params = new URLSearchParams(location.search);
+const pedidoId = params.get("pedido") || localStorage.getItem("pedido_atual");
+
+if(!pedidoId){
+  alert("Pedido não encontrado");
+  location.href = "mesas.html";
 }
 
+localStorage.setItem("pedido_atual", pedidoId);
+
 /* ================= DOM ================= */
-let total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
-let totalSaidas = 0;
+let pedido = null;
 </script>
 
 <div class="topo">
-  <h2>💰 Caixa</h2>
-  <div>
-    <button onclick="abrirVendaAvulsa()">➕ Venda Avulsa</button>
-    <button onclick="fecharCaixa()">🔒 Fechar Caixa</button>
-    <button class="sec" onclick="location.href='admin.html'">Voltar</button>
-  </div>
+  <h2>🪑 Mesa</h2>
+  <button class="voltar" onclick="location.href='mesas.html'">Voltar</button>
 </div>
 
-<div class="container">
-
-<div class="box">
-  <label>📅 Data do caixa</label>
-  <input type="date" id="dataCaixa">
-  <button onclick="carregarCaixa()">Filtrar</button>
-</div>
-
-<div class="grid">
-  <div class="card"><div class="tipo">Dinheiro</div><div class="valor positivo" id="tDinheiro">R$ 0,00</div></div>
-  <div class="card"><div class="tipo">Pix</div><div class="valor positivo" id="tPix">R$ 0,00</div></div>
-  <div class="card"><div class="tipo">Débito</div><div class="valor positivo" id="tDebito">R$ 0,00</div></div>
-  <div class="card"><div class="tipo">Crédito</div><div class="valor positivo" id="tCredito">R$ 0,00</div></div>
-  <div class="card"><div class="tipo">Fiado</div><div class="valor negativo" id="tFiado">R$ 0,00</div></div>
-</div>
-
-<div class="box">
-  <h3>📋 Movimentações</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Tipo</th>
-        <th>Valor</th>
-        <th>Operador</th>
-      </tr>
-    </thead>
-    <tbody id="lista"></tbody>
-  </table>
-</div>
-
-<div class="box">
-  <p class="total">
-    Total em caixa: R$ <span id="totalCaixa">0.00</span><br>
-    <small class="negativo">Saídas: R$ <span id="totalSaidas">0.00</span></small>
-  </p>
-</div>
-
-</div>
-
-<!-- ================= MODAL VENDA AVULSA ================= -->
-<div id="modalVenda" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
-  <div class="box" style="max-width:420px;width:100%">
-    <h3>➕ Venda Avulsa</h3>
-    <input id="vDesc" placeholder="Descrição">
-    <input id="vValor" type="number" placeholder="Valor">
-    <select id="vTipo">
-      <option value="dinheiro">Dinheiro</option>
-      <option value="pix">Pix</option>
-      <option value="debito">Débito</option>
-      <option value="credito">Crédito</option>
-    </select>
-    <button onclick="salvarVendaAvulsa()">Salvar</button>
-    <button class="sec" onclick="fecharVendaAvulsa()">Cancelar</button>
-  </div>
+<div class="container" id="conteudo">
+  Carregando pedido...
 </div>
 
 <script>
-/* ================= CAIXA ================= */
-async function carregarCaixa(){
-  try{
-    const data =
-      document.getElementById("dataCaixa").value ||
-      new Date().toISOString().split("T")[0];
-    document.getElementById("dataCaixa").value = data;
+/* ================= CARREGAR PEDIDO ================= */
+async function carregarPedido(){
+  const { data, error } = await sb
+    .from("pedidos")
+    .select(`
+      id,
+      cliente_nome,
+      status,
+      pedido_itens (
+        nome_produto,
+        quantidade,
+        preco
+      )
+    `)
+    .eq("id", pedidoId)
+    .single();
 
-    const inicio = data + "T00:00:00";
-    const fim = data + "T23:59:59";
-
-    total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
-    totalSaidas = 0;
-    lista.innerHTML = "";
-
-    /* PAGAMENTOS */
-    let pagamentos = [];
-
-    if(admin.nivel === "admin"){
-      const { data } = await sb.from("pagamentos")
-        .select("tipo,valor,funcionario_id")
-        .eq("app_id", admin.app_id)
-        .gte("created_at", inicio)
-        .lte("created_at", fim);
-      pagamentos = data || [];
-    } else {
-      const { data: meus } = await sb.from("pagamentos")
-        .select("tipo,valor,funcionario_id")
-        .eq("app_id", admin.app_id)
-        .eq("funcionario_id", admin.id)
-        .gte("created_at", inicio)
-        .lte("created_at", fim);
-
-      const { data: semFunc } = await sb.from("pagamentos")
-        .select("tipo,valor,funcionario_id")
-        .eq("app_id", admin.app_id)
-        .is("funcionario_id", null)
-        .gte("created_at", inicio)
-        .lte("created_at", fim);
-
-      pagamentos = [...(meus||[]), ...(semFunc||[])];
-    }
-
-    pagamentos.forEach(p=>{
-      const tipo = p.tipo.toLowerCase();
-      const valor = Number(p.valor)||0;
-      if(total[tipo] !== undefined) total[tipo] += valor;
-
-      lista.innerHTML += `
-        <tr>
-          <td>${p.tipo.toUpperCase()}</td>
-          <td>R$ ${valor.toFixed(2)}</td>
-          <td>${p.funcionario_id ? p.funcionario_id.slice(0,6) : "—"}</td>
-        </tr>
-      `;
-    });
-
-    /* DESPESAS */
-    let despesas = [];
-    const q = sb.from("despesas").select("valor")
-      .eq("app_id", admin.app_id)
-      .gte("created_at", inicio)
-      .lte("created_at", fim);
-
-    const { data: d } = admin.nivel === "admin"
-      ? await q
-      : await q.eq("funcionario_id", admin.id);
-
-    despesas = d || [];
-    totalSaidas = despesas.reduce((s,x)=>s+Number(x.valor||0),0);
-
-    /* TOTAIS */
-    tDinheiro.innerText = "R$ " + total.dinheiro.toFixed(2);
-    tPix.innerText = "R$ " + total.pix.toFixed(2);
-    tDebito.innerText = "R$ " + total.debito.toFixed(2);
-    tCredito.innerText = "R$ " + total.credito.toFixed(2);
-    tFiado.innerText = "R$ " + total.fiado.toFixed(2);
-
-    document.getElementById("totalCaixa").innerText =
-      (total.dinheiro + total.pix + total.debito + total.credito).toFixed(2);
-    document.getElementById("totalSaidas").innerText =
-      totalSaidas.toFixed(2);
-
-  }catch(err){
-    console.error("Erro caixa:", err);
-    alert("Erro ao carregar caixa");
-  }
-}
-
-/* ================= VENDA AVULSA ================= */
-function abrirVendaAvulsa(){
-  modalVenda.style.display="flex";
-}
-function fecharVendaAvulsa(){
-  modalVenda.style.display="none";
-}
-
-async function salvarVendaAvulsa(){
-  const desc = vDesc.value.trim();
-  const valor = Number(vValor.value);
-  const tipo = vTipo.value;
-
-  if(!desc || !valor){
-    alert("Preencha corretamente");
+  if(error || !data){
+    alert("Erro ao carregar pedido");
     return;
   }
 
-  await sb.from("pagamentos").insert({
-    app_id: admin.app_id,
-    funcionario_id: admin.id,
-    tipo,
-    valor,
-    observacao: "Venda avulsa: " + desc
-  });
-
-  vDesc.value = "";
-  vValor.value = "";
-  fecharVendaAvulsa();
-  carregarCaixa();
+  pedido = data;
+  renderPedido();
 }
 
-/* ================= FECHAR CAIXA ================= */
-async function fecharCaixa(){
-  const data = document.getElementById("dataCaixa").value;
-  if(!confirm("Deseja fechar o caixa do dia?")) return;
+function renderPedido(){
+  let total = 0;
 
-  await sb.from("fechamento_caixa").insert({
-    app_id: admin.app_id,
-    funcionario_id: admin.id,
-    data,
-    total_dinheiro: total.dinheiro,
-    total_pix: total.pix,
-    total_debito: total.debito,
-    total_credito: total.credito,
-    total_fiado: total.fiado,
-    total_caixa:
-      total.dinheiro + total.pix + total.debito + total.credito,
-    total_saidas: totalSaidas
-  });
+  conteudo.innerHTML = `
+    <div class="pedido">
+      <h3>${pedido.cliente_nome || "Mesa"}</h3>
+      <div class="itens">
+        ${pedido.pedido_itens.map(i=>{
+          const sub = i.preco * i.quantidade;
+          total += sub;
+          return `
+            <div class="item">
+              <span>${i.quantidade}x ${i.nome_produto}</span>
+              <b>R$ ${sub.toFixed(2)}</b>
+            </div>
+          `;
+        }).join("")}
+      </div>
 
-  alert("Caixa fechado com sucesso ✅");
+      <div class="total">Total: R$ ${total.toFixed(2)}</div>
+
+      <div class="acoes">
+        <button class="finalizar" onclick="finalizarPedido()">Finalizar / Pagar</button>
+      </div>
+    </div>
+  `;
 }
 
-/* START */
-carregarCaixa();
+/* ================= FINALIZAR (CORRIGIDO) ================= */
+function finalizarPedido(){
+  // 🔒 NÃO fecha o pedido aqui
+  // salva para a tela de pagamentos
+  localStorage.setItem("pedido_pagamento", pedidoId);
+
+  // redireciona para pagamentos
+  location.href = "pagamentos.html";
+}
+
+/* ================= START ================= */
+carregarPedido();
 </script>
 
 </body>
