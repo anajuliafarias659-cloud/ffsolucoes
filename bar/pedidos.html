@@ -1,39 +1,73 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<title>Pedidos Abertos</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="UTF-8">
+<title>Pedidos da Cozinha</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <style>
-  body { background:#020617; color:#fff; font-family:Arial, sans-serif; margin:0; }
-  .topo { background:#0f172a; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
-  .container { max-width:1000px; margin:auto; padding:24px; }
-  .pedido {
-    background:#0f172a;
-    border-left:6px solid #22c55e;
-    border-radius:14px;
-    padding:16px;
-    margin-bottom:16px;
-  }
-  .item { padding:6px 0; border-bottom:1px solid #1e293b; }
-  .total { margin-top:8px; font-weight:bold; }
-  button {
-    margin-top:10px;
-    padding:8px 14px;
-    border:none;
-    border-radius:8px;
-    background:#22c55e;
-    color:#000;
-    font-weight:bold;
-    cursor:pointer;
-  }
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:1200px;margin:auto;padding:24px}
+
+.pedido{
+  background:#0f172a;
+  border-radius:14px;
+  padding:16px;
+  margin-bottom:16px;
+  border-left:6px solid #1e293b;
+}
+
+.pedido.novo{
+  border-left-color:#22c55e;
+  animation:piscar 1.2s infinite;
+}
+
+@keyframes piscar{
+  0%{box-shadow:0 0 0 rgba(34,197,94,0)}
+  50%{box-shadow:0 0 25px rgba(34,197,94,.9)}
+  100%{box-shadow:0 0 0 rgba(34,197,94,0)}
+}
+
+.item{
+  display:flex;
+  justify-content:space-between;
+  border-bottom:1px solid #1e293b;
+  padding:4px 0;
+}
+
+.total{margin-top:8px;font-weight:bold}
+.tempo{font-size:13px;color:#facc15;margin-top:4px}
+
+.badge{
+  display:inline-block;
+  padding:3px 8px;
+  border-radius:6px;
+  font-size:12px;
+  margin-left:6px;
+}
+
+.badge-mesa{background:#2563eb}
+.badge-web{background:#16a34a}
+
+button{
+  margin-top:10px;
+  padding:8px 12px;
+  border:none;
+  border-radius:8px;
+  background:#2563eb;
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+}
 </style>
 </head>
+
 <body>
 
 <div class="topo">
-  <h2>🍳 Pedidos Abertos</h2>
+  <h2>🍳 Pedidos da Cozinha</h2>
   <button onclick="location.href='admin.html'">Voltar</button>
 </div>
 
@@ -42,97 +76,112 @@
 </div>
 
 <script>
+// ===== SUPABASE =====
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+// ===== ADMIN =====
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin?.app_id){
-  document.getElementById("lista").innerText = "Sessão inválida";
-  throw new Error("Sessão inválida");
+  alert("Sessão expirada");
+  location.href="../auth/login.html";
 }
 
+// ===== TEMPO =====
+function tempoDecorrido(data){
+  const diff = Math.floor((Date.now() - new Date(data)) / 1000);
+  const min = Math.floor(diff / 60);
+  const sec = diff % 60;
+  return `${min}m ${sec}s`;
+}
+
+// ===== CARREGAR PEDIDOS =====
 async function carregarPedidos(){
+
   const { data: pedidos, error } = await sb
     .from("pedidos")
-    .select("id, mesa_id, total, status, created_at")
+    .select("id, mesa_id, status, atendido, created_at, tipo")
     .eq("app_id", admin.app_id)
     .eq("status", "aberto")
-    .order("created_at", { ascending: true });
+    .or("tipo.eq.mesa,tipo.eq.web")
+    .order("created_at", { ascending:true });
 
   if(error){
     console.error(error);
-    document.getElementById("lista").innerText = "Erro ao buscar pedidos";
     return;
   }
 
-  if(!pedidos.length){
-    document.getElementById("lista").innerText = "Nenhum pedido aberto";
+  if(!pedidos || pedidos.length === 0){
+    document.getElementById("lista").innerHTML =
+      "<p>Nenhum pedido aberto</p>";
     return;
   }
 
-  let html = "";
+  const cards = [];
 
-  for(const pedido of pedidos){
-    // Buscar número da mesa
-    const { data: mesa, error: errMesa } = await sb
-      .from("mesas")
-      .select("numero_mesa")
-      .eq("id", pedido.mesa_id)
-      .single();
+  for(const p of pedidos){
 
-    const { data: itens, error: errItens } = await sb
-      .from("pedido_itens")
-      .select("nome, quantidade, preco")
-      .eq("pedido_id", pedido.id);
+    let titulo = "Pedido Web";
+    let badge = `<span class="badge badge-web">WEB</span>`;
 
-    if(errMesa || errItens){
-      console.error("Erro buscando mesa ou itens", errMesa, errItens);
-      continue;
+    if(p.mesa_id){
+      const { data: mesa } = await sb
+        .from("mesas")
+        .select("numero_mesa")
+        .eq("id", p.mesa_id)
+        .single();
+
+      titulo = `Mesa ${mesa?.numero_mesa || "-"}`;
+      badge = `<span class="badge badge-mesa">MESA</span>`;
     }
 
+    const { data: itens } = await sb
+      .from("pedido_itens")
+      .select("nome_produto, quantidade, preco")
+      .eq("pedido_id", p.id);
+
+    let total = 0;
     let itensHtml = "";
-    let totalCalc = 0;
 
     (itens || []).forEach(i=>{
-      totalCalc += i.preco * i.quantidade;
-      itensHtml += `<div class="item">${i.quantidade}x ${i.nome} — R$ ${(i.preco*i.quantidade).toFixed(2)}</div>`;
+      total += i.preco * i.quantidade;
+      itensHtml += `
+        <div class="item">
+          <span>${i.quantidade}x ${i.nome_produto}</span>
+          <span>R$ ${(i.preco * i.quantidade).toFixed(2)}</span>
+        </div>
+      `;
     });
 
-    html += `
-      <div class="pedido" id="pedido-${pedido.id}">
-        <strong>Mesa ${mesa.numero_mesa || "?"}</strong><br>
-        ${itensHtml}
-        <div class="total">Total: R$ ${totalCalc.toFixed(2)}</div>
-        <button onclick="marcarAtendido('${pedido.id}')">✔ Marcar como atendido</button>
+    cards.push(`
+      <div class="pedido novo">
+        <strong>${titulo}</strong> ${badge}
+        <div class="tempo">⏱️ ${tempoDecorrido(p.created_at)}</div>
+        ${itensHtml || "<i>Sem itens</i>"}
+        <div class="total">Total: R$ ${total.toFixed(2)}</div>
+        <button onclick="marcarAtendido('${p.id}')">✔ Atendido</button>
       </div>
-    `;
+    `);
   }
 
-  document.getElementById("lista").innerHTML = html;
+  document.getElementById("lista").innerHTML = cards.join("");
 }
 
+// ===== ATENDIDO =====
 async function marcarAtendido(id){
-  const admin = JSON.parse(localStorage.getItem("admin_logado"));
-  if(!admin?.app_id) return alert("Sessão inválida");
-
-  const { error } = await sb
+  await sb
     .from("pedidos")
-    .update({ atendido:true, status:"fechado" })
+    .update({ atendido:true })
     .eq("id", id)
     .eq("app_id", admin.app_id);
-
-  if(error){
-    alert("Erro ao atualizar pedido");
-    return;
-  }
 
   carregarPedidos();
 }
 
 carregarPedidos();
-setInterval(carregarPedidos, 3000);
+setInterval(carregarPedidos, 1500);
 </script>
 
 </body>
