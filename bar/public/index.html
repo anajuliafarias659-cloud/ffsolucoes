@@ -7,38 +7,16 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:#f8fafc}
+body{margin:0;font-family:Arial;background:#f8fafc}
 header{background:#020617;color:#fff;padding:22px;text-align:center}
 .container{max-width:600px;margin:auto;padding:16px}
-
-.produto{
-  background:#fff;border-radius:14px;
-  padding:10px 12px;display:flex;gap:14px;
-  margin-bottom:12px;
-}
+.produto{background:#fff;border-radius:14px;padding:10px 12px;display:flex;gap:14px;margin-bottom:12px}
 .produto img{width:72px;height:72px;border-radius:10px;object-fit:cover}
 .preco{color:#16a34a;font-weight:700}
-
-button{
-  background:#16a34a;border:none;border-radius:10px;
-  padding:6px 10px;font-weight:700;cursor:pointer;
-}
-
-.carrinho-btn{
-  position:fixed;bottom:16px;left:50%;
-  transform:translateX(-50%);
-  background:#020617;color:#fff;
-  padding:14px 20px;border-radius:30px;
-}
-
-.modal{
-  position:fixed;inset:0;background:rgba(0,0,0,.5);
-  display:none;align-items:flex-end;
-}
-.modal-content{
-  background:#fff;width:100%;max-width:600px;
-  margin:auto;border-radius:22px 22px 0 0;padding:20px;
-}
+button{background:#16a34a;border:none;border-radius:10px;padding:6px 10px;font-weight:700;cursor:pointer}
+.carrinho-btn{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#020617;color:#fff;padding:14px 20px;border-radius:30px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end}
+.modal-content{background:#fff;width:100%;max-width:600px;margin:auto;border-radius:22px 22px 0 0;padding:20px}
 .item{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 </style>
 </head>
@@ -64,27 +42,41 @@ button{
 </div>
 
 <script>
-/* SUPABASE */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* PARAMS */
 const params = new URLSearchParams(location.search);
-let app_id = params.get("app_id") || localStorage.getItem("app_id");
-const mesa = params.get("mesa") || "-";
+const app_id = params.get("app_id");
+const mesaNumero = params.get("mesa");
 
-if(!app_id){
-  document.body.innerHTML="<h2 style='text-align:center'>❌ QR inválido</h2>";
-  throw new Error("app_id ausente");
+if(!app_id || !mesaNumero){
+  document.body.innerHTML="<h2 style='text-align:center'>QR inválido</h2>";
+  throw new Error("QR inválido");
 }
-localStorage.setItem("app_id", app_id);
 
-document.getElementById("nome").innerText = `Cardápio · Mesa ${mesa}`;
+document.getElementById("nome").innerText = `Cardápio · Mesa ${mesaNumero}`;
 
-/* ESTADO */
 let carrinho = [];
+let mesa_id = null;
+
+/* BUSCAR ID DA MESA */
+async function carregarMesa(){
+  const { data, error } = await sb
+    .from("mesas")
+    .select("id")
+    .eq("app_id", app_id)
+    .eq("numero_mesa", mesaNumero)
+    .single();
+
+  if(error){
+    alert("Mesa não encontrada");
+    throw error;
+  }
+
+  mesa_id = data.id;
+}
 
 /* PRODUTOS */
 async function carregarProdutos(){
@@ -96,7 +88,7 @@ async function carregarProdutos(){
     .order("nome");
 
   if(error){
-    conteudo.innerHTML="<p>Erro ao carregar produtos</p>";
+    conteudo.innerHTML="Erro ao carregar produtos";
     return;
   }
 
@@ -116,20 +108,9 @@ async function carregarProdutos(){
 
 /* CARRINHO */
 function add(p){
-  const item = carrinho.find(i=>i.nome===p.nome);
+  const item = carrinho.find(i=>i.nome_produto===p.nome);
   if(item) item.quantidade++;
-  else carrinho.push({ nome:p.nome, quantidade:1, preco:p.preco });
-  atualizarQtd();
-}
-
-function remover(nome){
-  const item = carrinho.find(i=>i.nome===nome);
-  if(!item) return;
-  item.quantidade--;
-  if(item.quantidade<=0){
-    carrinho = carrinho.filter(i=>i.nome!==nome);
-  }
-  abrirCarrinho();
+  else carrinho.push({ nome_produto:p.nome, quantidade:1, preco:p.preco });
   atualizarQtd();
 }
 
@@ -143,21 +124,15 @@ function abrirCarrinho(){
   carrinho.forEach(i=>{
     lista.innerHTML+=`
       <div class="item">
-        <span>${i.quantidade}x ${i.nome}</span>
-        <div>
-          <button onclick="remover('${i.nome}')">-</button>
-          <b>R$ ${(i.quantidade*i.preco).toFixed(2)}</b>
-        </div>
+        <span>${i.quantidade}x ${i.nome_produto}</span>
+        <b>R$ ${(i.quantidade*i.preco).toFixed(2)}</b>
       </div>`;
   });
 }
 
-/* ENVIO */
+/* ENVIAR PEDIDO */
 async function enviarPedido(){
-  if(!carrinho.length){
-    alert("Carrinho vazio");
-    return;
-  }
+  if(!carrinho.length) return alert("Carrinho vazio");
 
   const total = carrinho.reduce((s,i)=>s+i.quantidade*i.preco,0);
 
@@ -165,42 +140,43 @@ async function enviarPedido(){
     .from("pedidos")
     .insert({
       app_id,
-      total,
-      status:"aberto"
+      mesa_id,
+      tipo: "mesa",
+      status: "aberto",
+      atendido: false,
+      total
     })
     .select()
     .single();
 
-  if(error){
-    alert(error.message);
-    return;
-  }
+  if(error) return alert(error.message);
 
   const itens = carrinho.map(i=>({
     pedido_id: pedido.id,
-    nome: i.nome,
+    nome_produto: i.nome_produto,
     quantidade: i.quantidade,
     preco: i.preco
   }));
 
   const { error: e2 } = await sb
-    .from("itens_pedido")
+    .from("pedido_itens")
     .insert(itens);
 
-  if(e2){
-    alert(e2.message);
-    return;
-  }
+  if(e2) return alert(e2.message);
 
-  alert("Pedido enviado 🔥");
+  alert("Pedido enviado para a cozinha 🍳");
   carrinho=[];
   atualizarQtd();
   modal.style.display="none";
 }
 
-/* INIT */
 modal.onclick=e=>e.target===modal&&(modal.style.display="none");
-carregarProdutos();
+
+/* INIT */
+(async ()=>{
+  await carregarMesa();
+  await carregarProdutos();
+})();
 </script>
 
 </body>
