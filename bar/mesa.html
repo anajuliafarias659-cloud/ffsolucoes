@@ -7,31 +7,66 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
-.container{max-width:900px;margin:auto;padding:20px}
-input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:12px}
-.produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
-.produto{display:flex;justify-content:space-between;align-items:center}
-.controls{display:flex;gap:8px;margin-top:8px}
-button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
-.pay{width:100%;padding:16px;border:none;border-radius:12px;font-size:16px;font-weight:bold;background:#2563eb;color:#fff}
-
-.filtros{
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#020617;
+  color:#fff
+}
+.topo{
+  background:#0f172a;
+  padding:16px;
+  font-size:20px;
+  font-weight:bold
+}
+.container{
+  max-width:900px;
+  margin:auto;
+  padding:20px
+}
+input{
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:none;
+  margin-bottom:16px
+}
+.produto,.item{
+  background:#0f172a;
+  border-radius:14px;
+  padding:14px;
+  margin-bottom:12px
+}
+.produto{
   display:flex;
-  gap:10px;
-  margin-bottom:16px;
+  justify-content:space-between;
+  align-items:center
 }
-.filtros button{
-  flex:1;
-  padding:10px;
+.controls{
+  display:flex;
+  gap:8px;
+  margin-top:8px
+}
+button{
+  padding:6px 12px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer
+}
+.pay{
+  width:100%;
+  padding:16px;
+  border:none;
+  border-radius:12px;
+  font-size:16px;
   font-weight:bold;
-  background:#1e293b;
+  background:#2563eb;
   color:#fff;
+  margin-top:10px
 }
-.filtros button.ativo{
-  background:#22c55e;
-  color:#000;
+.conta{
+  background:#eab308;
+  color:#000
 }
 </style>
 </head>
@@ -43,19 +78,14 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 <div class="container">
   <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos(this.value)">
 
-  <!-- FILTRO COZINHA / BAR -->
-  <div class="filtros">
-    <button id="btnCozinha" class="ativo" onclick="setDestino('cozinha')">🍳 Cozinha</button>
-    <button id="btnBar" onclick="setDestino('bar')">🍺 Bar</button>
-  </div>
-
   <h3>Produtos</h3>
   <div id="listaProdutos"></div>
 
   <h3>Pedido</h3>
   <div id="pedido"></div>
 
-  <button class="pay" onclick="irPagamento()">💳 Fechar conta</button>
+  <button class="pay" onclick="irPagamento()">💳 Ver pagamento</button>
+  <button class="pay conta" onclick="pedirConta()">🧾 Pedir a conta</button>
 </div>
 
 <script>
@@ -78,7 +108,6 @@ if(!mesaId || !appId){
 let mesaNumero = null;
 let pedidoAtual = null;
 let produtosCache = [];
-let destinoAtual = "cozinha";
 
 /* ================= MESA ================= */
 async function carregarMesa(){
@@ -89,8 +118,11 @@ async function carregarMesa(){
     .eq("app_id", appId)
     .single();
 
-  mesaNumero = data?.numero_mesa || "";
-  document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${mesaNumero}`;
+  if(data){
+    mesaNumero = data.numero_mesa;
+    document.getElementById("tituloMesa").innerText =
+      `🍽️ Mesa ${mesaNumero}`;
+  }
 }
 
 /* ================= PEDIDO ================= */
@@ -100,7 +132,15 @@ async function garantirPedido(){
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", appId)
-    .eq("status", "aberto")
+    .in("status", [
+      "aberto",
+      "aceito",
+      "finalizado",
+      "entregue",
+      "conta_solicitada"
+    ])
+    .order("created_at", { ascending:false })
+    .limit(1)
     .maybeSingle();
 
   if(data) return data;
@@ -110,8 +150,8 @@ async function garantirPedido(){
     .insert({
       app_id: appId,
       mesa_id: mesaId,
-      origem: "mesa",
-      status: "aberto"
+      status: "aberto",
+      origem: "mesa"
     })
     .select()
     .single();
@@ -119,22 +159,13 @@ async function garantirPedido(){
   return novo;
 }
 
-/* ================= DESTINO ================= */
-function setDestino(destino){
-  destinoAtual = destino;
-  document.getElementById("btnCozinha").classList.toggle("ativo", destino === "cozinha");
-  document.getElementById("btnBar").classList.toggle("ativo", destino === "bar");
-  carregarProdutos();
-}
-
 /* ================= PRODUTOS ================= */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
-    .select("id,nome,preco,destino")
+    .select("id,nome,preco")
     .eq("app_id", appId)
     .eq("ativo", true)
-    .eq("destino", destinoAtual)
     .order("nome");
 
   produtosCache = data || [];
@@ -162,8 +193,10 @@ function filtrarProdutos(txt){
   ));
 }
 
-/* ================= PEDIDO ITENS ================= */
+/* ================= ITENS ================= */
 async function carregarPedido(){
+  if(!pedidoAtual) return;
+
   const { data } = await sb
     .from("pedido_itens")
     .select("id,nome_produto,quantidade")
@@ -192,7 +225,7 @@ async function carregarPedido(){
   });
 }
 
-/* ================= ADD PRODUTO ================= */
+/* ================= AÇÕES ================= */
 async function addProduto(p){
   const { data } = await sb
     .from("pedido_itens")
@@ -206,22 +239,20 @@ async function addProduto(p){
     await sb.from("pedido_itens")
       .update({ quantidade: data.quantidade + 1 })
       .eq("id", data.id);
-  } else {
+  }else{
     await sb.from("pedido_itens").insert({
       app_id: appId,
       pedido_id: pedidoAtual.id,
       produto_id: p.id,
       nome_produto: p.nome,
       preco: p.preco,
-      quantidade: 1,
-      destino: p.destino
+      quantidade: 1
     });
   }
 
   carregarPedido();
 }
 
-/* ================= QTD ================= */
 async function alterarQtd(id, delta){
   const { data } = await sb
     .from("pedido_itens")
@@ -233,17 +264,28 @@ async function alterarQtd(id, delta){
 
   if(nova <= 0){
     await sb.from("pedido_itens").delete().eq("id", id);
-  } else {
+  }else{
     await sb.from("pedido_itens").update({ quantidade: nova }).eq("id", id);
   }
 
   carregarPedido();
 }
 
-/* ================= PAGAMENTO ================= */
+/* ================= PEDIR CONTA ================= */
+async function pedirConta(){
+  if(!pedidoAtual) return;
+
+  await sb.from("pedidos")
+    .update({ status: "conta_solicitada" })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", appId);
+
+  alert("🧾 Conta solicitada! Aguarde o garçom 🙂");
+}
+
+/* ================= PAGAMENTO (VISUAL) ================= */
 function irPagamento(){
-  location.href =
-    `pagamento.html?pedido=${pedidoAtual.id}&mesa=${mesaId}&app_id=${appId}`;
+  alert("O garçom irá até a mesa para finalizar o pagamento.");
 }
 
 /* ================= START ================= */
