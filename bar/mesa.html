@@ -10,12 +10,29 @@
 body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
 .container{max-width:900px;margin:auto;padding:20px}
-input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:16px}
+input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:12px}
 .produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
 .produto{display:flex;justify-content:space-between;align-items:center}
 .controls{display:flex;gap:8px;margin-top:8px}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .pay{width:100%;padding:16px;border:none;border-radius:12px;font-size:16px;font-weight:bold;background:#2563eb;color:#fff}
+
+.filtros{
+  display:flex;
+  gap:10px;
+  margin-bottom:16px;
+}
+.filtros button{
+  flex:1;
+  padding:10px;
+  font-weight:bold;
+  background:#1e293b;
+  color:#fff;
+}
+.filtros button.ativo{
+  background:#22c55e;
+  color:#000;
+}
 </style>
 </head>
 
@@ -25,6 +42,13 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
 <div class="container">
   <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos(this.value)">
+
+  <!-- FILTRO COZINHA / BAR -->
+  <div class="filtros">
+    <button id="btnCozinha" class="ativo" onclick="setDestino('cozinha')">🍳 Cozinha</button>
+    <button id="btnBar" onclick="setDestino('bar')">🍺 Bar</button>
+  </div>
+
   <h3>Produtos</h3>
   <div id="listaProdutos"></div>
 
@@ -43,8 +67,8 @@ const sb = supabase.createClient(
 
 /* ================= CONTEXTO ================= */
 const params = new URLSearchParams(location.search);
-const mesaId = params.get("mesa");     // UUID da mesa
-const appId  = params.get("app_id");   // negócio
+const mesaId = params.get("mesa");
+const appId  = params.get("app_id");
 
 if(!mesaId || !appId){
   alert("Sessão inválida");
@@ -54,27 +78,22 @@ if(!mesaId || !appId){
 let mesaNumero = null;
 let pedidoAtual = null;
 let produtosCache = [];
+let destinoAtual = "cozinha";
 
-/* ================= BUSCAR NÚMERO DA MESA ================= */
+/* ================= MESA ================= */
 async function carregarMesa(){
-  const { data, error } = await sb
+  const { data } = await sb
     .from("mesas")
     .select("numero_mesa")
     .eq("id", mesaId)
     .eq("app_id", appId)
     .single();
 
-  if(error || !data){
-    console.error("Erro ao carregar mesa:", error);
-    document.getElementById("tituloMesa").innerText = "🍽️ Mesa";
-    return;
-  }
-
-  mesaNumero = data.numero_mesa;
+  mesaNumero = data?.numero_mesa || "";
   document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${mesaNumero}`;
 }
 
-/* ================= GARANTIR PEDIDO (MESA) ================= */
+/* ================= PEDIDO ================= */
 async function garantirPedido(){
   const { data } = await sb
     .from("pedidos")
@@ -86,35 +105,36 @@ async function garantirPedido(){
 
   if(data) return data;
 
-  const { data: novo, error } = await sb
+  const { data: novo } = await sb
     .from("pedidos")
     .insert({
       app_id: appId,
       mesa_id: mesaId,
-      origem: "mesa",          // 🔥 DEFINE QUE É MESA
-      status: "aberto",
-      cliente_nome: null,      // 🔥 NÃO PEDE DADOS
-      cliente_whatsapp: null
+      origem: "mesa",
+      status: "aberto"
     })
     .select()
     .single();
 
-  if(error){
-    console.error("Erro ao criar pedido:", error);
-    alert("Erro ao criar pedido da mesa");
-    return null;
-  }
-
   return novo;
+}
+
+/* ================= DESTINO ================= */
+function setDestino(destino){
+  destinoAtual = destino;
+  document.getElementById("btnCozinha").classList.toggle("ativo", destino === "cozinha");
+  document.getElementById("btnBar").classList.toggle("ativo", destino === "bar");
+  carregarProdutos();
 }
 
 /* ================= PRODUTOS ================= */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
-    .select("id,nome,preco")
+    .select("id,nome,preco,destino")
     .eq("app_id", appId)
     .eq("ativo", true)
+    .eq("destino", destinoAtual)
     .order("nome");
 
   produtosCache = data || [];
@@ -142,10 +162,8 @@ function filtrarProdutos(txt){
   ));
 }
 
-/* ================= PEDIDO ================= */
+/* ================= PEDIDO ITENS ================= */
 async function carregarPedido(){
-  if(!pedidoAtual) return;
-
   const { data } = await sb
     .from("pedido_itens")
     .select("id,nome_produto,quantidade")
@@ -195,7 +213,8 @@ async function addProduto(p){
       produto_id: p.id,
       nome_produto: p.nome,
       preco: p.preco,
-      quantidade: 1
+      quantidade: 1,
+      destino: p.destino
     });
   }
 
@@ -231,7 +250,6 @@ function irPagamento(){
 (async ()=>{
   await carregarMesa();
   pedidoAtual = await garantirPedido();
-  if(!pedidoAtual) return;
   await carregarProdutos();
   await carregarPedido();
 })();
