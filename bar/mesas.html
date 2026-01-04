@@ -40,7 +40,13 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
   transition:.15s
 }
 .card:hover{transform:scale(1.03)}
+
 .card.livre{border-color:#22c55e}
+.card.preparando{border-color:#eab308}
+.card.pronto{
+  border-color:#22c55e;
+  box-shadow:0 0 14px rgba(34,197,94,.8);
+}
 .card.ocupada{border-color:#ef4444}
 
 .status{
@@ -99,7 +105,7 @@ if(!app_id){
 /* ===== SEGREDO REMOVER ===== */
 const SEGREDO_REMOVER_MESA = "4321";
 
-/* ===== TRAVA PARA EVITAR DUPLICAÇÃO ===== */
+/* ===== TRAVA ===== */
 let criandoMesa = false;
 </script>
 
@@ -120,49 +126,51 @@ let criandoMesa = false;
 /* ===== CARREGAR MESAS ===== */
 async function carregarMesas(){
 
-  const { data: mesas, error: erroMesas } = await sb
+  const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
     .eq("app_id", app_id)
     .eq("ativa", true)
     .order("numero_mesa");
 
-  if(erroMesas){
-    console.error(erroMesas);
-    alert("Erro ao carregar mesas");
-    return;
-  }
-
-  const { data: pedidos, error: erroPedidos } = await sb
+  const { data: pedidos } = await sb
     .from("pedidos")
-    .select("mesa_id")
+    .select("mesa_id,status")
     .eq("app_id", app_id)
-    .eq("status", "aberto")
     .not("mesa_id", "is", null);
 
-  if(erroPedidos){
-    console.error(erroPedidos);
-    alert("Erro ao verificar pedidos");
-    return;
-  }
-
-  const ocupadas = new Set(
-    (pedidos || []).map(p => String(p.mesa_id))
-  );
+  const pedidosPorMesa = {};
+  (pedidos || []).forEach(p=>{
+    pedidosPorMesa[String(p.mesa_id)] = p.status;
+  });
 
   const grid = document.getElementById("listaMesas");
   grid.innerHTML = "";
 
   mesas.forEach(m => {
-    const ocupada = ocupadas.has(String(m.id));
-    const status = ocupada ? "ocupada" : "livre";
+
+    const statusPedido = pedidosPorMesa[String(m.id)];
+    let classe = "livre";
+
+    if(statusPedido === "aberto" || statusPedido === "aceito"){
+      classe = "preparando";
+    }
+    else if(statusPedido === "finalizado"){
+      classe = "pronto";
+    }
+    else if(statusPedido === "entregue"){
+      classe = "ocupada";
+    }
+
+    const ocupada = !!statusPedido;
+    const textoStatus = ocupada ? "OCUPADA" : "LIVRE";
 
     const div = document.createElement("div");
-    div.className = `card ${status}`;
+    div.className = `card ${classe}`;
 
     div.innerHTML = `
       <h3>Mesa ${m.numero_mesa}</h3>
-      <span class="status ${status}">${status.toUpperCase()}</span>
+      <span class="status ${ocupada ? "ocupada" : "livre"}">${textoStatus}</span>
 
       <div class="qr">
         <canvas id="qr-${m.id}"></canvas>
@@ -190,16 +198,9 @@ async function carregarMesas(){
         const senha = prompt("Código para remover a mesa:");
         if(senha !== SEGREDO_REMOVER_MESA) return;
 
-        const { error } = await sb
-          .from("mesas")
+        await sb.from("mesas")
           .update({ ativa:false })
           .eq("id", m.id);
-
-        if(error){
-          console.error(error);
-          alert(error.message);
-          return;
-        }
 
         carregarMesas();
       };
@@ -207,13 +208,12 @@ async function carregarMesas(){
   });
 }
 
-/* ===== ADICIONAR MESA (MELHORADO SEM QUEBRAR) ===== */
+/* ===== ADICIONAR MESA ===== */
 async function adicionarMesa(){
-
   if(criandoMesa) return;
   criandoMesa = true;
 
-  const { data: ultima, error: erroBusca } = await sb
+  const { data: ultima } = await sb
     .from("mesas")
     .select("numero_mesa")
     .eq("app_id", app_id)
@@ -221,37 +221,15 @@ async function adicionarMesa(){
     .limit(1)
     .maybeSingle();
 
-  if(erroBusca){
-    criandoMesa = false;
-    console.error(erroBusca);
-    alert("Erro ao buscar última mesa");
-    return;
-  }
-
   const proximo = (ultima?.numero_mesa || 0) + 1;
 
-  const { error } = await sb
-    .from("mesas")
-    .insert({
-      app_id,
-      numero_mesa: proximo,
-      ativa: true
-    });
+  await sb.from("mesas").insert({
+    app_id,
+    numero_mesa: proximo,
+    ativa: true
+  });
 
   criandoMesa = false;
-
-  if(error){
-    // erro de duplicação → ignora e recarrega
-    if(error.code === "23505"){
-      carregarMesas();
-      return;
-    }
-
-    console.error(error);
-    alert(error.message);
-    return;
-  }
-
   carregarMesas();
 }
 
@@ -262,6 +240,7 @@ function vendaAvulsa(){
 
 /* START */
 carregarMesas();
+setInterval(carregarMesas, 4000);
 </script>
 
 </body>
