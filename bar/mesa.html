@@ -85,7 +85,7 @@ button{
   <div id="pedido"></div>
 
   <div class="footer">
-    <button class="pay" onclick="fecharConta()">💳 Fechar conta</button>
+    <button class="pay" onclick="irPagamento()">💳 Fechar conta</button>
   </div>
 
 </div>
@@ -103,27 +103,30 @@ const mesaId = params.get('mesa');
 const appId  = params.get('app_id');
 
 document.getElementById('tituloMesa').innerText =
-  `🍽️ Mesa ${mesaId ? mesaId.slice(0,4) : ''}`;
+  mesaId ? `🍽️ Mesa ${mesaId}` : '🍽️ Mesa';
 
 let pedidoAtual = null;
 let produtos = [];
 
-/* 🧠 GARANTE PEDIDO (NUNCA SOME) */
+/* 🧠 GARANTE PEDIDO (NÃO FECHA, NÃO LIBERA) */
 async function garantirPedido(){
   const { data } = await supabaseClient
     .from('pedidos')
-    .select('id,status')
+    .select('id')
     .eq('mesa_id', mesaId)
     .eq('app_id', appId)
-    .in('status', ['aberto','pagando'])
-    .order('created_at',{ascending:false})
+    .eq('status', 'aberto')
     .maybeSingle();
 
   if (data) return data;
 
   const { data: novo } = await supabaseClient
     .from('pedidos')
-    .insert({ mesa_id: mesaId, app_id: appId, status:'aberto' })
+    .insert({
+      mesa_id: mesaId,
+      app_id: appId,
+      status: 'aberto'
+    })
     .select()
     .single();
 
@@ -168,7 +171,8 @@ async function carregarPedido(){
   const { data } = await supabaseClient
     .from('pedido_itens')
     .select(`
-      id, quantidade,
+      id,
+      quantidade,
       produtos!pedido_itens_produto_fk (nome)
     `)
     .eq('pedido_id', pedidoAtual.id);
@@ -195,6 +199,7 @@ async function carregarPedido(){
   });
 }
 
+/* ➕ ADD PRODUTO */
 async function addProduto(produtoId){
   if (!pedidoAtual) return;
 
@@ -216,13 +221,15 @@ async function addProduto(produtoId){
       .insert({
         pedido_id: pedidoAtual.id,
         produto_id: produtoId,
-        quantidade: 1
+        quantidade: 1,
+        app_id: appId   // ⚠️ IMPORTANTE
       });
   }
 
   carregarPedido();
 }
 
+/* ➕➖ */
 async function alterarQtd(itemId, delta){
   const { data } = await supabaseClient
     .from('pedido_itens')
@@ -233,36 +240,32 @@ async function alterarQtd(itemId, delta){
   const nova = data.quantidade + delta;
 
   if (nova <= 0){
-    await supabaseClient.from('pedido_itens').delete().eq('id', itemId);
+    await supabaseClient
+      .from('pedido_itens')
+      .delete()
+      .eq('id', itemId);
   } else {
-    await supabaseClient.from('pedido_itens').update({quantidade:nova}).eq('id', itemId);
+    await supabaseClient
+      .from('pedido_itens')
+      .update({ quantidade: nova })
+      .eq('id', itemId);
   }
 
   carregarPedido();
 }
 
-/* 💳 FECHAR CONTA */
-async function fecharConta(){
-  if (!pedidoAtual) return;
-
-  const ok = confirm('Confirmar pagamento e fechar a conta?');
-  if (!ok) return;
-
-  function fecharConta(){
+/* 💳 PAGAMENTO — SÓ REDIRECIONA */
+function irPagamento(){
   if (!pedidoAtual) return;
 
   window.location.href =
     `pagamento.html?pedido=${pedidoAtual.id}&mesa=${mesaId}&app_id=${appId}`;
 }
 
-  alert('Conta paga. Mesa liberada.');
-  location.reload();
-}
-
 /* 🚀 START */
 (async ()=>{
   pedidoAtual = await garantirPedido();
-  if (!pedidoAtual) {
+  if (!pedidoAtual){
     alert('Erro ao carregar pedido da mesa');
     return;
   }
@@ -273,5 +276,3 @@ async function fecharConta(){
 
 </body>
 </html>
-
-
