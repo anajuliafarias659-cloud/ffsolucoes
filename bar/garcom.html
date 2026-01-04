@@ -9,7 +9,7 @@
 <style>
 body{
   margin:0;
-  font-family:Arial, sans-serif;
+  font-family:Arial,sans-serif;
   background:#020617;
   color:#fff;
 }
@@ -18,7 +18,7 @@ body{
   margin:auto;
   padding:24px;
 }
-h2{ margin-top:0; }
+h2{margin-top:0}
 
 .pedido{
   background:#0f172a;
@@ -29,11 +29,16 @@ h2{ margin-top:0; }
 }
 .pedido.pronto{
   border-left-color:#22c55e;
-  box-shadow:0 0 18px rgba(34,197,94,.5);
 }
 .pedido.conta{
-  border-left-color:#eab308;
-  box-shadow:0 0 18px rgba(234,179,8,.4);
+  border-left-color:#fff;
+  animation:piscando 1s infinite;
+}
+
+@keyframes piscando{
+  0%{box-shadow:0 0 0 transparent}
+  50%{box-shadow:0 0 18px rgba(255,255,255,.9)}
+  100%{box-shadow:0 0 0 transparent}
 }
 
 .top{
@@ -51,9 +56,9 @@ h2{ margin-top:0; }
   font-size:12px;
   font-weight:bold;
 }
-.preparando{ background:#eab308; color:#000 }
-.pronto{ background:#22c55e; color:#000 }
-.conta{ background:#fde047; color:#000 }
+.preparando{background:#eab308;color:#000}
+.pronto{background:#22c55e;color:#000}
+.conta-tag{background:#fff;color:#000}
 
 .itens{
   margin-top:10px;
@@ -68,24 +73,21 @@ h2{ margin-top:0; }
 .acoes{
   margin-top:14px;
   display:flex;
-  gap:10px;
+  gap:8px;
   flex-wrap:wrap;
 }
 button{
-  padding:10px 18px;
+  padding:10px 14px;
   border:none;
   border-radius:10px;
   font-weight:bold;
   cursor:pointer;
 }
-.entregue{
-  background:#22c55e;
-  color:#000;
-}
-.fechar{
-  background:#2563eb;
-  color:#fff;
-}
+.entregue{background:#22c55e;color:#000}
+.pix{background:#22c55e}
+.debito{background:#38bdf8}
+.credito{background:#a855f7}
+.dinheiro{background:#eab308;color:#000}
 </style>
 </head>
 
@@ -93,53 +95,43 @@ button{
 
 <div class="container">
   <h2>🧑‍🍺 Painel do Garçom</h2>
-  <div id="lista">Carregando pedidos...</div>
+  <div id="lista">Carregando...</div>
 </div>
 
 <script>
-/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= SESSÃO ================= */
-const garcom = JSON.parse(localStorage.getItem("funcionario_logado"));
-const app_id = garcom?.app_id;
+const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
+const app_id = funcionario?.app_id;
 
-if(!garcom || !app_id){
+if(!app_id){
   alert("Sessão inválida");
   location.href="../auth/login.html";
 }
 
 const lista = document.getElementById("lista");
 
-/* ================= CARREGAR PEDIDOS ================= */
 async function carregarPedidos(){
   const { data, error } = await sb
     .from("pedidos")
     .select(`
       id,
       status,
-      mesa_id,
-      mesas ( numero_mesa ),
-      pedido_itens (
-        nome_produto,
-        quantidade
-      )
+      mesas(numero_mesa),
+      pedido_itens(nome_produto,quantidade)
     `)
     .eq("app_id", app_id)
-    .not("mesa_id","is",null)
     .in("status", [
-      "aceito",
       "finalizado",
-      "entregue",
-      "conta_solicitada"
+      "conta_solicitada",
+      "aguardando_pagamento"
     ])
-    .order("created_at",{ ascending:true });
+    .order("created_at",{ascending:true});
 
   if(error){
-    console.error(error);
     lista.innerHTML = "Erro ao carregar pedidos";
     return;
   }
@@ -147,33 +139,34 @@ async function carregarPedidos(){
   lista.innerHTML = "";
 
   if(!data || data.length === 0){
-    lista.innerHTML = "<p>Nenhum pedido de mesa</p>";
+    lista.innerHTML = "<p>Nenhum pedido pendente</p>";
     return;
   }
 
-  data.forEach(pedido=>{
-    const pronto = pedido.status === "finalizado";
-    const pediuConta = pedido.status === "conta_solicitada";
+  data.forEach(p=>{
+    const pronto = p.status === "finalizado";
+    const conta = p.status === "conta_solicitada";
+    const aguardando = p.status === "aguardando_pagamento";
 
     lista.innerHTML += `
-      <div class="pedido ${pronto ? 'pronto' : ''} ${pediuConta ? 'conta' : ''}">
+      <div class="pedido ${pronto?'pronto':''} ${conta?'conta':''}">
         <div class="top">
-          <div class="mesa">Mesa ${pedido.mesas.numero_mesa}</div>
+          <div class="mesa">Mesa ${p.mesas.numero_mesa}</div>
           <div class="status ${
-            pediuConta ? 'conta' : pronto ? 'pronto' : 'preparando'
+            pronto?'pronto':
+            conta?'conta-tag':
+            aguardando?'preparando':''
           }">
             ${
-              pediuConta
-              ? 'PEDIU A CONTA'
-              : pronto
-              ? 'PRONTO'
-              : 'PREPARANDO'
+              pronto?'PRONTO':
+              conta?'CONTA SOLICITADA':
+              aguardando?'AGUARDANDO PAGAMENTO':''
             }
           </div>
         </div>
 
         <div class="itens">
-          ${pedido.pedido_itens.map(i=>`
+          ${p.pedido_itens.map(i=>`
             <div class="item">
               <span>${i.quantidade}x ${i.nome_produto}</span>
             </div>
@@ -182,18 +175,27 @@ async function carregarPedidos(){
 
         <div class="acoes">
           ${
-            pronto && !pediuConta
-            ? `<button class="entregue" onclick="marcarEntregue('${pedido.id}')">
+            pronto
+            ? `<button class="entregue" onclick="marcarEntregue('${p.id}')">
                  ✔ Entregue
                </button>`
             : ``
           }
 
           ${
-            pediuConta
-            ? `<button class="fechar" onclick="fecharConta('${pedido.id}')">
-                 💳 Fechar conta
-               </button>`
+            conta
+            ? `
+              <button class="pix" onclick="sugerirPagamento('${p.id}','pix')">PIX</button>
+              <button class="debito" onclick="sugerirPagamento('${p.id}','debito')">DÉBITO</button>
+              <button class="credito" onclick="sugerirPagamento('${p.id}','credito')">CRÉDITO</button>
+              <button class="dinheiro" onclick="sugerirPagamento('${p.id}','dinheiro')">DINHEIRO</button>
+            `
+            : ``
+          }
+
+          ${
+            aguardando
+            ? `<small>Forma enviada ao caixa</small>`
             : ``
           }
         </div>
@@ -202,7 +204,8 @@ async function carregarPedidos(){
   });
 }
 
-/* ================= AÇÕES ================= */
+/* ===== AÇÕES ===== */
+
 async function marcarEntregue(id){
   await sb.from("pedidos")
     .update({ status:"entregue" })
@@ -212,35 +215,20 @@ async function marcarEntregue(id){
   carregarPedidos();
 }
 
-async function fecharConta(id){
-  const senha = prompt("Confirme sua senha:");
-  if(!senha) return;
-
-  const { data, error } = await sb
-    .from("funcionarios")
-    .select("id")
-    .eq("id", garcom.id)
-    .eq("senha", senha)
-    .single();
-
-  if(error || !data){
-    alert("Senha incorreta");
-    return;
-  }
-
+async function sugerirPagamento(id, tipo){
   await sb.from("pedidos")
     .update({
-      status: "pago",
-      fechado_por: garcom.id
+      forma_pagamento_sugerida: tipo,
+      status: "aguardando_pagamento"
     })
     .eq("id", id)
     .eq("app_id", app_id);
 
-  alert("Conta fechada com sucesso");
+  alert("Forma de pagamento informada ao caixa");
   carregarPedidos();
 }
 
-/* ================= AUTO REFRESH ================= */
+/* START */
 carregarPedidos();
 setInterval(carregarPedidos, 3000);
 </script>
