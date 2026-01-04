@@ -2,312 +2,283 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Mesa</title>
+<title>Caixa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{
-  margin:0;
-  font-family:Arial,sans-serif;
-  background:#020617;
-  color:#fff;
-}
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{
   background:#0f172a;
-  padding:16px;
-  font-size:20px;
-  font-weight:bold;
-}
-.container{
-  max-width:900px;
-  margin:auto;
-  padding:20px;
-}
-input{
-  width:100%;
-  padding:12px;
-  border-radius:10px;
-  border:none;
-  margin-bottom:16px;
-}
-.produto,.item{
-  background:#0f172a;
-  border-radius:14px;
-  padding:14px;
-  margin-bottom:12px;
-}
-.produto{
+  padding:16px 24px;
   display:flex;
   justify-content:space-between;
   align-items:center;
 }
-.controls{
-  display:flex;
-  gap:8px;
-  margin-top:8px;
-  align-items:center;
+.container{max-width:1200px;margin:auto;padding:24px}
+.box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:16px
 }
-button{
-  padding:6px 12px;
-  border:none;
-  border-radius:8px;
-  cursor:pointer;
-}
-.total{
-  font-size:18px;
-  font-weight:900;
-  margin-top:10px;
-  text-align:right;
-}
-.pay{
-  width:100%;
-  padding:16px;
+
+.card{
+  background:#020617;
+  border:1px solid #1e293b;
   border-radius:12px;
-  font-size:16px;
+  padding:14px
+}
+
+.valor{font-size:22px;font-weight:bold;margin-top:6px}
+.tipo{font-size:13px;color:#94a3b8}
+.total{font-size:26px;font-weight:bold}
+
+.positivo{color:#22c55e}
+.negativo{color:#ef4444}
+
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{padding:8px;border-bottom:1px solid #1e293b;font-size:14px}
+th{color:#94a3b8}
+
+button{
+  padding:10px 16px;
+  border:none;
+  border-radius:10px;
+  background:#22c55e;
   font-weight:bold;
-  background:#2563eb;
+  cursor:pointer
+}
+button.sec{background:#1e293b;color:#fff}
+button.alerta{background:#eab308;color:#000}
+
+.obs{color:#fbbf24;font-size:13px}
+
+.badge{
+  background:#ef4444;
   color:#fff;
-  margin-top:10px;
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:12px;
+  margin-left:6px;
 }
-.conta{
-  background:#eab308;
-  color:#000;
-}
-small{color:#94a3b8}
 </style>
 </head>
 
 <body>
 
-<div class="topo" id="tituloMesa">🍽️ Mesa</div>
-
-<div class="container">
-  <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos(this.value)">
-
-  <h3>Produtos</h3>
-  <div id="listaProdutos"></div>
-
-  <h3>Pedido</h3>
-  <div id="pedido"></div>
-  <div class="total" id="totalPedido">Total: R$ 0,00</div>
-
-  <button class="pay conta" onclick="pedirConta()">🧾 Pedir a conta</button>
-</div>
-
 <script>
-/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= CONTEXTO ================= */
-const params = new URLSearchParams(location.search);
-const mesaId = params.get("mesa");
-const appId  = params.get("app_id");
-
-if(!mesaId || !appId){
-  alert("Sessão inválida");
-  location.href = "mesas.html";
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin?.app_id){
+  alert("Sessão expirada");
+  location.href="../auth/login.html";
 }
 
-let pedidoAtual = null;
-let produtosCache = [];
+let pagamentos = [];
+let pedidosMap = {};
+let total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
+</script>
 
-/* ================= MESA ================= */
-async function carregarMesa(){
-  const { data } = await sb
-    .from("mesas")
-    .select("numero_mesa")
-    .eq("id", mesaId)
-    .eq("app_id", appId)
-    .single();
+<div class="topo">
+  <h2>💰 Caixa</h2>
+  <div>
+    <button onclick="location.href='venda-avulsa.html'">➕ Venda Avulsa</button>
 
-  if(data){
-    document.getElementById("tituloMesa").innerText =
-      `🍽️ Mesa ${data.numero_mesa}`;
-  }
-}
+    <button class="alerta" id="btnContas" style="display:none" onclick="mostrarContas()">
+      🔔 Contas <span class="badge" id="qtdContas">0</span>
+    </button>
 
-/* ================= PEDIDO ================= */
-async function garantirPedido(){
+    <button class="sec" onclick="location.href='historico.html'">📊 Histórico</button>
+    <button class="sec" onclick="location.href='admin.html'">Voltar</button>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- CONTAS PENDENTES -->
+<div class="box" id="boxContas" style="display:none">
+  <h3>🧾 Mesas aguardando pagamento</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Mesa</th>
+        <th>Total</th>
+        <th>Ação</th>
+      </tr>
+    </thead>
+    <tbody id="listaContas"></tbody>
+  </table>
+</div>
+
+<!-- RESUMO -->
+<div class="grid">
+  <div class="card"><div class="tipo">Dinheiro</div><div class="valor positivo" id="tDinheiro">R$ 0,00</div></div>
+  <div class="card"><div class="tipo">Pix</div><div class="valor positivo" id="tPix">R$ 0,00</div></div>
+  <div class="card"><div class="tipo">Débito</div><div class="valor positivo" id="tDebito">R$ 0,00</div></div>
+  <div class="card"><div class="tipo">Crédito</div><div class="valor positivo" id="tCredito">R$ 0,00</div></div>
+  <div class="card"><div class="tipo">Fiado</div><div class="valor negativo" id="tFiado">R$ 0,00</div></div>
+</div>
+
+<!-- MOVIMENTAÇÕES -->
+<div class="box">
+  <h3>📋 Movimentações</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Tipo</th>
+        <th>Valor</th>
+        <th>Pedido</th>
+        <th>Obs</th>
+      </tr>
+    </thead>
+    <tbody id="lista"></tbody>
+  </table>
+</div>
+
+<div class="box">
+  <p class="total">
+    Total em caixa: R$ <span id="totalCaixa">0.00</span><br>
+    <small class="negativo">Fiado pendente: R$ <span id="totalFiado">0.00</span></small>
+  </p>
+</div>
+
+</div>
+
+<script>
+async function verificarContas(){
   const { data } = await sb
     .from("pedidos")
-    .select("*")
-    .eq("mesa_id", mesaId)
-    .eq("app_id", appId)
-    .in("status",[
-      "aberto",
-      "aceito",
-      "finalizado",
-      "entregue",
-      "conta_solicitada"
-    ])
-    .order("created_at",{ ascending:false })
-    .limit(1)
-    .maybeSingle();
+    .select(`
+      id,
+      mesas(numero_mesa),
+      pedido_itens(preco,quantidade)
+    `)
+    .eq("app_id", admin.app_id)
+    .eq("status","conta_solicitada");
 
-  if(data) return data;
+  const btn = document.getElementById("btnContas");
+  const qtd = document.getElementById("qtdContas");
+  const box = document.getElementById("boxContas");
+  const lista = document.getElementById("listaContas");
 
-  const { data: novo } = await sb
-    .from("pedidos")
-    .insert({
-      app_id: appId,
-      mesa_id: mesaId,
-      status: "aberto",
-      origem: "mesa"
-    })
-    .select()
-    .single();
+  lista.innerHTML = "";
 
-  return novo;
-}
+  if(data && data.length > 0){
+    btn.style.display = "inline-block";
+    qtd.innerText = data.length;
+    box.style.display = "block";
 
-/* ================= PRODUTOS ================= */
-async function carregarProdutos(){
-  const { data } = await sb
-    .from("produtos")
-    .select("id,nome,preco")
-    .eq("app_id", appId)
-    .eq("ativo", true)
-    .order("nome");
+    data.forEach(p=>{
+      let total = 0;
+      p.pedido_itens.forEach(i=>{
+        total += i.preco * i.quantidade;
+      });
 
-  produtosCache = data || [];
-  renderProdutos(produtosCache);
-}
-
-function renderProdutos(lista){
-  const div = document.getElementById("listaProdutos");
-  div.innerHTML = "";
-
-  lista.forEach(p=>{
-    div.innerHTML += `
-      <div class="produto">
-        <span>${p.nome}<br><small>R$ ${p.preco.toFixed(2)}</small></span>
-        <button onclick='addProduto(${JSON.stringify(p)})'>➕</button>
-      </div>
-    `;
-  });
-}
-
-function filtrarProdutos(txt){
-  txt = (txt||"").toLowerCase();
-  renderProdutos(
-    produtosCache.filter(p=>p.nome.toLowerCase().includes(txt))
-  );
-}
-
-/* ================= PEDIDO ITENS ================= */
-async function carregarPedido(){
-  if(!pedidoAtual) return;
-
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id,nome_produto,quantidade,preco")
-    .eq("pedido_id", pedidoAtual.id)
-    .eq("app_id", appId);
-
-  const div = document.getElementById("pedido");
-  div.innerHTML = "";
-
-  let total = 0;
-
-  if(!data || data.length === 0){
-    div.innerHTML = "<p>Nenhum item</p>";
-    document.getElementById("totalPedido").innerText =
-      "Total: R$ 0,00";
-    return;
-  }
-
-  data.forEach(i=>{
-    const subtotal = i.quantidade * i.preco;
-    total += subtotal;
-
-    div.innerHTML += `
-      <div class="item">
-        <div>
-          <strong>${i.nome_produto}</strong><br>
-          <small>${i.quantidade} x R$ ${i.preco.toFixed(2)}</small>
-        </div>
-
-        <div class="controls">
-          <b>R$ ${subtotal.toFixed(2)}</b>
-          <button onclick="alterarQtd('${i.id}',-1)">➖</button>
-          <span>${i.quantidade}</span>
-          <button onclick="alterarQtd('${i.id}',1)">➕</button>
-        </div>
-      </div>
-    `;
-  });
-
-  document.getElementById("totalPedido").innerText =
-    `Total: R$ ${total.toFixed(2)}`;
-}
-
-/* ================= AÇÕES ================= */
-async function addProduto(p){
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id,quantidade")
-    .eq("pedido_id", pedidoAtual.id)
-    .eq("produto_id", p.id)
-    .eq("app_id", appId)
-    .maybeSingle();
-
-  if(data){
-    await sb.from("pedido_itens")
-      .update({ quantidade: data.quantidade + 1 })
-      .eq("id", data.id);
-  }else{
-    await sb.from("pedido_itens").insert({
-      app_id: appId,
-      pedido_id: pedidoAtual.id,
-      produto_id: p.id,
-      nome_produto: p.nome,
-      preco: p.preco,
-      quantidade: 1
+      lista.innerHTML += `
+        <tr>
+          <td>Mesa ${p.mesas.numero_mesa}</td>
+          <td>R$ ${total.toFixed(2)}</td>
+          <td>
+            <button onclick="irPagamento('${p.id}')">
+              💳 Ir para pagamento
+            </button>
+          </td>
+        </tr>
+      `;
     });
+
+  } else {
+    btn.style.display = "none";
+    box.style.display = "none";
   }
-
-  carregarPedido();
 }
 
-async function alterarQtd(id, delta){
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("quantidade")
-    .eq("id", id)
-    .single();
-
-  const nova = data.quantidade + delta;
-
-  if(nova <= 0){
-    await sb.from("pedido_itens").delete().eq("id", id);
-  }else{
-    await sb.from("pedido_itens").update({ quantidade: nova }).eq("id", id);
-  }
-
-  carregarPedido();
+function irPagamento(pedidoId){
+  location.href = `pagamento.html?pedido=${pedidoId}&app_id=${admin.app_id}`;
 }
 
-/* ================= PEDIR CONTA ================= */
-async function pedirConta(){
-  await sb.from("pedidos")
-    .update({ status:"conta_solicitada" })
-    .eq("id", pedidoAtual.id)
-    .eq("app_id", appId);
-
-  alert("🧾 Conta solicitada! Aguarde o garçom.");
+function mostrarContas(){
+  document.getElementById("boxContas")
+    .scrollIntoView({ behavior:"smooth" });
 }
 
-/* ================= START ================= */
-(async ()=>{
-  await carregarMesa();
-  pedidoAtual = await garantirPedido();
-  await carregarProdutos();
-  await carregarPedido();
-})();
+/* ===== CAIXA FINANCEIRO (SEU ORIGINAL) ===== */
+async function carregarCaixa(){
+
+  const { data: pags } = await sb
+    .from("pagamentos")
+    .select("tipo,valor,pedido_id")
+    .eq("app_id", admin.app_id)
+    .order("created_at");
+
+  pagamentos = pags || [];
+
+  const { data: peds } = await sb
+    .from("pedidos")
+    .select("id,observacao,total")
+    .eq("app_id", admin.app_id);
+
+  pedidosMap = {};
+  (peds||[]).forEach(p=>{
+    pedidosMap[p.id] = {
+      obs: p.observacao,
+      total: Number(p.total) || 0
+    };
+  });
+
+  renderCaixa();
+}
+
+function renderCaixa(){
+  total = { dinheiro:0, pix:0, debito:0, credito:0, fiado:0 };
+  const tbody = document.getElementById("lista");
+  tbody.innerHTML = "";
+
+  pagamentos.forEach(p=>{
+    const tipo = p.tipo?.toLowerCase();
+    let valor = Number(p.valor);
+
+    if(tipo === "fiado" && (!valor || valor === 0)){
+      valor = pedidosMap[p.pedido_id]?.total || 0;
+    }
+
+    if(total[tipo] !== undefined){
+      total[tipo] += valor;
+    }
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${p.tipo.toUpperCase()}</td>
+        <td>R$ ${valor.toFixed(2)}</td>
+        <td>${p.pedido_id ? "#" + p.pedido_id.slice(0,6) : "-"}</td>
+        <td class="obs">${pedidosMap[p.pedido_id]?.obs || "-"}</td>
+      </tr>
+    `;
+  });
+
+  document.getElementById("tDinheiro").innerText = "R$ " + total.dinheiro.toFixed(2);
+  document.getElementById("tPix").innerText = "R$ " + total.pix.toFixed(2);
+  document.getElementById("tDebito").innerText = "R$ " + total.debito.toFixed(2);
+  document.getElementById("tCredito").innerText = "R$ " + total.credito.toFixed(2);
+  document.getElementById("tFiado").innerText = "R$ " + total.fiado.toFixed(2);
+
+  const totalCaixa =
+    total.dinheiro + total.pix + total.debito + total.credito;
+
+  document.getElementById("totalCaixa").innerText = totalCaixa.toFixed(2);
+  document.getElementById("totalFiado").innerText = total.fiado.toFixed(2);
+}
+
+/* START */
+carregarCaixa();
+verificarContas();
+setInterval(verificarContas, 4000);
 </script>
 
 </body>
