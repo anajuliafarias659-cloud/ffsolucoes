@@ -14,7 +14,6 @@ body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
 input,select{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:12px}
 button{width:100%;padding:14px;border:none;border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer}
 .pay{background:#22c55e;color:#000}
-.block{background:#ef4444}
 .total{font-size:20px;font-weight:bold;margin-bottom:10px}
 .troco{color:#22c55e;font-weight:bold}
 </style>
@@ -25,7 +24,9 @@ button{width:100%;padding:14px;border:none;border-radius:12px;font-size:16px;fon
 <div class="topo">💰 Caixa</div>
 
 <div class="container">
-  <div id="pedidoBox" class="card"></div>
+  <div id="pedidoBox" class="card">
+    <p>Aguardando pedido…</p>
+  </div>
 </div>
 
 <script>
@@ -37,39 +38,30 @@ const sb = supabase.createClient(
 
 /* ================= CONTEXTO ================= */
 const params = new URLSearchParams(location.search);
-const pedidoId = params.get("pedido");
 const appId = params.get("app_id");
 
-if(!pedidoId || !appId){
-  alert("Pedido inválido");
-  throw new Error("Pedido/app ausente");
-}
-
+/* ================= ESTADO ================= */
 let pedido = null;
 let totalPedido = 0;
 
-/* ================= CARREGAR PEDIDO ================= */
-async function carregarPedido(){
-  const { data, error } = await sb
+/* ================= BUSCAR PEDIDO EM CONTA ================= */
+async function buscarPedidoConta(){
+  const { data } = await sb
     .from("pedidos")
     .select("id,mesa_id,status")
-    .eq("id", pedidoId)
     .eq("app_id", appId)
-    .single();
+    .eq("status", "conta_solicitada")
+    .order("created_at",{ascending:true})
+    .limit(1)
+    .maybeSingle();
 
-  if(error || !data){
-    alert("Pedido não encontrado");
+  if(!data){
+    document.getElementById("pedidoBox").innerHTML =
+      "<p>Aguardando pedido…</p>";
     return;
   }
 
   pedido = data;
-
-  if(pedido.status !== "conta_solicitada"){
-    document.getElementById("pedidoBox").innerHTML =
-      "<p>⚠️ Pedido ainda não solicitou conta.</p>";
-    return;
-  }
-
   carregarItens();
 }
 
@@ -93,7 +85,7 @@ async function carregarItens(){
   html += `
     <div class="total">Total: R$ ${totalPedido.toFixed(2)}</div>
 
-    <select id="forma">
+    <select id="forma" onchange="ajustarForma()">
       <option value="dinheiro">Dinheiro</option>
       <option value="pix">PIX</option>
       <option value="cartao">Cartão</option>
@@ -107,8 +99,26 @@ async function carregarItens(){
   `;
 
   document.getElementById("pedidoBox").innerHTML = html;
+  ajustarForma();
+}
 
-  document.getElementById("valorPago").addEventListener("input", calcularTroco);
+/* ================= AJUSTE FORMA ================= */
+function ajustarForma(){
+  const forma = document.getElementById("forma").value;
+  const campo = document.getElementById("valorPago");
+  const troco = document.getElementById("troco");
+
+  if(forma === "dinheiro"){
+    campo.disabled = false;
+    campo.value = "";
+    troco.innerHTML = "";
+    campo.oninput = calcularTroco;
+  } else {
+    campo.value = totalPedido.toFixed(2);
+    campo.disabled = true;
+    troco.innerHTML = "";
+    campo.oninput = null;
+  }
 }
 
 /* ================= TROCO ================= */
@@ -124,8 +134,10 @@ function calcularTroco(){
 
 /* ================= PAGAMENTO ================= */
 async function finalizarPagamento(){
-  const valorPago = parseFloat(document.getElementById("valorPago").value || 0);
   const forma = document.getElementById("forma").value;
+  const valorPago = forma === "dinheiro"
+    ? parseFloat(document.getElementById("valorPago").value || 0)
+    : totalPedido;
 
   if(valorPago < totalPedido){
     alert("❌ Valor insuficiente");
@@ -151,12 +163,19 @@ async function finalizarPagamento(){
     acao: "pedido_pago"
   });
 
-  alert("✅ Pagamento finalizado com sucesso");
-  location.href = "painel_mesas.html?app_id=" + appId;
+  pedido = null;
+  totalPedido = 0;
+
+  document.getElementById("pedidoBox").innerHTML =
+    "<p>Pagamento concluído. Aguardando próximo pedido…</p>";
+
+  // 🔁 RECARREGA O PRÓPRIO CAIXA
+  setTimeout(buscarPedidoConta, 800);
 }
 
-/* ================= START ================= */
-carregarPedido();
+/* ================= LOOP ================= */
+buscarPedidoConta();
+setInterval(buscarPedidoConta, 5000);
 </script>
 
 </body>
