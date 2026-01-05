@@ -91,6 +91,7 @@ button{
 </div>
 
 <script>
+/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -104,13 +105,14 @@ let pedidoAtual=null;
 let produtos=[];
 let destinoAtual="cozinha";
 
-/* ===== PEDIDO ATIVO ===== */
+/* ================= GARANTIR VENDA ================= */
 async function garantirPedido(){
+
   const { data } = await sb
-    .from("pedidos")
+    .from("vendas")
     .select("*")
-    .eq("mesa_id",mesaId)
-    .eq("app_id",appId)
+    .eq("mesa_id", mesaId)
+    .eq("app_id", appId)
     .not("status","in",'("pago","cancelado")')
     .order("created_at",{ascending:false})
     .limit(1)
@@ -118,15 +120,20 @@ async function garantirPedido(){
 
   if(data) return data;
 
-  const { data:novo } = await sb
-    .from("pedidos")
-    .insert({ app_id:appId, mesa_id:mesaId, status:"aberto", origem:"mesa" })
-    .select().single();
+  const { data:nova } = await sb
+    .from("vendas")
+    .insert({
+      app_id: appId,
+      mesa_id: mesaId,
+      status: "aberto"
+    })
+    .select()
+    .single();
 
-  return novo;
+  return nova;
 }
 
-/* ===== PRODUTOS ===== */
+/* ================= PRODUTOS ================= */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
@@ -163,29 +170,29 @@ function renderProdutos(filtro=""){
     });
 }
 
-/* ===== ADD ITEM ===== */
+/* ================= ADD ITEM ================= */
 async function addProduto(p){
 
   if(pedidoAtual.status==="enviado"){
-    alert("Pedido já enviado, aguarde o garçom 😉");
+    alert("Pedido já enviado 😉");
     return;
   }
 
   const { data } = await sb
-    .from("pedido_itens")
+    .from("itens_pedido")
     .select("id,quantidade")
-    .eq("pedido_id",pedidoAtual.id)
+    .eq("venda_id",pedidoAtual.id)
     .eq("produto_id",p.id)
     .maybeSingle();
 
   if(data){
-    await sb.from("pedido_itens")
+    await sb.from("itens_pedido")
       .update({quantidade:data.quantidade+1})
       .eq("id",data.id);
   }else{
-    await sb.from("pedido_itens").insert({
+    await sb.from("itens_pedido").insert({
       app_id:appId,
-      pedido_id:pedidoAtual.id,
+      venda_id:pedidoAtual.id,
       produto_id:p.id,
       nome_produto:p.nome,
       preco:p.preco,
@@ -193,15 +200,16 @@ async function addProduto(p){
       destino:p.destino
     });
   }
+
   carregarPedido();
 }
 
-/* ===== PEDIDO ===== */
+/* ================= CARREGAR PEDIDO ================= */
 async function carregarPedido(){
   const { data } = await sb
-    .from("pedido_itens")
+    .from("itens_pedido")
     .select("nome_produto,quantidade")
-    .eq("pedido_id",pedidoAtual.id);
+    .eq("venda_id",pedidoAtual.id);
 
   const div=document.getElementById("pedido");
   div.innerHTML=data?.length
@@ -209,7 +217,7 @@ async function carregarPedido(){
     : "<p>Nenhum item</p>";
 }
 
-/* ===== ENVIAR PEDIDO (COM TRAVA) ===== */
+/* ================= ENVIAR PEDIDO (TRAVADO) ================= */
 async function enviarPedido(){
 
   if(pedidoAtual.status==="enviado"){
@@ -217,10 +225,10 @@ async function enviarPedido(){
     return;
   }
 
-  const { data: itens } = await sb
-    .from("pedido_itens")
-    .select("destino")
-    .eq("pedido_id",pedidoAtual.id);
+  const { data:itens } = await sb
+    .from("itens_pedido")
+    .select("id")
+    .eq("venda_id",pedidoAtual.id);
 
   if(!itens?.length){
     alert("Adicione itens ao pedido");
@@ -231,54 +239,25 @@ async function enviarPedido(){
     .update({status:"ocupada"})
     .eq("id",mesaId);
 
-  await sb.from("pedidos")
+  await sb.from("vendas")
     .update({status:"enviado"})
     .eq("id",pedidoAtual.id);
-
-  const destinos=[...new Set(itens.map(i=>i.destino))];
-
-  for(const d of destinos){
-    await sb.from("notificacoes").insert({
-      app_id:appId,
-      pedido_id:pedidoAtual.id,
-      tipo:"novo_pedido",
-      destino:d,
-      mensagem:`Novo pedido - Mesa ${mesaId}`
-    });
-  }
 
   pedidoAtual.status="enviado";
   alert("✅ Pedido enviado!");
 }
 
-/* ===== PEDIR CONTA ===== */
+/* ================= PEDIR CONTA ================= */
 async function pedirConta(){
 
-  await sb.from("pedidos")
+  await sb.from("vendas")
     .update({status:"conta_solicitada"})
     .eq("id",pedidoAtual.id);
-
-  await sb.from("notificacoes").insert([
-    {
-      app_id:appId,
-      pedido_id:pedidoAtual.id,
-      tipo:"pedir_conta",
-      destino:"caixa",
-      mensagem:`Mesa ${mesaId} pediu a conta`
-    },
-    {
-      app_id:appId,
-      pedido_id:pedidoAtual.id,
-      tipo:"pedir_conta",
-      destino:"garcom",
-      mensagem:`Mesa ${mesaId} pediu a conta`
-    }
-  ]);
 
   alert("🧾 Conta solicitada!");
 }
 
-/* START */
+/* ================= START ================= */
 (async()=>{
   pedidoAtual=await garantirPedido();
   document.getElementById("tituloMesa").innerText=`🍽️ Mesa ${mesaId}`;
