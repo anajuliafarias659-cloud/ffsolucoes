@@ -15,7 +15,8 @@ input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:16px}
 .produto{display:flex;justify-content:space-between;align-items:center}
 .controls{display:flex;gap:8px;margin-top:8px}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
-.pay{width:100%;padding:16px;border:none;border-radius:12px;font-size:16px;font-weight:bold;background:#2563eb;color:#fff}
+.send{width:100%;padding:16px;border-radius:12px;background:#22c55e;font-weight:bold;margin-bottom:10px}
+.bill{width:100%;padding:16px;border-radius:12px;background:#a855f7;font-weight:bold}
 </style>
 </head>
 
@@ -25,13 +26,15 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
 <div class="container">
   <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos(this.value)">
+
   <h3>Produtos</h3>
   <div id="listaProdutos"></div>
 
   <h3>Pedido</h3>
   <div id="pedido"></div>
 
-  <button class="pay" onclick="irPagamento()">💳 Fechar conta</button>
+  <button class="send" onclick="enviarPedido()">📤 Enviar pedido</button>
+  <button class="bill" onclick="pedirConta()">🧾 Pedir conta</button>
 </div>
 
 <script>
@@ -48,10 +51,9 @@ const appId  = params.get("app_id");
 
 if(!mesaId || !appId){
   alert("Sessão inválida");
-  location.href = "mesas.html";
+  throw new Error("Mesa/app ausentes");
 }
 
-/* ================= ESTADO ================= */
 let mesaNumero = null;
 let pedidoAtual = null;
 let produtosCache = [];
@@ -71,27 +73,19 @@ async function carregarMesa(){
   }
 }
 
-/* ================= GARANTIR PEDIDO ================= */
+/* ================= GARANTIR PEDIDO ATIVO ================= */
 async function garantirPedido(){
   const { data } = await sb
     .from("pedidos")
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", appId)
-    .not("status","in",'("pago","fechado","finalizado","cancelado")') // 🔧
+    .in("status", ["aberto","enviado","pronto","conta_solicitada"])
     .order("created_at",{ascending:false})
     .limit(1)
     .maybeSingle();
 
-  if(data){
-    // 🔧 ocupa mesa SOMENTE se pedido não estiver pago
-    await sb.from("mesas")
-      .update({ ocupada: true })
-      .eq("id", mesaId)
-      .eq("app_id", appId);
-
-    return data;
-  }
+  if(data) return data;
 
   const { data: novo } = await sb
     .from("pedidos")
@@ -104,12 +98,6 @@ async function garantirPedido(){
     .select()
     .single();
 
-  // 🔧 ocupa mesa ao criar pedido
-  await sb.from("mesas")
-    .update({ ocupada: true })
-    .eq("id", mesaId)
-    .eq("app_id", appId);
-
   return novo;
 }
 
@@ -117,7 +105,7 @@ async function garantirPedido(){
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
-    .select("id,nome,preco")
+    .select("id,nome,preco,destino")
     .eq("app_id", appId)
     .eq("ativo", true)
     .order("nome");
@@ -132,10 +120,9 @@ function renderProdutos(lista){
   lista.forEach(p=>{
     div.innerHTML += `
       <div class="produto">
-        <span>${p.nome} - R$ ${p.preco.toFixed(2)}</span>
+        <span>${p.nome} (${p.destino}) - R$ ${p.preco.toFixed(2)}</span>
         <button onclick='addProduto(${JSON.stringify(p)})'>➕</button>
-      </div>
-    `;
+      </div>`;
   });
 }
 
@@ -173,8 +160,7 @@ async function carregarPedido(){
           <span>${i.quantidade}</span>
           <button onclick="alterarQtd('${i.id}',1)">➕</button>
         </div>
-      </div>
-    `;
+      </div>`;
   });
 }
 
@@ -199,6 +185,7 @@ async function addProduto(p){
       produto_id: p.id,
       nome_produto: p.nome,
       preco: p.preco,
+      destino: p.destino,
       quantidade: 1
     });
   }
@@ -225,14 +212,28 @@ async function alterarQtd(id, delta){
   carregarPedido();
 }
 
-/* ================= PAGAMENTO ================= */
-function irPagamento(){
-  location.href =
-    `pagamento.html?pedido=${pedidoAtual.id}&mesa=${mesaId}&app_id=${appId}`;
+/* ================= ENVIAR PEDIDO ================= */
+async function enviarPedido(){
+  await sb.from("pedidos")
+    .update({ status: "enviado" })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", appId);
+
+  alert("✅ Pedido enviado!");
+}
+
+/* ================= PEDIR CONTA ================= */
+async function pedirConta(){
+  await sb.from("pedidos")
+    .update({ status: "conta_solicitada" })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", appId);
+
+  alert("🧾 Conta solicitada!");
 }
 
 /* ================= START ================= */
-(async ()=>{
+(async()=>{
   await carregarMesa();
   pedidoAtual = await garantirPedido();
   await carregarProdutos();
