@@ -7,21 +7,34 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;font-family:Arial;background:#020617;color:#fff}
+body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
 .container{max-width:900px;margin:auto;padding:20px}
+
 .produto,.item{
   background:#0f172a;
   border-radius:14px;
   padding:14px;
   margin-bottom:12px
 }
-.produto{display:flex;justify-content:space-between;align-items:center}
+.produto{
+  display:flex;
+  justify-content:space-between;
+  align-items:center
+}
 button{
   padding:6px 12px;
   border:none;
   border-radius:8px;
   cursor:pointer
+}
+.btn-enviar{
+  width:100%;
+  padding:16px;
+  background:#22c55e;
+  font-weight:bold;
+  border-radius:12px;
+  margin-top:20px
 }
 </style>
 </head>
@@ -37,20 +50,27 @@ button{
   <h3>Pedido</h3>
   <div id="pedido"></div>
 
-  <button onclick="enviarPedido()" style="width:100%;padding:16px;background:#22c55e;font-weight:bold">
+  <button class="btn-enviar" onclick="enviarPedido()">
     📤 Enviar pedido
   </button>
 </div>
 
 <script>
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* ===== CONTEXTO ===== */
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
-const appId = params.get("app_id");
+const appId  = params.get("app_id");
+
+if(!mesaId || !appId){
+  alert("Sessão inválida");
+  location.href = "mesas.html";
+}
 
 let pedidoAtual = null;
 
@@ -60,12 +80,13 @@ async function garantirPedido(){
     .from("pedidos")
     .select("*")
     .eq("mesa_id", mesaId)
-    .eq("status","aberto")
+    .eq("app_id", appId)
+    .eq("status", "aberto")
     .maybeSingle();
 
   if(data) return data;
 
-  const { data:novo } = await sb
+  const { data:novo, error } = await sb
     .from("pedidos")
     .insert({
       app_id: appId,
@@ -75,6 +96,11 @@ async function garantirPedido(){
     })
     .select()
     .single();
+
+  if(error){
+    alert("Erro ao iniciar pedido");
+    return null;
+  }
 
   return novo;
 }
@@ -91,7 +117,7 @@ async function carregarProdutos(){
   const div = document.getElementById("listaProdutos");
   div.innerHTML = "";
 
-  data.forEach(p=>{
+  (data||[]).forEach(p=>{
     div.innerHTML += `
       <div class="produto">
         <span>${p.nome} — R$ ${p.preco.toFixed(2)}</span>
@@ -101,7 +127,7 @@ async function carregarProdutos(){
   });
 }
 
-/* ===== ADD ITEM ===== */
+/* ===== ADD PRODUTO ===== */
 async function addProduto(p){
   const { data } = await sb
     .from("pedido_itens")
@@ -122,25 +148,25 @@ async function addProduto(p){
       nome_produto: p.nome,
       preco: p.preco,
       quantidade: 1,
-      destino: p.destino   // 🔥 AQUI ESTÁ A CHAVE
+      destino: p.destino
     });
   }
 
   carregarPedido();
 }
 
-/* ===== PEDIDO ===== */
+/* ===== LISTAR PEDIDO ===== */
 async function carregarPedido(){
   const { data } = await sb
     .from("pedido_itens")
-    .select("nome_produto,quantidade")
+    .select("id,nome_produto,quantidade")
     .eq("pedido_id", pedidoAtual.id);
 
   const div = document.getElementById("pedido");
   div.innerHTML = "";
 
-  if(!data || !data.length){
-    div.innerHTML = "<p>Nenhum item</p>";
+  if(!data || data.length === 0){
+    div.innerHTML = "<p>Nenhum item adicionado</p>";
     return;
   }
 
@@ -155,16 +181,41 @@ async function carregarPedido(){
 
 /* ===== ENVIAR PEDIDO ===== */
 async function enviarPedido(){
-  await sb.from("pedidos")
-    .update({ status:"aberto" })
-    .eq("id", pedidoAtual.id);
+  const { data } = await sb
+    .from("pedido_itens")
+    .select("id")
+    .eq("pedido_id", pedidoAtual.id)
+    .limit(1);
 
-  alert("Pedido enviado!");
+  if(!data || data.length === 0){
+    alert("Adicione pelo menos um item antes de enviar");
+    return;
+  }
+
+  alert("Pedido enviado com sucesso!");
 }
 
-/* START */
+/* ===== AUTO-LIBERAR MESA SE NÃO PEDIU ===== */
+window.addEventListener("beforeunload", async () => {
+  if(!pedidoAtual) return;
+
+  const { data } = await sb
+    .from("pedido_itens")
+    .select("id")
+    .eq("pedido_id", pedidoAtual.id)
+    .limit(1);
+
+  if(!data || data.length === 0){
+    await sb.from("pedidos")
+      .delete()
+      .eq("id", pedidoAtual.id);
+  }
+});
+
+/* ===== START ===== */
 (async ()=>{
   pedidoAtual = await garantirPedido();
+  if(!pedidoAtual) return;
   await carregarProdutos();
   await carregarPedido();
 })();
