@@ -40,10 +40,6 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 
 .card.livre{border-color:#22c55e}
 .card.preparando{border-color:#eab308}
-.card.pronto{
-  border-color:#22c55e;
-  box-shadow:0 0 14px rgba(34,197,94,.8);
-}
 .card.conta{
   border-color:#fde047;
   box-shadow:0 0 14px rgba(253,224,71,.8);
@@ -58,7 +54,6 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 }
 .status.livre{background:#22c55e;color:#022c22}
 .status.preparando{background:#eab308;color:#000}
-.status.pronto{background:#22c55e;color:#000}
 .status.conta{background:#fde047;color:#000}
 
 .qr{
@@ -119,6 +114,7 @@ let criandoMesa = false;
 <script>
 async function carregarMesas(){
 
+  /* ===== BUSCA MESAS ===== */
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
@@ -126,22 +122,18 @@ async function carregarMesas(){
     .eq("ativa", true)
     .order("numero_mesa");
 
+  /* ===== BUSCA SOMENTE PEDIDOS ATIVOS ===== */
   const { data: pedidos } = await sb
     .from("pedidos")
     .select("mesa_id,status,created_at")
     .eq("app_id", app_id)
     .not("mesa_id","is",null)
-    .in("status",[
-      "aberto",
-      "aceito",
-      "finalizado",
-      "entregue",
-      "conta_solicitada"
-    ])
+    .not("status","in",["pago","finalizado"])
     .order("created_at",{ ascending:false });
 
+  /* ===== MAPA DE PEDIDO ATIVO POR MESA ===== */
   const pedidosPorMesa = {};
-  (pedidos||[]).forEach(p=>{
+  (pedidos || []).forEach(p=>{
     if(!pedidosPorMesa[p.mesa_id]){
       pedidosPorMesa[p.mesa_id] = p;
     }
@@ -152,22 +144,23 @@ async function carregarMesas(){
 
   mesas.forEach(m=>{
     const pedido = pedidosPorMesa[m.id];
+
     let classe = "livre";
     let texto  = "LIVRE";
 
     if(pedido){
       if(pedido.status === "conta_solicitada"){
-        classe="conta"; texto="PEDIU A CONTA";
-      }else if(pedido.status === "finalizado"){
-        classe="pronto"; texto="PRONTO";
+        classe = "conta";
+        texto  = "PEDIU A CONTA";
       }else{
-        classe="preparando"; texto="OCUPADA";
+        classe = "preparando";
+        texto  = "OCUPADA";
       }
     }
 
     const div = document.createElement("div");
-    div.className=`card ${classe}`;
-    div.innerHTML=`
+    div.className = `card ${classe}`;
+    div.innerHTML = `
       <h3>Mesa ${m.numero_mesa}</h3>
       <span class="status ${classe}">${texto}</span>
 
@@ -178,8 +171,8 @@ async function carregarMesas(){
       ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ``}
     `;
 
-    div.onclick=()=>{
-      location.href=`mesa.html?mesa=${m.id}&app_id=${app_id}`;
+    div.onclick = ()=>{
+      location.href = `mesa.html?mesa=${m.id}&app_id=${app_id}`;
     };
 
     grid.appendChild(div);
@@ -190,12 +183,12 @@ async function carregarMesas(){
       { width:120 }
     );
 
-    const btn=div.querySelector(".btn-remover");
+    const btn = div.querySelector(".btn-remover");
     if(btn){
-      btn.onclick=async(e)=>{
+      btn.onclick = async(e)=>{
         e.stopPropagation();
-        const senha=prompt("Código para remover a mesa:");
-        if(senha!==SEGREDO_REMOVER_MESA) return;
+        const senha = prompt("Código para remover a mesa:");
+        if(senha !== SEGREDO_REMOVER_MESA) return;
         await sb.from("mesas").update({ativa:false}).eq("id",m.id);
         carregarMesas();
       };
@@ -215,7 +208,7 @@ async function adicionarMesa(){
     .limit(1)
     .maybeSingle();
 
-  const prox=(data?.numero_mesa||0)+1;
+  const prox = (data?.numero_mesa || 0) + 1;
   await sb.from("mesas").insert({app_id,numero_mesa:prox,ativa:true});
   criandoMesa=false;
   carregarMesas();
