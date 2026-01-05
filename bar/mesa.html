@@ -38,22 +38,20 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 </div>
 
 <script>
-/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= CONTEXTO ================= */
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 const appId  = params.get("app_id");
 
-let mesaNumero = null;
+let mesaNumero = "";
 let pedidoAtual = null;
 let produtosCache = [];
 
-/* ================= MESA ================= */
+/* ===== MESA ===== */
 async function carregarMesa(){
   const { data } = await sb
     .from("mesas")
@@ -67,7 +65,7 @@ async function carregarMesa(){
     mesaNumero ? `🍽️ Mesa ${mesaNumero}` : "🍽️ Mesa";
 }
 
-/* ================= GARANTIR PEDIDO ================= */
+/* ===== GARANTIR PEDIDO ===== */
 async function garantirPedido(){
   const { data } = await sb
     .from("pedidos")
@@ -95,11 +93,11 @@ async function garantirPedido(){
   return novo;
 }
 
-/* ================= PRODUTOS ================= */
+/* ===== PRODUTOS ===== */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
-    .select("id,nome,preco,destino") // 🔥 destino obrigatório
+    .select("id,nome,preco,destino")
     .eq("app_id", appId)
     .eq("ativo", true)
     .order("nome");
@@ -127,7 +125,7 @@ function filtrarProdutos(txt){
   ));
 }
 
-/* ================= PEDIDO ================= */
+/* ===== PEDIDO ===== */
 async function carregarPedido(){
   const { data } = await sb
     .from("pedido_itens")
@@ -156,17 +154,8 @@ async function carregarPedido(){
   });
 }
 
-/* ================= ADD PRODUTO ================= */
+/* ===== ADD PRODUTO ===== */
 async function addProduto(p){
-
-  if(pedidoAtual.status === "enviado"){
-    const ok = confirm(
-      "⚠️ Já existe um pedido em andamento.\n\nDeseja adicionar este item ao pedido atual?"
-    );
-    if(!ok) return;
-    pedidoAtual.status = "aberto";
-  }
-
   const { data } = await sb
     .from("pedido_itens")
     .select("id,quantidade")
@@ -187,35 +176,14 @@ async function addProduto(p){
       nome_produto: p.nome,
       preco: p.preco,
       quantidade: 1,
-      destino: p.destino // 🔥 essencial
+      destino: p.destino
     });
   }
 
   carregarPedido();
 }
 
-/* ================= QTD ================= */
-async function alterarQtd(id, delta){
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("quantidade")
-    .eq("id", id)
-    .single();
-
-  const nova = data.quantidade + delta;
-
-  if(nova <= 0){
-    await sb.from("pedido_itens").delete().eq("id", id);
-  }else{
-    await sb.from("pedido_itens")
-      .update({ quantidade: nova })
-      .eq("id", id);
-  }
-
-  carregarPedido();
-}
-
-/* ================= ENVIAR PEDIDO ================= */
+/* ===== ENVIAR PEDIDO ===== */
 async function enviarPedido(){
 
   const { data: itens } = await sb
@@ -228,28 +196,23 @@ async function enviarPedido(){
     return;
   }
 
-  // mesa ocupada (coluna correta)
+  // mesa ocupada
   await sb.from("mesas")
-  .update({ ativa: false })   // 🔥 OCUPADA
-  .eq("id", mesaId)
-  .eq("app_id", appId);
-
+    .update({ ocupada: true })
+    .eq("id", mesaId)
+    .eq("app_id", appId);
 
   // pedido enviado
   await sb.from("pedidos")
     .update({ status: "enviado" })
     .eq("id", pedidoAtual.id);
 
-  // destinos únicos (bar / cozinha)
   const destinos = [...new Set(
-    itens
-      .map(i => (i.destino || "").trim().toLowerCase())
-      .filter(d => d === "bar" || d === "cozinha")
+    itens.map(i => i.destino).filter(d => d === "bar" || d === "cozinha")
   )];
 
-  // notifica setores corretos
   for(const d of destinos){
-    await sb.from("notificacoes").insert({
+    await sb.from("logs").insert({
       app_id: appId,
       pedido_id: pedidoAtual.id,
       tipo: "novo_pedido",
@@ -258,8 +221,7 @@ async function enviarPedido(){
     });
   }
 
-  // caixa sempre recebe
-  await sb.from("notificacoes").insert({
+  await sb.from("logs").insert({
     app_id: appId,
     pedido_id: pedidoAtual.id,
     tipo: "novo_pedido",
@@ -271,14 +233,14 @@ async function enviarPedido(){
   alert("✅ Pedido enviado!");
 }
 
-/* ================= PEDIR CONTA ================= */
+/* ===== PEDIR CONTA ===== */
 async function pedirConta(){
 
   await sb.from("pedidos")
     .update({ status: "conta_solicitada" })
     .eq("id", pedidoAtual.id);
 
-  await sb.from("notificacoes").insert([
+  await sb.from("logs").insert([
     {
       app_id: appId,
       pedido_id: pedidoAtual.id,
@@ -299,8 +261,8 @@ async function pedirConta(){
   alert("🧾 Conta solicitada!");
 }
 
-/* ================= START ================= */
-(async ()=>{
+/* ===== START ===== */
+(async()=>{
   await carregarMesa();
   pedidoAtual = await garantirPedido();
   await carregarProdutos();
@@ -310,4 +272,3 @@ async function pedirConta(){
 
 </body>
 </html>
-
