@@ -10,243 +10,114 @@
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
-.container{max-width:1100px;margin:auto;padding:24px}
-input.search{width:100%;padding:12px;border-radius:12px;border:none;margin-bottom:16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
-.card{background:#0f172a;padding:16px;border-radius:16px;text-align:center}
-.qty{display:flex;justify-content:center;gap:8px;margin-top:8px}
-.qty button{width:32px;height:32px;border:none;border-radius:6px;background:#1e293b;color:#fff}
-.card button.add{width:100%;padding:10px;margin-top:10px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer}
-.box{background:#0f172a;padding:20px;border-radius:16px;margin-top:24px}
-.item{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1e293b;padding:6px 0}
-.acoes button{width:28px;height:28px;border:none;border-radius:6px;font-weight:bold}
-.btn-del{background:#ef4444;color:#fff}
-.total{font-size:20px;font-weight:bold;margin-top:12px}
-button.sec{background:#2563eb;margin-top:12px;border:none;padding:12px;border-radius:10px;color:#fff;font-weight:bold;cursor:pointer}
+.container{max-width:600px;margin:auto;padding:24px}
+.card{background:#0f172a;padding:20px;border-radius:16px}
+input,select,button{
+  width:100%;
+  padding:14px;
+  margin-top:12px;
+  border-radius:10px;
+  border:none
+}
+button{background:#22c55e;font-weight:bold;cursor:pointer}
+.troco{color:#22c55e;font-weight:bold;margin-top:10px}
 </style>
 </head>
 
 <body>
 
 <script>
-/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= SESSÃO (ADMIN OU FUNCIONÁRIO) ================= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
-
-const app_id = funcionario?.app_id || admin?.app_id;
+const app_id = admin?.app_id || funcionario?.app_id;
 
 if(!app_id){
   alert("Sessão expirada");
-  location.href = "login-funcionario.html";
+  location.href="login-funcionario.html";
 }
-
-/* ================= VARIÁVEIS ================= */
-let pedidoId = new URLSearchParams(location.search).get("pedido");
-let produtosCache = [];
-let total = 0;
 </script>
 
 <div class="topo">
-  <h2>🧾 Venda Avulsa</h2>
-  <button onclick="location.href='mesas.html'">Voltar</button>
+  <h2>➕ Venda Avulsa</h2>
+  <button onclick="location.href='caixa.html'">Voltar</button>
 </div>
 
 <div class="container">
+  <div class="card">
 
-  <input
-    class="search"
-    placeholder="Buscar produto..."
-    oninput="filtrarProdutos(this.value)"
-  >
+    <input id="descricao" placeholder="Descrição (ex: Água, Cerveja, Bala)">
+    <input id="valorVenda" type="number" step="0.01" placeholder="Valor da venda">
 
-  <div class="grid" id="listaProdutos"></div>
+    <select id="forma" onchange="ajustarForma()">
+      <option value="dinheiro">Dinheiro</option>
+      <option value="pix">PIX</option>
+      <option value="debito">Débito</option>
+      <option value="credito">Crédito</option>
+    </select>
 
-  <div class="box">
-    <h3>Itens da Venda</h3>
-    <div id="itens"></div>
-    <p class="total">
-      Total: R$ <span id="total">0.00</span>
-    </p>
-    <button class="sec" onclick="irPagamento()">
-      Ir para Pagamento
-    </button>
+    <input id="valorRecebido" type="number" step="0.01" placeholder="Valor recebido">
+
+    <div id="troco" class="troco"></div>
+
+    <button onclick="finalizar()">✅ Finalizar venda</button>
+
   </div>
-
 </div>
 
 <script>
-/* ================= PEDIDO ================= */
-async function iniciarPedido(){
-  if(pedidoId) return;
+function ajustarForma(){
+  const forma = document.getElementById("forma").value;
+  const recebido = document.getElementById("valorRecebido");
+  document.getElementById("troco").innerHTML = "";
 
-  const { data, error } = await sb
-    .from("pedidos")
-    .insert({
-      app_id: app_id,
-      tipo: "avulso",
-      mesa_id: null,
-      status: "aberto"
-    })
-    .select()
-    .single();
+  if(forma !== "dinheiro"){
+    recebido.value = "";
+    recebido.disabled = true;
+  } else {
+    recebido.disabled = false;
+  }
+}
 
-  if(error){
-    console.error(error);
-    alert("Erro ao criar venda avulsa");
+async function finalizar(){
+  const descricao = document.getElementById("descricao").value || "Venda avulsa";
+  const valorVenda = Number(document.getElementById("valorVenda").value || 0);
+  const forma = document.getElementById("forma").value;
+  let valorRecebido = Number(document.getElementById("valorRecebido").value || 0);
+
+  if(valorVenda <= 0){
+    alert("Informe o valor da venda");
     return;
   }
 
-  pedidoId = data.id;
-}
+  let troco = 0;
 
-/* ================= PRODUTOS ================= */
-async function carregarProdutos(){
-  const { data, error } = await sb
-    .from("produtos")
-    .select("id,nome,preco")
-    .eq("app_id", app_id)
-    .eq("ativo", true)
-    .order("nome");
-
-  if(error){
-    console.error(error);
-    alert("Erro ao carregar produtos");
-    return;
+  if(forma === "dinheiro"){
+    if(valorRecebido < valorVenda){
+      alert("Valor recebido insuficiente");
+      return;
+    }
+    troco = valorRecebido - valorVenda;
   }
 
-  produtosCache = data || [];
-  renderProdutos(produtosCache);
-}
-
-function renderProdutos(lista){
-  const grid = document.getElementById("listaProdutos");
-  grid.innerHTML = "";
-
-  lista.forEach(p=>{
-    let qtd = 1;
-
-    const div = document.createElement("div");
-    div.className = "card";
-    div.innerHTML = `
-      <h4>${p.nome}</h4>
-      <p>R$ ${p.preco.toFixed(2)}</p>
-
-      <div class="qty">
-        <button>-</button>
-        <span>1</span>
-        <button>+</button>
-      </div>
-
-      <button class="add">Adicionar</button>
-    `;
-
-    const span = div.querySelector("span");
-    const [menos, mais] = div.querySelectorAll(".qty button");
-
-    menos.onclick = () => {
-      if(qtd > 1){
-        qtd--;
-        span.innerText = qtd;
-      }
-    };
-
-    mais.onclick = () => {
-      qtd++;
-      span.innerText = qtd;
-    };
-
-    div.querySelector(".add").onclick = () => addItem(p, qtd);
-    grid.appendChild(div);
-  });
-}
-
-function filtrarProdutos(txt){
-  txt = txt.toLowerCase().trim();
-  if(!txt) return renderProdutos(produtosCache);
-
-  renderProdutos(
-    produtosCache.filter(p =>
-      p.nome.toLowerCase().includes(txt)
-    )
-  );
-}
-
-/* ================= ITENS ================= */
-async function addItem(p, qtd){
-  if(!pedidoId) return;
-
-  await sb.from("pedido_itens").insert({
-    app_id: app_id,
-    pedido_id: pedidoId,
-    produto_id: p.id,
-    nome_produto: p.nome,
-    preco: p.preco,
-    quantidade: qtd
+  await sb.from("pagamentos").insert({
+    app_id,
+    pedido_id: null,
+    tipo: forma,
+    valor: valorVenda,      // 🔥 isso entra no caixa
+    troco: forma === "dinheiro" ? troco : 0,
+    descricao
   });
 
-  carregarItens();
+  alert("Venda registrada com sucesso");
+  location.href = "caixa.html";
 }
 
-async function carregarItens(){
-  if(!pedidoId) return;
-
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id,nome_produto,preco,quantidade")
-    .eq("pedido_id", pedidoId)
-    .eq("app_id", app_id);
-
-  const div = document.getElementById("itens");
-  div.innerHTML = "";
-  total = 0;
-
-  (data || []).forEach(i=>{
-    total += i.preco * i.quantidade;
-    div.innerHTML += `
-      <div class="item">
-        <span>${i.quantidade}x ${i.nome_produto}</span>
-        <div class="acoes">
-          <button class="btn-del" onclick="remover('${i.id}')">✕</button>
-        </div>
-      </div>
-    `;
-  });
-
-  document.getElementById("total").innerText = total.toFixed(2);
-}
-
-async function remover(id){
-  await sb.from("pedido_itens")
-    .delete()
-    .eq("id", id)
-    .eq("app_id", app_id);
-
-  carregarItens();
-}
-
-/* ================= PAGAMENTO ================= */
-function irPagamento(){
-  if(!pedidoId || total === 0){
-    alert("Adicione itens à venda");
-    return;
-  }
-
-  location.href = `pagamento.html?pedido=${pedidoId}`;
-}
-
-/* ================= START ================= */
-(async ()=>{
-  await iniciarPedido();
-  if(!pedidoId) return;
-  await carregarProdutos();
-  await carregarItens();
-})();
+ajustarForma();
 </script>
 
 </body>
