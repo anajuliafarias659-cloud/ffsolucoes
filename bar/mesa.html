@@ -1,4 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Mesa</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial, sans-serif;
+  background:#020617;
+  color:#fff;
+}
+.container{
+  max-width:600px;
+  margin:auto;
+  padding:24px;
+}
+h2{margin-top:0}
+.item{
+  background:#0f172a;
+  padding:12px;
+  border-radius:12px;
+  margin-bottom:10px;
+}
+.controls{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
+button{
+  padding:6px 12px;
+  border:none;
+  border-radius:8px;
+  font-weight:bold;
+  cursor:pointer;
+}
+.status{
+  margin:12px 0;
+  font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+  <h2>🍽️ Mesa</h2>
+  <div id="statusPedido" class="status"></div>
+  <div id="pedido">Carregando...</div>
+</div>
+
+<script>
+/* ================= SUPABASE ================= */
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+/* ================= PARAMS ================= */
+const params = new URLSearchParams(location.search);
+const mesaId = params.get("mesa");
+const appId = params.get("app_id");
+
+let pedidoAtual = null;
+
+/* ================= STATUS VISUAL ================= */
+function renderStatus(status){
+  const el = document.getElementById("statusPedido");
+  const map = {
+    aberto: "📝 Pedido recebido",
+    enviado: "📨 Pedido enviado",
+    aceito: "👨‍🍳 Em preparo",
+    pronto: "🍽️ Pedido pronto",
+    aguardando_pagamento: "💰 Aguardando pagamento",
+    conta_solicitada: "🧾 Conta solicitada"
+  };
+  el.innerText = map[status] || "";
+}
+
+/* ================= CARREGAR PEDIDO ================= */
 async function carregarPedido(){
+
   const { data: pedido } = await sb
     .from("pedidos")
     .select("id,status")
@@ -8,7 +92,7 @@ async function carregarPedido(){
     .limit(1)
     .maybeSingle();
 
-  // 🔓 PEDIDO ENCERRADO → LIBERA MESA
+  /* 🔓 PEDIDO ENCERRADO → LIBERA MESA */
   if(pedido && (pedido.status === "pago" || pedido.status === "finalizado")){
     pedidoAtual = null;
     document.getElementById("pedido").innerHTML = "<p>Nenhuma mesa ocupada</p>";
@@ -16,11 +100,12 @@ async function carregarPedido(){
     return;
   }
 
-  // 🔁 PEDIDO ATIVO → MANTÉM MESA OCUPADA
+  /* 🔁 PEDIDO ATIVO → MANTÉM OCUPADA */
   if(pedido){
     pedidoAtual = pedido;
   } else {
     pedidoAtual = null;
+    document.getElementById("pedido").innerHTML = "<p>Nenhuma mesa ocupada</p>";
     return;
   }
 
@@ -53,3 +138,35 @@ async function carregarPedido(){
     `;
   });
 }
+
+/* ================= ALTERAR QUANTIDADE ================= */
+async function alterarQtd(id,delta){
+  if(!pedidoAtual) return;
+
+  const { data:item } = await sb
+    .from("pedido_itens")
+    .select("quantidade")
+    .eq("id", id)
+    .eq("app_id", appId)
+    .maybeSingle();
+
+  if(!item) return;
+
+  const nova = item.quantidade + delta;
+  if(nova < 1) return;
+
+  await sb.from("pedido_itens")
+    .update({ quantidade:nova })
+    .eq("id", id)
+    .eq("app_id", appId);
+
+  carregarPedido();
+}
+
+/* ================= AUTO REFRESH ================= */
+carregarPedido();
+setInterval(carregarPedido, 3000);
+</script>
+
+</body>
+</html>
