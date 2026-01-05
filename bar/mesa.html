@@ -44,7 +44,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
   font-weight:bold
 }
 
-/* STATUS */
+/* status visual */
 .status{
   padding:10px;
   border-radius:10px;
@@ -95,7 +95,7 @@ const appId  = params.get("app_id");
 
 if(!mesaId || !appId){
   alert("Sessão inválida");
-  throw "";
+  throw new Error("Mesa/app ausentes");
 }
 
 /* ================= ESTADO ================= */
@@ -118,30 +118,27 @@ async function carregarMesa(){
   }
 }
 
-/* ================= STATUS ================= */
+/* ================= STATUS VISUAL ================= */
 function renderStatus(status){
   const div = document.getElementById("statusPedido");
   div.innerHTML = "";
 
-  if(status === "enviado" || status === "aceito"){
+  if(status === "aceito" || status === "enviado")
     div.innerHTML = `<div class="status preparo">🟡 Pedido em preparo</div>`;
-  }
 
-  if(status === "pronto"){
+  if(status === "pronto")
     div.innerHTML = `<div class="status pronto">🔵 Pedido pronto</div>`;
-  }
 
-  if(status === "conta_solicitada"){
+  if(status === "conta_solicitada")
     div.innerHTML = `<div class="status conta">🧾 Conta solicitada</div>`;
-  }
 }
 
-/* ================= GARANTIR PEDIDO ================= */
+/* ================= GARANTIR PEDIDO (CORREÇÃO PRINCIPAL) ================= */
 async function garantirPedido(){
   if(pedidoAtual) return pedidoAtual;
 
-  // 1️⃣ procura pedido ativo
-  const { data: existente } = await sb
+  // 🔥 busca pedido ATIVO da mesa (inclusive PRONTO)
+  const { data } = await sb
     .from("pedidos")
     .select("*")
     .eq("app_id", appId)
@@ -153,42 +150,17 @@ async function garantirPedido(){
       "pronto",
       "conta_solicitada"
     ])
-    .order("created_at", { ascending:false })
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if(existente){
-    pedidoAtual = existente;
-
-    await sb.from("mesas")
-      .update({ status: "ocupada" })
-      .eq("id", mesaId)
-      .eq("app_id", appId);
-
-    renderStatus(existente.status);
+  if(data){
+    pedidoAtual = data;
+    renderStatus(data.status);
     return pedidoAtual;
   }
 
-  // 2️⃣ não existe → cria (lógica original)
-  const { data: novo } = await sb
-    .from("pedidos")
-    .insert({
-      app_id: appId,
-      mesa_id: mesaId,
-      origem: "mesa",
-      status: "aberto"
-    })
-    .select()
-    .single();
-
-  pedidoAtual = novo;
-
-  await sb.from("mesas")
-    .update({ status: "ocupada" })
-    .eq("id", mesaId)
-    .eq("app_id", appId);
-
-  return pedidoAtual;
+  return null; // ❗ NÃO cria pedido novo automaticamente
 }
 
 /* ================= PRODUTOS ================= */
@@ -232,6 +204,10 @@ function filtrarProdutos(txt){
 /* ================= ADD PRODUTO ================= */
 async function addProduto(p){
   const pedido = await garantirPedido();
+  if(!pedido){
+    alert("Chame o garçom para iniciar o pedido");
+    return;
+  }
 
   const { data } = await sb
     .from("pedido_itens")
@@ -263,38 +239,28 @@ async function addProduto(p){
 /* ================= PEDIDO ================= */
 async function carregarPedido(){
   const pedido = await garantirPedido();
-
-  // 🔓 libera mesa SOMENTE quando pago/finalizado
-  if(pedido.status === "pago" || pedido.status === "finalizado"){
-    pedidoAtual = null;
-
-    await sb.from("mesas")
-      .update({ status: "livre" })
-      .eq("id", mesaId)
-      .eq("app_id", appId);
-
-    document.getElementById("pedido").innerHTML = "<p>Mesa livre</p>";
-    document.getElementById("statusPedido").innerHTML = "";
+  if(!pedido){
+    document.getElementById("pedido").innerHTML = "<p>Nenhum item</p>";
     return;
   }
 
-  renderStatus(pedido.status);
-
-  const { data } = await sb
+  const { data: itens } = await sb
     .from("pedido_itens")
     .select("id,nome_produto,quantidade")
     .eq("pedido_id", pedido.id)
     .eq("app_id", appId);
 
+  renderStatus(pedido.status);
+
   const div = document.getElementById("pedido");
   div.innerHTML = "";
 
-  if(!data?.length){
+  if(!itens?.length){
     div.innerHTML = "<p>Nenhum item</p>";
     return;
   }
 
-  data.forEach(i=>{
+  itens.forEach(i=>{
     div.innerHTML += `
       <div class="item">
         <strong>${i.nome_produto}</strong>
@@ -308,28 +274,10 @@ async function carregarPedido(){
   });
 }
 
-/* ================= QTD ================= */
-async function alterarQtd(id, delta){
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("quantidade")
-    .eq("id", id)
-    .single();
-
-  const nova = data.quantidade + delta;
-
-  if(nova <= 0){
-    await sb.from("pedido_itens").delete().eq("id", id);
-  } else {
-    await sb.from("pedido_itens").update({ quantidade: nova }).eq("id", id);
-  }
-
-  carregarPedido();
-}
-
-/* ================= AÇÕES ================= */
+/* ================= ENVIAR / CONTA ================= */
 async function enviarPedido(){
   const pedido = await garantirPedido();
+  if(!pedido) return;
 
   await sb.from("pedidos")
     .update({ status: "enviado" })
@@ -340,6 +288,7 @@ async function enviarPedido(){
 
 async function pedirConta(){
   const pedido = await garantirPedido();
+  if(!pedido) return;
 
   await sb.from("pedidos")
     .update({ status: "conta_solicitada" })
