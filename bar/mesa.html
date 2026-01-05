@@ -19,11 +19,7 @@ input{
   margin-bottom:14px
 }
 
-.tabs{
-  display:flex;
-  gap:10px;
-  margin-bottom:16px
-}
+.tabs{display:flex;gap:10px;margin-bottom:16px}
 .tab{
   flex:1;
   padding:10px;
@@ -41,17 +37,15 @@ input{
   padding:14px;
   margin-bottom:12px
 }
-.produto{
-  display:flex;
-  justify-content:space-between;
-  align-items:center
-}
+.produto{display:flex;justify-content:space-between;align-items:center}
+
 button{
   padding:6px 12px;
   border:none;
   border-radius:8px;
   cursor:pointer
 }
+
 .btn-enviar{
   width:100%;
   padding:16px;
@@ -59,6 +53,16 @@ button{
   font-weight:bold;
   border-radius:12px;
   margin-top:20px
+}
+
+.btn-conta{
+  width:100%;
+  padding:16px;
+  background:#eab308;
+  color:#000;
+  font-weight:bold;
+  border-radius:12px;
+  margin-top:12px
 }
 </style>
 </head>
@@ -69,13 +73,11 @@ button{
 
 <div class="container">
 
-  <!-- PESQUISA -->
   <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos(this.value)">
 
-  <!-- ABAS -->
   <div class="tabs">
-    <div class="tab ativa" onclick="mudarDestino('cozinha')">🍳 Cozinha</div>
-    <div class="tab" onclick="mudarDestino('bar')">🍺 Bar</div>
+    <div class="tab ativa" onclick="mudarDestino('cozinha',this)">🍳 Cozinha</div>
+    <div class="tab" onclick="mudarDestino('bar',this)">🍺 Bar</div>
   </div>
 
   <div id="listaProdutos"></div>
@@ -83,9 +85,9 @@ button{
   <h3>Pedido</h3>
   <div id="pedido"></div>
 
-  <button class="btn-enviar" onclick="enviarPedido()">
-    📤 Enviar pedido
-  </button>
+  <button class="btn-enviar" onclick="enviarPedido()">📤 Enviar pedido</button>
+  <button class="btn-conta" onclick="pedirConta()">🧾 Pedir a conta</button>
+
 </div>
 
 <script>
@@ -102,13 +104,13 @@ let pedidoAtual=null;
 let produtos=[];
 let destinoAtual="cozinha";
 
-/* ===== PEDIDO ATIVO DA MESA ===== */
+/* ===== PEDIDO ATIVO ===== */
 async function garantirPedido(){
   const { data } = await sb
     .from("pedidos")
     .select("*")
-    .eq("mesa_id", mesaId)
-    .eq("app_id", appId)
+    .eq("mesa_id",mesaId)
+    .eq("app_id",appId)
     .not("status","in",'("pago","cancelado")')
     .order("created_at",{ascending:false})
     .limit(1)
@@ -132,14 +134,14 @@ async function carregarProdutos(){
     .eq("app_id",appId)
     .eq("ativo",true);
 
-  produtos = data || [];
+  produtos=data||[];
   renderProdutos();
 }
 
-function mudarDestino(d){
+function mudarDestino(d,el){
   destinoAtual=d;
   document.querySelectorAll(".tab").forEach(t=>t.classList.remove("ativa"));
-  event.target.classList.add("ativa");
+  el.classList.add("ativa");
   renderProdutos();
 }
 
@@ -163,6 +165,12 @@ function renderProdutos(filtro=""){
 
 /* ===== ADD ITEM ===== */
 async function addProduto(p){
+
+  if(pedidoAtual.status==="enviado"){
+    alert("Pedido já enviado, aguarde o garçom 😉");
+    return;
+  }
+
   const { data } = await sb
     .from("pedido_itens")
     .select("id,quantidade")
@@ -201,35 +209,79 @@ async function carregarPedido(){
     : "<p>Nenhum item</p>";
 }
 
-/* ===== ENVIAR ===== */
+/* ===== ENVIAR PEDIDO (COM TRAVA) ===== */
 async function enviarPedido(){
-  const { data } = await sb
+
+  if(pedidoAtual.status==="enviado"){
+    alert("Pedido já foi enviado!");
+    return;
+  }
+
+  const { data: itens } = await sb
     .from("pedido_itens")
-    .select("id")
-    .eq("pedido_id",pedidoAtual.id)
-    .limit(1);
+    .select("destino")
+    .eq("pedido_id",pedidoAtual.id);
 
-  if(!data?.length) return alert("Adicione um item");
+  if(!itens?.length){
+    alert("Adicione itens ao pedido");
+    return;
+  }
 
-  alert("Pedido enviado!");
+  await sb.from("mesas")
+    .update({status:"ocupada"})
+    .eq("id",mesaId);
+
+  await sb.from("pedidos")
+    .update({status:"enviado"})
+    .eq("id",pedidoAtual.id);
+
+  const destinos=[...new Set(itens.map(i=>i.destino))];
+
+  for(const d of destinos){
+    await sb.from("notificacoes").insert({
+      app_id:appId,
+      pedido_id:pedidoAtual.id,
+      tipo:"novo_pedido",
+      destino:d,
+      mensagem:`Novo pedido - Mesa ${mesaId}`
+    });
+  }
+
+  pedidoAtual.status="enviado";
+  alert("✅ Pedido enviado!");
 }
 
-/* ===== AUTO LIBERAR SE VAZIO ===== */
-window.addEventListener("beforeunload",async()=>{
-  if(!pedidoAtual) return;
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id")
-    .eq("pedido_id",pedidoAtual.id)
-    .limit(1);
-  if(!data?.length){
-    await sb.from("pedidos").delete().eq("id",pedidoAtual.id);
-  }
-});
+/* ===== PEDIR CONTA ===== */
+async function pedirConta(){
+
+  await sb.from("pedidos")
+    .update({status:"conta_solicitada"})
+    .eq("id",pedidoAtual.id);
+
+  await sb.from("notificacoes").insert([
+    {
+      app_id:appId,
+      pedido_id:pedidoAtual.id,
+      tipo:"pedir_conta",
+      destino:"caixa",
+      mensagem:`Mesa ${mesaId} pediu a conta`
+    },
+    {
+      app_id:appId,
+      pedido_id:pedidoAtual.id,
+      tipo:"pedir_conta",
+      destino:"garcom",
+      mensagem:`Mesa ${mesaId} pediu a conta`
+    }
+  ]);
+
+  alert("🧾 Conta solicitada!");
+}
 
 /* START */
 (async()=>{
   pedidoAtual=await garantirPedido();
+  document.getElementById("tituloMesa").innerText=`🍽️ Mesa ${mesaId}`;
   await carregarProdutos();
   await carregarPedido();
 })();
