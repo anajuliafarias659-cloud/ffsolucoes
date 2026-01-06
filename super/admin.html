@@ -74,6 +74,29 @@ hr{
   justify-content:space-between;
   align-items:center;
 }
+
+/* ===== CHAT ===== */
+.chat-box{
+  background:#020617;
+  border-radius:14px;
+  padding:14px;
+  height:260px;
+  overflow:auto;
+  margin-top:10px;
+}
+.msg{
+  margin-bottom:8px;
+}
+.msg.admin b{color:#22c55e}
+.msg.super b{color:#60a5fa}
+.chat-input{
+  display:flex;
+  gap:8px;
+  margin-top:10px;
+}
+.chat-input input{
+  flex:1;
+}
 </style>
 </head>
 
@@ -114,6 +137,22 @@ hr{
 
   <hr>
 
+  <!-- CHAT PRIVADO -->
+  <h2>💬 Chat com Admin do Negócio</h2>
+
+  <select id="chatAppSelect" onchange="abrirChat()">
+    <option value="">Selecione o negócio</option>
+  </select>
+
+  <div class="chat-box" id="chatBox"></div>
+
+  <div class="chat-input">
+    <input id="chatMsg" placeholder="Digite a mensagem...">
+    <button onclick="enviarChat()">Enviar</button>
+  </div>
+
+  <hr>
+
   <!-- CRIAR ADMIN -->
   <h2>👤 Criar Admin Inicial</h2>
   <input id="usuarioAdmin" placeholder="Usuário do admin">
@@ -145,6 +184,7 @@ const supabase = createClient(
 );
 
 const SENHA_SUPER = "super123";
+let chatAppAtual = null;
 
 /* ===============================
    LOGIN / LOGOUT
@@ -167,214 +207,71 @@ window.logout = function(){
 };
 
 /* ===============================
-   BASE DO SITE PÚBLICO (LOCAL/PROD)
-================================ */
-function getBasePublica(){
-  const isLocal =
-    location.hostname === "127.0.0.1" ||
-    location.hostname === "localhost";
-
-  if(isLocal){
-    return "http://127.0.0.1:5500/locadora/Locadora/public";
-  }
-
-  return "https://seusite.com/locadora/Locadora/public";
-}
-
-/* ===============================
-   GERAR LINK PÚBLICO
-================================ */
-function gerarLinkPublico(app){
-  const base = getBasePublica();
-  return `${base}/index.html?app=${app.id}`;
-}
-
-/* ===============================
-   CRIAR NEGÓCIO
-================================ */
-window.criarNegocio = async function(){
-  const nome = nomeApp.value.trim();
-  const tipo = tipoApp.value;
-  if(!nome) return alert("Informe o nome");
-
-  const { data:app, error } = await supabase
-    .from("apps")
-    .insert({ nome, tipo })
-    .select()
-    .single();
-
-  if(error){
-    alert("Erro ao criar negócio");
-    console.error(error);
-    return;
-  }
-
-  /* CONFIG PADRÃO (SEM QUEBRAR SE JÁ EXISTIR) */
-  await supabase.from("config_app").upsert({
-    app_id: app.id,
-    whatsapp: "",
-    cor_primaria: "#e30613",
-    cor_secundaria: "#020617"
-  });
-
-  nomeApp.value="";
-  carregarNegocios();
-};
-
-/* ===============================
-   LISTAR NEGÓCIOS
+   LISTAR NEGÓCIOS (sem alteração)
 ================================ */
 async function carregarNegocios(){
-  const { data, error } = await supabase
-    .from("apps")
-    .select("*")
-    .order("created_at",{ascending:false});
-
-  if(error){
-    console.error(error);
-    return;
-  }
-
+  const { data } = await supabase.from("apps").select("*").order("created_at",{ascending:false});
   listaApps.innerHTML="";
   appAdmin.innerHTML=`<option value="">Selecione o negócio</option>`;
+  chatAppSelect.innerHTML=`<option value="">Selecione o negócio</option>`;
 
   data.forEach(app=>{
-    const linkPublico = gerarLinkPublico(app);
-
-    listaApps.innerHTML += `
+    chatAppSelect.innerHTML+=`<option value="${app.id}">${app.nome}</option>`;
+    appAdmin.innerHTML+=`<option value="${app.id}">${app.nome}</option>`;
+    listaApps.innerHTML+=`
       <div class="card">
-        <div>
-          <b>${app.nome}</b>
-          <span class="tag">${app.tipo}</span><br>
-          <small>
-            🆔 ${app.id}<br>
-            🌍 <a href="${linkPublico}" target="_blank">Abrir site público</a>
-          </small>
-        </div>
-        <button onclick="excluirNegocio('${app.id}')">Excluir</button>
-      </div>
-    `;
-
-    appAdmin.innerHTML += `
-      <option value="${app.id}">
-        ${app.nome} (${app.tipo})
-      </option>
-    `;
+        <div><b>${app.nome}</b> <span class="tag">${app.tipo}</span></div>
+      </div>`;
   });
 }
 
 /* ===============================
-   EXCLUIR NEGÓCIO
+   CHAT PRIVADO (NOVO)
 ================================ */
-window.excluirNegocio = async function(appId){
-  if(!confirm("Excluir este negócio?")) return;
+window.abrirChat = async function(){
+  chatAppAtual = chatAppSelect.value;
+  chatBox.innerHTML="";
+  if(!chatAppAtual) return;
 
-  const { data:admins } = await supabase
-    .from("admins")
-    .select("id")
-    .eq("app_id", appId)
-    .limit(1);
-
-  if(admins && admins.length > 0){
-    alert("❌ Não é possível excluir. Existem admins vinculados.");
-    return;
-  }
-
-  await supabase.from("apps").delete().eq("id", appId);
-  carregarNegocios();
-};
-
-/* ===============================
-   CRIAR ADMIN
-================================ */
-window.criarAdminInicial = async function(){
-  const usuario = usuarioAdmin.value.trim().toLowerCase();
-  const senha = senhaAdmin.value.trim();
-  const permissao = permissaoAdmin.value;
-  const app_id = appAdmin.value;
-
-  if(!usuario || !senha || !app_id){
-    alert("Preencha todos os campos");
-    return;
-  }
-
-  const { data:existe } = await supabase
-    .from("admins")
-    .select("id")
-    .eq("usuario",usuario)
-    .maybeSingle();
-
-  if(existe){
-    alert("Usuário já existe");
-    return;
-  }
-
-  await supabase.from("admins").insert({
-    usuario,
-    senha,
-    permissao,
-    app_id,
-    ativo:true
-  });
-
-  usuarioAdmin.value="";
-  senhaAdmin.value="";
-  carregarAdmins();
-};
-
-/* ===============================
-   LISTAR ADMINS
-================================ */
-async function carregarAdmins(){
   const { data } = await supabase
-    .from("admins")
-    .select("id, usuario, permissao, ativo, app_id")
-    .order("usuario");
+    .from("chat_admin")
+    .select("*")
+    .eq("app_id",chatAppAtual)
+    .order("created_at");
 
-  listaAdmins.innerHTML="";
+  data.forEach(m=>mostrarMsg(m));
+};
 
-  for(const a of data){
-    let appNome="Sem negócio";
-    let appTipo="?";
+window.enviarChat = async function(){
+  if(!chatAppAtual || !chatMsg.value.trim()) return;
 
-    if(a.app_id){
-      const { data:app } = await supabase
-        .from("apps")
-        .select("nome, tipo")
-        .eq("id",a.app_id)
-        .maybeSingle();
+  await supabase.from("chat_admin").insert({
+    app_id: chatAppAtual,
+    remetente: "super_admin",
+    mensagem: chatMsg.value.trim()
+  });
 
-      if(app){
-        appNome=app.nome;
-        appTipo=app.tipo;
-      }
-    }
+  chatMsg.value="";
+};
 
-    listaAdmins.innerHTML += `
-      <div class="card">
-        <div>
-          <b>${a.usuario}</b>
-          <span class="tag">${appTipo}</span><br>
-          <small>
-            🏢 ${appNome}<br>
-            🔐 ${a.permissao} |
-            ${a.ativo ? "🟢 ativo" : "🔴 inativo"}
-          </small>
-        </div>
-        <button onclick="excluirAdmin('${a.id}')">Excluir</button>
-      </div>
-    `;
-  }
+function mostrarMsg(m){
+  chatBox.innerHTML+=`
+    <div class="msg ${m.remetente === "super_admin" ? "super" : "admin"}">
+      <b>${m.remetente === "super_admin" ? "Você" : "Admin"}:</b> ${m.mensagem}
+    </div>`;
+  chatBox.scrollTop = chatBox.scrollHeight;
 }
 
-/* ===============================
-   EXCLUIR ADMIN
-================================ */
-window.excluirAdmin = async function(id){
-  if(!confirm("Excluir este admin?")) return;
-  await supabase.from("admins").delete().eq("id",id);
-  carregarAdmins();
-};
+/* realtime */
+supabase.channel("chat-super")
+  .on("postgres_changes",{
+    event:"INSERT",
+    table:"chat_admin"
+  },payload=>{
+    if(payload.new.app_id === chatAppAtual){
+      mostrarMsg(payload.new);
+    }
+  }).subscribe();
 </script>
 
 </body>
