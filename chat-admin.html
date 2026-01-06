@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Chat com Suporte</title>
+<title>Chat Suporte</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -11,17 +11,13 @@ body{
   font-family:Arial,sans-serif;
   background:#020617;
   color:#fff;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  min-height:100vh;
 }
 .box{
   width:100%;
   max-width:420px;
   background:#0f172a;
-  padding:18px;
-  border-radius:16px;
+  padding:16px;
+  border-radius:14px;
 }
 .chat{
   background:#020617;
@@ -30,9 +26,9 @@ body{
   height:260px;
   overflow:auto;
 }
-.msg{margin-bottom:6px}
+.msg{margin-bottom:8px}
 .admin{color:#38bdf8}
-.super{color:#22c55e}
+.super_admin{color:#22c55e}
 input,button{
   width:100%;
   padding:12px;
@@ -63,20 +59,19 @@ button{
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
 const supabase = createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+  "SUA_URL_SUPABASE",
+  "SUA_CHAVE_PUBLICA"
 );
 
-/* 🔐 dados vindos do login */
-const usuario = {
-  id: "USER_ID",
-  role: "admin",
-  app_id: "APP_ID"
-};
+const usuario = window.usuario;
+if(!usuario || !usuario.app_id){
+  alert("Sessão inválida");
+  throw new Error("Usuário sem app_id");
+}
 
 const chatBox = document.getElementById("chatBox");
 
-/* carregar mensagens */
+/* carregar histórico */
 async function carregarMensagens(){
   const { data } = await supabase
     .from("chat_admin")
@@ -85,7 +80,6 @@ async function carregarMensagens(){
     .order("created_at");
 
   chatBox.innerHTML = "";
-
   data.forEach(m=>{
     chatBox.innerHTML += `
       <div class="msg ${m.remetente}">
@@ -100,6 +94,30 @@ async function carregarMensagens(){
 
 carregarMensagens();
 
+/* realtime */
+supabase
+  .channel("chat-admin-" + usuario.app_id)
+  .on(
+    "postgres_changes",
+    {
+      event: "INSERT",
+      schema: "public",
+      table: "chat_admin",
+      filter: `app_id=eq.${usuario.app_id}`
+    },
+    payload => {
+      const m = payload.new;
+      chatBox.innerHTML += `
+        <div class="msg ${m.remetente}">
+          <b>${m.remetente === "admin" ? "Você" : "Suporte"}:</b>
+          ${m.mensagem}
+        </div>
+      `;
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+  )
+  .subscribe();
+
 /* enviar */
 window.enviar = async function(){
   if(!mensagem.value.trim()) return;
@@ -111,7 +129,6 @@ window.enviar = async function(){
   });
 
   mensagem.value="";
-  carregarMensagens();
 };
 </script>
 
