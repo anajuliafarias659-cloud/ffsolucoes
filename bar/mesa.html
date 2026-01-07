@@ -2,140 +2,245 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Caixa</title>
+<title>Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
-.container{max-width:1200px;margin:auto;padding:24px}
-.box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
-button{padding:10px 16px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer}
-button.sec{background:#1e293b;color:#fff}
-.badge{background:#ef4444;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:6px}
-table{width:100%;border-collapse:collapse;margin-top:12px}
-th,td{padding:10px;border-bottom:1px solid #1e293b;font-size:14px}
-th{color:#94a3b8}
-@keyframes piscar{0%{box-shadow:0 0 0 transparent}50%{box-shadow:0 0 18px rgba(234,179,8,.9)}100%{box-shadow:0 0 0 transparent}}
-.alerta.piscar{animation:piscar 1s infinite}
+.topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
+.container{max-width:900px;margin:auto;padding:20px}
+input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:16px}
+.produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
+.produto{display:flex;justify-content:space-between;align-items:center}
+.controls{display:flex;gap:8px;margin-top:8px}
+button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
+.pay{width:100%;padding:16px;border:none;border-radius:12px;font-size:16px;font-weight:bold;background:#2563eb;color:#fff}
+.total{font-size:18px;font-weight:bold;margin:16px 0}
+.tag{font-size:13px;font-weight:bold;padding:4px 10px;border-radius:8px}
+.bar{background:#38bdf8;color:#000}
+.cozinha{background:#22c55e;color:#000}
+.bloqueado{opacity:.5;pointer-events:none}
 </style>
 </head>
 
 <body>
 
-<div class="topo">
-  <h2>💰 Caixa</h2>
-  <div>
-    <button onclick="location.href='venda-avulsa.html'">➕ Venda Avulsa</button>
-    <button class="alerta" id="btnContas" style="display:none" onclick="scrollContas()">🔔 Contas <span class="badge" id="qtdContas">0</span></button>
-    <button class="sec" onclick="location.href='historico.html'">📊 Histórico</button>
-    <button class="sec" onclick="location.href='admin.html'">Voltar</button>
-  </div>
-</div>
+<div class="topo" id="tituloMesa">🍽️ Mesa</div>
 
 <div class="container">
-<div class="box" id="boxContas" style="display:none">
-  <h3>🧾 Mesas aguardando pagamento</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Mesa</th>
-        <th>Total</th>
-        <th>Solicitado por</th>
-        <th>Forma sugerida</th>
-        <th>Ação</th>
-      </tr>
-    </thead>
-    <tbody id="listaContas"></tbody>
-  </table>
-</div>
+  <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos(this.value)">
+
+  <h3>Produtos</h3>
+  <div id="listaProdutos"></div>
+
+  <h3>Pedido</h3>
+  <div id="pedido"></div>
+
+  <div class="total" id="totalPedido">Total: R$ 0,00</div>
+
+  <button class="pay" onclick="enviarPedido()">📨 Enviar pedido</button>
 </div>
 
 <script>
 /* ===== SUPABASE ===== */
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"; // ← coloque sua anon key aqui
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
 
-/* ===== SESSÃO ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin?.app_id){
-  alert("Sessão expirada");
-  location.href="../auth/login.html";
+/* ===== CONTEXTO ===== */
+const params = new URLSearchParams(location.search);
+const mesaId = params.get("mesa");
+const appId  = params.get("app_id");
+
+if(!mesaId || !appId){
+  alert("Sessão inválida");
+  location.href="mesas.html";
 }
 
-/* ===== FUNÇÕES ===== */
-async function verificarContas(){
-  try{
-    const { data, error } = await sb
-      .from("pedidos")
-      .select(`
-        id,
-        origem,
-        forma_pagamento_sugerida,
-        mesas(numero_mesa),
-        pedido_itens(preco,quantidade)
-      `)
-      .eq("app_id", admin.app_id)
-      .in("status", ["conta_solicitada","aguardando_pagamento"]);
+let pedidoAtual = null;
+let produtosCache = [];
 
-    if(error) throw error;
+/* ===== BLOQUEIO ===== */
+function pedidoBloqueado(){
+  return pedidoAtual && pedidoAtual.status !== "aberto";
+}
 
-    const btn = document.getElementById("btnContas");
-    const qtd = document.getElementById("qtdContas");
-    const box = document.getElementById("boxContas");
-    const lista = document.getElementById("listaContas");
+/* ===== MESA ===== */
+async function carregarMesa(){
+  const { data } = await sb
+    .from("mesas")
+    .select("numero_mesa")
+    .eq("id",mesaId)
+    .single();
 
-    lista.innerHTML = "";
+  document.getElementById("tituloMesa").innerText =
+    `🍽️ Mesa ${data.numero_mesa}`;
+}
 
-    if(data?.length){
-      btn.style.display = "inline-block";
-      btn.classList.add("piscar");
-      qtd.innerText = data.length;
-      box.style.display = "block";
+/* ===== GARANTIR PEDIDO ===== */
+async function garantirPedido(){
+  const { data } = await sb
+    .from("pedidos")
+    .select("*")
+    .eq("mesa_id",mesaId)
+    .eq("app_id",appId)
+    .not("status","in",'("pago","finalizado")')
+    .maybeSingle();
 
-      data.forEach(p=>{
-        let total = 0;
-        p.pedido_itens.forEach(i=>{
-          total += i.preco * i.quantidade;
-        });
+  if(data) return data;
 
-        lista.innerHTML += `
-          <tr>
-            <td>Mesa ${p.mesas.numero_mesa}</td>
-            <td>R$ ${total.toFixed(2)}</td>
-            <td>${p.origem==="garcom"?"🧑‍🍺 Garçom":"📱 Cliente"}</td>
-            <td>${p.forma_pagamento_sugerida?.toUpperCase()||"-"}</td>
-            <td>
-              <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
-            </td>
-          </tr>
-        `;
-      });
+  const { data: novo } = await sb
+    .from("pedidos")
+    .insert({
+      app_id: appId,
+      mesa_id: mesaId,
+      status: "aberto",
+      origem: "mesa"
+    })
+    .select()
+    .single();
 
-    } else {
-      btn.style.display = "none";
-      btn.classList.remove("piscar");
-      box.style.display = "none";
-    }
-  }catch(err){
-    console.error("Erro ao buscar contas:", err);
-    alert("Erro ao carregar contas. Veja console.");
+  return novo;
+}
+
+/* ===== PRODUTOS ===== */
+async function carregarProdutos(){
+  const { data } = await sb
+    .from("produtos")
+    .select("id,nome,preco,destino")
+    .eq("app_id",appId)
+    .eq("ativo",true)
+    .order("nome");
+
+  produtosCache = data || [];
+  renderProdutos(produtosCache);
+}
+
+function renderProdutos(lista){
+  const div = document.getElementById("listaProdutos");
+  div.innerHTML="";
+
+  lista.forEach(p=>{
+    div.innerHTML+=`
+      <div class="produto ${pedidoBloqueado()?'bloqueado':''}">
+        <span>
+          ${p.nome} - R$ ${p.preco.toFixed(2)}
+          <span class="tag ${p.destino}">${p.destino.toUpperCase()}</span>
+        </span>
+        <button onclick='addProduto(${JSON.stringify(p)})'>➕</button>
+      </div>
+    `;
+  });
+}
+
+function filtrarProdutos(txt){
+  txt=(txt||"").toLowerCase();
+  renderProdutos(produtosCache.filter(p=>p.nome.toLowerCase().includes(txt)));
+}
+
+/* ===== PEDIDO ===== */
+async function carregarPedido(){
+  const { data } = await sb
+    .from("pedido_itens")
+    .select("id,nome_produto,quantidade,preco,destino")
+    .eq("pedido_id",pedidoAtual.id);
+
+  const div=document.getElementById("pedido");
+  div.innerHTML="";
+  let total=0;
+
+  if(!data?.length){
+    div.innerHTML="<p>Nenhum item</p>";
   }
+
+  data.forEach(i=>{
+    total+=i.preco*i.quantidade;
+    div.innerHTML+=`
+      <div class="item ${pedidoBloqueado()?'bloqueado':''}">
+        <strong>${i.nome_produto}</strong>
+        <span class="tag ${i.destino}">${i.destino.toUpperCase()}</span>
+        <div class="controls">
+          <button onclick="alterarQtd('${i.id}',-1)">➖</button>
+          <span>${i.quantidade}</span>
+          <button onclick="alterarQtd('${i.id}',1)">➕</button>
+        </div>
+      </div>
+    `;
+  });
+
+  document.getElementById("totalPedido").innerText =
+    `Total: R$ ${total.toFixed(2)}`;
 }
 
-function irPagamento(id){
-  location.href = `pagamento.html?pedido=${id}&app_id=${admin.app_id}`;
+/* ===== ADD / REMOVE ===== */
+async function addProduto(p){
+  if(pedidoBloqueado()) return;
+
+  const { data } = await sb
+    .from("pedido_itens")
+    .select("id,quantidade")
+    .eq("pedido_id",pedidoAtual.id)
+    .eq("produto_id",p.id)
+    .maybeSingle();
+
+  if(data){
+    await sb.from("pedido_itens")
+      .update({quantidade:data.quantidade+1})
+      .eq("id",data.id);
+  }else{
+    await sb.from("pedido_itens").insert({
+      app_id:appId,
+      pedido_id:pedidoAtual.id,
+      produto_id:p.id,
+      nome_produto:p.nome,
+      preco:p.preco,
+      quantidade:1,
+      destino:p.destino
+    });
+  }
+  carregarPedido();
 }
 
-function scrollContas(){
-  document.getElementById("boxContas").scrollIntoView({behavior:"smooth"});
+async function alterarQtd(id,delta){
+  if(pedidoBloqueado()) return;
+
+  const { data } = await sb
+    .from("pedido_itens")
+    .select("quantidade")
+    .eq("id",id)
+    .single();
+
+  const nova=data.quantidade+delta;
+  if(nova<=0){
+    await sb.from("pedido_itens").delete().eq("id",id);
+  }else{
+    await sb.from("pedido_itens").update({quantidade:nova}).eq("id",id);
+  }
+  carregarPedido();
+}
+
+/* ===== ENVIAR ===== */
+async function enviarPedido(){
+  if(pedidoBloqueado()) return;
+
+  await sb.from("pedidos")
+    .update({status:"enviado"})
+    .eq("id",pedidoAtual.id);
+
+  pedidoAtual.status="enviado";
+  alert("Pedido enviado!");
+  carregarPedido();
 }
 
 /* ===== START ===== */
-verificarContas();
-setInterval(verificarContas,3000);
+(async()=>{
+  await carregarMesa();
+  pedidoAtual = await garantirPedido();
+  await carregarProdutos();
+  await carregarPedido();
+})();
 </script>
 
 </body>
