@@ -1,14 +1,75 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Teste Mesas</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-</head>
-<body>
+<title>Mesas - Garçom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<h2>Teste de Mesas</h2>
-<pre id="out">Carregando...</pre>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.container{padding:32px;max-width:1200px;margin:auto}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:20px
+}
+
+.card{
+  background:#0f172a;
+  padding:16px;
+  border-radius:18px;
+  text-align:center;
+  border:2px solid transparent;
+  transition:.15s
+}
+
+.card.livre{border-color:#22c55e}
+.card.preparando{border-color:#eab308}
+.card.conta{
+  border-color:#fde047;
+  box-shadow:0 0 14px rgba(253,224,71,.8);
+}
+.card.atencao{
+  border-color:#f59e0b;
+}
+.card.critico{
+  border-color:#dc2626;
+  box-shadow:0 0 14px rgba(220,38,38,.6);
+}
+
+.status{
+  margin:6px 0 10px;
+  padding:4px 10px;
+  border-radius:8px;
+  font-weight:bold;
+  font-size:13px
+}
+
+.status.livre{background:#22c55e;color:#022c22}
+.status.preparando{background:#eab308;color:#000}
+.status.conta{background:#fde047;color:#000}
+.status.atencao{background:#f59e0b;color:#000}
+.status.critico{background:#dc2626;color:#fff}
+
+button{
+  margin-top:8px;
+  width:100%;
+  background:#dc2626;
+  color:#fff;
+  border:none;
+  padding:8px;
+  border-radius:8px;
+  font-weight:700;
+  cursor:pointer;
+}
+</style>
+</head>
+
+<body>
 
 <script>
 const sb = supabase.createClient(
@@ -16,22 +77,129 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-async function testar(){
-  const { data, error } = await sb
-    .from("mesas")
-    .select("*");
+const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
+const app_id = funcionario?.app_id;
 
-  if(error){
-    document.getElementById("out").innerText =
-      "ERRO:\n" + JSON.stringify(error, null, 2);
+if(!app_id){
+  alert("Sessão inválida");
+  location.href="../auth/login.html";
+}
+</script>
+
+<div class="topo">
+  <h2>🧑‍🍺 Mesas (Garçom)</h2>
+  <button onclick="history.back()">Voltar</button>
+</div>
+
+<div class="container">
+  <div class="grid" id="listaMesas"></div>
+</div>
+
+<script>
+async function carregarMesas(){
+
+  /* ===== MESAS (MESMA CONSULTA QUE FUNCIONA) ===== */
+  const { data: mesas } = await sb
+    .from("mesas")
+    .select("id,numero_mesa")
+    .eq("app_id", app_id)
+    .eq("ativa", true)
+    .order("numero_mesa");
+
+  /* ===== PEDIDOS ATIVOS ===== */
+  const { data: pedidos } = await sb
+    .from("pedidos")
+    .select("mesa_id,status,created_at")
+    .eq("app_id", app_id)
+    .not("mesa_id","is",null)
+    .not("status","in",'("pago","finalizado")')
+    .order("created_at",{ ascending:false });
+
+  const pedidosPorMesa = {};
+  (pedidos || []).forEach(p=>{
+    if(!pedidosPorMesa[p.mesa_id]){
+      pedidosPorMesa[p.mesa_id] = p;
+    }
+  });
+
+  const grid = document.getElementById("listaMesas");
+  grid.innerHTML="";
+
+  const agora = Date.now();
+
+  mesas.forEach(m=>{
+    const pedido = pedidosPorMesa[m.id];
+
+    let classe = "livre";
+    let texto  = "LIVRE";
+    let podeLiberar = false;
+
+    if(pedido){
+      const minutos = (agora - new Date(pedido.created_at).getTime()) / 60000;
+
+      if(pedido.status === "conta_solicitada"){
+        classe="conta";
+        texto="PEDIU A CONTA";
+      }else{
+        classe="preparando";
+        texto="OCUPADA";
+      }
+
+    }else{
+      // mesa sem pedido → lógica 4 / 6 minutos
+      const minutos = (agora - new Date(m.created_at).getTime()) / 60000;
+
+      if(minutos >= 6){
+        classe="critico";
+        texto="SEM PEDIDO +6 MIN";
+        podeLiberar = true;
+      }
+      else if(minutos >= 4){
+        classe="atencao";
+        texto="SEM PEDIDO +4 MIN";
+      }
+    }
+
+    const div = document.createElement("div");
+    div.className=`card ${classe}`;
+    div.innerHTML=`
+      <h3>Mesa ${m.numero_mesa}</h3>
+      <span class="status ${classe}">${texto}</span>
+
+      ${
+        podeLiberar
+        ? `<button onclick="liberarMesa('${m.id}')">
+             🚨 Liberar mesa
+           </button>`
+        : ``
+      }
+    `;
+
+    grid.appendChild(div);
+  });
+}
+
+/* ===== LIBERAR MESA ===== */
+async function liberarMesa(mesaId){
+  const { data: pedidos } = await sb
+    .from("pedidos")
+    .select("id")
+    .eq("mesa_id", mesaId);
+
+  if(pedidos.length > 0){
+    alert("Mesa possui pedido, não pode liberar.");
     return;
   }
 
-  document.getElementById("out").innerText =
-    JSON.stringify(data, null, 2);
+  await sb.from("mesas")
+    .update({ ativa:false })
+    .eq("id", mesaId);
+
+  carregarMesas();
 }
 
-testar();
+carregarMesas();
+setInterval(carregarMesas,4000);
 </script>
 
 </body>
