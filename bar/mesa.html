@@ -10,17 +10,20 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
 .container{max-width:900px;margin:auto;padding:20px}
-input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:16px}
+input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px}
 .produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
 .produto{display:flex;justify-content:space-between;align-items:center}
-.controls{display:flex;gap:8px;margin-top:8px}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
-.pay{width:100%;padding:16px;border:none;border-radius:12px;font-size:16px;font-weight:bold;background:#2563eb;color:#fff}
+.pay{width:100%;padding:16px;border-radius:12px;font-size:16px;font-weight:bold;background:#2563eb;color:#fff;margin-bottom:10px}
+.conta{width:100%;padding:16px;border-radius:12px;font-size:16px;font-weight:bold;background:#16a34a;color:#fff}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
 .tag{font-size:13px;font-weight:bold;padding:4px 10px;border-radius:8px}
 .bar{background:#38bdf8;color:#000}
 .cozinha{background:#22c55e;color:#000}
 .bloqueado{opacity:.5;pointer-events:none}
+.filtros{display:flex;gap:8px;margin-bottom:16px}
+.filtros button{flex:1;background:#1e293b;color:#fff}
+.filtros button.ativo{background:#2563eb}
 </style>
 </head>
 
@@ -29,17 +32,24 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 <div class="topo" id="tituloMesa">🍽️ Mesa</div>
 
 <div class="container">
-  <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos(this.value)">
+  <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos()">
+
+  <!-- FILTROS ESSENCIAIS -->
+  <div class="filtros">
+    <button id="fBar" class="ativo" onclick="filtrarDestino('bar')">🍹 Bar</button>
+    <button id="fCozinha" onclick="filtrarDestino('cozinha')">🍳 Cozinha</button>
+  </div>
 
   <h3>Produtos</h3>
   <div id="listaProdutos"></div>
 
-  <h3>Pedido</h3>
+  <h3>Pedidos da mesa</h3>
   <div id="pedido"></div>
 
   <div class="total" id="totalPedido">Total: R$ 0,00</div>
 
   <button class="pay" onclick="enviarPedido()">📨 Enviar pedido</button>
+  <button class="conta" onclick="pedirConta()">🧾 Pedir conta</button>
 </div>
 
 <script>
@@ -54,18 +64,9 @@ const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 const appId  = params.get("app_id");
 
-if(!mesaId || !appId){
-  alert("Sessão inválida");
-  location.href="mesas.html";
-}
-
 let pedidoAtual = null;
 let produtosCache = [];
-
-/* ===== BLOQUEIO ===== */
-function pedidoBloqueado(){
-  return pedidoAtual && pedidoAtual.status !== "aberto";
-}
+let destinoSelecionado = "bar";
 
 /* ===== MESA ===== */
 async function carregarMesa(){
@@ -79,14 +80,14 @@ async function carregarMesa(){
     `🍽️ Mesa ${data.numero_mesa}`;
 }
 
-/* ===== GARANTIR PEDIDO ===== */
-async function garantirPedido(){
+/* ===== GARANTIR PEDIDO (RESPEITA CONSTRAINT) ===== */
+async function garantirPedidoAberto(){
   const { data } = await sb
     .from("pedidos")
     .select("*")
     .eq("mesa_id",mesaId)
     .eq("app_id",appId)
-    .not("status","in",'("pago","finalizado")')
+    .not("status","in",'("finalizado","pago")')
     .maybeSingle();
 
   if(data) return data;
@@ -94,10 +95,10 @@ async function garantirPedido(){
   const { data: novo } = await sb
     .from("pedidos")
     .insert({
-      app_id: appId,
-      mesa_id: mesaId,
-      status: "aberto",
-      origem: "mesa"
+      app_id:appId,
+      mesa_id:mesaId,
+      status:"aberto",
+      origem:"mesa"
     })
     .select()
     .single();
@@ -115,19 +116,26 @@ async function carregarProdutos(){
     .order("nome");
 
   produtosCache = data || [];
-  renderProdutos(produtosCache);
+  aplicarFiltros();
 }
 
 function renderProdutos(lista){
   const div = document.getElementById("listaProdutos");
-  div.innerHTML="";
+  div.innerHTML = "";
 
   lista.forEach(p=>{
-    div.innerHTML+=`
-      <div class="produto ${pedidoBloqueado()?'bloqueado':''}">
+    const destino = p.destino || "bar";
+    const bloqueado =
+      pedidoAtual &&
+      (pedidoAtual.status === "conta_solicitada" ||
+       pedidoAtual.status === "finalizado" ||
+       pedidoAtual.status === "pago");
+
+    div.innerHTML += `
+      <div class="produto ${bloqueado?'bloqueado':''}">
         <span>
           ${p.nome} - R$ ${p.preco.toFixed(2)}
-          <span class="tag ${p.destino}">${p.destino.toUpperCase()}</span>
+          <span class="tag ${destino}">${destino.toUpperCase()}</span>
         </span>
         <button onclick='addProduto(${JSON.stringify(p)})'>➕</button>
       </div>
@@ -135,37 +143,57 @@ function renderProdutos(lista){
   });
 }
 
-function filtrarProdutos(txt){
-  txt=(txt||"").toLowerCase();
-  renderProdutos(produtosCache.filter(p=>p.nome.toLowerCase().includes(txt)));
+/* ===== FILTROS ===== */
+function filtrarProdutos(){
+  aplicarFiltros();
 }
 
-/* ===== PEDIDO ===== */
-async function carregarPedido(){
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id,nome_produto,quantidade,preco,destino")
-    .eq("pedido_id",pedidoAtual.id);
+function filtrarDestino(destino){
+  destinoSelecionado = destino;
 
-  const div=document.getElementById("pedido");
-  div.innerHTML="";
-  let total=0;
+  document.querySelectorAll(".filtros button")
+    .forEach(b=>b.classList.remove("ativo"));
 
-  if(!data?.length){
-    div.innerHTML="<p>Nenhum item</p>";
+  if(destino === "bar"){
+    document.getElementById("fBar").classList.add("ativo");
+  } else {
+    document.getElementById("fCozinha").classList.add("ativo");
   }
 
-  data.forEach(i=>{
-    total+=i.preco*i.quantidade;
-    div.innerHTML+=`
-      <div class="item ${pedidoBloqueado()?'bloqueado':''}">
+  aplicarFiltros();
+}
+
+function aplicarFiltros(){
+  const texto = document.querySelector("input").value.toLowerCase();
+
+  let lista = produtosCache.filter(p =>
+    p.nome.toLowerCase().includes(texto)
+  );
+
+  lista = lista.filter(p => (p.destino || "bar") === destinoSelecionado);
+
+  renderProdutos(lista);
+}
+
+/* ===== PEDIDOS ===== */
+async function carregarPedido(){
+  const { data: itens } = await sb
+    .from("pedido_itens")
+    .select("*")
+    .eq("pedido_id",pedidoAtual.id);
+
+  const div = document.getElementById("pedido");
+  div.innerHTML = "";
+  let total = 0;
+
+  itens.forEach(i=>{
+    const destino = i.destino || "bar";
+    total += i.preco * i.quantidade;
+    div.innerHTML += `
+      <div class="item">
         <strong>${i.nome_produto}</strong>
-        <span class="tag ${i.destino}">${i.destino.toUpperCase()}</span>
-        <div class="controls">
-          <button onclick="alterarQtd('${i.id}',-1)">➖</button>
-          <span>${i.quantidade}</span>
-          <button onclick="alterarQtd('${i.id}',1)">➕</button>
-        </div>
+        <span class="tag ${destino}">${destino.toUpperCase()}</span>
+        <div>x ${i.quantidade}</div>
       </div>
     `;
   });
@@ -174,9 +202,14 @@ async function carregarPedido(){
     `Total: R$ ${total.toFixed(2)}`;
 }
 
-/* ===== ADD / REMOVE ===== */
+/* ===== ADD PRODUTO (AJUSTE PRINCIPAL AQUI) ===== */
 async function addProduto(p){
-  if(pedidoBloqueado()) return;
+  if(
+    !pedidoAtual ||
+    pedidoAtual.status === "conta_solicitada" ||
+    pedidoAtual.status === "finalizado" ||
+    pedidoAtual.status === "pago"
+  ) return;
 
   const { data } = await sb
     .from("pedido_itens")
@@ -200,44 +233,28 @@ async function addProduto(p){
       destino:p.destino
     });
   }
+
   carregarPedido();
 }
 
-async function alterarQtd(id,delta){
-  if(pedidoBloqueado()) return;
-
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("quantidade")
-    .eq("id",id)
-    .single();
-
-  const nova=data.quantidade+delta;
-  if(nova<=0){
-    await sb.from("pedido_itens").delete().eq("id",id);
-  }else{
-    await sb.from("pedido_itens").update({quantidade:nova}).eq("id",id);
-  }
-  carregarPedido();
-}
-
-/* ===== ENVIAR ===== */
+/* ===== AÇÕES ===== */
 async function enviarPedido(){
-  if(pedidoBloqueado()) return;
+  alert("Pedido enviado!");
+}
 
-  await sb.from("pedidos")
-    .update({status:"enviado"})
+async function pedirConta(){
+  await sb
+    .from("pedidos")
+    .update({ status:"conta_solicitada" })
     .eq("id",pedidoAtual.id);
 
-  pedidoAtual.status="enviado";
-  alert("Pedido enviado!");
-  carregarPedido();
+  alert("Conta solicitada! Aguarde o garçom 🧾");
 }
 
 /* ===== START ===== */
 (async()=>{
   await carregarMesa();
-  pedidoAtual = await garantirPedido();
+  pedidoAtual = await garantirPedidoAberto();
   await carregarProdutos();
   await carregarPedido();
 })();
