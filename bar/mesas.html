@@ -5,6 +5,10 @@
 <title>Mesas</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<!-- ✅ PWA (MESMO DO BAR) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#020617">
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
@@ -12,25 +16,89 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
 .container{padding:32px;max-width:1200px;margin:auto}
-.btn{border:none;padding:10px 16px;border-radius:10px;font-weight:bold;cursor:pointer}
+
+.btn{
+  border:none;padding:10px 16px;border-radius:10px;
+  font-weight:bold;cursor:pointer
+}
 .btn-add{background:#22c55e}
 .btn-avulsa{background:#38bdf8}
 .btn-voltar{background:#1e293b;color:#fff}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px}
-.card{background:#0f172a;padding:16px;border-radius:18px;text-align:center;border:2px solid transparent;cursor:pointer;transition:.15s}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:20px
+}
+
+.card{
+  background:#0f172a;
+  padding:16px;
+  border-radius:18px;
+  text-align:center;
+  border:2px solid transparent;
+  cursor:pointer;
+  transition:.15s
+}
 .card:hover{transform:scale(1.03)}
+
 .card.livre{border-color:#22c55e}
 .card.preparando{border-color:#eab308}
-.card.conta{border-color:#fde047;box-shadow:0 0 14px rgba(253,224,71,.8);}
-.status{margin:6px 0 10px;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:13px}
+.card.conta{
+  border-color:#fde047;
+  box-shadow:0 0 14px rgba(253,224,71,.8);
+}
+
+.status{
+  margin:6px 0 10px;
+  padding:4px 10px;
+  border-radius:8px;
+  font-weight:bold;
+  font-size:13px
+}
 .status.livre{background:#22c55e;color:#022c22}
 .status.preparando{background:#eab308;color:#000}
 .status.conta{background:#fde047;color:#000}
-.qr{background:#020617;border-radius:14px;padding:10px;margin:12px 0;display:flex;justify-content:center}
-.btn-remover{margin-top:8px;width:100%;background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
+
+.qr{
+  background:#020617;
+  border-radius:14px;
+  padding:10px;
+  margin:12px 0;
+  display:flex;
+  justify-content:center
+}
+
+.btn-remover{
+  margin-top:8px;width:100%;
+  background:#1e293b;color:#94a3b8;
+  border:1px solid #334155;
+  padding:8px;border-radius:8px;
+  font-weight:600;cursor:pointer;font-size:13px
+}
 </style>
 </head>
+
 <body>
+
+<script>
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
+const app_id = funcionario?.app_id || admin?.app_id;
+
+if(!app_id){
+  alert("Sessão inválida");
+  location.href="../auth/login.html";
+}
+
+const SEGREDO_REMOVER_MESA = "4321";
+let criandoMesa = false;
+</script>
 
 <div class="topo">
   <h2>🪑 Mesas</h2>
@@ -46,42 +114,15 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"; // ← Coloque aqui a anon key correta
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-/* ===== SESSÃO ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
-const app_id = funcionario?.app_id || admin?.app_id;
-
-if(!app_id){
-  alert("Sessão inválida");
-  location.href="../auth/login.html";
-}
-
-const SEGREDO_REMOVER_MESA = "4321";
-let criandoMesa = false;
-
-/* ===== FUNÇÕES ===== */
 async function carregarMesas(){
 
-  // Mesas ativas
-  const { data: mesas, error: mesasError } = await sb
+  const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
     .eq("app_id", app_id)
     .eq("ativa", true)
     .order("numero_mesa");
 
-  if(mesasError){
-    console.error("Erro ao carregar mesas:", mesasError);
-    alert("Erro ao carregar mesas. Veja console.");
-    return;
-  }
-
-  // Pedidos ativos
   const { data: pedidos } = await sb
     .from("pedidos")
     .select("mesa_id,status,created_at")
@@ -91,7 +132,7 @@ async function carregarMesas(){
     .order("created_at",{ ascending:false });
 
   const pedidosPorMesa = {};
-  (pedidos || []).forEach(p => {
+  (pedidos || []).forEach(p=>{
     if(!pedidosPorMesa[p.mesa_id]){
       pedidosPorMesa[p.mesa_id] = p;
     }
@@ -102,44 +143,52 @@ async function carregarMesas(){
 
   mesas.forEach(m=>{
     const pedido = pedidosPorMesa[m.id];
-    let classe="livre", texto="LIVRE";
+
+    let classe = "livre";
+    let texto  = "LIVRE";
+
     if(pedido){
-      if(pedido.status==="conta_solicitada"){ classe="conta"; texto="PEDIU A CONTA"; }
-      else { classe="preparando"; texto="OCUPADA"; }
+      if(pedido.status === "conta_solicitada"){
+        classe="conta"; texto="PEDIU A CONTA";
+      }else{
+        classe="preparando"; texto="OCUPADA";
+      }
     }
 
     const div = document.createElement("div");
-    div.className = `card ${classe}`;
-    div.innerHTML = `
+    div.className=`card ${classe}`;
+    div.innerHTML=`
       <h3>Mesa ${m.numero_mesa}</h3>
       <span class="status ${classe}">${texto}</span>
-      <div class="qr"><canvas id="qr-${m.id}"></canvas></div>
+
+      <div class="qr">
+        <canvas id="qr-${m.id}"></canvas>
+      </div>
+
       ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ``}
     `;
 
-    div.onclick = () => {
-      location.href = `mesa.html?mesa=${m.id}&app_id=${app_id}`;
+    div.onclick=()=>{
+      location.href=`mesa.html?mesa=${m.id}&app_id=${app_id}`;
     };
 
     grid.appendChild(div);
 
-    // QR Code
     QRCode.toCanvas(
       document.getElementById(`qr-${m.id}`),
-      `${location.origin}/bar/mesa.html?mesa=${m.id}&app_id=${app_id}`,
+      `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/mesa.html?mesa=${m.id}&app_id=${app_id}`,
       { width:120 }
     );
 
-    // Remover mesa
-    const btn = div.querySelector(".btn-remover");
+    const btn=div.querySelector(".btn-remover");
     if(btn){
-      btn.onclick = async (e) => {
+      btn.onclick=async(e)=>{
         e.stopPropagation();
-        const senha = prompt("Código para remover a mesa:");
+        const senha=prompt("Código para remover a mesa:");
         if(senha!==SEGREDO_REMOVER_MESA) return;
-        await sb.from("mesas").update({ativa:false}).eq("id", m.id);
+        await sb.from("mesas").update({ativa:false}).eq("id",m.id);
         carregarMesas();
-      }
+      };
     }
   });
 }
@@ -151,13 +200,13 @@ async function adicionarMesa(){
   const { data } = await sb
     .from("mesas")
     .select("numero_mesa")
-    .eq("app_id", app_id)
+    .eq("app_id",app_id)
     .order("numero_mesa",{ascending:false})
     .limit(1)
     .maybeSingle();
 
-  const prox = (data?.numero_mesa || 0) + 1;
-  await sb.from("mesas").insert({app_id, numero_mesa:prox, ativa:true});
+  const prox=(data?.numero_mesa||0)+1;
+  await sb.from("mesas").insert({app_id,numero_mesa:prox,ativa:true});
   criandoMesa=false;
   carregarMesas();
 }
@@ -166,9 +215,13 @@ function vendaAvulsa(){
   location.href=`venda-avulsa.html?app_id=${app_id}`;
 }
 
-/* ===== START ===== */
 carregarMesas();
 setInterval(carregarMesas,4000);
+
+/* ✅ REGISTRO DO SERVICE WORKER (PWA DO BAR) */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
 </script>
 
 </body>
