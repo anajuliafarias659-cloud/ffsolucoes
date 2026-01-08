@@ -26,15 +26,11 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .filtros button{flex:1;background:#1e293b;color:#fff}
 .filtros button.ativo{background:#2563eb}
 
-/* item controls */
+/* botoes do item */
 .itemRow{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .itemBtns{display:flex;gap:8px;align-items:center}
 .btnMenos{background:#f59e0b;color:#000;font-weight:bold}
 .btnRemover{background:#dc2626;color:#fff;font-weight:bold}
-
-/* status badge */
-.stNovo{background:#fbbf24;color:#000}
-.stEnviado{background:#94a3b8;color:#000}
 </style>
 </head>
 
@@ -58,17 +54,19 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
   <div class="total" id="totalPedido">Total: R$ 0,00</div>
 
-  <button class="pay" onclick="enviarPedido()">📨 Enviar itens novos</button>
+  <button class="pay" onclick="enviarPedido()">📨 Enviar pedido</button>
   <button class="conta" onclick="pedirConta()">🧾 Pedir conta</button>
   <button class="liberar" id="btnLiberar" onclick="liberarMesa()">🔓 Liberar mesa</button>
 </div>
 
 <script>
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* ===== CONTEXTO ===== */
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 const appId  = params.get("app_id");
@@ -77,12 +75,7 @@ let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
 
-function badgeStatus(st){
-  if(st === "enviado") return `<span class="tag stEnviado">ENVIADO</span>`;
-  return `<span class="tag stNovo">NOVO</span>`;
-}
-
-/* MESA */
+/* ===== MESA ===== */
 async function carregarMesa(){
   const { data } = await sb
     .from("mesas")
@@ -94,28 +87,33 @@ async function carregarMesa(){
     `🍽️ Mesa ${data.numero_mesa}`;
 }
 
-/* PEDIDO (sempre 1 carrinho aberto) */
+/* ===== PEDIDO ===== */
 async function garantirPedidoAberto(){
   const { data } = await sb
     .from("pedidos")
     .select("*")
     .eq("mesa_id",mesaId)
     .eq("app_id",appId)
-    .eq("status","aberto")
+    .not("status","in",'("finalizado","pago")')
     .maybeSingle();
 
   if(data) return data;
 
   const { data: novo } = await sb
     .from("pedidos")
-    .insert({ app_id:appId, mesa_id:mesaId, status:"aberto", origem:"mesa" })
+    .insert({
+      app_id:appId,
+      mesa_id:mesaId,
+      status:"aberto",
+      origem:"mesa"
+    })
     .select()
     .single();
 
   return novo;
 }
 
-/* PRODUTOS */
+/* ===== PRODUTOS ===== */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
@@ -132,29 +130,35 @@ function renderProdutos(lista){
   const div = document.getElementById("listaProdutos");
   div.innerHTML="";
 
-  const bloqueado = !pedidoAtual || pedidoAtual.status !== "aberto";
-
   lista.forEach(p=>{
+    const bloqueado = pedidoAtual.status !== "aberto";
+
     div.innerHTML += `
       <div class="produto ${bloqueado?'bloqueado':''}">
         <span>
           ${p.nome} - R$ ${Number(p.preco).toFixed(2)}
           <span class="tag ${p.destino}">${String(p.destino).toUpperCase()}</span>
         </span>
+
+        <!-- AQUI: nao usa JSON.stringify (evita quebrar com aspas/emoji no nome) -->
         <button onclick="addProduto('${p.id}')">➕</button>
       </div>
     `;
   });
 }
 
-/* FILTROS */
+/* ===== FILTROS ===== */
 function filtrarDestino(dest){
   destinoSelecionado = dest;
-  document.querySelectorAll(".filtros button").forEach(b=>b.classList.remove("ativo"));
-  document.getElementById(dest==="bar"?"fBar":"fCozinha").classList.add("ativo");
+  document.querySelectorAll(".filtros button")
+    .forEach(b=>b.classList.remove("ativo"));
+  document.getElementById(dest==="bar"?"fBar":"fCozinha")
+    .classList.add("ativo");
   aplicarFiltros();
 }
+
 function filtrarProdutos(){ aplicarFiltros(); }
+
 function aplicarFiltros(){
   const txt = document.querySelector("input").value.toLowerCase();
   renderProdutos(
@@ -165,22 +169,21 @@ function aplicarFiltros(){
   );
 }
 
-/* ITENS */
+/* ===== ITENS ===== */
 async function carregarPedido(){
   const { data } = await sb
     .from("pedido_itens")
     .select("*")
-    .eq("pedido_id",pedidoAtual.id)
-    .order("created_at",{ascending:true});
+    .eq("pedido_id",pedidoAtual.id);
 
   const div = document.getElementById("pedido");
   div.innerHTML="";
   let total = 0;
 
+  const podeEditar = pedidoAtual.status === "aberto";
+
   (data || []).forEach(i=>{
     total += Number(i.preco) * Number(i.quantidade);
-
-    const podeEditarItem = (pedidoAtual.status === "aberto" && i.status === "novo");
 
     div.innerHTML += `
       <div class="item">
@@ -188,11 +191,11 @@ async function carregarPedido(){
           <div>
             ${i.nome_produto} x ${i.quantidade}
             <span class="tag ${i.destino}">${String(i.destino).toUpperCase()}</span>
-            ${badgeStatus(i.status)}
           </div>
 
-          ${podeEditarItem ? `
+          ${podeEditar ? `
             <div class="itemBtns">
+              <!-- AQUI: id entre aspas pq pode ser UUID -->
               <button class="btnMenos" onclick="diminuirItem('${i.id}', ${i.quantidade})">➖</button>
               <button class="btnRemover" onclick="removerItem('${i.id}')">Remover</button>
             </div>
@@ -212,20 +215,18 @@ async function carregarPedido(){
   }
 }
 
-/* ADD PRODUTO (somente no lote NOVO) */
+/* ===== ADD PRODUTO ===== */
 async function addProduto(produtoId){
-  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
+  if(pedidoAtual.status !== "aberto") return;
 
   const p = produtosCache.find(x => String(x.id) === String(produtoId));
   if(!p) return;
 
-  // procura item NOVO do mesmo produto
   const { data } = await sb
     .from("pedido_itens")
     .select("id,quantidade")
     .eq("pedido_id",pedidoAtual.id)
     .eq("produto_id",p.id)
-    .eq("status","novo")
     .maybeSingle();
 
   if(data){
@@ -248,60 +249,60 @@ async function addProduto(produtoId){
   carregarPedido();
 }
 
-/* DIMINUI/REMOVE (só itens NOVO) */
+/* ===== DIMINUI / REMOVE (SÓ ANTES DE ENVIAR) ===== */
 async function diminuirItem(itemId, qtd){
+  if(pedidoAtual.status !== "aberto") return;
+
   const q = Number(qtd);
+
   if(q > 1){
-    await sb.from("pedido_itens").update({ quantidade: q - 1 }).eq("id", itemId);
+    await sb.from("pedido_itens")
+      .update({ quantidade: q - 1 })
+      .eq("id", itemId);
   }else{
-    await sb.from("pedido_itens").delete().eq("id", itemId);
+    await sb.from("pedido_itens")
+      .delete()
+      .eq("id", itemId);
   }
+
   carregarPedido();
 }
 
 async function removerItem(itemId){
-  if(!confirm("Remover este item do lote novo?")) return;
-  await sb.from("pedido_itens").delete().eq("id", itemId);
+  if(pedidoAtual.status !== "aberto") return;
+
+  if(!confirm("Remover este item do pedido?")) return;
+
+  await sb.from("pedido_itens")
+    .delete()
+    .eq("id", itemId);
+
   carregarPedido();
 }
 
-/* ENVIAR (baixa estoque só do NOVO e marca como ENVIADO) */
+/* ===== AÇÕES ===== */
 async function enviarPedido(){
-  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
+  if(pedidoAtual.status !== "aberto") return;
 
-  const { data: itensNovos } = await sb
-    .from("pedido_itens")
-    .select("id")
-    .eq("pedido_id", pedidoAtual.id)
-    .eq("status","novo");
+  await sb.from("pedidos")
+    .update({status:"enviado"})
+    .eq("id",pedidoAtual.id);
 
-  if(!itensNovos || !itensNovos.length){
-    alert("Não há itens novos para enviar.");
-    return;
-  }
+  // trava local (sem precisar recarregar)
+  pedidoAtual.status = "enviado";
 
-  const { error } = await sb.rpc("enviar_itens_novos_com_baixa", {
-    p_pedido_id: pedidoAtual.id
-  });
-
-  if(error){
-    console.log(error);
-    alert("Falha ao enviar/baixar estoque: " + (error.message || "erro"));
-    return;
-  }
-
-  alert("✅ Itens novos enviados! Pode continuar pedindo.");
+  alert("📨 Pedido enviado!");
+  aplicarFiltros();
   carregarPedido();
 }
 
-/* PEDIR CONTA (fecha a brincadeira) */
 async function pedirConta(){
   const { data } = await sb
     .from("pedido_itens")
     .select("id")
     .eq("pedido_id",pedidoAtual.id);
 
-  if(!data || !data.length){
+  if(!data.length){
     alert("Não há pedidos.");
     return;
   }
@@ -310,21 +311,18 @@ async function pedirConta(){
     .update({status:"conta_solicitada"})
     .eq("id",pedidoAtual.id);
 
-  pedidoAtual.status = "conta_solicitada";
   alert("🧾 Conta solicitada!");
-  aplicarFiltros();
-  carregarPedido();
 }
 
-/* LIBERAR MESA */
+/* ===== LIBERAR MESA ===== */
 async function liberarMesa(){
   const { data } = await sb
     .from("pedido_itens")
     .select("id")
     .eq("pedido_id",pedidoAtual.id);
 
-  if(data && data.length){
-    alert("🚫 Mesa possui itens no pedido. Finalize/pague antes.");
+  if(data.length){
+    alert("🚫 Mesa possui pedidos ativos.");
     return;
   }
 
@@ -338,7 +336,7 @@ async function liberarMesa(){
   location.href="mesas.html";
 }
 
-/* START */
+/* ===== START ===== */
 (async()=>{
   await carregarMesa();
   pedidoAtual = await garantirPedidoAberto();
