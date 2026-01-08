@@ -25,6 +25,8 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .filtros{display:flex;gap:8px;margin-bottom:16px}
 .filtros button{flex:1;background:#1e293b;color:#fff}
 .filtros button.ativo{background:#2563eb}
+.qtdBtns{display:flex;gap:6px;margin-top:6px}
+.qtdBtns button{font-weight:bold}
 </style>
 </head>
 
@@ -54,6 +56,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 </div>
 
 <script>
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -133,7 +136,7 @@ function renderProdutos(lista){
             ${p.destino.toUpperCase()}
           </span>
         </span>
-        <button onclick='addProduto(${JSON.stringify(p)})'>➕</button>
+        <button onclick="addProduto(${p.id})">➕</button>
       </div>
     `;
   });
@@ -161,7 +164,7 @@ function aplicarFiltros(){
   );
 }
 
-/* ===== PEDIDO ITENS ===== */
+/* ===== PEDIDO ===== */
 async function carregarPedido(){
   const { data } = await sb
     .from("pedido_itens")
@@ -186,10 +189,12 @@ async function carregarPedido(){
         </div>
 
         ${podeEditar ? `
-          <button onclick="removerItem(${i.id})"
-            style="background:#dc2626;color:#fff;margin-top:6px">
-            ❌ Remover
-          </button>
+          <div class="qtdBtns">
+            <button onclick="diminuirItem(${i.id},${i.quantidade})"
+              style="background:#f59e0b;color:#000">➖</button>
+            <button onclick="addProduto(${i.produto_id})"
+              style="background:#22c55e;color:#000">➕</button>
+          </div>
         ` : ``}
       </div>
     `;
@@ -199,21 +204,22 @@ async function carregarPedido(){
     `Total: R$ ${total.toFixed(2)}`;
 
   const btn = document.getElementById("btnLiberar");
-  if(btn){
-    data.length ? btn.classList.add("bloqueado")
-                : btn.classList.remove("bloqueado");
-  }
+  data.length ? btn.classList.add("bloqueado")
+              : btn.classList.remove("bloqueado");
 }
 
-/* ===== ADD / REMOVE ===== */
-async function addProduto(p){
+/* ===== ADD / DIMINUI ===== */
+async function addProduto(produtoId){
   if(pedidoAtual.status !== "aberto") return;
+
+  const p = produtosCache.find(x => x.id === produtoId);
+  if(!p) return;
 
   const { data } = await sb
     .from("pedido_itens")
     .select("id,quantidade")
     .eq("pedido_id",pedidoAtual.id)
-    .eq("produto_id",p.id)
+    .eq("produto_id",produtoId)
     .maybeSingle();
 
   if(data){
@@ -236,17 +242,18 @@ async function addProduto(p){
   carregarPedido();
 }
 
-async function removerItem(itemId){
-  if(pedidoAtual.status !== "aberto"){
-    alert("🚫 Pedido já enviado.");
-    return;
+async function diminuirItem(itemId,qtd){
+  if(pedidoAtual.status !== "aberto") return;
+
+  if(qtd > 1){
+    await sb.from("pedido_itens")
+      .update({quantidade:qtd-1})
+      .eq("id",itemId);
+  }else{
+    await sb.from("pedido_itens")
+      .delete()
+      .eq("id",itemId);
   }
-
-  if(!confirm("Remover este item?")) return;
-
-  await sb.from("pedido_itens")
-    .delete()
-    .eq("id",itemId);
 
   carregarPedido();
 }
@@ -259,8 +266,8 @@ async function enviarPedido(){
     .update({status:"enviado"})
     .eq("id",pedidoAtual.id);
 
+  pedidoAtual.status="enviado";
   alert("📨 Pedido enviado!");
-  pedidoAtual.status = "enviado";
   carregarPedido();
   carregarProdutos();
 }
