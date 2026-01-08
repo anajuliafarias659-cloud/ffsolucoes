@@ -5,27 +5,23 @@
 <title>Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
 .container{max-width:900px;margin:auto;padding:20px}
 input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px}
-.produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
-.produto{display:flex;justify-content:space-between;align-items:center}
+.produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
-.bloqueado{opacity:.4;pointer-events:none}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
+.bloqueado{opacity:.4;pointer-events:none}
 </style>
 </head>
-
 <body>
 
 <div class="topo" id="tituloMesa">Mesa</div>
 
 <div class="container">
-  <input placeholder="Buscar produto" oninput="filtrarProdutos()">
-
+  <input placeholder="Buscar produto..." oninput="filtrarProdutos()">
   <h3>Produtos</h3>
   <div id="listaProdutos"></div>
 
@@ -34,96 +30,125 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
   <div class="total" id="totalPedido">Total: R$ 0,00</div>
 
-  <button onclick="enviarPedido()">Enviar pedido</button>
+  <button id="btnEnviar">Enviar pedido</button>
 </div>
 
 <script>
-var sb = supabase.createClient(
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-var params = new URLSearchParams(location.search);
-var mesaId = params.get("mesa");
-var appId  = params.get("app_id");
+const params = new URLSearchParams(location.search);
+const mesaId = params.get("mesa");
+const appId  = params.get("app_id");
 
-var pedidoAtual = null;
-var produtosCache = [];
+let pedidoAtual = null;
+let produtosCache = [];
 
+// ===== MESA =====
 async function carregarMesa(){
-  var r = await sb.from("mesas")
+  const { data } = await sb.from("mesas")
     .select("numero_mesa")
     .eq("id",mesaId)
     .single();
-
-  document.getElementById("tituloMesa").innerText =
-    "Mesa " + r.data.numero_mesa;
+  document.getElementById("tituloMesa").innerText = "Mesa " + data.numero_mesa;
 }
 
+// ===== PEDIDO =====
 async function garantirPedido(){
-  var r = await sb.from("pedidos")
+  const { data } = await sb.from("pedidos")
     .select("*")
     .eq("mesa_id",mesaId)
     .eq("app_id",appId)
-    .eq("status","aberto")
+    .not("status","in",'("finalizado","pago")')
     .maybeSingle();
+  if(data) return data;
 
-  if(r.data) return r.data;
-
-  var n = await sb.from("pedidos")
+  const { data: novo } = await sb.from("pedidos")
     .insert({mesa_id:mesaId,app_id:appId,status:"aberto"})
-    .select()
-    .single();
-
-  return n.data;
+    .select().single();
+  return novo;
 }
 
+// ===== PRODUTOS =====
 async function carregarProdutos(){
-  var r = await sb.from("produtos")
+  const { data } = await sb.from("produtos")
     .select("id,nome,preco")
     .eq("app_id",appId)
-    .eq("ativo",true);
-
-  produtosCache = r.data || [];
+    .eq("ativo",true)
+    .order("nome");
+  produtosCache = data || [];
   renderProdutos(produtosCache);
 }
 
 function renderProdutos(lista){
-  var div = document.getElementById("listaProdutos");
+  const div = document.getElementById("listaProdutos");
   div.innerHTML = "";
+  lista.forEach(p=>{
+    const prodDiv = document.createElement("div");
+    prodDiv.className = "produto";
 
-  lista.forEach(function(p){
-    div.innerHTML +=
-      "<div class='produto'>" +
-        "<span>"+p.nome+" - R$ "+p.preco.toFixed(2)+"</span>" +
-        "<button onclick=\"addProdutoPorId('"+p.id+"')\">+</button>" +
-      "</div>";
+    const span = document.createElement("span");
+    span.textContent = p.nome + " - R$ " + p.preco.toFixed(2);
+
+    const btn = document.createElement("button");
+    btn.textContent = "+";
+    btn.addEventListener("click",()=>addProduto(p));
+
+    prodDiv.appendChild(span);
+    prodDiv.appendChild(btn);
+    div.appendChild(prodDiv);
   });
 }
 
 function filtrarProdutos(){
-  var t = document.querySelector("input").value.toLowerCase();
-  renderProdutos(produtosCache.filter(function(p){
-    return p.nome.toLowerCase().indexOf(t) > -1;
-  }));
+  const txt = document.querySelector("input").value.toLowerCase();
+  renderProdutos(produtosCache.filter(p=>p.nome.toLowerCase().includes(txt)));
 }
 
-function addProdutoPorId(id){
-  var p = produtosCache.find(function(x){ return x.id === id; });
-  if(p) addProduto(p);
+// ===== PEDIDO ITENS =====
+async function carregarPedido(){
+  const { data } = await sb.from("pedido_itens")
+    .select("*")
+    .eq("pedido_id",pedidoAtual.id);
+
+  const div = document.getElementById("pedido");
+  div.innerHTML = "";
+  let total = 0;
+
+  data.forEach(i=>{
+    total += i.preco * i.quantidade;
+
+    const itemDiv = document.createElement("div");
+    itemDiv.className = "item";
+    itemDiv.textContent = i.nome_produto + " x " + i.quantidade;
+
+    if(pedidoAtual.status === "aberto"){
+      const btnRem = document.createElement("button");
+      btnRem.textContent = "-";
+      btnRem.addEventListener("click",()=>removerProduto(i.id,i.quantidade));
+      itemDiv.appendChild(btnRem);
+    }
+
+    div.appendChild(itemDiv);
+  });
+
+  document.getElementById("totalPedido").innerText = "Total: R$ " + total.toFixed(2);
 }
 
+// ===== ADD PRODUTO =====
 async function addProduto(p){
-  var r = await sb.from("pedido_itens")
+  if(pedidoAtual.status !== "aberto") return;
+
+  const { data } = await sb.from("pedido_itens")
     .select("id,quantidade")
     .eq("pedido_id",pedidoAtual.id)
     .eq("produto_id",p.id)
     .maybeSingle();
 
-  if(r.data){
-    await sb.from("pedido_itens")
-      .update({quantidade:r.data.quantidade+1})
-      .eq("id",r.data.id);
+  if(data){
+    await sb.from("pedido_itens").update({quantidade:data.quantidade+1}).eq("id",data.id);
   }else{
     await sb.from("pedido_itens").insert({
       pedido_id:pedidoAtual.id,
@@ -133,60 +158,36 @@ async function addProduto(p){
       quantidade:1
     });
   }
-
   carregarPedido();
 }
 
+// ===== REMOVER PRODUTO =====
 async function removerProduto(id,q){
-  if(q > 1){
-    await sb.from("pedido_itens")
-      .update({quantidade:q-1})
-      .eq("id",id);
+  if(pedidoAtual.status !== "aberto") return;
+  if(q>1){
+    await sb.from("pedido_itens").update({quantidade:q-1}).eq("id",id);
   }else{
-    await sb.from("pedido_itens")
-      .delete()
-      .eq("id",id);
+    await sb.from("pedido_itens").delete().eq("id",id);
   }
   carregarPedido();
 }
 
-async function carregarPedido(){
-  var r = await sb.from("pedido_itens")
-    .select("*")
-    .eq("pedido_id",pedidoAtual.id);
+// ===== ENVIAR PEDIDO =====
+document.getElementById("btnEnviar").addEventListener("click", async()=>{
+  if(pedidoAtual.status !== "aberto") return;
+  await sb.from("pedidos").update({status:"enviado"}).eq("id",pedidoAtual.id);
+  pedidoAtual.status = "enviado";
+  carregarPedido();
+  alert("Pedido enviado!");
+});
 
-  var div = document.getElementById("pedido");
-  div.innerHTML = "";
-  var total = 0;
-
-  r.data.forEach(function(i){
-    total += i.preco * i.quantidade;
-    div.innerHTML +=
-      "<div class='item'>" +
-        i.nome_produto+" x "+i.quantidade+
-        " <button onclick='removerProduto("+i.id+","+i.quantidade+")'>-</button>" +
-      "</div>";
-  });
-
-  document.getElementById("totalPedido").innerText =
-    "Total: R$ " + total.toFixed(2);
-}
-
-async function enviarPedido(){
-  await sb.from("pedidos")
-    .update({status:"enviado"})
-    .eq("id",pedidoAtual.id);
-
-  alert("Pedido enviado");
-}
-
-(async function(){
+// ===== START =====
+(async()=>{
   await carregarMesa();
   pedidoAtual = await garantirPedido();
   await carregarProdutos();
   await carregarPedido();
 })();
 </script>
-
 </body>
 </html>
