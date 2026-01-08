@@ -15,17 +15,15 @@ input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px}
 .produto{display:flex;justify-content:space-between;align-items:center}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .pay{width:100%;padding:16px;border-radius:12px;font-size:16px;font-weight:bold;background:#2563eb;color:#fff;margin-bottom:10px}
-.conta{width:100%;padding:16px;border-radius:12px;font-size:16px;font-weight:bold;background:#16a34a;color:#fff;margin-bottom:10px}
-.liberar{width:100%;padding:16px;border-radius:12px;font-size:16px;font-weight:bold;background:#dc2626;color:#fff}
+.conta{width:100%;padding:16px;border-radius:12px;font-size:16px;font-weight:bold;background:#16a34a;color:#fff}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
 .tag{font-size:12px;font-weight:bold;padding:4px 8px;border-radius:8px}
 .bar{background:#38bdf8;color:#000}
 .cozinha{background:#22c55e;color:#000}
-.itemRow{display:flex;justify-content:space-between;align-items:center}
+.itemRow{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .itemBtns{display:flex;gap:8px}
-.btnMenos{background:#f59e0b;color:#000}
-.btnRemover{background:#dc2626;color:#fff}
-.bloqueado{opacity:.4;pointer-events:none}
+.btnMenos{background:#f59e0b;color:#000;font-weight:bold}
+.btnRemover{background:#dc2626;color:#fff;font-weight:bold}
 .status{font-size:12px;opacity:.7;margin-left:6px}
 </style>
 </head>
@@ -47,7 +45,6 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
   <button class="pay" onclick="enviarPedido()">📨 Enviar pedido</button>
   <button class="conta" onclick="pedirConta()">🧾 Pedir conta</button>
-  <button class="liberar bloqueado" id="btnLiberar" onclick="liberarMesa()">🔓 Liberar mesa</button>
 </div>
 
 <script>
@@ -87,7 +84,6 @@ async function carregarPedido(){
 
   if(data){
     pedidoAtual = data;
-    controlarLiberacao();
     return;
   }
 
@@ -102,30 +98,33 @@ async function carregarPedido(){
     .single();
 
   pedidoAtual = novo;
-  controlarLiberacao();
 }
 
 /* ===== PRODUTOS ===== */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
-    .select("id,nome,preco")
+    .select("id,nome,preco,destino")
     .eq("ativo", true);
 
   produtos = data || [];
-  renderProdutos();
+  renderProdutos(produtos);
 }
 
-function renderProdutos(){
+function renderProdutos(lista){
   const div = document.getElementById("listaProdutos");
   div.innerHTML="";
 
-  produtos.forEach(p=>{
+  lista.forEach(p=>{
     div.innerHTML += `
       <div class="produto">
-        <span>${p.nome} - R$ ${p.preco.toFixed(2)}</span>
+        <span>
+          ${p.nome} - R$ ${p.preco.toFixed(2)}
+          <span class="tag ${p.destino}">${p.destino}</span>
+        </span>
         <button onclick="addProduto('${p.id}')">➕</button>
-      </div>`;
+      </div>
+    `;
   });
 }
 
@@ -140,7 +139,7 @@ async function carregarItens(){
   div.innerHTML="";
   let total = 0;
 
-  (data||[]).forEach(i=>{
+  data.forEach(i=>{
     total += i.preco * i.quantidade;
 
     div.innerHTML += `
@@ -151,13 +150,14 @@ async function carregarItens(){
             <span class="status">${i.status}</span>
           </div>
 
-          ${i.status==="novo" && pedidoAtual.status==="aberto" ? `
+          ${i.status === "novo" ? `
           <div class="itemBtns">
             <button class="btnMenos" onclick="diminuir('${i.id}',${i.quantidade})">➖</button>
             <button class="btnRemover" onclick="remover('${i.id}')">❌</button>
           </div>` : ``}
         </div>
-      </div>`;
+      </div>
+    `;
   });
 
   document.getElementById("totalPedido").innerText =
@@ -166,8 +166,6 @@ async function carregarItens(){
 
 /* ===== AÇÕES ===== */
 async function addProduto(id){
-  if(pedidoAtual.status !== "aberto") return;
-
   const p = produtos.find(x=>x.id===id);
 
   const { data } = await sb
@@ -197,7 +195,7 @@ async function addProduto(id){
 }
 
 async function diminuir(id,q){
-  if(q>1){
+  if(q > 1){
     await sb.from("pedido_itens")
       .update({quantidade:q-1})
       .eq("id",id)
@@ -219,12 +217,11 @@ async function remover(id){
   carregarItens();
 }
 
-/* ===== ENVIAR PEDIDO ===== */
 async function enviarPedido(){
   const { data } = await sb
     .from("pedido_itens")
     .select("produto_id,quantidade")
-    .eq("pedido_id", pedidoAtual.id)
+    .eq("pedido_id",pedidoAtual.id)
     .eq("status","novo");
 
   if(!data.length){
@@ -241,47 +238,18 @@ async function enviarPedido(){
 
   await sb.from("pedido_itens")
     .update({status:"confirmado"})
-    .eq("pedido_id", pedidoAtual.id)
+    .eq("pedido_id",pedidoAtual.id)
     .eq("status","novo");
 
-  alert("Pedido enviado para cozinha!");
   carregarItens();
 }
 
-/* ===== CONTA ===== */
 async function pedirConta(){
   await sb.from("pedidos")
     .update({status:"conta_solicitada"})
-    .eq("id", pedidoAtual.id);
+    .eq("id",pedidoAtual.id);
 
-  pedidoAtual.status = "conta_solicitada";
-  controlarLiberacao();
   alert("Conta solicitada.");
-}
-
-/* ===== LIBERAR MESA ===== */
-function controlarLiberacao(){
-  const btn = document.getElementById("btnLiberar");
-  if(pedidoAtual.status === "conta_solicitada"){
-    btn.classList.remove("bloqueado");
-  }else{
-    btn.classList.add("bloqueado");
-  }
-}
-
-async function liberarMesa(){
-  if(pedidoAtual.status !== "conta_solicitada"){
-    alert("Só é possível liberar a mesa após pedir a conta.");
-    return;
-  }
-
-  if(!confirm("Confirmar liberação da mesa?")) return;
-
-  await sb.from("pedidos")
-    .update({status:"finalizado"})
-    .eq("id", pedidoAtual.id);
-
-  location.href="mesas.html";
 }
 
 /* ===== START ===== */
