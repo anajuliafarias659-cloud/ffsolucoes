@@ -2,9 +2,191 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Teste</title>
+<title>Mesa</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
+.container{max-width:900px;margin:auto;padding:20px}
+input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px}
+.produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
+.produto{display:flex;justify-content:space-between;align-items:center}
+button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
+.bloqueado{opacity:.4;pointer-events:none}
+.total{font-size:18px;font-weight:bold;margin:16px 0}
+</style>
 </head>
+
 <body>
-FUNCIONOU
+
+<div class="topo" id="tituloMesa">Mesa</div>
+
+<div class="container">
+  <input placeholder="Buscar produto" oninput="filtrarProdutos()">
+
+  <h3>Produtos</h3>
+  <div id="listaProdutos"></div>
+
+  <h3>Pedido</h3>
+  <div id="pedido"></div>
+
+  <div class="total" id="totalPedido">Total: R$ 0,00</div>
+
+  <button onclick="enviarPedido()">Enviar pedido</button>
+</div>
+
+<script>
+var sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+var params = new URLSearchParams(location.search);
+var mesaId = params.get("mesa");
+var appId  = params.get("app_id");
+
+var pedidoAtual = null;
+var produtosCache = [];
+
+async function carregarMesa(){
+  var r = await sb.from("mesas")
+    .select("numero_mesa")
+    .eq("id",mesaId)
+    .single();
+
+  document.getElementById("tituloMesa").innerText =
+    "Mesa " + r.data.numero_mesa;
+}
+
+async function garantirPedido(){
+  var r = await sb.from("pedidos")
+    .select("*")
+    .eq("mesa_id",mesaId)
+    .eq("app_id",appId)
+    .eq("status","aberto")
+    .maybeSingle();
+
+  if(r.data) return r.data;
+
+  var n = await sb.from("pedidos")
+    .insert({mesa_id:mesaId,app_id:appId,status:"aberto"})
+    .select()
+    .single();
+
+  return n.data;
+}
+
+async function carregarProdutos(){
+  var r = await sb.from("produtos")
+    .select("id,nome,preco")
+    .eq("app_id",appId)
+    .eq("ativo",true);
+
+  produtosCache = r.data || [];
+  renderProdutos(produtosCache);
+}
+
+function renderProdutos(lista){
+  var div = document.getElementById("listaProdutos");
+  div.innerHTML = "";
+
+  lista.forEach(function(p){
+    div.innerHTML +=
+      "<div class='produto'>" +
+        "<span>"+p.nome+" - R$ "+p.preco.toFixed(2)+"</span>" +
+        "<button onclick=\"addProdutoPorId('"+p.id+"')\">+</button>" +
+      "</div>";
+  });
+}
+
+function filtrarProdutos(){
+  var t = document.querySelector("input").value.toLowerCase();
+  renderProdutos(produtosCache.filter(function(p){
+    return p.nome.toLowerCase().indexOf(t) > -1;
+  }));
+}
+
+function addProdutoPorId(id){
+  var p = produtosCache.find(function(x){ return x.id === id; });
+  if(p) addProduto(p);
+}
+
+async function addProduto(p){
+  var r = await sb.from("pedido_itens")
+    .select("id,quantidade")
+    .eq("pedido_id",pedidoAtual.id)
+    .eq("produto_id",p.id)
+    .maybeSingle();
+
+  if(r.data){
+    await sb.from("pedido_itens")
+      .update({quantidade:r.data.quantidade+1})
+      .eq("id",r.data.id);
+  }else{
+    await sb.from("pedido_itens").insert({
+      pedido_id:pedidoAtual.id,
+      produto_id:p.id,
+      nome_produto:p.nome,
+      preco:p.preco,
+      quantidade:1
+    });
+  }
+
+  carregarPedido();
+}
+
+async function removerProduto(id,q){
+  if(q > 1){
+    await sb.from("pedido_itens")
+      .update({quantidade:q-1})
+      .eq("id",id);
+  }else{
+    await sb.from("pedido_itens")
+      .delete()
+      .eq("id",id);
+  }
+  carregarPedido();
+}
+
+async function carregarPedido(){
+  var r = await sb.from("pedido_itens")
+    .select("*")
+    .eq("pedido_id",pedidoAtual.id);
+
+  var div = document.getElementById("pedido");
+  div.innerHTML = "";
+  var total = 0;
+
+  r.data.forEach(function(i){
+    total += i.preco * i.quantidade;
+    div.innerHTML +=
+      "<div class='item'>" +
+        i.nome_produto+" x "+i.quantidade+
+        " <button onclick='removerProduto("+i.id+","+i.quantidade+")'>-</button>" +
+      "</div>";
+  });
+
+  document.getElementById("totalPedido").innerText =
+    "Total: R$ " + total.toFixed(2);
+}
+
+async function enviarPedido(){
+  await sb.from("pedidos")
+    .update({status:"enviado"})
+    .eq("id",pedidoAtual.id);
+
+  alert("Pedido enviado");
+}
+
+(async function(){
+  await carregarMesa();
+  pedidoAtual = await garantirPedido();
+  await carregarProdutos();
+  await carregarPedido();
+})();
+</script>
+
 </body>
 </html>
