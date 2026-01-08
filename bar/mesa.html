@@ -26,11 +26,15 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .filtros button{flex:1;background:#1e293b;color:#fff}
 .filtros button.ativo{background:#2563eb}
 
-/* controles do item */
+/* item controls */
 .itemRow{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .itemBtns{display:flex;gap:8px;align-items:center}
 .btnMenos{background:#f59e0b;color:#000;font-weight:bold}
 .btnRemover{background:#dc2626;color:#fff;font-weight:bold}
+
+/* status badge */
+.stNovo{background:#fbbf24;color:#000}
+.stEnviado{background:#94a3b8;color:#000}
 </style>
 </head>
 
@@ -49,24 +53,22 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
   <h3>Produtos</h3>
   <div id="listaProdutos"></div>
 
-  <h3>Pedido atual</h3>
+  <h3>Pedidos da mesa</h3>
   <div id="pedido"></div>
 
   <div class="total" id="totalPedido">Total: R$ 0,00</div>
 
-  <button class="pay" onclick="enviarPedido()">📨 Enviar pedido</button>
+  <button class="pay" onclick="enviarPedido()">📨 Enviar itens novos</button>
   <button class="conta" onclick="pedirConta()">🧾 Pedir conta</button>
   <button class="liberar" id="btnLiberar" onclick="liberarMesa()">🔓 Liberar mesa</button>
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== CONTEXTO ===== */
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 const appId  = params.get("app_id");
@@ -75,26 +77,26 @@ let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
 
-/* ===== MESA ===== */
+function badgeStatus(st){
+  if(st === "enviado") return `<span class="tag stEnviado">ENVIADO</span>`;
+  return `<span class="tag stNovo">NOVO</span>`;
+}
+
+/* MESA */
 async function carregarMesa(){
-  const { data, error } = await sb
+  const { data } = await sb
     .from("mesas")
     .select("numero_mesa")
     .eq("id",mesaId)
     .single();
 
-  if(error){ console.log("carregarMesa:", error); return; }
-
   document.getElementById("tituloMesa").innerText =
     `🍽️ Mesa ${data.numero_mesa}`;
 }
 
-/* ===== PEDIDO (CARRINHO ATUAL = SEMPRE STATUS ABERTO) ===== */
+/* PEDIDO (sempre 1 carrinho aberto) */
 async function garantirPedidoAberto(){
-  // ✅ AQUI A CORREÇÃO PRINCIPAL:
-  // antes pegava "qualquer um que não fosse finalizado/pago"
-  // agora pega SOMENTE pedido ABERTO
-  const { data, error } = await sb
+  const { data } = await sb
     .from("pedidos")
     .select("*")
     .eq("mesa_id",mesaId)
@@ -102,43 +104,25 @@ async function garantirPedidoAberto(){
     .eq("status","aberto")
     .maybeSingle();
 
-  if(error) console.log("garantirPedidoAberto select:", error);
   if(data) return data;
 
-  return await criarNovoPedidoAberto();
-}
-
-async function criarNovoPedidoAberto(){
-  const { data: novo, error } = await sb
+  const { data: novo } = await sb
     .from("pedidos")
-    .insert({
-      app_id:appId,
-      mesa_id:mesaId,
-      status:"aberto",
-      origem:"mesa"
-    })
+    .insert({ app_id:appId, mesa_id:mesaId, status:"aberto", origem:"mesa" })
     .select()
     .single();
-
-  if(error){
-    console.log("criarNovoPedidoAberto:", error);
-    alert("Falha ao criar novo pedido aberto.");
-    return null;
-  }
 
   return novo;
 }
 
-/* ===== PRODUTOS ===== */
+/* PRODUTOS */
 async function carregarProdutos(){
-  const { data, error } = await sb
+  const { data } = await sb
     .from("produtos")
     .select("id,nome,preco,destino")
     .eq("app_id",appId)
     .eq("ativo",true)
     .order("nome");
-
-  if(error) console.log("carregarProdutos:", error);
 
   produtosCache = data || [];
   aplicarFiltros();
@@ -163,18 +147,14 @@ function renderProdutos(lista){
   });
 }
 
-/* ===== FILTROS ===== */
+/* FILTROS */
 function filtrarDestino(dest){
   destinoSelecionado = dest;
-  document.querySelectorAll(".filtros button")
-    .forEach(b=>b.classList.remove("ativo"));
-  document.getElementById(dest==="bar"?"fBar":"fCozinha")
-    .classList.add("ativo");
+  document.querySelectorAll(".filtros button").forEach(b=>b.classList.remove("ativo"));
+  document.getElementById(dest==="bar"?"fBar":"fCozinha").classList.add("ativo");
   aplicarFiltros();
 }
-
 function filtrarProdutos(){ aplicarFiltros(); }
-
 function aplicarFiltros(){
   const txt = document.querySelector("input").value.toLowerCase();
   renderProdutos(
@@ -185,29 +165,22 @@ function aplicarFiltros(){
   );
 }
 
-/* ===== ITENS ===== */
+/* ITENS */
 async function carregarPedido(){
-  if(!pedidoAtual){
-    document.getElementById("pedido").innerHTML = "";
-    document.getElementById("totalPedido").innerText = "Total: R$ 0,00";
-    return;
-  }
-
-  const { data, error } = await sb
+  const { data } = await sb
     .from("pedido_itens")
     .select("*")
-    .eq("pedido_id",pedidoAtual.id);
-
-  if(error) console.log("carregarPedido:", error);
+    .eq("pedido_id",pedidoAtual.id)
+    .order("created_at",{ascending:true});
 
   const div = document.getElementById("pedido");
   div.innerHTML="";
   let total = 0;
 
-  const podeEditar = pedidoAtual.status === "aberto";
-
   (data || []).forEach(i=>{
     total += Number(i.preco) * Number(i.quantidade);
+
+    const podeEditarItem = (pedidoAtual.status === "aberto" && i.status === "novo");
 
     div.innerHTML += `
       <div class="item">
@@ -215,11 +188,11 @@ async function carregarPedido(){
           <div>
             ${i.nome_produto} x ${i.quantidade}
             <span class="tag ${i.destino}">${String(i.destino).toUpperCase()}</span>
+            ${badgeStatus(i.status)}
           </div>
 
-          ${podeEditar ? `
+          ${podeEditarItem ? `
             <div class="itemBtns">
-              <!-- ✅ UUID entre aspas -->
               <button class="btnMenos" onclick="diminuirItem('${i.id}', ${i.quantidade})">➖</button>
               <button class="btnRemover" onclick="removerItem('${i.id}')">Remover</button>
             </div>
@@ -239,30 +212,28 @@ async function carregarPedido(){
   }
 }
 
-/* ===== ADD PRODUTO ===== */
+/* ADD PRODUTO (somente no lote NOVO) */
 async function addProduto(produtoId){
   if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
 
   const p = produtosCache.find(x => String(x.id) === String(produtoId));
   if(!p) return;
 
-  const { data, error } = await sb
+  // procura item NOVO do mesmo produto
+  const { data } = await sb
     .from("pedido_itens")
     .select("id,quantidade")
     .eq("pedido_id",pedidoAtual.id)
     .eq("produto_id",p.id)
+    .eq("status","novo")
     .maybeSingle();
 
-  if(error) console.log("addProduto select:", error);
-
   if(data){
-    const { error: errUp } = await sb.from("pedido_itens")
+    await sb.from("pedido_itens")
       .update({quantidade:Number(data.quantidade)+1})
       .eq("id",data.id);
-
-    if(errUp) console.log("addProduto update:", errUp);
   }else{
-    const { error: errIns } = await sb.from("pedido_itens").insert({
+    await sb.from("pedido_itens").insert({
       app_id:appId,
       pedido_id:pedidoAtual.id,
       produto_id:p.id,
@@ -272,78 +243,59 @@ async function addProduto(produtoId){
       destino:p.destino,
       status:"novo"
     });
-
-    if(errIns) console.log("addProduto insert:", errIns);
   }
 
   carregarPedido();
 }
 
-/* ===== DIMINUI / REMOVE ===== */
+/* DIMINUI/REMOVE (só itens NOVO) */
 async function diminuirItem(itemId, qtd){
-  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
-
   const q = Number(qtd);
-
   if(q > 1){
-    const { error } = await sb.from("pedido_itens")
-      .update({ quantidade: q - 1 })
-      .eq("id", itemId);
-
-    if(error){ console.log("diminuirItem:", error); return; }
+    await sb.from("pedido_itens").update({ quantidade: q - 1 }).eq("id", itemId);
   }else{
-    const { error } = await sb.from("pedido_itens")
-      .delete()
-      .eq("id", itemId);
-
-    if(error){ console.log("diminuirItem delete:", error); return; }
+    await sb.from("pedido_itens").delete().eq("id", itemId);
   }
-
   carregarPedido();
 }
 
 async function removerItem(itemId){
-  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
-
-  if(!confirm("Remover este item do pedido?")) return;
-
-  const { error } = await sb.from("pedido_itens")
-    .delete()
-    .eq("id", itemId);
-
-  if(error){ console.log("removerItem:", error); return; }
-
+  if(!confirm("Remover este item do lote novo?")) return;
+  await sb.from("pedido_itens").delete().eq("id", itemId);
   carregarPedido();
 }
 
-/* ===== AÇÕES ===== */
+/* ENVIAR (baixa estoque só do NOVO e marca como ENVIADO) */
 async function enviarPedido(){
   if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
 
-  // ✅ baixa estoque + envia (RPC)
-  const { error } = await sb.rpc("enviar_pedido_com_baixa", {
+  const { data: itensNovos } = await sb
+    .from("pedido_itens")
+    .select("id")
+    .eq("pedido_id", pedidoAtual.id)
+    .eq("status","novo");
+
+  if(!itensNovos || !itensNovos.length){
+    alert("Não há itens novos para enviar.");
+    return;
+  }
+
+  const { error } = await sb.rpc("enviar_itens_novos_com_baixa", {
     p_pedido_id: pedidoAtual.id
   });
 
   if(error){
-    console.log("RPC enviar_pedido_com_baixa:", error);
+    console.log(error);
     alert("Falha ao enviar/baixar estoque: " + (error.message || "erro"));
     return;
   }
 
-  alert("📨 Pedido enviado!");
-
-  // ✅ AQUI a correção do teu comportamento:
-  // cria um novo pedido ABERTO pra mesa continuar pedindo
-  pedidoAtual = await criarNovoPedidoAberto();
-
-  // recarrega tela (novo carrinho vazio e liberado)
-  aplicarFiltros();
+  alert("✅ Itens novos enviados! Pode continuar pedindo.");
   carregarPedido();
 }
 
+/* PEDIR CONTA (fecha a brincadeira) */
 async function pedirConta(){
-  // pedir conta pode considerar pedidos enviados tambem, mas mantendo teu comportamento:
   const { data } = await sb
     .from("pedido_itens")
     .select("id")
@@ -354,16 +306,17 @@ async function pedirConta(){
     return;
   }
 
-  const { error } = await sb.from("pedidos")
+  await sb.from("pedidos")
     .update({status:"conta_solicitada"})
     .eq("id",pedidoAtual.id);
 
-  if(error){ console.log("pedirConta:", error); return; }
-
+  pedidoAtual.status = "conta_solicitada";
   alert("🧾 Conta solicitada!");
+  aplicarFiltros();
+  carregarPedido();
 }
 
-/* ===== LIBERAR MESA ===== */
+/* LIBERAR MESA */
 async function liberarMesa(){
   const { data } = await sb
     .from("pedido_itens")
@@ -371,23 +324,21 @@ async function liberarMesa(){
     .eq("pedido_id",pedidoAtual.id);
 
   if(data && data.length){
-    alert("🚫 Mesa possui pedidos ativos.");
+    alert("🚫 Mesa possui itens no pedido. Finalize/pague antes.");
     return;
   }
 
   if(!confirm("Tem certeza que deseja liberar esta mesa?")) return;
 
-  const { error } = await sb.from("pedidos")
+  await sb.from("pedidos")
     .update({status:"finalizado"})
     .eq("id",pedidoAtual.id);
-
-  if(error){ console.log("liberarMesa:", error); return; }
 
   alert("✅ Mesa liberada!");
   location.href="mesas.html";
 }
 
-/* ===== START ===== */
+/* START */
 (async()=>{
   await carregarMesa();
   pedidoAtual = await garantirPedidoAberto();
