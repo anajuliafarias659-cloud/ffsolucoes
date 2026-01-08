@@ -29,6 +29,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .itemBtns{display:flex;gap:8px}
 .btnMenos{background:#f59e0b;color:#000;font-weight:bold}
 .btnRemover{background:#dc2626;color:#fff;font-weight:bold}
+.statusOk{font-size:12px;opacity:.7}
 </style>
 </head>
 
@@ -170,13 +171,12 @@ async function carregarPedido(){
   const { data } = await sb
     .from("pedido_itens")
     .select("*")
-    .eq("pedido_id",pedidoAtual.id);
+    .eq("pedido_id",pedidoAtual.id)
+    .order("created_at");
 
   const div = document.getElementById("pedido");
   div.innerHTML="";
   let total = 0;
-
-  const podeEditar = ["aberto","enviado"].includes(pedidoAtual.status);
 
   (data||[]).forEach(i=>{
     total += i.preco * i.quantidade;
@@ -187,12 +187,16 @@ async function carregarPedido(){
           <div>
             ${i.nome_produto} x ${i.quantidade}
             <span class="tag ${i.destino}">${i.destino.toUpperCase()}</span>
+            ${i.status==="confirmado"
+              ? `<span class="statusOk">✔ enviado</span>`
+              : `<span class="statusOk">🕒 novo</span>`}
           </div>
-          ${podeEditar?`
+
+          ${pedidoAtual.status==="aberto" && i.status==="novo" ? `
           <div class="itemBtns">
             <button class="btnMenos" onclick="diminuirItem('${i.id}',${i.quantidade})">➖</button>
             <button class="btnRemover" onclick="removerItem('${i.id}')">Remover</button>
-          </div>`:""}
+          </div>` : ``}
         </div>
       </div>
     `;
@@ -214,6 +218,7 @@ async function addProduto(produtoId){
     .select("id,quantidade")
     .eq("pedido_id",pedidoAtual.id)
     .eq("produto_id",p.id)
+    .eq("status","novo")
     .maybeSingle();
 
   if(data){
@@ -236,8 +241,10 @@ async function addProduto(produtoId){
   carregarPedido();
 }
 
-/* ===== EDITAR ITENS ===== */
+/* ===== EDITAR (SÓ SE ABERTO) ===== */
 async function diminuirItem(id,q){
+  if(pedidoAtual.status!=="aberto") return;
+
   if(q>1){
     await sb.from("pedido_itens").update({quantidade:q-1}).eq("id",id);
   }else{
@@ -247,20 +254,22 @@ async function diminuirItem(id,q){
 }
 
 async function removerItem(id){
+  if(pedidoAtual.status!=="aberto") return;
   if(!confirm("Remover item?")) return;
   await sb.from("pedido_itens").delete().eq("id",id);
   carregarPedido();
 }
 
-/* ===== ENVIAR PEDIDO + BAIXAR ESTOQUE ===== */
+/* ===== ENVIAR PEDIDO (BAIXA ESTOQUE SÓ DOS NOVOS) ===== */
 async function enviarPedido(){
   const { data: itens } = await sb
     .from("pedido_itens")
-    .select("produto_id,quantidade")
-    .eq("pedido_id",pedidoAtual.id);
+    .select("id,produto_id,quantidade")
+    .eq("pedido_id",pedidoAtual.id)
+    .eq("status","novo");
 
-  if(!itens.length){
-    alert("Pedido vazio.");
+  if(!itens || !itens.length){
+    alert("Nenhum item novo para enviar.");
     return;
   }
 
@@ -271,12 +280,18 @@ async function enviarPedido(){
     });
   }
 
+  await sb.from("pedido_itens")
+    .update({status:"confirmado"})
+    .eq("pedido_id",pedidoAtual.id)
+    .eq("status","novo");
+
   await sb.from("pedidos")
     .update({status:"enviado"})
     .eq("id",pedidoAtual.id);
 
   pedidoAtual.status="enviado";
   alert("📨 Pedido enviado!");
+  carregarPedido();
 }
 
 /* ===== CONTA / FINALIZAR ===== */
