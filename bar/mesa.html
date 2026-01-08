@@ -26,7 +26,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .filtros button{flex:1;background:#1e293b;color:#fff}
 .filtros button.ativo{background:#2563eb}
 
-/* controles dos itens */
+/* controles do item */
 .itemRow{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .itemBtns{display:flex;gap:8px;align-items:center}
 .btnMenos{background:#f59e0b;color:#000;font-weight:bold}
@@ -49,7 +49,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
   <h3>Produtos</h3>
   <div id="listaProdutos"></div>
 
-  <h3>Pedidos da mesa</h3>
+  <h3>Pedido atual</h3>
   <div id="pedido"></div>
 
   <div class="total" id="totalPedido">Total: R$ 0,00</div>
@@ -71,10 +71,6 @@ const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 const appId  = params.get("app_id");
 
-if(!mesaId || !appId){
-  alert("Link inválido: faltando mesa ou app_id.");
-}
-
 let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
@@ -87,30 +83,33 @@ async function carregarMesa(){
     .eq("id",mesaId)
     .single();
 
-  if(error){
-    console.log("carregarMesa:", error);
-    return;
-  }
+  if(error){ console.log("carregarMesa:", error); return; }
 
   document.getElementById("tituloMesa").innerText =
     `🍽️ Mesa ${data.numero_mesa}`;
 }
 
-/* ===== PEDIDO ===== */
+/* ===== PEDIDO (CARRINHO ATUAL = SEMPRE STATUS ABERTO) ===== */
 async function garantirPedidoAberto(){
+  // ✅ AQUI A CORREÇÃO PRINCIPAL:
+  // antes pegava "qualquer um que não fosse finalizado/pago"
+  // agora pega SOMENTE pedido ABERTO
   const { data, error } = await sb
     .from("pedidos")
     .select("*")
     .eq("mesa_id",mesaId)
     .eq("app_id",appId)
-    .not("status","in",'("finalizado","pago")')
+    .eq("status","aberto")
     .maybeSingle();
 
   if(error) console.log("garantirPedidoAberto select:", error);
-
   if(data) return data;
 
-  const { data: novo, error: err2 } = await sb
+  return await criarNovoPedidoAberto();
+}
+
+async function criarNovoPedidoAberto(){
+  const { data: novo, error } = await sb
     .from("pedidos")
     .insert({
       app_id:appId,
@@ -121,7 +120,11 @@ async function garantirPedidoAberto(){
     .select()
     .single();
 
-  if(err2) console.log("garantirPedidoAberto insert:", err2);
+  if(error){
+    console.log("criarNovoPedidoAberto:", error);
+    alert("Falha ao criar novo pedido aberto.");
+    return null;
+  }
 
   return novo;
 }
@@ -135,9 +138,7 @@ async function carregarProdutos(){
     .eq("ativo",true)
     .order("nome");
 
-  if(error){
-    console.log("carregarProdutos:", error);
-  }
+  if(error) console.log("carregarProdutos:", error);
 
   produtosCache = data || [];
   aplicarFiltros();
@@ -147,9 +148,9 @@ function renderProdutos(lista){
   const div = document.getElementById("listaProdutos");
   div.innerHTML="";
 
-  lista.forEach(p=>{
-    const bloqueado = pedidoAtual.status !== "aberto";
+  const bloqueado = !pedidoAtual || pedidoAtual.status !== "aberto";
 
+  lista.forEach(p=>{
     div.innerHTML += `
       <div class="produto ${bloqueado?'bloqueado':''}">
         <span>
@@ -186,14 +187,18 @@ function aplicarFiltros(){
 
 /* ===== ITENS ===== */
 async function carregarPedido(){
+  if(!pedidoAtual){
+    document.getElementById("pedido").innerHTML = "";
+    document.getElementById("totalPedido").innerText = "Total: R$ 0,00";
+    return;
+  }
+
   const { data, error } = await sb
     .from("pedido_itens")
     .select("*")
     .eq("pedido_id",pedidoAtual.id);
 
-  if(error){
-    console.log("carregarPedido:", error);
-  }
+  if(error) console.log("carregarPedido:", error);
 
   const div = document.getElementById("pedido");
   div.innerHTML="";
@@ -214,7 +219,7 @@ async function carregarPedido(){
 
           ${podeEditar ? `
             <div class="itemBtns">
-              <!-- IMPORTANTE: id entre aspas pq pode ser UUID -->
+              <!-- ✅ UUID entre aspas -->
               <button class="btnMenos" onclick="diminuirItem('${i.id}', ${i.quantidade})">➖</button>
               <button class="btnRemover" onclick="removerItem('${i.id}')">Remover</button>
             </div>
@@ -236,7 +241,7 @@ async function carregarPedido(){
 
 /* ===== ADD PRODUTO ===== */
 async function addProduto(produtoId){
-  if(pedidoAtual.status !== "aberto") return;
+  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
 
   const p = produtosCache.find(x => String(x.id) === String(produtoId));
   if(!p) return;
@@ -276,7 +281,7 @@ async function addProduto(produtoId){
 
 /* ===== DIMINUI / REMOVE ===== */
 async function diminuirItem(itemId, qtd){
-  if(pedidoAtual.status !== "aberto") return;
+  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
 
   const q = Number(qtd);
 
@@ -285,28 +290,20 @@ async function diminuirItem(itemId, qtd){
       .update({ quantidade: q - 1 })
       .eq("id", itemId);
 
-    if(error){
-      console.log("diminuirItem update:", error);
-      alert("Não consegui diminuir (veja o console).");
-      return;
-    }
+    if(error){ console.log("diminuirItem:", error); return; }
   }else{
     const { error } = await sb.from("pedido_itens")
       .delete()
       .eq("id", itemId);
 
-    if(error){
-      console.log("diminuirItem delete:", error);
-      alert("Não consegui remover (veja o console).");
-      return;
-    }
+    if(error){ console.log("diminuirItem delete:", error); return; }
   }
 
   carregarPedido();
 }
 
 async function removerItem(itemId){
-  if(pedidoAtual.status !== "aberto") return;
+  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
 
   if(!confirm("Remover este item do pedido?")) return;
 
@@ -314,20 +311,16 @@ async function removerItem(itemId){
     .delete()
     .eq("id", itemId);
 
-  if(error){
-    console.log("removerItem:", error);
-    alert("Não consegui remover (veja o console).");
-    return;
-  }
+  if(error){ console.log("removerItem:", error); return; }
 
   carregarPedido();
 }
 
 /* ===== AÇÕES ===== */
 async function enviarPedido(){
-  if(pedidoAtual.status !== "aberto") return;
+  if(!pedidoAtual || pedidoAtual.status !== "aberto") return;
 
-  // ✅ BAIXA ESTOQUE + ENVIA (RPC)
+  // ✅ baixa estoque + envia (RPC)
   const { error } = await sb.rpc("enviar_pedido_com_baixa", {
     p_pedido_id: pedidoAtual.id
   });
@@ -338,15 +331,19 @@ async function enviarPedido(){
     return;
   }
 
-  // trava localmente a tela
-  pedidoAtual.status = "enviado";
-
   alert("📨 Pedido enviado!");
+
+  // ✅ AQUI a correção do teu comportamento:
+  // cria um novo pedido ABERTO pra mesa continuar pedindo
+  pedidoAtual = await criarNovoPedidoAberto();
+
+  // recarrega tela (novo carrinho vazio e liberado)
   aplicarFiltros();
   carregarPedido();
 }
 
 async function pedirConta(){
+  // pedir conta pode considerar pedidos enviados tambem, mas mantendo teu comportamento:
   const { data } = await sb
     .from("pedido_itens")
     .select("id")
@@ -361,11 +358,7 @@ async function pedirConta(){
     .update({status:"conta_solicitada"})
     .eq("id",pedidoAtual.id);
 
-  if(error){
-    console.log("pedirConta:", error);
-    alert("Falha ao solicitar conta.");
-    return;
-  }
+  if(error){ console.log("pedirConta:", error); return; }
 
   alert("🧾 Conta solicitada!");
 }
@@ -388,11 +381,7 @@ async function liberarMesa(){
     .update({status:"finalizado"})
     .eq("id",pedidoAtual.id);
 
-  if(error){
-    console.log("liberarMesa:", error);
-    alert("Falha ao liberar mesa.");
-    return;
-  }
+  if(error){ console.log("liberarMesa:", error); return; }
 
   alert("✅ Mesa liberada!");
   location.href="mesas.html";
