@@ -16,8 +16,8 @@
 
   <div class="container">
     <p>
-      Aqui você define o <b>banner principal</b> do site de divulgação.<br>
-      <small style="opacity:.7">Esse banner aparece para o público.</small>
+      Aqui você define o <b>banner principal</b> do seu site.<br>
+      <small style="opacity:.7">Esse banner aparece apenas para o público do seu site.</small>
     </p>
 
     <input type="file" id="bannerInput" accept="image/*">
@@ -38,7 +38,6 @@ const sb = supabase.createClient(
 
 /* ===== SESSÃO ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-
 if (!admin || !admin.user_id || !admin.app_id) {
   alert("Sessão inválida. Faça login novamente.");
   location.href = "../auth/login.html";
@@ -51,34 +50,38 @@ const input = document.getElementById("bannerInput");
 const previewBox = document.getElementById("previewBox");
 const previewImg = document.getElementById("previewImg");
 
-/* ===== CARREGAR BANNER EXISTENTE ===== */
+/* ===== CARREGAR BANNER ATUAL ===== */
 async function carregarBannerAtual() {
   try {
     const { data: publicUrl, error } = sb.storage
       .from("sites")
       .getPublicUrl(`${appId}/banner.jpg`);
 
-    if (!error && publicUrl?.publicUrl) {
-      // Verifica se a URL realmente existe
+    if (publicUrl?.publicUrl) {
       const res = await fetch(publicUrl.publicUrl);
       if (res.ok) {
         previewImg.src = publicUrl.publicUrl;
         previewBox.style.display = "block";
+        return;
       }
     }
+    // Se não existe ou fetch falhar, usa placeholder
+    previewImg.src = "./placeholder.jpg";
+    previewBox.style.display = "block";
   } catch (err) {
     console.log("Banner ainda não existe");
+    previewImg.src = "./placeholder.jpg";
+    previewBox.style.display = "block";
   }
 }
 
-/* Chama ao abrir a página */
+/* ===== CHAMA AO ABRIR A PÁGINA ===== */
 carregarBannerAtual();
 
 /* ===== PREVIEW DO UPLOAD ===== */
 input.addEventListener("change", () => {
   const file = input.files[0];
   if (!file) return;
-
   previewImg.src = URL.createObjectURL(file);
   previewBox.style.display = "block";
 });
@@ -89,7 +92,7 @@ async function salvarBanner() {
   if (!file) return alert("Selecione uma imagem");
 
   try {
-    const { data, error } = await sb.storage
+    const { error } = await sb.storage
       .from("sites")
       .upload(`${appId}/banner.jpg`, file, {
         upsert: true,
@@ -98,20 +101,11 @@ async function salvarBanner() {
 
     if (error) {
       console.error(error);
-      alert("Erro ao salvar banner: " + error.message);
-      return;
+      return alert("Erro ao salvar banner: " + error.message);
     }
 
     alert("Banner salvo com sucesso ✅");
-
-    // Atualiza preview com URL pública
-    const { data: publicUrl } = sb.storage
-      .from("sites")
-      .getPublicUrl(`${appId}/banner.jpg`);
-
-    if (publicUrl?.publicUrl) {
-      previewImg.src = publicUrl.publicUrl;
-    }
+    carregarBannerAtual(); // Atualiza preview
 
   } catch (err) {
     console.error(err);
