@@ -45,7 +45,6 @@ if(!admin || admin.tipo !== "locadora"){
   alert("Acesso não autorizado");
   location.href = "../auth/login.html";
 }
-
 const appId = admin.app_id;
 
 /* ================= SUPABASE ================= */
@@ -64,11 +63,11 @@ async function carregar(){
 
   const { data:veiculos } = await sb
     .from("veiculos")
-    .select("id,modelo")
+    .select("id,modelo,placa,chassi,diaria")
     .eq("app_id", appId);
 
   const mapa = {};
-  veiculos?.forEach(v=>mapa[v.id]=v.modelo);
+  veiculos?.forEach(v=>mapa[v.id]=v);
 
   lista.innerHTML = "";
 
@@ -80,7 +79,7 @@ async function carregar(){
   locacoes.forEach(l=>{
     lista.innerHTML += `
       <div class="card">
-        <h3>🚗 ${mapa[l.veiculo_id] || "Veículo"}</h3>
+        <h3>🚗 ${mapa[l.veiculo_id]?.modelo || "Veículo"}</h3>
 
         <p><b>Cliente:</b> ${l.nome}</p>
         <p><b>Telefone:</b> ${l.telefone}</p>
@@ -120,7 +119,6 @@ async function docsPDF(id){
   const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
 
   const pdf = new jsPDF();
-
   const docs = [
     ["Selfie", l.selfie_url],
     ["RG Frente", l.rg_frente_url],
@@ -133,13 +131,9 @@ async function docsPDF(id){
     if(!url) continue;
     pdf.addPage();
     pdf.text(nome, 10, 10);
-
     const img = await fetch(url).then(r=>r.blob()).then(b=>new Promise(res=>{
-      const i=new Image();
-      i.onload=()=>res(i);
-      i.src=URL.createObjectURL(b);
+      const i=new Image(); i.onload=()=>res(i); i.src=URL.createObjectURL(b);
     }));
-
     pdf.addImage(img,"JPEG",10,20,180,240);
   }
 
@@ -151,7 +145,7 @@ async function contratoPDF(id){
   const { jsPDF } = window.jspdf;
 
   const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
-  const { data:v } = await sb.from("veiculos").select("modelo").eq("id",l.veiculo_id).single();
+  const { data:v } = await sb.from("veiculos").select("*").eq("id",l.veiculo_id).single();
   const { data:cfg } = await sb
     .from("config_site")
     .select("nome_site, logo_url, clausulas_pdf")
@@ -159,26 +153,54 @@ async function contratoPDF(id){
     .single();
 
   const pdf = new jsPDF();
+  let y = 20;
 
   if(cfg?.logo_url){
     const logo = await fetch(cfg.logo_url).then(r=>r.blob()).then(b=>new Promise(res=>{
       const i=new Image(); i.onload=()=>res(i); i.src=URL.createObjectURL(b);
     }));
-    pdf.addImage(logo,"PNG",10,10,40,20);
+    pdf.addImage(logo,"PNG",10,10,190,30);
+    y = 50;
   }
 
-  pdf.setFontSize(16);
-  pdf.text(cfg?.nome_site || "Locadora", 60, 20);
+  pdf.setFont(undefined,"bold");
+  pdf.text("1. DADOS DO LOCATÁRIO",10,y); y+=8;
+  pdf.setFont(undefined,"normal");
+  pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
+  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=6;
+  pdf.text(`CPF: ${l.cpf || "—"}`,10,y); y+=10;
 
-  pdf.setFontSize(12);
-  pdf.text(`Cliente: ${l.nome}`, 10, 45);
-  pdf.text(`Telefone: ${l.telefone}`, 10, 53);
-  pdf.text(`Veículo: ${v.modelo}`, 10, 61);
-  pdf.text(`Dias: ${l.dias}`, 10, 69);
-  pdf.text(`Total: R$ ${l.total}`, 10, 77);
+  pdf.setFont(undefined,"bold");
+  pdf.text("2. DADOS DO LOCADOR",10,y); y+=8;
+  pdf.setFont(undefined,"normal");
+  pdf.text(cfg?.nome_site || "Locadora",10,y); y+=10;
 
-  pdf.line(10, 82, 200, 82);
-  pdf.text(cfg?.clausulas_pdf || "Cláusulas do contrato...", 10, 90, {maxWidth:190});
+  pdf.setFont(undefined,"bold");
+  pdf.text("3. DETALHES DO VEÍCULO",10,y); y+=8;
+  pdf.setFont(undefined,"normal");
+  pdf.text(`Modelo: ${v.modelo}`,10,y); y+=6;
+  pdf.text(`Placa: ${v.placa || "—"}`,10,y); y+=6;
+  pdf.text(`Chassi: ${v.chassi || "—"}`,10,y); y+=10;
+
+  pdf.setFont(undefined,"bold");
+  pdf.text("4. PERÍODO DE ALUGUEL",10,y); y+=8;
+  pdf.setFont(undefined,"normal");
+  pdf.text(`Dias: ${l.dias}`,10,y); y+=10;
+
+  pdf.setFont(undefined,"bold");
+  pdf.text("5. VALOR",10,y); y+=8;
+  pdf.setFont(undefined,"normal");
+  pdf.text(`Total: R$ ${l.total}`,10,y); y+=12;
+
+  pdf.setFont(undefined,"bold");
+  pdf.text("CLÁUSULAS CONTRATUAIS",10,y); y+=8;
+  pdf.setFont(undefined,"normal");
+  pdf.text(cfg?.clausulas_pdf || "Cláusulas do contrato...",10,y,{maxWidth:190});
+
+  pdf.line(20,260,90,260);
+  pdf.line(120,260,190,260);
+  pdf.text("Locatário",45,266);
+  pdf.text("Locador",150,266);
 
   pdf.save(`contrato-${l.nome}.pdf`);
 }
