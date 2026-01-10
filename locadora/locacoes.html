@@ -28,7 +28,7 @@ hr{opacity:.2}
 }
 #modal .box{
   background:#0b1220;padding:20px;border-radius:16px;
-  max-width:700px;margin:4% auto
+  max-width:720px;margin:4% auto
 }
 label{font-weight:700;margin-top:10px;display:block}
 input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top:6px}
@@ -43,10 +43,10 @@ input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top
   <div class="grid" id="lista"></div>
 </div>
 
-<!-- MODAL -->
+<!-- MODAL LOCADORA -->
 <div id="modal">
   <div class="box">
-    <h3>🏢 Dados da Locadora (para o contrato)</h3>
+    <h3>🏢 Dados da Locadora (Contrato)</h3>
 
     <label>Nome da Locadora</label>
     <input id="mNome">
@@ -64,7 +64,7 @@ input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top
     <input id="mLogo" placeholder="https://.../logo.png">
 
     <label>Cláusulas do Contrato</label>
-    <textarea id="mClausulas" rows="6"></textarea>
+    <textarea id="mClausulas" rows="8"></textarea>
 
     <label style="margin-top:10px">
       <input type="checkbox" id="salvarLocal">
@@ -169,57 +169,50 @@ function fechar(){ modal.style.display="none"; }
 async function gerarPDF(id){
   const { jsPDF } = window.jspdf;
 
-  const { data:l } = await sb
-    .from("locacoes")
-    .select("*")
-    .eq("id",id)
-    .single();
-
-  const { data:v } = await sb
-    .from("veiculos")
-    .select("*")
-    .eq("id",l.veiculo_id)
-    .single();
-
-  const locadora = {
-    nome: mNome.value,
-    endereco: mEndereco.value,
-    cnpj: mCnpj.value,
-    telefone: mTelefone.value,
-    logo: mLogo.value,
-    clausulas: mClausulas.value
-  };
+  const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
+  const { data:v } = await sb.from("veiculos").select("*").eq("id",l.veiculo_id).single();
 
   const pdf = new jsPDF();
   let y = 20;
 
-  // LOGO – CHARME FINO
-  if(locadora.logo){
-    pdf.addImage(locadora.logo,"PNG",10,10,40,20);
-    y = 40;
+  /* TOPO */
+  if(mLogo.value){
+    pdf.addImage(mLogo.value,"PNG",10,10,40,20);
   }
 
-  pdf.setFontSize(14);
-  pdf.text(locadora.nome || "Locadora",10,y); y+=10;
-  pdf.setFontSize(11);
+  pdf.setFontSize(13);
+  pdf.text(mNome.value || "Locadora",55,15);
+  pdf.setFontSize(10);
+  pdf.text(mEndereco.value || "",55,21);
+  pdf.text(`Tel: ${mTelefone.value || ""}`,55,27);
 
+  y = 40;
+
+  /* LOCATÁRIO */
+  pdf.setFontSize(12);
   pdf.text("1. DADOS DO LOCATÁRIO",10,y); y+=6;
+  pdf.setFontSize(11);
   pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
-  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=6;
+  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=8;
+
+  /* VEÍCULO */
+  pdf.setFontSize(12);
+  pdf.text("2. DETALHES DO VEÍCULO",10,y); y+=6;
+  pdf.setFontSize(11);
+  pdf.text(`Modelo: ${v.modelo}`,10,y); y+=8;
+
+  /* PERÍODO */
+  pdf.setFontSize(12);
+  pdf.text("3. PERÍODO E VALOR",10,y); y+=6;
+  pdf.setFontSize(11);
   pdf.text(`Dias: ${l.dias}`,10,y); y+=6;
-  pdf.text(`Total: R$ ${l.total}`,10,y); y+=10;
+  pdf.text(`Total: R$ ${l.total}`,10,y); y+=8;
 
-  pdf.text("2. DADOS DO LOCADOR",10,y); y+=6;
-  pdf.text(`Empresa: ${locadora.nome}`,10,y); y+=6;
-  pdf.text(`CNPJ: ${locadora.cnpj}`,10,y); y+=6;
-  pdf.text(`Telefone: ${locadora.telefone}`,10,y); y+=6;
-  pdf.text(`Endereço: ${locadora.endereco}`,10,y); y+=10;
-
-  pdf.text("3. VEÍCULO",10,y); y+=6;
-  pdf.text(`Modelo: ${v.modelo}`,10,y); y+=10;
-
+  /* CLÁUSULAS */
+  pdf.setFontSize(12);
   pdf.text("CLÁUSULAS CONTRATUAIS",10,y); y+=6;
-  pdf.text(locadora.clausulas || "Sem cláusulas.",10,y,{maxWidth:180});
+  pdf.setFontSize(10);
+  pdf.text(mClausulas.value || "Sem cláusulas.",10,y,{maxWidth:180});
 
   return pdf;
 }
@@ -241,12 +234,7 @@ async function confirmar(){
   const pdf = await gerarPDF(locacaoAtual);
   pdf.save("contrato-locacao.pdf");
 
-  const { data:l } = await sb
-    .from("locacoes")
-    .select("veiculo_id")
-    .eq("id",locacaoAtual)
-    .single();
-
+  const { data:l } = await sb.from("locacoes").select("veiculo_id").eq("id",locacaoAtual).single();
   await sb.from("locacoes").update({status:"ativa"}).eq("id",locacaoAtual);
   await sb.from("veiculos").update({status:"alugado"}).eq("id",l.veiculo_id);
 
