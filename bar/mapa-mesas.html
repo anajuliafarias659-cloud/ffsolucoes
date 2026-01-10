@@ -8,19 +8,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;background:#020617;font-family:Arial;color:#fff}
+body{
+  margin:0;
+  background:#020617;
+  font-family:Arial;
+  color:#fff;
+}
 .topo{
   background:#0f172a;
   padding:14px 20px;
   display:flex;
   justify-content:space-between;
-  align-items:center
+  align-items:center;
 }
 .mapa{
   position:relative;
   width:100%;
   height:calc(100vh - 64px);
-  overflow:hidden
+  overflow:hidden;
 }
 .bar,.mesa{
   position:absolute;
@@ -30,15 +35,17 @@ body{margin:0;background:#020617;font-family:Arial;color:#fff}
   justify-content:center;
   font-weight:bold;
   cursor:grab;
-  user-select:none
+  user-select:none;
 }
 .bar{
-  width:160px;height:180px;
-  border:3px solid #ef4444
+  width:160px;
+  height:180px;
+  border:3px solid #ef4444;
 }
 .mesa{
-  width:60px;height:60px;
-  border:3px solid #22c55e
+  width:60px;
+  height:60px;
+  border:3px solid #22c55e;
 }
 .bar:active,.mesa:active{cursor:grabbing}
 </style>
@@ -76,11 +83,11 @@ const modoAdmin = !!admin;
 <script>
 const mapa = document.getElementById("mapa");
 
-/* 🔹 drag com salvamento */
+/* 💎 DRAG COM SALVAMENTO SEGURO */
 function drag(el, mesa_id){
   if(!modoAdmin) return;
 
-  let offX=0, offY=0, ativo=false;
+  let ativo=false, offX=0, offY=0;
 
   el.addEventListener("mousedown",e=>{
     ativo=true;
@@ -91,28 +98,66 @@ function drag(el, mesa_id){
   document.addEventListener("mousemove",e=>{
     if(!ativo) return;
     el.style.left=(e.pageX-offX)+"px";
-    el.style.top=(e.pageY-offY-64)+"px";
+    el.style.top =(e.pageY-offY-64)+"px";
   });
 
   document.addEventListener("mouseup",async()=>{
     if(!ativo) return;
     ativo=false;
 
-    await sb.from("mapa_mesas")
-      .upsert({
-        app_id,
-        mesa_id,
-        x: el.style.left,
-        y: el.style.top
-      },{ onConflict:"app_id,mesa_id" });
+    if(!mesa_id) return; // ❌ não salva BAR
+
+    /* 🔎 verifica se já existe */
+    const { data: existe, error: erroBusca } = await sb
+      .from("mapa_mesas")
+      .select("id")
+      .eq("app_id",app_id)
+      .eq("mesa_id",mesa_id)
+      .maybeSingle();
+
+    if(erroBusca){
+      console.error("Erro busca:", erroBusca);
+      return;
+    }
+
+    if(existe){
+      /* 🔁 UPDATE */
+      const { error } = await sb
+        .from("mapa_mesas")
+        .update({
+          x: el.style.left,
+          y: el.style.top
+        })
+        .eq("id", existe.id);
+
+      if(error){
+        console.error("Erro update:", error);
+      }
+
+    }else{
+      /* ➕ INSERT */
+      const { error } = await sb
+        .from("mapa_mesas")
+        .insert({
+          app_id,
+          mesa_id,
+          x: el.style.left,
+          y: el.style.top
+        });
+
+      if(error){
+        console.error("Erro insert:", error);
+      }
+    }
   });
 }
 
-/* BAR arrastável (mesa_id = 0) */
-drag(document.getElementById("bar"), 0);
+/* 🔹 BAR arrastável (visual apenas) */
+drag(document.getElementById("bar"), null);
 
-/* 🔹 carrega mesas e posições */
+/* 🔹 CARREGA MESAS + POSIÇÕES */
 async function carregarMesas(){
+
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
@@ -138,18 +183,22 @@ async function carregarMesas(){
     div.innerText=m.numero_mesa;
 
     if(mapaPos[m.id]){
-      div.style.left=mapaPos[m.id].x;
-      div.style.top =mapaPos[m.id].y;
+      div.style.left = mapaPos[m.id].x;
+      div.style.top  = mapaPos[m.id].y;
     }else{
-      div.style.left=x+"px";
-      div.style.top =y+"px";
+      div.style.left = x+"px";
+      div.style.top  = y+"px";
     }
 
     mapa.appendChild(div);
     drag(div, m.id);
 
     col++; x+=80;
-    if(col>=4){col=0;x=260;y+=90}
+    if(col>=4){
+      col=0;
+      x=260;
+      y+=90;
+    }
   });
 }
 
