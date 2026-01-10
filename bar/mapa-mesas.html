@@ -13,7 +13,9 @@ body{
   background:#020617;
   font-family:Arial;
   color:#fff;
+  overflow:hidden;
 }
+
 .topo{
   background:#0f172a;
   padding:14px 20px;
@@ -21,12 +23,24 @@ body{
   justify-content:space-between;
   align-items:center;
 }
-.mapa{
-  position:relative;
+
+/* WRAPPER (pan do mapa) */
+.mapa-wrapper{
   width:100%;
   height:calc(100vh - 64px);
   overflow:hidden;
+  touch-action:none;
 }
+
+/* MAPA */
+.mapa{
+  position:relative;
+  width:1200px;
+  height:900px;
+  transform-origin: 0 0;
+}
+
+/* ELEMENTOS */
 .bar,.mesa{
   position:absolute;
   border-radius:12px;
@@ -34,21 +48,32 @@ body{
   align-items:center;
   justify-content:center;
   font-weight:bold;
-  cursor:grab;
   user-select:none;
 }
+
 .bar{
   width:160px;
   height:180px;
   border:3px solid #ef4444;
+  cursor:grab;
 }
+
 .mesa{
   width:60px;
   height:60px;
   border:3px solid #22c55e;
+  cursor:grab;
 }
+
 .bar:active,.mesa:active{
   cursor:grabbing;
+}
+
+/* MOBILE */
+@media (max-width: 768px){
+  .mapa{
+    transform: scale(0.7);
+  }
 }
 </style>
 </head>
@@ -79,14 +104,41 @@ const modoAdmin = !!admin;
   <button onclick="history.back()">Voltar</button>
 </div>
 
-<div class="mapa" id="mapa">
-  <div class="bar" id="bar">BAR</div>
+<div class="mapa-wrapper" id="wrapper">
+  <div class="mapa" id="mapa">
+    <div class="bar" id="bar">BAR</div>
+  </div>
 </div>
 
 <script>
 const mapa = document.getElementById("mapa");
+const wrapper = document.getElementById("wrapper");
 
-/* 💎 DRAG PROFISSIONAL (SEM ERRO UUID) */
+/* =======================
+   PAN DO MAPA (MOBILE)
+======================= */
+let panX=0, panY=0, panAtivo=false, startX=0, startY=0;
+const scale = window.innerWidth <= 768 ? 0.7 : 1;
+
+wrapper.addEventListener("touchstart",e=>{
+  if(e.touches.length!==1) return;
+  panAtivo=true;
+  startX=e.touches[0].clientX-panX;
+  startY=e.touches[0].clientY-panY;
+});
+
+wrapper.addEventListener("touchmove",e=>{
+  if(!panAtivo) return;
+  panX=e.touches[0].clientX-startX;
+  panY=e.touches[0].clientY-startY;
+  mapa.style.transform=`translate(${panX}px,${panY}px) scale(${scale})`;
+});
+
+wrapper.addEventListener("touchend",()=>panAtivo=false);
+
+/* =======================
+   DRAG ELEMENTOS (ADMIN)
+======================= */
 function drag(el, config){
   if(!modoAdmin) return;
 
@@ -100,8 +152,8 @@ function drag(el, config){
 
   document.addEventListener("mousemove",e=>{
     if(!ativo) return;
-    el.style.left = (e.pageX - offX) + "px";
-    el.style.top  = (e.pageY - offY - 64) + "px";
+    el.style.left=(e.pageX-offX-panX)/scale+"px";
+    el.style.top =(e.pageY-offY-64-panY)/scale+"px";
   });
 
   document.addEventListener("mouseup",async()=>{
@@ -110,37 +162,25 @@ function drag(el, config){
 
     const { tipo, mesa_id } = config;
 
-    /* 🔎 BUSCA SEGURA */
-    let query = sb
-      .from("mapa_mesas")
+    let query = sb.from("mapa_mesas")
       .select("id")
-      .eq("app_id", app_id)
-      .eq("tipo", tipo);
+      .eq("app_id",app_id)
+      .eq("tipo",tipo);
 
-    if(tipo === "MESA"){
-      query = query.eq("mesa_id", mesa_id);
-    }
+    if(tipo==="MESA") query=query.eq("mesa_id",mesa_id);
 
-    const { data: existe, error } = await query.maybeSingle();
-    if(error){
-      console.error("Erro busca:", error);
-      return;
-    }
+    const { data: existe } = await query.maybeSingle();
 
-    /* 🔁 UPDATE ou INSERT */
     if(existe){
       await sb.from("mapa_mesas")
-        .update({
-          x: el.style.left,
-          y: el.style.top
-        })
-        .eq("id", existe.id);
+        .update({ x: el.style.left, y: el.style.top })
+        .eq("id",existe.id);
     }else{
       await sb.from("mapa_mesas")
         .insert({
           app_id,
           tipo,
-          mesa_id: tipo === "MESA" ? mesa_id : null,
+          mesa_id: tipo==="MESA"?mesa_id:null,
           x: el.style.left,
           y: el.style.top
         });
@@ -148,75 +188,73 @@ function drag(el, config){
   });
 }
 
-/* 🔹 CARREGA BAR */
+/* =======================
+   BAR
+======================= */
 async function carregarBar(){
-  const bar = document.getElementById("bar");
+  const bar=document.getElementById("bar");
 
-  const { data } = await sb
-    .from("mapa_mesas")
+  const { data } = await sb.from("mapa_mesas")
     .select("x,y")
-    .eq("app_id", app_id)
-    .eq("tipo", "BAR")
+    .eq("app_id",app_id)
+    .eq("tipo","BAR")
     .maybeSingle();
 
   if(data){
-    bar.style.left = data.x;
-    bar.style.top  = data.y;
+    bar.style.left=data.x;
+    bar.style.top=data.y;
   }else{
-    bar.style.left = "40px";
-    bar.style.top  = "140px";
+    bar.style.left="40px";
+    bar.style.top="140px";
   }
 
-  drag(bar, { tipo:"BAR", mesa_id:null });
+  drag(bar,{tipo:"BAR",mesa_id:null});
 }
 
-/* 🔹 CARREGA MESAS */
+/* =======================
+   MESAS
+======================= */
 async function carregarMesas(){
-
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
-    .eq("app_id", app_id)
-    .eq("ativa", true)
+    .eq("app_id",app_id)
+    .eq("ativa",true)
     .order("numero_mesa");
 
   const { data: posicoes } = await sb
     .from("mapa_mesas")
     .select("mesa_id,x,y")
-    .eq("app_id", app_id)
-    .eq("tipo", "MESA");
+    .eq("app_id",app_id)
+    .eq("tipo","MESA");
 
-  const mapaPos = {};
-  (posicoes || []).forEach(p=>{
-    mapaPos[p.mesa_id] = p;
-  });
+  const mapaPos={};
+  (posicoes||[]).forEach(p=>mapaPos[p.mesa_id]=p);
 
-  let x=260, y=60, col=0;
+  let x=260,y=60,col=0;
 
   mesas.forEach(m=>{
-    const div = document.createElement("div");
-    div.className = "mesa";
-    div.innerText = m.numero_mesa;
+    const div=document.createElement("div");
+    div.className="mesa";
+    div.innerText=m.numero_mesa;
 
     if(mapaPos[m.id]){
-      div.style.left = mapaPos[m.id].x;
-      div.style.top  = mapaPos[m.id].y;
+      div.style.left=mapaPos[m.id].x;
+      div.style.top =mapaPos[m.id].y;
     }else{
-      div.style.left = x + "px";
-      div.style.top  = y + "px";
+      div.style.left=x+"px";
+      div.style.top =y+"px";
     }
 
     mapa.appendChild(div);
-    drag(div, { tipo:"MESA", mesa_id:m.id });
+    drag(div,{tipo:"MESA",mesa_id:m.id});
 
     col++; x+=80;
-    if(col>=4){
-      col=0; x=260; y+=90;
-    }
+    if(col>=4){col=0;x=260;y+=90;}
   });
 }
 
-/* 🚀 START */
+/* START */
 carregarBar();
 carregarMesas();
 </script>
