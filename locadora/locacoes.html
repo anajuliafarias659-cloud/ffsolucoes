@@ -13,20 +13,39 @@ body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
 header{background:#0f172a;padding:18px 24px;font-size:22px;font-weight:700}
 .container{max-width:1200px;margin:auto;padding:24px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:18px}
+
 .card{background:#0b1220;border-radius:18px;padding:18px;box-shadow:0 10px 25px rgba(0,0,0,.45)}
 .badge{display:inline-block;margin-top:10px;padding:6px 14px;border-radius:999px;font-weight:700;font-size:13px}
 .solicitada{background:#facc15;color:#000}
 .ativa{background:#22c55e;color:#022c22}
 .recusada{background:#ef4444}
+
 .actions{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
 .btn{padding:10px 14px;border-radius:12px;border:none;font-weight:700;cursor:pointer}
 .aprovar{background:#22c55e;color:#022c22}
 .recusar{background:#ef4444;color:#fff}
 .excluir{background:#475569;color:#fff}
 .pdf{background:#2563eb;color:#fff}
+
 .docs a{color:#38bdf8;text-decoration:none}
 .docs a:hover{text-decoration:underline}
 hr{opacity:.2;margin:14px 0}
+
+/* MODAL */
+#modalContrato{
+  display:none;position:fixed;inset:0;background:#0009;z-index:999
+}
+#modalContrato .box{
+  background:#0b1220;
+  padding:20px;
+  border-radius:16px;
+  max-width:600px;
+  margin:5% auto
+}
+#modalContrato label{display:block;margin-top:12px}
+#modalContrato input,#modalContrato textarea{
+  width:100%;padding:10px;border-radius:10px;border:none;margin-top:6px
+}
 </style>
 </head>
 
@@ -38,12 +57,30 @@ hr{opacity:.2;margin:14px 0}
   <div class="grid" id="lista"></div>
 </div>
 
+<!-- MODAL CONTRATO -->
+<div id="modalContrato">
+  <div class="box">
+    <h3>Ajustes do Contrato</h3>
+
+    <label>Endereço da Locadora</label>
+    <input id="mEndereco">
+
+    <label>Cláusulas do Contrato</label>
+    <textarea id="mClausulas" rows="6"></textarea>
+
+    <div style="margin-top:16px;display:flex;gap:10px">
+      <button class="btn pdf" onclick="confirmarContrato()">Gerar & Aprovar</button>
+      <button class="btn excluir" onclick="fecharModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ================= AUTH ================= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || admin.tipo !== "locadora"){
-  alert("Acesso não autorizado");
-  location.href = "../auth/login.html";
+if(!admin || admin.tipo!=="locadora"){
+  alert("Acesso negado");
+  location.href="../auth/login.html";
 }
 const appId = admin.app_id;
 
@@ -53,34 +90,36 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+let contratoIdAtual = null;
+
 /* ================= LOAD ================= */
 async function carregar(){
   const { data:locacoes } = await sb
     .from("locacoes")
     .select("*")
-    .eq("app_id", appId)
+    .eq("app_id",appId)
     .order("created_at",{ascending:false});
 
   const { data:veiculos } = await sb
     .from("veiculos")
-    .select("id,modelo,placa,chassi,diaria")
-    .eq("app_id", appId);
+    .select("*")
+    .eq("app_id",appId);
 
   const mapa = {};
   veiculos?.forEach(v=>mapa[v.id]=v);
 
-  lista.innerHTML = "";
+  lista.innerHTML="";
 
   if(!locacoes?.length){
-    lista.innerHTML = "<p style='opacity:.6'>Nenhuma locação.</p>";
+    lista.innerHTML="<p>Nenhuma locação.</p>";
     return;
   }
 
   locacoes.forEach(l=>{
-    lista.innerHTML += `
+    const v = mapa[l.veiculo_id] || {};
+    lista.innerHTML+=`
       <div class="card">
-        <h3>🚗 ${mapa[l.veiculo_id]?.modelo || "Veículo"}</h3>
-
+        <h3>🚗 ${v.modelo || "Veículo"}</h3>
         <p><b>Cliente:</b> ${l.nome}</p>
         <p><b>Telefone:</b> ${l.telefone}</p>
         <p><b>Dias:</b> ${l.dias}</p>
@@ -91,7 +130,6 @@ async function carregar(){
         <hr>
 
         <div class="docs">
-          <p><b>Documentos:</b></p>
           ${l.selfie_url?`• <a href="${l.selfie_url}" target="_blank">Selfie</a><br>`:""}
           ${l.rg_frente_url?`• <a href="${l.rg_frente_url}" target="_blank">RG Frente</a><br>`:""}
           ${l.rg_verso_url?`• <a href="${l.rg_verso_url}" target="_blank">RG Verso</a><br>`:""}
@@ -101,11 +139,10 @@ async function carregar(){
 
         <div class="actions">
           ${l.status==="solicitada"?`
-            <button class="btn aprovar" onclick="aprovar('${l.id}')">Aprovar</button>
+            <button class="btn aprovar" onclick="abrirModal('${l.id}')">Aprovar</button>
             <button class="btn recusar" onclick="recusar('${l.id}')">Recusar</button>
           `:""}
           <button class="btn pdf" onclick="docsPDF('${l.id}')">Docs PDF</button>
-          <button class="btn pdf" onclick="contratoPDF('${l.id}')">Contrato PDF</button>
           <button class="btn excluir" onclick="excluir('${l.id}')">Excluir</button>
         </div>
       </div>
@@ -113,104 +150,100 @@ async function carregar(){
   });
 }
 
-/* ================= PDF DOCUMENTOS ================= */
+/* ================= DOCS PDF ================= */
 async function docsPDF(id){
   const { jsPDF } = window.jspdf;
   const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
 
   const pdf = new jsPDF();
   const docs = [
-    ["Selfie", l.selfie_url],
-    ["RG Frente", l.rg_frente_url],
-    ["RG Verso", l.rg_verso_url],
-    ["CPF", l.cpf_url],
-    ["CNH", l.cnh_url]
+    ["Selfie",l.selfie_url],
+    ["RG Frente",l.rg_frente_url],
+    ["RG Verso",l.rg_verso_url],
+    ["CPF",l.cpf_url],
+    ["CNH",l.cnh_url]
   ];
 
-  for(const [nome,url] of docs){
-    if(!url) continue;
+  for(const [t,u] of docs){
+    if(!u) continue;
     pdf.addPage();
-    pdf.text(nome, 10, 10);
-    const img = await fetch(url).then(r=>r.blob()).then(b=>new Promise(res=>{
-      const i=new Image(); i.onload=()=>res(i); i.src=URL.createObjectURL(b);
+    pdf.text(t,10,10);
+    const img = await fetch(u).then(r=>r.blob()).then(b=>new Promise(res=>{
+      const i=new Image();i.onload=()=>res(i);i.src=URL.createObjectURL(b);
     }));
     pdf.addImage(img,"JPEG",10,20,180,240);
   }
-
   pdf.save(`documentos-${l.nome}.pdf`);
 }
 
-/* ================= PDF CONTRATO ================= */
-async function contratoPDF(id){
+/* ================= MODAL ================= */
+function abrirModal(id){
+  contratoIdAtual=id;
+  modalContrato.style.display="block";
+}
+function fecharModal(){
+  modalContrato.style.display="none";
+}
+
+/* ================= CONFIRMAR ================= */
+async function confirmarContrato(){
+  await gerarContratoFinal(
+    contratoIdAtual,
+    mEndereco.value,
+    mClausulas.value
+  );
+
+  const { data:l } = await sb.from("locacoes").select("veiculo_id").eq("id",contratoIdAtual).single();
+
+  await sb.from("locacoes").update({status:"ativa"}).eq("id",contratoIdAtual);
+  await sb.from("veiculos").update({status:"alugado"}).eq("id",l.veiculo_id);
+
+  fecharModal();
+  carregar();
+}
+
+/* ================= CONTRATO PDF ================= */
+async function gerarContratoFinal(id,endereco,clausulas){
   const { jsPDF } = window.jspdf;
 
   const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
   const { data:v } = await sb.from("veiculos").select("*").eq("id",l.veiculo_id).single();
-  const { data:cfg } = await sb
-    .from("config_site")
-    .select("nome_site, logo_url, clausulas_pdf")
-    .eq("app_id", appId)
-    .single();
+  const { data:cfg } = await sb.from("config_site").select("*").eq("app_id",appId).single();
 
   const pdf = new jsPDF();
-  let y = 20;
+  let y=50;
 
   if(cfg?.logo_url){
     const logo = await fetch(cfg.logo_url).then(r=>r.blob()).then(b=>new Promise(res=>{
-      const i=new Image(); i.onload=()=>res(i); i.src=URL.createObjectURL(b);
+      const i=new Image();i.onload=()=>res(i);i.src=URL.createObjectURL(b);
     }));
-    pdf.addImage(logo,"PNG",10,10,190,30);
-    y = 50;
+    pdf.addImage(logo,"PNG",12,12,40,20);
   }
 
-  pdf.setFont(undefined,"bold");
-  pdf.text("1. DADOS DO LOCATÁRIO",10,y); y+=8;
-  pdf.setFont(undefined,"normal");
-  pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
-  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=6;
-  pdf.text(`CPF: ${l.cpf || "—"}`,10,y); y+=10;
+  pdf.setFontSize(11);
+  pdf.text(cfg?.nome_site||"Locadora",60,16);
+  pdf.text(endereco||"Endereço não informado",60,22);
 
   pdf.setFont(undefined,"bold");
-  pdf.text("2. DADOS DO LOCADOR",10,y); y+=8;
+  pdf.text("1. DADOS DO LOCATÁRIO",10,y);y+=8;
   pdf.setFont(undefined,"normal");
-  pdf.text(cfg?.nome_site || "Locadora",10,y); y+=10;
+  pdf.text(`Nome: ${l.nome}`,10,y);y+=6;
+  pdf.text(`Telefone: ${l.telefone}`,10,y);y+=10;
 
   pdf.setFont(undefined,"bold");
-  pdf.text("3. DETALHES DO VEÍCULO",10,y); y+=8;
+  pdf.text("3. DETALHES DO VEÍCULO",10,y);y+=8;
   pdf.setFont(undefined,"normal");
-  pdf.text(`Modelo: ${v.modelo}`,10,y); y+=6;
-  pdf.text(`Placa: ${v.placa || "—"}`,10,y); y+=6;
-  pdf.text(`Chassi: ${v.chassi || "—"}`,10,y); y+=10;
+  pdf.text(`Modelo: ${v.modelo}`,10,y);y+=10;
 
   pdf.setFont(undefined,"bold");
-  pdf.text("4. PERÍODO DE ALUGUEL",10,y); y+=8;
+  pdf.text("CLÁUSULAS CONTRATUAIS",10,y);y+=8;
   pdf.setFont(undefined,"normal");
-  pdf.text(`Dias: ${l.dias}`,10,y); y+=10;
-
-  pdf.setFont(undefined,"bold");
-  pdf.text("5. VALOR",10,y); y+=8;
-  pdf.setFont(undefined,"normal");
-  pdf.text(`Total: R$ ${l.total}`,10,y); y+=12;
-
-  pdf.setFont(undefined,"bold");
-  pdf.text("CLÁUSULAS CONTRATUAIS",10,y); y+=8;
-  pdf.setFont(undefined,"normal");
-  pdf.text(cfg?.clausulas_pdf || "Cláusulas do contrato...",10,y,{maxWidth:190});
-
-  pdf.line(20,260,90,260);
-  pdf.line(120,260,190,260);
-  pdf.text("Locatário",45,266);
-  pdf.text("Locador",150,266);
+  pdf.text(clausulas||"Cláusulas não informadas",10,y,{maxWidth:190});
 
   pdf.save(`contrato-${l.nome}.pdf`);
 }
 
-/* ================= AÇÕES ================= */
-async function aprovar(id){
-  await sb.from("locacoes").update({status:"ativa"}).eq("id",id);
-  alert("Locação aprovada!");
-  carregar();
-}
+/* ================= OUTRAS ================= */
 async function recusar(id){
   await sb.from("locacoes").update({status:"recusada"}).eq("id",id);
   carregar();
@@ -222,7 +255,7 @@ async function excluir(id){
   }
 }
 
-/* ================= INIT ================= */
+/* INIT */
 carregar();
 </script>
 
