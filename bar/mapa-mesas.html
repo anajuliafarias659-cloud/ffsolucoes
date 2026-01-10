@@ -8,63 +8,39 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{
-  margin:0;
-  background:#020617;
-  font-family:Arial;
-  color:#fff;
-}
-
+body{margin:0;background:#020617;font-family:Arial;color:#fff}
 .topo{
   background:#0f172a;
   padding:14px 20px;
   display:flex;
   justify-content:space-between;
-  align-items:center;
+  align-items:center
 }
-
 .mapa{
   position:relative;
   width:100%;
   height:calc(100vh - 64px);
-  background:#020617;
-  overflow:hidden;
+  overflow:hidden
 }
-
-/* BAR */
-.bar{
+.bar,.mesa{
   position:absolute;
-  width:160px;
-  height:180px;
-  border:3px solid #ef4444;
-  border-radius:14px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight:bold;
-  cursor:grab;
-  user-select:none;
-}
-
-/* MESA */
-.mesa{
-  position:absolute;
-  width:60px;
-  height:60px;
   border-radius:12px;
-  border:3px solid #22c55e;
   display:flex;
   align-items:center;
   justify-content:center;
   font-weight:bold;
   cursor:grab;
-  user-select:none;
+  user-select:none
 }
-
-.mesa:active,
-.bar:active{
-  cursor:grabbing;
+.bar{
+  width:160px;height:180px;
+  border:3px solid #ef4444
 }
+.mesa{
+  width:60px;height:60px;
+  border:3px solid #22c55e
+}
+.bar:active,.mesa:active{cursor:grabbing}
 </style>
 </head>
 
@@ -84,6 +60,8 @@ if(!app_id){
   alert("Sessão inválida");
   location.href="../auth/login.html";
 }
+
+const modoAdmin = !!admin;
 </script>
 
 <div class="topo">
@@ -98,8 +76,10 @@ if(!app_id){
 <script>
 const mapa = document.getElementById("mapa");
 
-/* 🔹 Drag genérico */
-function drag(el){
+/* 🔹 drag com salvamento */
+function drag(el, mesa_id){
+  if(!modoAdmin) return;
+
   let offX=0, offY=0, ativo=false;
 
   el.addEventListener("mousedown",e=>{
@@ -114,13 +94,24 @@ function drag(el){
     el.style.top=(e.pageY-offY-64)+"px";
   });
 
-  document.addEventListener("mouseup",()=>ativo=false);
+  document.addEventListener("mouseup",async()=>{
+    if(!ativo) return;
+    ativo=false;
+
+    await sb.from("mapa_mesas")
+      .upsert({
+        app_id,
+        mesa_id,
+        x: el.style.left,
+        y: el.style.top
+      },{ onConflict:"app_id,mesa_id" });
+  });
 }
 
-/* BAR arrastável */
-drag(document.getElementById("bar"));
+/* BAR arrastável (mesa_id = 0) */
+drag(document.getElementById("bar"), 0);
 
-/* 🔹 Carrega mesas reais */
+/* 🔹 carrega mesas e posições */
 async function carregarMesas(){
   const { data: mesas } = await sb
     .from("mesas")
@@ -129,27 +120,36 @@ async function carregarMesas(){
     .eq("ativa",true)
     .order("numero_mesa");
 
-  let x=260, y=60;
-  const maxCol=4;
-  let col=0;
+  const { data: posicoes } = await sb
+    .from("mapa_mesas")
+    .select("mesa_id,x,y")
+    .eq("app_id",app_id);
+
+  const mapaPos = {};
+  (posicoes||[]).forEach(p=>{
+    mapaPos[p.mesa_id] = p;
+  });
+
+  let x=260,y=60,col=0;
 
   mesas.forEach(m=>{
     const div=document.createElement("div");
     div.className="mesa";
     div.innerText=m.numero_mesa;
-    div.style.left=x+"px";
-    div.style.top=y+"px";
+
+    if(mapaPos[m.id]){
+      div.style.left=mapaPos[m.id].x;
+      div.style.top =mapaPos[m.id].y;
+    }else{
+      div.style.left=x+"px";
+      div.style.top =y+"px";
+    }
 
     mapa.appendChild(div);
-    drag(div);
+    drag(div, m.id);
 
-    col++;
-    x+=80;
-    if(col>=maxCol){
-      col=0;
-      x=260;
-      y+=90;
-    }
+    col++; x+=80;
+    if(col>=4){col=0;x=260;y+=90}
   });
 }
 
