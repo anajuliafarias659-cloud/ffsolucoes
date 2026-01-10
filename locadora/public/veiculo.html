@@ -61,6 +61,7 @@ input{
   font-weight:700;
   cursor:pointer
 }
+.btn-sec{background:#222}
 </style>
 </head>
 
@@ -83,15 +84,20 @@ input{
       Alugar este veículo
     </div>
 
+    <!-- FORMULÁRIO COMPLETO -->
     <div id="formSolicitacao" style="display:none">
+
       <label>Nome</label>
       <input id="fNome">
 
       <label>Telefone</label>
       <input id="fTelefone">
 
+      <label>CPF</label>
+      <input id="fCpf">
+
       <label>Dias</label>
-      <input id="fDias" type="number" min="1">
+      <input id="fDias" type="number" min="1" oninput="calcularTotal()">
 
       <label>Total</label>
       <input id="fTotal" readonly>
@@ -103,15 +109,12 @@ input{
 </div>
 
 <script>
-/* ================= PARAMS ================= */
+/* PARAMS */
 const params = new URLSearchParams(window.location.search);
 const appId = params.get("app_id");
 const veiculoId = params.get("id");
 
-console.log("APP_ID:", appId);
-console.log("VEICULO_ID:", veiculoId);
-
-/* ================= SUPABASE (ANTES DE TUDO) ================= */
+/* SUPABASE */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -119,58 +122,62 @@ const sb = supabase.createClient(
 
 let DIARIA = 0;
 
-/* ================= INIT ================= */
+/* INIT */
 if(!appId || !veiculoId){
   document.body.innerHTML =
     "<h2 style='padding:30px;text-align:center'>Acesso inválido</h2>";
-} else {
+}else{
   carregarVeiculo();
 }
 
-/* ================= LOAD VEÍCULO ================= */
+/* LOAD */
 async function carregarVeiculo(){
-  const { data:v, error } = await sb
+  const { data:v } = await sb
     .from("veiculos")
     .select("*")
     .eq("id", veiculoId)
     .eq("app_id", appId)
     .single();
 
-  if(error || !v){
+  if(!v){
     document.querySelector(".card").innerHTML =
       "<p style='text-align:center'>Veículo não encontrado.</p>";
     return;
   }
 
-  DIARIA = v.diaria;
+  const statusEl = document.getElementById("status");
 
+  DIARIA = v.diaria;
   imgVeiculo.src = v.foto_url || "https://via.placeholder.com/800x400";
   modelo.innerText = v.modelo;
   preco.innerText = `R$ ${DIARIA} / diária`;
 
   if(v.status === "alugado"){
-    status.innerText = "🔒 Alugado";
-    status.classList.add("alugado");
-  } else {
-    status.innerText = "✅ Disponível";
-    status.classList.add("disponivel");
+    statusEl.innerText = "🔒 Alugado";
+    statusEl.classList.add("alugado");
+  }else{
+    statusEl.innerText = "✅ Disponível";
+    statusEl.classList.add("disponivel");
     acaoAlugar.style.display = "block";
   }
 }
 
-/* ================= FORM ================= */
+/* FORM */
 function abrirFormulario(){
   formSolicitacao.style.display = "block";
   acaoAlugar.style.display = "none";
 }
 
-/* ================= ENVIO ================= */
+function calcularTotal(){
+  const dias = Number(fDias.value || 0);
+  fTotal.value = dias * DIARIA;
+}
+
+/* ENVIO */
 async function enviarSolicitacao(){
   const dias = Number(fDias.value || 0);
-  const total = dias * DIARIA;
-  fTotal.value = total;
 
-  if(!dias || !fNome.value || !fTelefone.value){
+  if(!fNome.value || !fTelefone.value || !dias){
     alert("Preencha todos os campos");
     return;
   }
@@ -180,8 +187,9 @@ async function enviarSolicitacao(){
     veiculo_id: veiculoId,
     nome: fNome.value,
     telefone: fTelefone.value,
+    cpf: fCpf.value,
     dias,
-    total,
+    total: dias * DIARIA,
     status: "solicitada"
   });
 
