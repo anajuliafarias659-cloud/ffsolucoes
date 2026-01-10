@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Locações – Painel Administrativo</title>
+<title>Locações – Painel Admin</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -12,39 +12,20 @@
 body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
 header{background:#0f172a;padding:18px 24px;font-size:22px;font-weight:700}
 .container{max-width:1200px;margin:auto;padding:24px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:18px}
-
-.card{background:#0b1220;border-radius:18px;padding:18px;box-shadow:0 10px 25px rgba(0,0,0,.45)}
-.badge{display:inline-block;padding:6px 14px;border-radius:999px;font-weight:700;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:18px}
+.card{background:#0b1220;border-radius:18px;padding:18px}
+.badge{padding:6px 14px;border-radius:999px;font-weight:700;font-size:13px}
 .solicitada{background:#facc15;color:#000}
 .ativa{background:#22c55e;color:#022c22}
 .recusada{background:#ef4444}
-
 .btn{padding:10px 14px;border-radius:12px;border:none;font-weight:700;cursor:pointer}
-.aprovar{background:#22c55e;color:#022c22}
+.aprovar{background:#22c55e}
 .recusar{background:#ef4444;color:#fff}
 .pdf{background:#2563eb;color:#fff}
 .whats{background:#16a34a;color:#022c22}
-.excluir{background:#475569;color:#fff}
-
-details summary{cursor:pointer;font-weight:700;margin:10px 0}
-hr{opacity:.2;margin:14px 0}
-
-/* MODAL */
-#modalContrato{
-  display:none;position:fixed;inset:0;background:#0009;z-index:999
-}
-#modalContrato .box{
-  background:#0b1220;
-  padding:20px;
-  border-radius:16px;
-  max-width:700px;
-  margin:5% auto
-}
-#modalContrato label{display:block;margin-top:12px;font-weight:700}
-#modalContrato input,#modalContrato textarea{
-  width:100%;padding:10px;border-radius:10px;border:none;margin-top:6px
-}
+hr{opacity:.2}
+input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top:6px}
+label{font-weight:700;margin-top:10px;display:block}
 </style>
 </head>
 
@@ -56,39 +37,10 @@ hr{opacity:.2;margin:14px 0}
   <div class="grid" id="lista"></div>
 </div>
 
-<!-- MODAL CONTRATO -->
-<div id="modalContrato">
-  <div class="box">
-    <h3>🏢 Dados da Locadora (salvos automaticamente)</h3>
-
-    <label>Nome da Locadora</label>
-    <input id="mNome">
-
-    <label>Endereço</label>
-    <input id="mEndereco">
-
-    <label>CNPJ</label>
-    <input id="mCnpj">
-
-    <label>Telefone</label>
-    <input id="mTelefone">
-
-    <label>Cláusulas do Contrato</label>
-    <textarea id="mClausulas" rows="6"></textarea>
-
-    <div style="margin-top:16px;display:flex;gap:10px">
-      <button class="btn pdf" onclick="confirmarContrato()">✔ Gerar contrato</button>
-      <button class="btn excluir" onclick="fecharModal()">Cancelar</button>
-    </div>
-  </div>
-</div>
-
 <script>
 /* ================= AUTH ================= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || admin.tipo!=="locadora"){
-  location.href="../auth/login.html";
-}
+if(!admin || admin.tipo!=="locadora"){ location.href="../auth/login.html"; }
 const appId = admin.app_id;
 
 /* ================= SUPABASE ================= */
@@ -97,186 +49,126 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let contratoIdAtual = null;
-
 /* ================= LOAD ================= */
 async function carregar(){
-  const { data:locacoes } = await sb
-    .from("locacoes")
-    .select("*")
-    .eq("app_id",appId)
-    .order("created_at",{ascending:false});
+  const { data:locacoes } = await sb.from("locacoes")
+    .select("*").eq("app_id",appId).order("created_at",{ascending:false});
 
-  const { data:veiculos } = await sb
-    .from("veiculos")
-    .select("*")
-    .eq("app_id",appId);
+  const { data:veiculos } = await sb.from("veiculos")
+    .select("*").eq("app_id",appId);
 
   const mapa = {};
   veiculos.forEach(v=>mapa[v.id]=v);
 
   lista.innerHTML="";
-  if(!locacoes?.length){
-    lista.innerHTML="<p>Nenhuma locação.</p>";
-    return;
+  if(!locacoes.length){
+    lista.innerHTML="<p>Nenhuma locação.</p>"; return;
   }
 
   locacoes.forEach(l=>{
     const v = mapa[l.veiculo_id] || {};
-
     lista.innerHTML+=`
     <div class="card">
-      <h3>🚗 ${v.modelo || "Veículo"}</h3>
-
-      <span class="badge ${l.status}">${l.status.toUpperCase()}</span>
-
-      <details open>
-        <summary>👤 Dados do Cliente</summary>
-        <p><b>Nome:</b> ${l.nome}</p>
-        <p><b>Telefone:</b> ${l.telefone}</p>
-        ${l.cpf ? `<p><b>CPF:</b> ${l.cpf}</p>` : ""}
-        ${l.endereco ? `<p><b>Endereço:</b> ${l.endereco}</p>` : ""}
-        ${l.bairro ? `<p><b>Bairro:</b> ${l.bairro}</p>` : ""}
-        ${l.cidade ? `<p><b>Cidade:</b> ${l.cidade}</p>` : ""}
-        ${l.estado ? `<p><b>Estado:</b> ${l.estado}</p>` : ""}
-      </details>
-
-      <details>
-        <summary>🚘 Dados do Veículo</summary>
-        <p><b>Modelo:</b> ${v.modelo || "-"}</p>
-        ${v.placa ? `<p><b>Placa:</b> ${v.placa}</p>` : ""}
-        ${v.chassi ? `<p><b>Chassi:</b> ${v.chassi}</p>` : ""}
-        ${v.renavam ? `<p><b>Renavam:</b> ${v.renavam}</p>` : ""}
-      </details>
-
-      <hr>
-
+      <h3>${v.modelo || "Veículo"}</h3>
+      <p><b>Cliente:</b> ${l.nome}</p>
+      <p><b>Telefone:</b> ${l.telefone}</p>
       <p><b>Dias:</b> ${l.dias}</p>
       <p><b>Total:</b> R$ ${l.total}</p>
 
+      <span class="badge ${l.status}">${l.status.toUpperCase()}</span>
       <hr>
 
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn pdf" onclick="baixarContrato('${l.id}')">📄 Contrato PDF</button>
-        <button class="btn whats" onclick="enviarWhats('${l.id}')">📲 WhatsApp</button>
+      <button class="btn pdf" onclick="baixarContrato('${l.id}')">📄 Baixar contrato</button>
+      <button class="btn whats" onclick="enviarWhats('${l.id}')">📲 WhatsApp</button>
 
-        ${l.status==="solicitada"?`
-          <button class="btn aprovar" onclick="abrirModal('${l.id}')">✔ Aprovar</button>
-          <button class="btn recusar" onclick="recusar('${l.id}')">✖ Recusar</button>
-        `:""}
-
-        <button class="btn excluir" onclick="excluir('${l.id}')">🗑 Excluir</button>
-      </div>
-    </div>
-    `;
+      ${l.status==="solicitada"?`
+        <button class="btn aprovar" onclick="aprovar('${l.id}','${l.veiculo_id}')">✔ Aprovar</button>
+        <button class="btn recusar" onclick="recusar('${l.id}')">✖ Recusar</button>
+      `:""}
+    </div>`;
   });
-}
-
-/* ================= MODAL ================= */
-async function abrirModal(id){
-  contratoIdAtual = id;
-
-  const { data:cfg } = await sb
-    .from("config_site")
-    .select("nome_site,endereco,cnpj,telefone,clausulas_pdf")
-    .eq("app_id",appId)
-    .single();
-
-  mNome.value      = cfg?.nome_site || "";
-  mEndereco.value  = cfg?.endereco || "";
-  mCnpj.value      = cfg?.cnpj || "";
-  mTelefone.value  = cfg?.telefone || "";
-  mClausulas.value = cfg?.clausulas_pdf || "";
-
-  modalContrato.style.display="block";
-}
-function fecharModal(){
-  modalContrato.style.display="none";
-}
-
-/* ================= CONFIRMAR ================= */
-async function confirmarContrato(){
-  await sb.from("config_site").upsert({
-    app_id: appId,
-    nome_site: mNome.value,
-    endereco: mEndereco.value,
-    cnpj: mCnpj.value,
-    telefone: mTelefone.value,
-    clausulas_pdf: mClausulas.value
-  });
-
-  await gerarContratoFinal(contratoIdAtual);
-
-  const { data:l } = await sb
-    .from("locacoes")
-    .select("veiculo_id")
-    .eq("id",contratoIdAtual)
-    .single();
-
-  await sb.from("locacoes").update({status:"ativa"}).eq("id",contratoIdAtual);
-  await sb.from("veiculos").update({status:"alugado"}).eq("id",l.veiculo_id);
-
-  fecharModal();
-  carregar();
 }
 
 /* ================= PDF ================= */
-async function gerarContratoFinal(id){
+async function gerarPDF(id){
   const { jsPDF } = window.jspdf;
 
   const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
   const { data:v } = await sb.from("veiculos").select("*").eq("id",l.veiculo_id).single();
-  const { data:cfg } = await sb.from("config_site").select("*").eq("app_id",appId).single();
+  const { data:cfg } = await sb.from("config_site")
+    .select("*").eq("app_id",appId).single();
 
   const pdf = new jsPDF();
 
   if(cfg?.logo_url){
-    pdf.addImage(cfg.logo_url,"PNG",10,10,45,20);
+    pdf.addImage(cfg.logo_url,"PNG",10,10,50,20);
   }
 
   pdf.setFontSize(14);
-  pdf.text(cfg?.nome_site || "Locadora",65,18);
-
-  let y=40;
+  pdf.text(cfg?.nome_site || "Locadora",70,18);
   pdf.setFontSize(11);
 
-  pdf.text("DADOS DO CLIENTE",10,y); y+=6;
+  let y=40;
+  pdf.text("1. DADOS DO LOCATÁRIO",10,y); y+=6;
   pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
-  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=6;
-  if(l.cpf) pdf.text(`CPF: ${l.cpf}`,10,y+=6);
-  if(l.endereco) pdf.text(`Endereço: ${l.endereco}`,10,y+=6);
+  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=8;
 
-  y+=8;
-  pdf.text("DADOS DO VEÍCULO",10,y); y+=6;
+  pdf.text("2. DADOS DO LOCADOR",10,y); y+=6;
+  pdf.text(cfg?.nome_site||"",10,y); y+=8;
+
+  pdf.text("3. VEÍCULO",10,y); y+=6;
   pdf.text(`Modelo: ${v.modelo}`,10,y); y+=6;
   if(v.placa) pdf.text(`Placa: ${v.placa}`,10,y+=6);
+  if(v.chassi) pdf.text(`Chassi: ${v.chassi}`,10,y+=6);
 
   y+=8;
+  pdf.text("4. VALOR",10,y); y+=6;
+  pdf.text(`Dias: ${l.dias}`,10,y); y+=6;
+  pdf.text(`Total: R$ ${l.total}`,10,y);
+
+  y+=10;
   pdf.text("CLÁUSULAS",10,y); y+=6;
-  pdf.text(cfg?.clausulas_pdf || "Cláusulas contratuais.",10,y,{maxWidth:180});
+  pdf.text(cfg?.clausulas_pdf || "Sem cláusulas.",10,y,{maxWidth:180});
 
-  pdf.save(`contrato-${l.nome}.pdf`);
+  return pdf;
 }
 
-/* ================= OUTRAS ================= */
+/* ================= STORAGE ================= */
+async function salvarPDF(pdf,id){
+  const blob = pdf.output("blob");
+  const path = `contratos/${id}.pdf`;
+  await sb.storage.from("contratos").upload(path,blob,{upsert:true});
+  return sb.storage.from("contratos").getPublicUrl(path).data.publicUrl;
+}
+
+/* ================= AÇÕES ================= */
 async function baixarContrato(id){
-  await gerarContratoFinal(id);
+  const pdf = await gerarPDF(id);
+  pdf.save("contrato-locacao.pdf");
 }
+
 async function enviarWhats(id){
-  const pdf = await gerarContratoFinal(id);
+  const pdf = await gerarPDF(id);
+  const url = await salvarPDF(pdf,id);
+
+  const { data:l } = await sb.from("locacoes").select("telefone").eq("id",id).single();
+  const tel = l.telefone.replace(/\D/g,"");
+
+  window.open(`https://wa.me/55${tel}?text=${encodeURIComponent("Contrato de locação: "+url)}`);
 }
+
+async function aprovar(id,veiculoId){
+  await sb.from("locacoes").update({status:"ativa"}).eq("id",id);
+  await sb.from("veiculos").update({status:"alugado"}).eq("id",veiculoId);
+  carregar();
+}
+
 async function recusar(id){
   await sb.from("locacoes").update({status:"recusada"}).eq("id",id);
   carregar();
 }
-async function excluir(id){
-  if(confirm("Excluir locação?")){
-    await sb.from("locacoes").delete().eq("id",id);
-    carregar();
-  }
-}
 
-/* INIT */
+/* ================= INIT ================= */
 carregar();
 </script>
 
