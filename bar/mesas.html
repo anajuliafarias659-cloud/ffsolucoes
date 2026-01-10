@@ -5,7 +5,6 @@
 <title>Mesas</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- PWA -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#020617">
 
@@ -20,11 +19,11 @@ body{
   color:#fff;
 }
 
-/* TOPO */
 .topo{
   background:#0f172a;
   padding:16px;
 }
+
 .topo h2{
   margin:0 0 12px;
 }
@@ -35,6 +34,7 @@ body{
   flex-wrap:wrap;
   gap:10px;
 }
+
 .botoes-linha.baixo{
   margin-top:10px;
 }
@@ -46,21 +46,20 @@ body{
   font-weight:bold;
   cursor:pointer;
 }
+
 .btn-avulsa{background:#38bdf8}
 .btn-mapa{background:#6366f1}
 .btn-voltar{background:#1e293b;color:#fff}
 
-.btn-add{
+/* BOTÃO SECRETO */
+.btn-secreto{
+  width:42px;
+  height:42px;
+  border-radius:50%;
   background:#22c55e;
 }
-.btn-add.segurar{
+.btn-secreto.segurar{
   background:#16a34a;
-}
-
-.hint{
-  font-size:12px;
-  opacity:.7;
-  margin-top:6px;
 }
 
 /* CONTEÚDO */
@@ -142,57 +141,57 @@ const admin = JSON.parse(localStorage.getItem("admin_logado"));
 const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
 const app_id = funcionario?.app_id || admin?.app_id;
 
-if(!app_id){
-  alert("Sessão inválida");
-  location.href="../auth/login.html";
+if(!admin && !funcionario){
+  alert("Acesso restrito");
+  location.href="../mesa.html";
 }
 
+const SEGREDO_ADD_MESA = "4321";
 const SEGREDO_REMOVER_MESA = "4321";
+
 let criandoMesa = false;
 let timerAdd = null;
 </script>
 
-<!-- TOPO -->
 <div class="topo">
   <h2>🪑 Mesas</h2>
 
   <div class="botoes-linha">
     <button class="btn btn-avulsa" onclick="vendaAvulsa()">💳 Venda Avulsa</button>
 
+    <!-- BOTÃO SECRETO -->
     <button
-      class="btn btn-add"
+      class="btn btn-secreto"
       id="btnAdd"
       ontouchstart="segurarAdd(true)"
       ontouchend="segurarAdd(false)"
       onmousedown="segurarAdd(true)"
       onmouseup="segurarAdd(false)"
-    >
-      ➕ Mesa
-    </button>
+      title="Ação restrita"
+    ></button>
   </div>
 
   <div class="botoes-linha baixo">
     <button class="btn btn-mapa" onclick="abrirMapa()">🗺️ Mapa das Mesas</button>
     <button class="btn btn-voltar" onclick="history.back()">Voltar</button>
   </div>
-
-  <div class="hint">Para adicionar mesa, segure o botão por 10 segundos</div>
 </div>
 
-<!-- LISTA -->
 <div class="container">
   <div class="grid" id="listaMesas"></div>
 </div>
 
 <script>
-/* SEGURAR BOTÃO ADD */
 function segurarAdd(pressionado){
   const btn = document.getElementById("btnAdd");
 
   if(pressionado){
     btn.classList.add("segurar");
     timerAdd = setTimeout(()=>{
-      adicionarMesa();
+      const senha = prompt("Código para adicionar mesa:");
+      if(senha === SEGREDO_ADD_MESA){
+        adicionarMesa();
+      }
     },10000);
   }else{
     btn.classList.remove("segurar");
@@ -200,9 +199,7 @@ function segurarAdd(pressionado){
   }
 }
 
-/* CARREGAR MESAS */
 async function carregarMesas(){
-
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
@@ -220,9 +217,7 @@ async function carregarMesas(){
 
   const pedidosPorMesa = {};
   (pedidos || []).forEach(p=>{
-    if(!pedidosPorMesa[p.mesa_id]){
-      pedidosPorMesa[p.mesa_id] = p;
-    }
+    if(!pedidosPorMesa[p.mesa_id]) pedidosPorMesa[p.mesa_id] = p;
   });
 
   const grid = document.getElementById("listaMesas");
@@ -230,8 +225,8 @@ async function carregarMesas(){
 
   mesas.forEach(m=>{
     const pedido = pedidosPorMesa[m.id];
-
     let classe="livre", texto="LIVRE";
+
     if(pedido){
       if(pedido.status==="conta_solicitada"){
         classe="conta"; texto="PEDIU A CONTA";
@@ -240,43 +235,35 @@ async function carregarMesas(){
       }
     }
 
-    const div = document.createElement("div");
+    const div=document.createElement("div");
     div.className=`card ${classe}`;
     div.innerHTML=`
       <h3>Mesa ${m.numero_mesa}</h3>
       <span class="status ${classe}">${texto}</span>
-      <div class="qr">
-        <canvas id="qr-${m.id}"></canvas>
-      </div>
-      ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ``}
+      <div class="qr"><canvas id="qr-${m.id}"></canvas></div>
+      ${!pedido?`<button class="btn-remover">Remover mesa</button>`:""}
     `;
 
-    div.onclick=()=>{
-      location.href=`mesa.html?mesa=${m.id}&app_id=${app_id}`;
-    };
-
+    div.onclick=()=>location.href=`mesa.html?mesa=${m.id}&app_id=${app_id}`;
     grid.appendChild(div);
 
-    /* ✅ QR CODE (FIX DEFINITIVO MOBILE) */
     const canvas = document.getElementById(`qr-${m.id}`);
     if(canvas){
       canvas.width = 140;
       canvas.height = 140;
-
       QRCode.toCanvas(
         canvas,
         `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/mesa.html?mesa=${m.id}&app_id=${app_id}`,
-        { width:140, margin:1 },
-        err => { if(err) console.error("Erro QR:", err); }
+        { width:140, margin:1 }
       );
     }
 
-    const btn = div.querySelector(".btn-remover");
+    const btn=div.querySelector(".btn-remover");
     if(btn){
       btn.onclick=async(e)=>{
         e.stopPropagation();
-        const senha = prompt("Código para remover a mesa:");
-        if(senha !== SEGREDO_REMOVER_MESA) return;
+        const senha=prompt("Código para remover a mesa:");
+        if(senha!==SEGREDO_REMOVER_MESA) return;
         await sb.from("mesas").update({ativa:false}).eq("id",m.id);
         carregarMesas();
       };
@@ -284,7 +271,6 @@ async function carregarMesas(){
   });
 }
 
-/* ADD MESA */
 async function adicionarMesa(){
   if(criandoMesa) return;
   criandoMesa=true;
@@ -297,14 +283,13 @@ async function adicionarMesa(){
     .limit(1)
     .maybeSingle();
 
-  const prox = (data?.numero_mesa || 0) + 1;
+  const prox=(data?.numero_mesa||0)+1;
   await sb.from("mesas").insert({app_id,numero_mesa:prox,ativa:true});
 
   criandoMesa=false;
   carregarMesas();
 }
 
-/* NAVEGAÇÃO */
 function vendaAvulsa(){
   location.href=`venda-avulsa.html?app_id=${app_id}`;
 }
@@ -314,11 +299,6 @@ function abrirMapa(){
 
 carregarMesas();
 setInterval(carregarMesas,4000);
-
-/* SERVICE WORKER */
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
-}
 </script>
 
 </body>
