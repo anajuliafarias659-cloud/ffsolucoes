@@ -8,19 +8,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;background:#020617;font-family:Arial;color:#fff}
+body{
+  margin:0;
+  background:#020617;
+  font-family:Arial;
+  color:#fff;
+}
 .topo{
   background:#0f172a;
   padding:14px 20px;
   display:flex;
   justify-content:space-between;
-  align-items:center
+  align-items:center;
 }
 .mapa{
   position:relative;
   width:100%;
   height:calc(100vh - 64px);
-  overflow:hidden
+  overflow:hidden;
 }
 .bar,.mesa{
   position:absolute;
@@ -30,25 +35,28 @@ body{margin:0;background:#020617;font-family:Arial;color:#fff}
   justify-content:center;
   font-weight:bold;
   cursor:grab;
-  user-select:none
+  user-select:none;
 }
 .bar{
   width:160px;
   height:180px;
-  border:3px solid #ef4444
+  border:3px solid #ef4444;
 }
 .mesa{
   width:60px;
   height:60px;
-  border:3px solid #22c55e
+  border:3px solid #22c55e;
 }
-.bar:active,.mesa:active{cursor:grabbing}
+.bar:active,.mesa:active{
+  cursor:grabbing;
+}
 </style>
 </head>
 
 <body>
 
 <script>
+/* 🔐 SUPABASE */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -78,7 +86,7 @@ const modoAdmin = !!admin;
 <script>
 const mapa = document.getElementById("mapa");
 
-/* 🔒 DRAG COM SALVAMENTO PROFISSIONAL */
+/* 💎 DRAG PROFISSIONAL (SEM ERRO UUID) */
 function drag(el, config){
   if(!modoAdmin) return;
 
@@ -92,8 +100,8 @@ function drag(el, config){
 
   document.addEventListener("mousemove",e=>{
     if(!ativo) return;
-    el.style.left=(e.pageX-offX)+"px";
-    el.style.top =(e.pageY-offY-64)+"px";
+    el.style.left = (e.pageX - offX) + "px";
+    el.style.top  = (e.pageY - offY - 64) + "px";
   });
 
   document.addEventListener("mouseup",async()=>{
@@ -102,24 +110,37 @@ function drag(el, config){
 
     const { tipo, mesa_id } = config;
 
-    const { data: existe } = await sb
+    /* 🔎 BUSCA SEGURA */
+    let query = sb
       .from("mapa_mesas")
       .select("id")
-      .eq("app_id",app_id)
-      .eq("tipo",tipo)
-      .eq(mesa_id ? "mesa_id" : "id", mesa_id || "dummy")
-      .maybeSingle();
+      .eq("app_id", app_id)
+      .eq("tipo", tipo);
 
+    if(tipo === "MESA"){
+      query = query.eq("mesa_id", mesa_id);
+    }
+
+    const { data: existe, error } = await query.maybeSingle();
+    if(error){
+      console.error("Erro busca:", error);
+      return;
+    }
+
+    /* 🔁 UPDATE ou INSERT */
     if(existe){
       await sb.from("mapa_mesas")
-        .update({ x: el.style.left, y: el.style.top })
+        .update({
+          x: el.style.left,
+          y: el.style.top
+        })
         .eq("id", existe.id);
     }else{
       await sb.from("mapa_mesas")
         .insert({
           app_id,
           tipo,
-          mesa_id,
+          mesa_id: tipo === "MESA" ? mesa_id : null,
           x: el.style.left,
           y: el.style.top
         });
@@ -134,64 +155,68 @@ async function carregarBar(){
   const { data } = await sb
     .from("mapa_mesas")
     .select("x,y")
-    .eq("app_id",app_id)
-    .eq("tipo","BAR")
+    .eq("app_id", app_id)
+    .eq("tipo", "BAR")
     .maybeSingle();
 
   if(data){
-    bar.style.left=data.x;
-    bar.style.top =data.y;
+    bar.style.left = data.x;
+    bar.style.top  = data.y;
   }else{
-    bar.style.left="40px";
-    bar.style.top ="140px";
+    bar.style.left = "40px";
+    bar.style.top  = "140px";
   }
 
-  drag(bar,{ tipo:"BAR", mesa_id:null });
+  drag(bar, { tipo:"BAR", mesa_id:null });
 }
 
 /* 🔹 CARREGA MESAS */
 async function carregarMesas(){
+
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
-    .eq("app_id",app_id)
-    .eq("ativa",true)
+    .eq("app_id", app_id)
+    .eq("ativa", true)
     .order("numero_mesa");
 
   const { data: posicoes } = await sb
     .from("mapa_mesas")
     .select("mesa_id,x,y")
-    .eq("app_id",app_id)
-    .eq("tipo","MESA");
+    .eq("app_id", app_id)
+    .eq("tipo", "MESA");
 
   const mapaPos = {};
-  (posicoes||[]).forEach(p=>{
-    mapaPos[p.mesa_id]=p;
+  (posicoes || []).forEach(p=>{
+    mapaPos[p.mesa_id] = p;
   });
 
-  let x=260,y=60,col=0;
+  let x=260, y=60, col=0;
 
   mesas.forEach(m=>{
-    const div=document.createElement("div");
-    div.className="mesa";
-    div.innerText=m.numero_mesa;
+    const div = document.createElement("div");
+    div.className = "mesa";
+    div.innerText = m.numero_mesa;
 
     if(mapaPos[m.id]){
-      div.style.left=mapaPos[m.id].x;
-      div.style.top =mapaPos[m.id].y;
+      div.style.left = mapaPos[m.id].x;
+      div.style.top  = mapaPos[m.id].y;
     }else{
-      div.style.left=x+"px";
-      div.style.top =y+"px";
+      div.style.left = x + "px";
+      div.style.top  = y + "px";
     }
 
     mapa.appendChild(div);
-    drag(div,{ tipo:"MESA", mesa_id:m.id });
+    drag(div, { tipo:"MESA", mesa_id:m.id });
 
     col++; x+=80;
-    if(col>=4){col=0;x=260;y+=90}
+    if(col>=4){
+      col=0; x=260; y+=90;
+    }
   });
 }
 
+/* 🚀 START */
 carregarBar();
 carregarMesas();
 </script>
