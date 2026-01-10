@@ -22,7 +22,6 @@ header{background:#0f172a;padding:18px 24px;font-size:22px;font-weight:700}
 .aprovar{background:#22c55e}
 .recusar{background:#ef4444;color:#fff}
 .pdf{background:#2563eb;color:#fff}
-.whats{background:#16a34a;color:#022c22}
 hr{opacity:.2}
 
 #modal{
@@ -65,8 +64,13 @@ input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top
     <label>Cláusulas do Contrato</label>
     <textarea id="mClausulas" rows="6"></textarea>
 
+    <label style="margin-top:10px">
+      <input type="checkbox" id="salvarLocal">
+      Salvar dados da locadora neste navegador
+    </label>
+
     <div style="margin-top:16px;display:flex;gap:10px">
-      <button class="btn aprovar" onclick="confirmar()">✔ Salvar & Aprovar</button>
+      <button class="btn aprovar" onclick="confirmar()">✔ Aprovar & Gerar PDF</button>
       <button class="btn recusar" onclick="fechar()">Cancelar</button>
     </div>
   </div>
@@ -115,7 +119,6 @@ async function carregar(){
     lista.innerHTML+=`
       <div class="card">
         <h3>${v.modelo || "Veículo"}</h3>
-
         <p><b>Cliente:</b> ${l.nome}</p>
         <p><b>Telefone:</b> ${l.telefone}</p>
         <p><b>Dias:</b> ${l.dias}</p>
@@ -123,9 +126,6 @@ async function carregar(){
 
         <span class="badge ${l.status}">${l.status.toUpperCase()}</span>
         <hr>
-
-        <button class="btn pdf" onclick="baixar('${l.id}')">📄 PDF</button>
-        <button class="btn whats" onclick="whats('${l.id}')">📲 Whats</button>
 
         ${l.status==="solicitada"?`
           <button class="btn aprovar" onclick="abrir('${l.id}')">✔ Aprovar</button>
@@ -137,35 +137,102 @@ async function carregar(){
 }
 
 /* ================= MODAL ================= */
-async function abrir(id){
-  locacaoAtual=id;
+function abrir(id){
+  locacaoAtual = id;
 
-  const { data:cfg } = await sb
-    .from("config_site")
-    .select("*")
-    .eq("app_id",appId)
-    .single();
-
-  mNome.value = cfg?.nome_site || "";
-  mEndereco.value = cfg?.endereco || "";
-  mCnpj.value = cfg?.cnpj || "";
-  mTelefone.value = cfg?.telefone || "";
-  mClausulas.value = cfg?.clausulas_pdf || "";
+  const salvo = JSON.parse(localStorage.getItem("dados_locadora"));
+  if(salvo){
+    mNome.value = salvo.nome || "";
+    mEndereco.value = salvo.endereco || "";
+    mCnpj.value = salvo.cnpj || "";
+    mTelefone.value = salvo.telefone || "";
+    mClausulas.value = salvo.clausulas || "";
+    salvarLocal.checked = true;
+  }else{
+    mNome.value="";
+    mEndereco.value="";
+    mCnpj.value="";
+    mTelefone.value="";
+    mClausulas.value="";
+    salvarLocal.checked = false;
+  }
 
   modal.style.display="block";
 }
 function fechar(){ modal.style.display="none"; }
 
-/* ================= CONFIRMAR ================= */
-async function confirmar(){
-  await sb.from("config_site").upsert({
-    app_id: appId,
-    nome_site: mNome.value,
+/* ================= PDF ================= */
+async function gerarPDF(id){
+  const { jsPDF } = window.jspdf;
+
+  const { data:l } = await sb
+    .from("locacoes")
+    .select("*")
+    .eq("id",id)
+    .single();
+
+  const { data:v } = await sb
+    .from("veiculos")
+    .select("*")
+    .eq("id",l.veiculo_id)
+    .single();
+
+  const locadora = {
+    nome: mNome.value,
     endereco: mEndereco.value,
     cnpj: mCnpj.value,
     telefone: mTelefone.value,
-    clausulas_pdf: mClausulas.value
-  });
+    clausulas: mClausulas.value
+  };
+
+  const pdf = new jsPDF();
+  let y=20;
+
+  pdf.setFontSize(14);
+  pdf.text(locadora.nome || "Locadora",10,y); y+=10;
+  pdf.setFontSize(11);
+
+  pdf.text("1. DADOS DO LOCATÁRIO",10,y); y+=6;
+  pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
+  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=6;
+  pdf.text(`Dias: ${l.dias}`,10,y); y+=6;
+  pdf.text(`Total: R$ ${l.total}`,10,y); y+=10;
+
+  pdf.text("2. DADOS DO LOCADOR",10,y); y+=6;
+  pdf.text(`Empresa: ${locadora.nome}`,10,y); y+=6;
+  pdf.text(`CNPJ: ${locadora.cnpj}`,10,y); y+=6;
+  pdf.text(`Telefone: ${locadora.telefone}`,10,y); y+=6;
+  pdf.text(`Endereço: ${locadora.endereco}`,10,y); y+=10;
+
+  pdf.text("3. VEÍCULO",10,y); y+=6;
+  pdf.text(`Modelo: ${v.modelo}`,10,y); y+=10;
+
+  pdf.text("CLÁUSULAS CONTRATUAIS",10,y); y+=6;
+  pdf.text(
+    locadora.clausulas || "Sem cláusulas.",
+    10,
+    y,
+    { maxWidth:180 }
+  );
+
+  return pdf;
+}
+
+/* ================= CONFIRMAR ================= */
+async function confirmar(){
+
+  if(salvarLocal.checked){
+    localStorage.setItem("dados_locadora", JSON.stringify({
+      nome: mNome.value,
+      endereco: mEndereco.value,
+      cnpj: mCnpj.value,
+      telefone: mTelefone.value,
+      clausulas: mClausulas.value
+    }));
+  }
+
+  const pdf = await gerarPDF(locacaoAtual);
+  pdf.save("contrato-locacao.pdf");
 
   const { data:l } = await sb
     .from("locacoes")
@@ -173,78 +240,11 @@ async function confirmar(){
     .eq("id",locacaoAtual)
     .single();
 
-  await sb.from("locacoes")
-    .update({status:"ativa"})
-    .eq("id",locacaoAtual);
-
-  await sb.from("veiculos")
-    .update({status:"alugado"})
-    .eq("id",l.veiculo_id);
+  await sb.from("locacoes").update({status:"ativa"}).eq("id",locacaoAtual);
+  await sb.from("veiculos").update({status:"alugado"}).eq("id",l.veiculo_id);
 
   fechar();
   carregar();
-}
-
-/* ================= PDF ================= */
-async function gerarPDF(id){
-  const { jsPDF } = window.jspdf;
-
-  const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
-  const { data:v } = await sb.from("veiculos").select("*").eq("id",l.veiculo_id).single();
-  const { data:cfg } = await sb.from("config_site").select("*").eq("app_id",appId).single();
-
-  const pdf = new jsPDF();
-  let y=20;
-
-  pdf.setFontSize(14);
-  pdf.text(cfg?.nome_site || "Locadora",10,y); y+=10;
-  pdf.setFontSize(11);
-
-  pdf.text("1. DADOS DO LOCATÁRIO",10,y); y+=6;
-  pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
-  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=8;
-
-  pdf.text("2. DADOS DO LOCADOR",10,y); y+=6;
-  pdf.text(`Empresa: ${cfg?.nome_site||"-"}`,10,y); y+=6;
-  pdf.text(`CNPJ: ${cfg?.cnpj||"-"}`,10,y); y+=6;
-  pdf.text(`Telefone: ${cfg?.telefone||"-"}`,10,y); y+=6;
-  pdf.text(`Endereço: ${cfg?.endereco||"-"}`,10,y); y+=8;
-
-  pdf.text("3. VEÍCULO",10,y); y+=6;
-  pdf.text(`Modelo: ${v.modelo}`,10,y); y+=8;
-
-  pdf.text("4. VALOR",10,y); y+=6;
-  pdf.text(`Dias: ${l.dias}`,10,y); y+=6;
-  pdf.text(`Total: R$ ${l.total}`,10,y); y+=8;
-
-  pdf.text("CLÁUSULAS",10,y); y+=6;
-  pdf.text(cfg?.clausulas_pdf||"Sem cláusulas.",10,y,{maxWidth:180});
-
-  return pdf;
-}
-
-/* ================= AÇÕES ================= */
-async function baixar(id){
-  const pdf = await gerarPDF(id);
-  pdf.save("contrato-locacao.pdf");
-}
-
-async function whats(id){
-  const pdf = await gerarPDF(id);
-  const blob = pdf.output("blob");
-
-  await sb.storage.from("contratos")
-    .upload(`contratos/${id}.pdf`,blob,{upsert:true});
-
-  const url = sb.storage.from("contratos")
-    .getPublicUrl(`contratos/${id}.pdf`).data.publicUrl;
-
-  const { data:l } = await sb.from("locacoes")
-    .select("telefone").eq("id",id).single();
-
-  window.open(
-    `https://wa.me/55${l.telefone.replace(/\D/g,"")}?text=Contrato: ${url}`
-  );
 }
 
 async function recusar(id){
