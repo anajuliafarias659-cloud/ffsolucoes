@@ -1,24 +1,133 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<title>Configurações</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <title>Configuração do Site</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-<style>
-body {
-  margin: 0;
-  padding: 24px;
-  font-family: Arial;
-  background: #020617;
-  color: #fff;
-}
-</style>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: #fff;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    input, button {
+      width: 100%;
+      padding: 12px;
+      margin-top: 10px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      font-size: 15px;
+    }
+
+    button {
+      background: #111;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    img {
+      width: 100%;
+      border-radius: 10px;
+      margin-top: 10px;
+    }
+  </style>
 </head>
 <body>
 
-<h2>⚙️ Configurações do Site</h2>
-<p>Nome, descrição, endereço, etc.</p>
+<h1>Configurar Site</h1>
+
+<div class="card">
+  <h3>Banner do site</h3>
+  <input type="file" id="bannerFile" accept="image/*" />
+  <button onclick="salvarBanner()">Salvar banner</button>
+
+  <img id="preview" />
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  const supabase = supabase.createClient(
+    'SUA_SUPABASE_URL',
+    'SUA_PUBLIC_ANON_KEY'
+  )
+
+  const params = new URLSearchParams(window.location.search)
+  const appId = params.get('app')
+
+  if (!appId) {
+    alert('App não encontrado')
+  }
+
+  async function carregarBanner() {
+    const { data } = await supabase
+      .from('banners')
+      .select('*')
+      .eq('site_id', appId)
+      .eq('ativo', true)
+      .single()
+
+    if (data) {
+      document.getElementById('preview').src = data.url
+    }
+  }
+
+  async function salvarBanner() {
+    const file = document.getElementById('bannerFile').files[0]
+    if (!file) return alert('Selecione uma imagem')
+
+    const filePath = `banners/${appId}/${Date.now()}-${file.name}`
+
+    const { error: uploadError } = await supabase
+      .storage
+      .from('public')
+      .upload(filePath, file)
+
+    if (uploadError) {
+      alert('Erro ao subir imagem')
+      return
+    }
+
+    const { data: urlData } = supabase
+      .storage
+      .from('public')
+      .getPublicUrl(filePath)
+
+    // desativa banners antigos
+    await supabase
+      .from('banners')
+      .update({ ativo: false })
+      .eq('site_id', appId)
+
+    // salva novo banner
+    await supabase
+      .from('banners')
+      .insert({
+        site_id: appId,
+        url: urlData.publicUrl,
+        ativo: true
+      })
+
+    alert('Banner atualizado 🔥')
+    carregarBanner()
+  }
+
+  carregarBanner()
+</script>
 
 </body>
 </html>
