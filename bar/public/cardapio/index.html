@@ -59,16 +59,6 @@ body{
   gap:18px;
 }
 
-/* CATEGORIA */
-.categoria{
-  grid-column:1/-1;
-  font-size:20px;
-  font-weight:800;
-  margin:28px 0 10px;
-  padding-bottom:6px;
-  border-bottom:2px solid var(--border);
-}
-
 /* PRODUTO */
 .produto{
   background:#fff;
@@ -181,65 +171,72 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const params=new URLSearchParams(location.search);
-const app_id=params.get("app")||params.get("app_id");
-if(!app_id){document.body.innerHTML="Indisponível";throw""}
+const params = new URLSearchParams(location.search);
+const app_id = params.get("app") || params.get("app_id");
+if(!app_id){ document.body.innerHTML="Indisponível"; throw ""; }
 
-let produtos=[], carrinho=[];
+let produtos = [];
+let carrinho = [];
 
 /* CONFIG */
 async function carregarConfig(){
-  const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).single();
+  const {data} = await sb
+    .from("config_site")
+    .select("*")
+    .eq("app_id", app_id)
+    .single();
+
   if(!data) return;
-  nome.innerText=data.nome_site||"Cardápio";
-  if(data.logo_url){logo.src=data.logo_url;logo.style.display="block"}
-  if(data.banner_url){banner.src=data.banner_url;banner.style.display="block"}
+  nome.innerText = data.nome_site || "Cardápio";
+  if(data.logo_url){ logo.src=data.logo_url; logo.style.display="block"; }
+  if(data.banner_url){ banner.src=data.banner_url; banner.style.display="block"; }
 }
 
-/* PRODUTOS */
+/* PRODUTOS – BAR / COZINHA INVISÍVEL */
 async function carregarProdutos(){
-  const {data}=await sb
+  const { data } = await sb
     .from("produtos")
-    .select("id,nome,preco,foto,categoria")
-    .eq("app_id",app_id)
-    .eq("ativo",true)
-    .order("categoria")
+    .select("id,nome,preco,foto,destino")
+    .eq("app_id", app_id)
+    .eq("ativo", true)
+    .order("destino")
     .order("nome");
 
-  produtos=data||[];
-  conteudo.innerHTML="";
-  const grupos={};
+  produtos = data || [];
+  conteudo.innerHTML = "";
+
+  const bar = [];
+  const cozinha = [];
 
   produtos.forEach(p=>{
-    const cat=(p.categoria&&p.categoria.trim())?p.categoria:"Outros";
-    if(!grupos[cat]) grupos[cat]=[];
-    grupos[cat].push(p);
+    const d = (p.destino || "").toUpperCase().trim();
+    if(d === "BAR") bar.push(p);
+    else cozinha.push(p);
   });
 
-  Object.keys(grupos).forEach(cat=>{
-    conteudo.innerHTML+=`<div class="categoria">${cat}</div>`;
-    grupos[cat].forEach(p=>{
-      conteudo.innerHTML+=`
-        <div class="produto">
-          ${p.foto?`<img src="${p.foto}">`:""}
-          <b>${p.nome}</b>
-          <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-          <button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
-        </div>
-      `;
-    });
-  });
+  bar.forEach(p => conteudo.innerHTML += renderProduto(p));
+  cozinha.forEach(p => conteudo.innerHTML += renderProduto(p));
+}
+
+function renderProduto(p){
+  return `
+    <div class="produto">
+      ${p.foto ? `<img src="${p.foto}">` : ""}
+      <b>${p.nome}</b>
+      <div class="preco">R$ ${p.preco.toFixed(2)}</div>
+      <button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
+    </div>
+  `;
 }
 
 /* CARRINHO */
 function addProduto(id){
-  const p=produtos.find(x=>x.id===id);
-  const i=carrinho.find(x=>x.id===id);
-  i?i.qtd++:carrinho.push({...p,qtd:1});
-  qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
+  const p = produtos.find(x=>x.id===id);
+  const i = carrinho.find(x=>x.id===id);
+  i ? i.qtd++ : carrinho.push({...p, qtd:1});
+  qtd.innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
-/* MODAL */
 function abrirCarrinho(){
   modal.style.display="flex";
   lista.innerHTML="";
@@ -261,9 +258,8 @@ function abrirCarrinho(){
   `;
 }
 
-/* PEDIDO */
 async function enviarPedido(){
-  if(!carrinho.length){alert("Carrinho vazio");return}
+  if(!carrinho.length){ alert("Carrinho vazio"); return; }
   alert("Pedido enviado com sucesso ✅");
   carrinho=[];
   qtd.innerText=0;
@@ -271,7 +267,7 @@ async function enviarPedido(){
 }
 
 /* START */
-modal.onclick=e=>e.target===modal&&(modal.style.display="none");
+modal.onclick = e => e.target === modal && (modal.style.display="none");
 (async()=>{
   await carregarConfig();
   await carregarProdutos();
