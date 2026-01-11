@@ -8,21 +8,20 @@
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.login{max-width:420px;margin:120px auto;padding:30px;background:#0f172a;border-radius:20px}
-.container{max-width:1100px;margin:40px auto;padding:30px;background:#0f172a;border-radius:20px}
+.login,.container{max-width:1100px;margin:40px auto;padding:30px;background:#0f172a;border-radius:20px}
 input,select,button{width:100%;padding:14px;margin-top:10px;border-radius:12px;border:none}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
 .card{background:#020617;padding:16px;margin-top:12px;border-radius:14px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-hr{margin:30px 0;border:none;height:1px;background:rgba(255,255,255,.2)}
 .badge{background:#334155;padding:4px 8px;border-radius:6px;font-size:12px}
 small{opacity:.8}
+hr{margin:30px 0;border:none;height:1px;background:rgba(255,255,255,.2)}
 </style>
 </head>
 
 <body>
 
-<!-- LOGIN DO VENDEDOR -->
+<!-- LOGIN -->
 <div class="login" id="loginBox">
   <h2>🔐 Login do Vendedor</h2>
   <input id="emailVendedor" placeholder="E-mail">
@@ -49,7 +48,6 @@ small{opacity:.8}
 
   <input id="nomeDono" placeholder="Nome do dono">
   <input id="loginDono" placeholder="Login do dono">
-
   <input id="senhaDono" type="password" placeholder="Senha do dono">
 </div>
 
@@ -57,7 +55,7 @@ small{opacity:.8}
 
 <hr>
 
-<h2>📊 Meus Negócios (Relatório)</h2>
+<h2>📊 Meus Negócios</h2>
 <div id="listaNegocios"></div>
 
 </div>
@@ -79,42 +77,80 @@ window.login = async ()=>{
     .select("*")
     .eq("email", emailVendedor.value)
     .eq("senha", senhaVendedor.value)
-    .eq("tipo", "vendedor")
-    .eq("ativo", true)
+    .eq("tipo","vendedor")
+    .eq("ativo",true)
     .maybeSingle();
 
-  if(!data){
-    alert("Login inválido");
-    return;
-  }
+  if(!data) return alert("Login inválido");
 
   vendedorLogado = data;
-  loginBox.style.display = "none";
-  painel.style.display = "block";
-
+  loginBox.style.display="none";
+  painel.style.display="block";
   carregarNegocios();
 };
 
-/* CRIAR NEGÓCIO */
+/* CRIAR NEGÓCIO + DONO */
 window.criarNegocio = async ()=>{
-  await supabase.from("apps").insert({
-    nome: nomeNegocio.value,
-    tipo: tipoNegocio.value,
-    endereco: enderecoNegocio.value,
-    telefone: telefoneNegocio.value,
-    dono_nome: nomeDono.value,
-    dono_login: loginDono.value,
-    dono_senha: senhaDono.value,
-    vendedor_id: vendedorLogado.id,
-    ativo: true
-  });
+  // cria dono
+  const { data: dono, error: erroDono } = await supabase
+    .from("usuarios")
+    .insert({
+      nome: nomeDono.value,
+      email: loginDono.value,
+      senha: senhaDono.value,
+      tipo: "dono",
+      ativo: true
+    })
+    .select()
+    .single();
 
-  nomeNegocio.value="";
-  enderecoNegocio.value="";
-  telefoneNegocio.value="";
-  nomeDono.value="";
-  loginDono.value="";
-  senhaDono.value="";
+  if(erroDono){
+    alert("Erro ao criar dono");
+    return;
+  }
+
+  // cria negócio
+  const { data: negocio, error } = await supabase
+    .from("apps")
+    .insert({
+      nome: nomeNegocio.value,
+      tipo: tipoNegocio.value,
+      endereco: enderecoNegocio.value,
+      telefone: telefoneNegocio.value,
+      vendedor_id: vendedorLogado.id,
+      dono_id: dono.id,
+      ativo: true
+    })
+    .select()
+    .single();
+
+  if(error){
+    alert("Erro ao criar negócio");
+    return;
+  }
+
+  const linkPublico =
+    tipoNegocio.value === "locadora"
+    ? `https://anajuliafarias659-cloud.github.io/ffsolucoes/locadora/public/index.html?app_id=${negocio.id}`
+    : `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/public/cardapio/index.html?app=${negocio.id}`;
+
+  const linkPainel = "https://anajuliafarias659-cloud.github.io/ffsolucoes/";
+
+  alert(
+`✅ Negócio criado!
+
+🔗 Painel:
+${linkPainel}
+
+👤 Login:
+${loginDono.value}
+
+🔑 Senha:
+${senhaDono.value}
+
+🌍 Link público:
+${linkPublico}`
+  );
 
   carregarNegocios();
 };
@@ -129,26 +165,35 @@ async function carregarNegocios(){
   listaNegocios.innerHTML="";
 
   (data||[]).forEach(n=>{
+    const linkPublico =
+      n.tipo==="locadora"
+      ? `https://anajuliafarias659-cloud.github.io/ffsolucoes/locadora/public/index.html?app_id=${n.id}`
+      : `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/public/cardapio/index.html?app=${n.id}`;
+
+    const msg = `
+🏪 Seu sistema está pronto!
+
+🔗 Painel:
+https://anajuliafarias659-cloud.github.io/ffsolucoes/
+
+👤 Login: ${n.dono_login || "conforme cadastro"}
+🔑 Senha: conforme informado
+
+🌍 Link público:
+${linkPublico}
+`;
+
     listaNegocios.innerHTML += `
       <div class="card">
-        <b>${n.nome}</b>
-        <span class="badge">${n.tipo}</span>
-        <br><br>
+        <b>${n.nome}</b> <span class="badge">${n.tipo}</span><br><br>
+        <small>📍 Endereço:</small> ${n.endereco}<br>
+        <small>📞 Telefone:</small> ${n.telefone}<br><br>
 
-        <small>📍 Endereço:</small><br>
-        ${n.endereco}<br><br>
+        <a href="${linkPublico}" target="_blank">🌍 Abrir link público</a><br><br>
 
-        <small>📞 Telefone:</small><br>
-        ${n.telefone}<br><br>
-
-        <small>👤 Dono:</small><br>
-        ${n.dono_nome}<br><br>
-
-        <small>🔐 Login:</small><br>
-        ${n.dono_login}<br><br>
-
-        <small>🔑 Senha:</small><br>
-        ${n.dono_senha}
+        <button onclick="window.open('https://wa.me/55${n.telefone}?text=${encodeURIComponent(msg)}')">
+          📩 Enviar informações ao dono
+        </button>
       </div>
     `;
   });
