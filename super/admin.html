@@ -21,24 +21,19 @@ body{
   background:linear-gradient(135deg,#0f172a,#4b1fa0);
 }
 h1,h2{margin-top:25px}
-input,select,button{
+input,select,button,textarea{
   width:100%;
   padding:14px;
   margin-top:10px;
   border-radius:12px;
   border:none;
 }
+textarea{resize:none}
 button{
   background:#22c55e;
   color:#000;
   font-weight:bold;
   cursor:pointer;
-}
-hr{
-  margin:35px 0;
-  border:none;
-  height:1px;
-  background:rgba(255,255,255,.25);
 }
 .card{
   background:#020617;
@@ -50,42 +45,29 @@ hr{
   align-items:center;
   gap:12px;
 }
-.card small{opacity:.8}
 .card button{
   width:auto;
   background:#e53935;
   color:#fff;
 }
-.login{
-  max-width:420px;
-  margin:60px auto;
+.login{max-width:420px;margin:60px auto}
+.chat-box{
+  background:#020617;
+  padding:15px;
+  border-radius:12px;
+  margin-top:15px;
 }
-.tag{
-  font-size:12px;
-  padding:4px 10px;
-  border-radius:20px;
-  margin-left:8px;
-  background:#334155;
-  text-transform:uppercase;
+.msg{
+  padding:8px 12px;
+  border-radius:10px;
+  margin-top:6px;
 }
-.topo{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-a.link-publico{
-  color:#22c55e;
-  text-decoration:none;
-  font-weight:bold;
-}
-a.link-publico:hover{
-  text-decoration:underline;
-}
+.admin{background:#2563eb}
+.publico{background:#334155}
 </style>
 </head>
 
 <body>
-
 <div class="container">
 
 <h1>🔐 Super Admin — FF Soluções</h1>
@@ -99,49 +81,28 @@ a.link-publico:hover{
 <!-- PAINEL -->
 <div id="painel" style="display:none">
 
-  <div class="topo">
-    <h2>Painel Administrativo</h2>
-    <button style="background:#e53935" onclick="logout()">Sair</button>
-  </div>
+<h2>👤 Criar Admin</h2>
+<input id="usuarioAdmin" placeholder="Usuário">
+<input id="senhaAdmin" type="password" placeholder="Senha">
+<select id="permissaoAdmin">
+  <option value="editar">Editar</option>
+  <option value="visualizar">Visualizar</option>
+</select>
+<input id="appAdmin" placeholder="ID do Negócio">
+<button onclick="criarAdmin()">Criar Admin</button>
 
-  <!-- CRIAR NEGÓCIO -->
-  <h2>🏢 Criar Negócio</h2>
-  <input id="nomeApp" placeholder="Nome do negócio">
-  <select id="tipoApp">
-    <option value="bar">Bar</option>
-    <option value="restaurante">Restaurante</option>
-    <option value="mercado">Mercado</option>
-    <option value="locadora">Locadora</option>
-  </select>
-  <button onclick="criarNegocio()">Criar</button>
+<h2>👥 Admins</h2>
+<div id="listaAdmins"></div>
 
-  <!-- LISTA NEGÓCIOS -->
-  <h2>📋 Negócios</h2>
-  <div id="listaApps"></div>
+<hr>
 
-  <hr>
+<h2>💬 Chat com Público</h2>
+<select id="appChat" onchange="carregarChat()"></select>
 
-  <!-- ADMINS -->
-  <h2>👤 Criar Admin</h2>
-  <input id="usuarioAdmin" placeholder="Usuário">
-  <input id="senhaAdmin" type="password" placeholder="Senha">
-  <select id="permissaoAdmin">
-    <option value="editar">Editar</option>
-    <option value="visualizar">Visualizar</option>
-  </select>
-  <select id="appAdmin">
-    <option value="">Selecione o negócio</option>
-  </select>
-  <button onclick="criarAdminInicial()">Criar Admin</button>
+<div class="chat-box" id="chatMensagens"></div>
 
-  <h2>👥 Admins</h2>
-  <div id="listaAdmins"></div>
-
-  <hr>
-
-  <!-- CHAT -->
-  <h2>💬 Interessados (Chat)</h2>
-  <div id="interessados"></div>
+<textarea id="msgAdmin" placeholder="Digite a mensagem"></textarea>
+<button onclick="enviarMensagem()">Enviar</button>
 
 </div>
 </div>
@@ -154,113 +115,46 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const SENHA_SUPER = "super123";
-
-/* MAPA REAL DAS PÁGINAS PÚBLICAS */
-const MAPA_PUBLICO = {
-  bar: "bar/public/index.html",
-  restaurante: "restaurante/public/index.html",
-  mercado: "mercado/public/index.html",
-  locadora: "locadora/Locadora/public/index.html"
-};
-
-/* ELEMENTOS */
 const loginBox = document.getElementById("loginBox");
 const painel = document.getElementById("painel");
 const senhaSuper = document.getElementById("senhaSuper");
 
-const nomeApp = document.getElementById("nomeApp");
-const tipoApp = document.getElementById("tipoApp");
-const listaApps = document.getElementById("listaApps");
-
-const usuarioAdmin = document.getElementById("usuarioAdmin");
-const senhaAdmin = document.getElementById("senhaAdmin");
-const permissaoAdmin = document.getElementById("permissaoAdmin");
-const appAdmin = document.getElementById("appAdmin");
-
 const listaAdmins = document.getElementById("listaAdmins");
-const interessados = document.getElementById("interessados");
+const appChat = document.getElementById("appChat");
+const chatMensagens = document.getElementById("chatMensagens");
 
-/* LOGIN */
-window.login = function(){
-  if(senhaSuper.value === SENHA_SUPER){
-    senhaSuper.value="";
-    loginBox.style.display="none";
-    painel.style.display="block";
-    carregarNegocios();
-    carregarAdmins();
-    carregarInteressados();
-  }else{
-    alert("Senha incorreta");
-  }
+/* LOGIN SEGURO */
+window.login = async ()=>{
+  const { data } = await supabase
+    .from("super_admins")
+    .select("*")
+    .eq("senha", senhaSuper.value)
+    .eq("ativo", true)
+    .maybeSingle();
+
+  if(!data){ alert("Senha incorreta"); return; }
+
+  senhaSuper.value="";
+  loginBox.style.display="none";
+  painel.style.display="block";
+  carregarAdmins();
+  carregarApps();
 };
-
-window.logout = function(){
-  painel.style.display="none";
-  loginBox.style.display="block";
-};
-
-/* CRIAR NEGÓCIO */
-window.criarNegocio = async function(){
-  if(!nomeApp.value) return;
-
-  await supabase.from("apps").insert({
-    nome: nomeApp.value,
-    tipo: tipoApp.value
-  });
-
-  nomeApp.value="";
-  carregarNegocios();
-};
-
-/* LISTAR NEGÓCIOS (🔥 AQUI ESTÁ A CORREÇÃO REAL 🔥) */
-async function carregarNegocios(){
-  const { data } = await supabase.from("apps").select("*");
-
-  listaApps.innerHTML="";
-  appAdmin.innerHTML='<option value="">Selecione o negócio</option>';
-
-  (data || []).forEach(app=>{
-    const caminho = MAPA_PUBLICO[app.tipo];
-    if(!caminho) return;
-
-    // ✅ PARAMETRO CERTO: app
-    const linkPublico =
-      `https://anajuliafarias659-cloud.github.io/ffsolucoes/${caminho}?app=${app.id}`;
-
-    listaApps.innerHTML += `
-      <div class="card">
-        <div>
-          <b>
-            <a href="${linkPublico}" target="_blank" class="link-publico">
-              🌍 Meu site
-            </a>
-            &nbsp; ${app.nome}
-          </b>
-          <span class="tag">${app.tipo.toUpperCase()}</span><br>
-          <small>🆔 ${app.id}</small>
-        </div>
-      </div>
-    `;
-
-    appAdmin.innerHTML += `<option value="${app.id}">${app.nome}</option>`;
-  });
-}
 
 /* ADMINS */
 async function carregarAdmins(){
   const { data } = await supabase.from("admins").select("*");
   listaAdmins.innerHTML="";
-  (data || []).forEach(a=>{
-    listaAdmins.innerHTML += `
+  data.forEach(a=>{
+    listaAdmins.innerHTML+=`
       <div class="card">
-        <div><b>${a.usuario}</b></div>
-      </div>
-    `;
+        <b>${a.usuario}</b>
+        <button onclick="excluirAdmin('${a.id}')">Excluir</button>
+      </div>`;
   });
 }
 
-window.criarAdminInicial = async function(){
+window.criarAdmin = async ()=>{
   await supabase.from("admins").insert({
     usuario:usuarioAdmin.value,
     senha:senhaAdmin.value,
@@ -268,58 +162,52 @@ window.criarAdminInicial = async function(){
     app_id:appAdmin.value,
     ativo:true
   });
-  usuarioAdmin.value="";
-  senhaAdmin.value="";
   carregarAdmins();
 };
 
-/* CHAT (INALTERADO) */
-async function carregarInteressados(){
+window.excluirAdmin = async (id)=>{
+  if(!confirm("Excluir este admin?")) return;
+  await supabase.from("admins").delete().eq("id",id);
+  carregarAdmins();
+};
+
+/* CHAT */
+async function carregarApps(){
+  const { data } = await supabase.from("apps").select("id,nome");
+  appChat.innerHTML="";
+  data.forEach(a=>{
+    appChat.innerHTML+=`<option value="${a.id}">${a.nome}</option>`;
+  });
+  carregarChat();
+}
+
+window.carregarChat = async ()=>{
+  const appId = appChat.value;
   const { data } = await supabase
     .from("chat_admin")
-    .select("app_id")
-    .eq("remetente","admin")
-    .eq("lida",false);
+    .select("*")
+    .eq("app_id", appId)
+    .order("created_at");
 
-  interessados.innerHTML="";
-
-  if(!data || data.length===0){
-    interessados.innerHTML="<small>✅ Nenhuma mensagem pendente</small>";
-    return;
-  }
-
-  const mapa = {};
-
-  for(const m of data){
-    if(!mapa[m.app_id]){
-      const { data:app } = await supabase
-        .from("apps")
-        .select("nome")
-        .eq("id",m.app_id)
-        .maybeSingle();
-
-      mapa[m.app_id] = {
-        nome: app?.nome || "Negócio",
-        total: 0
-      };
-    }
-    mapa[m.app_id].total++;
-  }
-
-  Object.entries(mapa).forEach(([app_id,info])=>{
-    interessados.innerHTML += `
-      <div class="card">
-        <div>
-          <b>${info.nome}</b><br>
-          <small>💬 ${info.total} nova(s)</small>
-        </div>
-        <button onclick="window.open('chat-super-admin.html?app=${app_id}')">
-          Abrir Chat
-        </button>
-      </div>
-    `;
+  chatMensagens.innerHTML="";
+  data.forEach(m=>{
+    chatMensagens.innerHTML+=`
+      <div class="msg ${m.remetente}">
+        ${m.mensagem}
+      </div>`;
   });
-}
+};
+
+window.enviarMensagem = async ()=>{
+  await supabase.from("chat_admin").insert({
+    app_id: appChat.value,
+    remetente: "admin",
+    mensagem: msgAdmin.value,
+    lida: false
+  });
+  msgAdmin.value="";
+  carregarChat();
+};
 </script>
 
 </body>
