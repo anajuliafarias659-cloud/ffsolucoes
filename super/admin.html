@@ -10,14 +10,14 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .container{max-width:1200px;margin:40px auto;padding:30px;border-radius:20px;background:linear-gradient(135deg,#0f172a,#4b1fa0)}
 h1,h2,h3{margin-top:25px}
-input,select,button,textarea{width:100%;padding:14px;margin-top:10px;border-radius:12px;border:none}
-textarea{resize:none}
+input,select,button{width:100%;padding:14px;margin-top:10px;border-radius:12px;border:none}
 button{background:#22c55e;color:#000;font-weight:bold;cursor:pointer}
 button.danger{background:#e53935;color:#fff}
-.card{background:#020617;padding:16px;margin-top:12px;border-radius:14px;display:flex;justify-content:space-between;align-items:center}
+.card{background:#020617;padding:16px;margin-top:12px;border-radius:14px;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .login{max-width:420px;margin:80px auto}
 hr{margin:40px 0;border:none;height:1px;background:rgba(255,255,255,.2)}
 a{color:#22c55e;text-decoration:none}
+.btn-small{width:auto;padding:6px 12px;font-size:12px;border-radius:8px}
 </style>
 </head>
 
@@ -36,7 +36,8 @@ a{color:#22c55e;text-decoration:none}
 <!-- PAINEL -->
 <div id="painel" style="display:none">
 
-<h2>🏢 Criar Negócio</h2>
+<!-- NEGÓCIOS -->
+<h2>🏢 Criar / Editar Negócio</h2>
 <input id="nomeNegocio" placeholder="Nome do negócio">
 <select id="tipoNegocio">
   <option value="bar">Bar</option>
@@ -44,14 +45,14 @@ a{color:#22c55e;text-decoration:none}
   <option value="mercado">Mercado</option>
   <option value="locadora">Locadora</option>
 </select>
-<input id="publicUrl" placeholder="URL pública base (ex: locadora/public/index.html?app_id=)">
-<button onclick="criarNegocio()">Criar Negócio</button>
+<button onclick="criarNegocio()">Salvar Negócio</button>
 
 <h3>📋 Negócios</h3>
 <div id="listaNegocios"></div>
 
 <hr>
 
+<!-- ADMINS -->
 <h2>👤 Criar Admin</h2>
 <input id="usuarioAdmin" placeholder="Usuário">
 <input id="senhaAdmin" type="password" placeholder="Senha">
@@ -59,7 +60,10 @@ a{color:#22c55e;text-decoration:none}
   <option value="editar">Editar</option>
   <option value="visualizar">Visualizar</option>
 </select>
+
+<!-- ⚠️ MANTIDO: escolha de negócio -->
 <select id="appAdmin"></select>
+
 <button onclick="criarAdmin()">Criar Admin</button>
 
 <h3>👥 Admins</h3>
@@ -67,13 +71,15 @@ a{color:#22c55e;text-decoration:none}
 
 <hr>
 
-<h2>💰 Criar Vendedor</h2>
-<input id="nomeVendedor" placeholder="Nome do vendedor">
-<input id="usuarioVendedor" placeholder="Usuário">
-<input id="senhaVendedor" type="password" placeholder="Senha">
-<input id="comissaoVendedor" type="number" value="10" placeholder="Comissão (%)">
-<select id="appVendedor"></select>
-<button onclick="criarVendedor()">Criar Vendedor</button>
+<!-- VENDEDORES -->
+<h2>💰 Cadastro de Vendedor</h2>
+<div class="card" style="flex-direction:column;align-items:stretch">
+  <input id="nomeVendedor" placeholder="Nome completo">
+  <input id="usuarioVendedor" placeholder="Usuário">
+  <input id="senhaVendedor" type="password" placeholder="Senha">
+  <input id="comissaoVendedor" type="number" value="10" placeholder="Comissão (%)">
+  <button onclick="criarVendedor()">Cadastrar Vendedor</button>
+</div>
 
 <h3>🧾 Vendedores</h3>
 <div id="listaVendedores"></div>
@@ -89,13 +95,19 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+function getPublicUrlBase(tipo){
+  if(tipo==="locadora") return "locadora/public/index.html?app_id=";
+  return "bar/public/cardapio/index.html?app=";
+}
+
+/* LOGIN */
 window.login = async ()=>{
   const { data } = await supabase
     .from("super_admins")
     .select("*")
-    .eq("usuario", usuarioSuper.value)
-    .eq("senha", senhaSuper.value)
-    .eq("ativo", true)
+    .eq("usuario",usuarioSuper.value)
+    .eq("senha",senhaSuper.value)
+    .eq("ativo",true)
     .maybeSingle();
 
   if(!data) return alert("Login inválido");
@@ -107,44 +119,76 @@ window.login = async ()=>{
   carregarVendedores();
 };
 
+/* NEGÓCIOS */
 window.criarNegocio = async ()=>{
-  await supabase.from("apps").insert({
-    nome: nomeNegocio.value,
-    tipo: tipoNegocio.value,
-    public_url: publicUrl.value
-  });
+  const id = nomeNegocio.dataset.editando;
+
+  if(id){
+    await supabase.from("apps")
+      .update({nome:nomeNegocio.value,tipo:tipoNegocio.value})
+      .eq("id",id);
+    delete nomeNegocio.dataset.editando;
+  }else{
+    await supabase.from("apps").insert({
+      nome:nomeNegocio.value,
+      tipo:tipoNegocio.value,
+      public_url:getPublicUrlBase(tipoNegocio.value)
+    });
+  }
+
   nomeNegocio.value="";
-  publicUrl.value="";
   carregarNegocios();
 };
 
 async function carregarNegocios(){
   const { data } = await supabase.from("apps").select("*");
+
   listaNegocios.innerHTML="";
   appAdmin.innerHTML="";
-  appVendedor.innerHTML="";
+
   (data||[]).forEach(n=>{
-    const link = `https://anajuliafarias659-cloud.github.io/ffsolucoes/${n.public_url}${n.id}`;
+    const link = `https://anajuliafarias659-cloud.github.io/ffsolucoes/${getPublicUrlBase(n.tipo)}${n.id}`;
+
     listaNegocios.innerHTML+=`
       <div class="card">
         <div>
           <b>${n.nome}</b><br>
           <a href="${link}" target="_blank">🌍 Site Público</a>
         </div>
-      </div>`;
+        <div>
+          <button class="btn-small" onclick="editarNegocio('${n.id}','${n.nome}','${n.tipo}')">Editar</button>
+          <button class="danger btn-small" onclick="excluirNegocio('${n.id}')">Excluir</button>
+        </div>
+      </div>
+    `;
+
     appAdmin.innerHTML+=`<option value="${n.id}">${n.nome}</option>`;
-    appVendedor.innerHTML+=`<option value="${n.id}">${n.nome}</option>`;
   });
 }
 
+window.editarNegocio = (id,nome,tipo)=>{
+  nomeNegocio.value=nome;
+  tipoNegocio.value=tipo;
+  nomeNegocio.dataset.editando=id;
+};
+
+window.excluirNegocio = async id=>{
+  if(confirm("Excluir negócio?")){
+    await supabase.from("apps").delete().eq("id",id);
+    carregarNegocios();
+  }
+};
+
+/* ADMINS */
 window.criarAdmin = async ()=>{
   await supabase.from("admins").insert({
     usuario:usuarioAdmin.value,
     senha:senhaAdmin.value,
     permissao:permissaoAdmin.value,
-    app_id:appAdmin.value,
+    app_id:appAdmin.value, // 🔒 MANTIDO
     ativo:true
   });
+
   usuarioAdmin.value="";
   senhaAdmin.value="";
   carregarAdmins();
@@ -153,12 +197,14 @@ window.criarAdmin = async ()=>{
 async function carregarAdmins(){
   const { data } = await supabase.from("admins").select("*");
   listaAdmins.innerHTML="";
+
   (data||[]).forEach(a=>{
     listaAdmins.innerHTML+=`
       <div class="card">
         <b>${a.usuario}</b>
-        <button class="danger" onclick="excluirAdmin('${a.id}')">Excluir</button>
-      </div>`;
+        <button class="danger btn-small" onclick="excluirAdmin('${a.id}')">Excluir</button>
+      </div>
+    `;
   });
 }
 
@@ -169,15 +215,16 @@ window.excluirAdmin = async id=>{
   }
 };
 
+/* VENDEDORES */
 window.criarVendedor = async ()=>{
   await supabase.from("vendedores").insert({
     nome:nomeVendedor.value,
     usuario:usuarioVendedor.value,
     senha:senhaVendedor.value,
     comissao_percentual:comissaoVendedor.value,
-    app_id:appVendedor.value,
     ativo:true
   });
+
   nomeVendedor.value="";
   usuarioVendedor.value="";
   senhaVendedor.value="";
@@ -187,6 +234,7 @@ window.criarVendedor = async ()=>{
 async function carregarVendedores(){
   const { data } = await supabase.from("vendedores").select("*");
   listaVendedores.innerHTML="";
+
   (data||[]).forEach(v=>{
     listaVendedores.innerHTML+=`
       <div class="card">
@@ -194,8 +242,9 @@ async function carregarVendedores(){
           <b>${v.nome}</b><br>
           <small>${v.usuario} • ${v.comissao_percentual}%</small>
         </div>
-        <button class="danger" onclick="excluirVendedor('${v.id}')">Excluir</button>
-      </div>`;
+        <button class="danger btn-small" onclick="excluirVendedor('${v.id}')">Excluir</button>
+      </div>
+    `;
   });
 }
 
