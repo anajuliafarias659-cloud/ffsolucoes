@@ -37,7 +37,6 @@ a{color:#22c55e;text-decoration:none}
 <!-- PAINEL -->
 <div id="painel" style="display:none">
 
-<!-- NEGÓCIOS -->
 <h2>🏢 Criar / Editar Negócio</h2>
 <input id="nomeNegocio" placeholder="Nome do negócio">
 <select id="tipoNegocio">
@@ -53,7 +52,6 @@ a{color:#22c55e;text-decoration:none}
 
 <hr>
 
-<!-- ADMINS -->
 <h2>👤 Criar Admin</h2>
 <input id="usuarioAdmin" placeholder="Usuário">
 <input id="senhaAdmin" type="password" placeholder="Senha">
@@ -69,7 +67,6 @@ a{color:#22c55e;text-decoration:none}
 
 <hr>
 
-<!-- VENDEDORES -->
 <h2>💰 Cadastro de Vendedor</h2>
 <div class="card" style="flex-direction:column;align-items:stretch">
   <input id="nomeVendedor" placeholder="Nome completo">
@@ -79,7 +76,7 @@ a{color:#22c55e;text-decoration:none}
   <button onclick="criarVendedor()">Cadastrar Vendedor</button>
 </div>
 
-<h3>🧾 Vendedores (Acompanhamento)</h3>
+<h3>🧾 Vendedores</h3>
 <div id="listaVendedores"></div>
 
 </div>
@@ -93,10 +90,7 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-function getPublicUrlBase(tipo){
-  if(tipo==="locadora") return "locadora/public/index.html?app_id=";
-  return "bar/public/cardapio/index.html?app=";
-}
+let mapaApps = {};
 
 /* LOGIN */
 window.login = async ()=>{
@@ -121,8 +115,7 @@ window.login = async ()=>{
 window.criarNegocio = async ()=>{
   await supabase.from("apps").insert({
     nome:nomeNegocio.value,
-    tipo:tipoNegocio.value,
-    public_url:getPublicUrlBase(tipoNegocio.value)
+    tipo:tipoNegocio.value
   });
   nomeNegocio.value="";
   carregarNegocios();
@@ -132,27 +125,20 @@ async function carregarNegocios(){
   const { data } = await supabase.from("apps").select("*");
   listaNegocios.innerHTML="";
   appAdmin.innerHTML="";
+  mapaApps = {};
+
   (data||[]).forEach(n=>{
-    const link = `https://anajuliafarias659-cloud.github.io/ffsolucoes/${getPublicUrlBase(n.tipo)}${n.id}`;
+    mapaApps[n.id] = `${n.nome} (${n.tipo})`;
+
     listaNegocios.innerHTML+=`
       <div class="card">
-        <div>
-          <b>${n.nome}</b><br>
-          <a href="${link}" target="_blank">🌍 Site Público</a>
-        </div>
-        <button class="danger btn-small" onclick="excluirNegocio('${n.id}')">Excluir</button>
+        <b>${n.nome}</b>
+        <span class="badge">${n.tipo}</span>
       </div>
     `;
     appAdmin.innerHTML+=`<option value="${n.id}">${n.nome}</option>`;
   });
 }
-
-window.excluirNegocio = async id=>{
-  if(confirm("Excluir negócio?")){
-    await supabase.from("apps").delete().eq("id",id);
-    carregarNegocios();
-  }
-};
 
 /* ADMINS */
 window.criarAdmin = async ()=>{
@@ -174,61 +160,31 @@ async function carregarAdmins(){
   (data||[]).forEach(a=>{
     listaAdmins.innerHTML+=`
       <div class="card">
-        <b>${a.usuario}</b>
-        <button class="danger btn-small" onclick="excluirAdmin('${a.id}')">Excluir</button>
+        <div>
+          <b>${a.usuario}</b><br>
+          <span class="badge">${mapaApps[a.app_id] || "Negócio não identificado"}</span>
+        </div>
       </div>
     `;
   });
 }
 
-window.excluirAdmin = async id=>{
-  if(confirm("Excluir admin?")){
-    await supabase.from("admins").delete().eq("id",id);
-    carregarAdmins();
-  }
-};
-
-/* VENDEDOR */
-let vendedorEditando = null;
-
+/* VENDEDORES */
 window.criarVendedor = async ()=>{
-  if(vendedorEditando){
-    await supabase.from("usuarios").update({
-      nome:nomeVendedor.value,
-      email:emailVendedor.value,
-      comissao_percentual:Number(comissaoVendedor.value)
-    }).eq("id",vendedorEditando);
-    vendedorEditando = null;
-  }else{
-    await supabase.from("usuarios").insert({
-      nome:nomeVendedor.value,
-      email:emailVendedor.value,
-      senha:senhaVendedor.value,
-      tipo:"vendedor",
-      comissao_percentual:Number(comissaoVendedor.value),
-      ativo:true
-    });
-  }
+  await supabase.from("usuarios").insert({
+    nome:nomeVendedor.value,
+    email:emailVendedor.value,
+    senha:senhaVendedor.value,
+    tipo:"vendedor",
+    comissao_percentual:Number(comissaoVendedor.value),
+    ativo:true
+  });
 
   nomeVendedor.value="";
   emailVendedor.value="";
   senhaVendedor.value="";
   comissaoVendedor.value=10;
   carregarVendedores();
-};
-
-window.editarVendedor = (id,nome,email,comissao)=>{
-  vendedorEditando = id;
-  nomeVendedor.value = nome;
-  emailVendedor.value = email;
-  comissaoVendedor.value = comissao;
-};
-
-window.excluirVendedor = async id=>{
-  if(confirm("Desativar vendedor?")){
-    await supabase.from("usuarios").update({ativo:false}).eq("id",id);
-    carregarVendedores();
-  }
 };
 
 async function carregarVendedores(){
@@ -240,16 +196,7 @@ async function carregarVendedores(){
         <div>
           <b>${v.nome}</b><br>
           <small>${v.email}</small><br>
-          <span class="badge">Comissão: ${v.comissao_percentual}%</span>
-        </div>
-        <div>
-          <button class="btn-small" onclick="editarVendedor(
-            '${v.id}',
-            '${v.nome}',
-            '${v.email}',
-            ${v.comissao_percentual}
-          )">Editar</button>
-          <button class="danger btn-small" onclick="excluirVendedor('${v.id}')">Desativar</button>
+          <span class="badge">${mapaApps[v.app_id] || "Negócio não identificado"}</span>
         </div>
       </div>
     `;
