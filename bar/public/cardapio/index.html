@@ -6,88 +6,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <meta name="theme-color" content="#020617">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{
-  margin:0;
-  font-family:Arial;
-  background:#020617;
-  color:#fff;
-}
-
-.banner{
-  width:100%;
-  height:180px;
-  background:#0f172a;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  overflow:hidden;
-}
-
-.banner img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-}
-
-.container{
-  max-width:900px;
-  margin:auto;
-  padding:20px;
-}
-
-.categoria{
-  margin-top:24px;
-}
-
-.categoria h2{
-  margin-bottom:12px;
-  border-left:4px solid #38bdf8;
-  padding-left:10px;
-}
-
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.banner{height:180px;background:#0f172a}
+.banner img{width:100%;height:100%;object-fit:cover}
+.container{max-width:900px;margin:auto;padding:20px}
+.categoria{margin-top:24px}
+.categoria h2{border-left:4px solid #38bdf8;padding-left:10px}
 .item{
-  background:#0f172a;
-  padding:14px;
-  border-radius:14px;
-  margin-bottom:12px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+  background:#0f172a;padding:14px;border-radius:14px;
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:10px
 }
-
 .item button{
-  background:#22c55e;
-  border:none;
-  padding:6px 12px;
-  border-radius:8px;
-  font-weight:bold;
-  cursor:pointer;
+  background:#22c55e;border:none;padding:6px 12px;
+  border-radius:8px;font-weight:bold;cursor:pointer
 }
-
 .footer{
-  position:fixed;
-  bottom:0;
-  left:0;
-  right:0;
-  background:#020617;
-  border-top:1px solid #1e293b;
-  padding:12px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+  position:fixed;bottom:0;left:0;right:0;
+  background:#020617;border-top:1px solid #1e293b;
+  padding:12px;display:flex;justify-content:space-between
 }
-
 .footer button{
-  background:#38bdf8;
-  border:none;
-  padding:10px 18px;
-  border-radius:10px;
-  font-weight:bold;
-  cursor:pointer;
+  background:#38bdf8;border:none;padding:10px 18px;
+  border-radius:10px;font-weight:bold;cursor:pointer
 }
 </style>
 </head>
@@ -95,12 +39,11 @@ body{
 <body>
 
 <div class="banner" id="banner"></div>
-
 <div class="container" id="lista"></div>
 
 <div class="footer">
   <span id="total">Total: R$ 0,00</span>
-  <button onclick="finalizar()">Pedir</button>
+  <button onclick="finalizar()">Enviar pedido</button>
 </div>
 
 <script>
@@ -110,27 +53,18 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* 🚫 BLOQUEIA FUNCIONÁRIO */
-if(localStorage.getItem("perfil")){
-  alert("Acesso inválido");
-  location.href = "/";
-}
-
-/* 📌 PARAMS */
+/* 🔗 PARAMS DO QR (MULTI-NEGÓCIO) */
 const params = new URLSearchParams(location.search);
 const mesa_id = params.get("mesa");
-const app_id = params.get("app_id") || params.get("app");
+const app_id  = params.get("app_id") || params.get("app");
 
+/* 🚫 SEM ISSO NÃO ENTRA */
 if(!mesa_id || !app_id){
   alert("QR inválido");
-  location.href = "/";
+  throw new Error("QR inválido");
 }
 
-/* 🧠 ESTADO */
-let pedido_id = null;
-let total = 0;
-
-/* 🔎 VALIDA MESA */
+/* 🔎 VALIDA MESA DO NEGÓCIO */
 const { data: mesa } = await sb
   .from("mesas")
   .select("id")
@@ -141,10 +75,10 @@ const { data: mesa } = await sb
 
 if(!mesa){
   alert("Mesa inválida");
-  location.href = "/";
+  throw new Error("Mesa inválida");
 }
 
-/* 🧾 GARANTE 1 PEDIDO */
+/* 🧾 GARANTE 1 PEDIDO POR MESA (VÁRIOS CELULARES) */
 let { data: pedido } = await sb
   .from("pedidos")
   .select("*")
@@ -157,14 +91,13 @@ if(!pedido){
   const res = await sb.from("pedidos").insert({
     app_id,
     mesa_id,
-    status: "aberto",
-    origem: "cliente"
+    status:"aberto",
+    origem:"cliente"
   }).select().single();
-
   pedido = res.data;
 }
 
-pedido_id = pedido.id;
+const pedido_id = pedido.id;
 
 /* 🖼️ BANNER POR NEGÓCIO */
 const { data: negocio } = await sb
@@ -178,7 +111,7 @@ if(negocio?.banner_url){
     `<img src="${negocio.banner_url}">`;
 }
 
-/* 🍕 PRODUTOS */
+/* 🍕 PRODUTOS DO NEGÓCIO */
 const { data: produtos } = await sb
   .from("produtos")
   .select("*")
@@ -187,41 +120,43 @@ const { data: produtos } = await sb
   .order("categoria");
 
 const lista = document.getElementById("lista");
+let total = 0;
 
 const categorias = {};
 produtos?.forEach(p=>{
-  if(!categorias[p.categoria]) categorias[p.categoria] = [];
+  if(!categorias[p.categoria]) categorias[p.categoria]=[];
   categorias[p.categoria].push(p);
 });
 
 /* 🎨 RENDER */
 for(const cat in categorias){
-  const divCat = document.createElement("div");
-  divCat.className = "categoria";
-  divCat.innerHTML = `<h2>${cat}</h2>`;
-  
+  const bloco = document.createElement("div");
+  bloco.className = "categoria";
+  bloco.innerHTML = `<h2>${cat}</h2>`;
+
   categorias[cat].forEach(p=>{
-    const item = document.createElement("div");
-    item.className = "item";
-    item.innerHTML = `
+    const div = document.createElement("div");
+    div.className = "item";
+    div.innerHTML = `
       <div>
         <strong>${p.nome}</strong><br>
         R$ ${p.preco.toFixed(2)}
       </div>
       <button onclick="add(${p.id},${p.preco})">+</button>
     `;
-    divCat.appendChild(item);
+    bloco.appendChild(div);
   });
 
-  lista.appendChild(divCat);
+  lista.appendChild(bloco);
 }
 
-/* ➕ ADD ITEM */
+/* ➕ ADD ITEM (NUNCA CRIA PEDIDO) */
 async function add(produto_id, preco){
   await sb.from("itens_pedido").insert({
     pedido_id,
     produto_id,
     quantidade:1,
+    pago:false,
     origem:"cliente"
   });
 
@@ -230,13 +165,13 @@ async function add(produto_id, preco){
     `Total: R$ ${total.toFixed(2)}`;
 }
 
-/* ✅ FINALIZAR */
+/* 📤 FINALIZA (NÃO FECHA MESA) */
 async function finalizar(){
   await sb.from("pedidos")
     .update({ status:"preparando" })
     .eq("id", pedido_id);
 
-  alert("Pedido enviado 🚀");
+  alert("Pedido enviado 🍻");
 }
 </script>
 
