@@ -100,9 +100,11 @@ if(!admin && !funcionario){
 
 const SEGREDO_ADD_MESA = "4321";
 const SEGREDO_REMOVER_MESA = "4321";
+const SEGREDO_ADMIN = "9999";
 
-let criandoMesa=false;
-let timerAdd=null;
+let criandoMesa = false;
+let timerAdd = null;
+let timerAdmin = null;
 </script>
 
 <div class="topo">
@@ -110,19 +112,24 @@ let timerAdd=null;
 
   <div class="botoes-linha">
     <button class="btn btn-avulsa" onclick="vendaAvulsa()">💳 Venda Avulsa</button>
+
     <button class="btn btn-secreto" id="btnAdd"
-      ontouchstart="segurarAdd(true)"
-      ontouchend="segurarAdd(false)"
       onmousedown="segurarAdd(true)"
       onmouseup="segurarAdd(false)"
-    ></button>
+      ontouchstart="segurarAdd(true)"
+      ontouchend="segurarAdd(false)">
+    </button>
   </div>
 
   <div class="botoes-linha baixo">
     <button class="btn btn-mapa" onclick="abrirMapa()">🗺️ Mapa das Mesas</button>
     <button class="btn btn-voltar" onclick="history.back()">Voltar</button>
-    <button class="btn btn-voltar" onclick="sairAdmin()">Sair (Admin)</button>
 
+    <button class="btn btn-voltar"
+      onmousedown="segurarAdmin(true)"
+      onmouseup="segurarAdmin(false)">
+      Sair (Admin)
+    </button>
   </div>
 </div>
 
@@ -132,32 +139,41 @@ let timerAdd=null;
 
 <script>
 function segurarAdd(pressionado){
-  const btn=document.getElementById("btnAdd");
+  const btn = document.getElementById("btnAdd");
   if(pressionado){
     btn.classList.add("segurar");
-    timerAdd=setTimeout(()=>{
-      const senha=prompt("Código para adicionar mesa:");
-      if(senha===SEGREDO_ADD_MESA) adicionarMesa();
-    },10000);
+    timerAdd = setTimeout(()=>{
+      const senha = prompt("Código para adicionar mesa:");
+      if(senha === SEGREDO_ADD_MESA) adicionarMesa();
+    }, 3000);
   }else{
     btn.classList.remove("segurar");
     clearTimeout(timerAdd);
   }
 }
 
+function segurarAdmin(pressionado){
+  if(pressionado){
+    timerAdmin = setTimeout(()=>{
+      const senha = prompt("Código do admin:");
+      if(senha === SEGREDO_ADMIN){
+        localStorage.removeItem("funcionario_logado");
+        location.href="../auth/login.html";
+      }
+    }, 3000);
+  }else{
+    clearTimeout(timerAdmin);
+  }
+}
+
 async function carregarMesas(){
-  if (!app_id) return;
+  if(!app_id) return;
 
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
     .eq("app_id", app_id)
     .order("numero_mesa");
-
-  if(!mesas) return;
-
-  // resto do código IGUAL
-}
 
   if(!mesas) return;
 
@@ -169,19 +185,19 @@ async function carregarMesas(){
     .not("status","in","(pago,finalizado)")
     .order("created_at",{ ascending:false });
 
-  if(!pedidos) pedidos=[];
+  if(!pedidos) pedidos = [];
 
-  const pedidosPorMesa={};
+  const pedidosPorMesa = {};
   pedidos.forEach(p=>{
-    if(!pedidosPorMesa[p.mesa_id]) pedidosPorMesa[p.mesa_id]=p;
+    if(!pedidosPorMesa[p.mesa_id]) pedidosPorMesa[p.mesa_id] = p;
   });
 
-  const grid=document.getElementById("listaMesas");
-  grid.innerHTML="";
+  const grid = document.getElementById("listaMesas");
+  grid.innerHTML = "";
 
   mesas.forEach(m=>{
-    const pedido=pedidosPorMesa[m.id];
-    let classe="livre",texto="LIVRE";
+    const pedido = pedidosPorMesa[m.id];
+    let classe="livre", texto="LIVRE";
 
     if(pedido){
       if(pedido.status==="conta_solicitada"){
@@ -191,22 +207,22 @@ async function carregarMesas(){
       }
     }
 
-    const div=document.createElement("div");
-    div.className=`card ${classe}`;
-    div.innerHTML=`
+    const div = document.createElement("div");
+    div.className = `card ${classe}`;
+    div.innerHTML = `
       <h3>Mesa ${m.numero_mesa}</h3>
       <span class="status ${classe}">${texto}</span>
       <div class="qr"><canvas id="qr-${m.id}"></canvas></div>
-      ${!pedido?`<button class="btn-remover">Remover mesa</button>`:""}
+      ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ""}
     `;
 
-    div.onclick=()=>location.href=`mesa.html?mesa=${m.id}&app_id=${app_id}`;
+    div.onclick = () =>
+      location.href = `mesa.html?mesa=${m.id}&app_id=${app_id}`;
+
     grid.appendChild(div);
 
-    const canvas=document.getElementById(`qr-${m.id}`);
+    const canvas = document.getElementById(`qr-${m.id}`);
     if(canvas){
-      canvas.width=140;
-      canvas.height=140;
       QRCode.toCanvas(
         canvas,
         `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/mesa.html?mesa=${m.id}&app_id=${app_id}`,
@@ -214,13 +230,13 @@ async function carregarMesas(){
       );
     }
 
-    const btn=div.querySelector(".btn-remover");
+    const btn = div.querySelector(".btn-remover");
     if(btn){
-      btn.onclick=async(e)=>{
+      btn.onclick = async (e)=>{
         e.stopPropagation();
-        const senha=prompt("Código para remover a mesa:");
-        if(senha!==SEGREDO_REMOVER_MESA) return;
-        await sb.from("mesas").update({ativa:false}).eq("id",m.id);
+        const senha = prompt("Código para remover a mesa:");
+        if(senha !== SEGREDO_REMOVER_MESA) return;
+        await sb.from("mesas").update({ativa:false}).eq("id", m.id);
         carregarMesas();
       };
     }
@@ -229,36 +245,27 @@ async function carregarMesas(){
 
 async function adicionarMesa(){
   if(criandoMesa) return;
-  criandoMesa=true;
+  criandoMesa = true;
 
   const { data } = await sb
     .from("mesas")
     .select("numero_mesa")
-    .eq("app_id",app_id)
+    .eq("app_id", app_id)
     .order("numero_mesa",{ascending:false})
     .limit(1)
     .maybeSingle();
 
-  const prox=(data?.numero_mesa||0)+1;
+  const prox = (data?.numero_mesa || 0) + 1;
   await sb.from("mesas").insert({app_id,numero_mesa:prox,ativa:true});
-  criandoMesa=false;
+  criandoMesa = false;
   carregarMesas();
-}
-function sairAdmin(){
-  // limpa só o necessário
-  localStorage.removeItem("funcionario_logado");
-
-  // se quiser sair total:
-  // localStorage.removeItem("admin_logado");
-
-  location.href = "../auth/login.html";
 }
 
 function vendaAvulsa(){
-  location.href=`venda-avulsa.html?app_id=${app_id}`;
+  location.href = `venda-avulsa.html?app_id=${app_id}`;
 }
 function abrirMapa(){
-  location.href=`mapa-mesas.html?app_id=${app_id}`;
+  location.href = `mapa-mesas.html?app_id=${app_id}`;
 }
 
 carregarMesas();
@@ -267,5 +274,3 @@ setInterval(carregarMesas,4000);
 
 </body>
 </html>
-
-
