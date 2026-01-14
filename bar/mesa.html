@@ -66,26 +66,10 @@ const mesaId = params.get("mesa");
 const appId  = params.get("app_id");
 const role   = params.get("role") || "cliente";
 
-/* ================= 🔐 TRAVA APENAS PARA CLIENTE ================= */
 if(!mesaId || !appId){
   alert("Acesso inválido");
   location.href = "index.html";
 }
-
-if(role === "cliente"){
-  const mesaSessao = localStorage.getItem("mesa_sessao");
-
-  if(!mesaSessao){
-    localStorage.setItem("mesa_sessao", mesaId);
-  }else if(mesaSessao !== mesaId){
-    alert("⚠️ Você já está vinculado a outra mesa.");
-    location.href = `mesa.html?mesa=${mesaSessao}&app_id=${appId}&role=cliente`;
-  }
-}
-
-/* trava botão voltar */
-history.pushState(null, null, location.href);
-window.onpopstate = () => history.pushState(null, null, location.href);
 
 /* ================= VARIÁVEIS ================= */
 let pedidoAtual = null;
@@ -104,13 +88,17 @@ async function carregarMesa(){
     `🍽️ Mesa ${data.numero_mesa}`;
 }
 
-/* ================= PEDIDO ================= */
+/* ================= PEDIDO (CORRIGIDO) ================= */
 async function garantirPedidoAberto(){
+
+  const origemPedido = role === "cliente" ? "mesa" : "garcom";
+
   const { data } = await sb
     .from("pedidos")
     .select("*")
-    .eq("mesa_id",mesaId)
-    .eq("app_id",appId)
+    .eq("mesa_id", mesaId)
+    .eq("app_id", appId)
+    .eq("origem", origemPedido)
     .not("status","in",'("finalizado","pago")')
     .maybeSingle();
 
@@ -123,10 +111,10 @@ async function garantirPedidoAberto(){
   const { data: novo } = await sb
     .from("pedidos")
     .insert({
-      app_id:appId,
-      mesa_id:mesaId,
-      status:"aberto",
-      origem:"mesa"
+      app_id: appId,
+      mesa_id: mesaId,
+      status: "aberto",
+      origem: origemPedido
     })
     .select()
     .single();
@@ -259,93 +247,6 @@ async function addProduto(produtoId){
   }
 
   carregarPedido();
-}
-
-async function diminuirItem(id,q){
-  if(q > 1){
-    await sb.from("pedido_itens")
-      .update({quantidade:q-1})
-      .eq("id",id)
-      .eq("status","novo");
-  }else{
-    await sb.from("pedido_itens")
-      .delete()
-      .eq("id",id)
-      .eq("status","novo");
-  }
-  carregarPedido();
-}
-
-async function removerItem(id){
-  await sb.from("pedido_itens")
-    .delete()
-    .eq("id",id)
-    .eq("status","novo");
-  carregarPedido();
-}
-
-/* ================= AÇÕES ================= */
-async function enviarPedido(){
-  await sb.from("pedido_itens")
-    .update({status:"confirmado"})
-    .eq("pedido_id",pedidoAtual.id)
-    .eq("status","novo");
-
-  await sb.from("pedidos")
-    .update({status:"enviado"})
-    .eq("id",pedidoAtual.id);
-
-  pedidoAtual.status = "enviado";
-  alert("📨 Pedido enviado!");
-}
-
-async function pedirConta(){
-  const { count } = await sb
-    .from("pedido_itens")
-    .select("*",{count:"exact",head:true})
-    .eq("pedido_id",pedidoAtual.id);
-
-  if(count === 0){
-    alert("⚠️ Não é possível pedir conta sem pedido.");
-    return;
-  }
-
-  await sb.from("pedidos")
-    .update({status:"conta_solicitada"})
-    .eq("id",pedidoAtual.id);
-
-  pedidoAtual.status = "conta_solicitada";
-  alert("🧾 Conta solicitada!");
-}
-
-async function atualizarLiberacao(){
-  const btn = document.getElementById("btnLiberar");
-
-  const { count } = await sb
-    .from("pedido_itens")
-    .select("*",{count:"exact",head:true})
-    .eq("pedido_id",pedidoAtual.id);
-
-  btn.classList.toggle("bloqueado", count > 0);
-}
-
-async function liberarMesa(){
-  const { count } = await sb
-    .from("pedido_itens")
-    .select("*",{count:"exact",head:true})
-    .eq("pedido_id",pedidoAtual.id);
-
-  if(count > 0) return;
-
-  await sb.from("pedidos")
-    .update({status:"finalizado"})
-    .eq("id",pedidoAtual.id);
-
-  if(role === "cliente"){
-    localStorage.removeItem("mesa_sessao");
-  }
-
-  location.href="mesas.html";
 }
 
 /* ================= START ================= */
