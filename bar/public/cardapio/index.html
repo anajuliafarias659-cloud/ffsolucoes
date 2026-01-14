@@ -5,34 +5,15 @@
 <title>Cardápio</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<meta name="theme-color" content="#020617">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .banner{height:180px;background:#0f172a}
 .banner img{width:100%;height:100%;object-fit:cover}
-.container{max-width:900px;margin:auto;padding:20px}
-.categoria{margin-top:24px}
-.categoria h2{border-left:4px solid #38bdf8;padding-left:10px}
-.item{
-  background:#0f172a;padding:14px;border-radius:14px;
-  display:flex;justify-content:space-between;align-items:center;
-  margin-bottom:10px
-}
-.item button{
-  background:#22c55e;border:none;padding:6px 12px;
-  border-radius:8px;font-weight:bold;cursor:pointer
-}
-.footer{
-  position:fixed;bottom:0;left:0;right:0;
-  background:#020617;border-top:1px solid #1e293b;
-  padding:12px;display:flex;justify-content:space-between
-}
-.footer button{
-  background:#38bdf8;border:none;padding:10px 18px;
-  border-radius:10px;font-weight:bold;cursor:pointer
-}
+.container{padding:20px;max-width:900px;margin:auto}
+.item{background:#0f172a;padding:14px;border-radius:14px;margin-bottom:10px;display:flex;justify-content:space-between}
+button{background:#22c55e;border:none;padding:6px 12px;border-radius:8px}
 </style>
 </head>
 
@@ -41,30 +22,23 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 <div class="banner" id="banner"></div>
 <div class="container" id="lista"></div>
 
-<div class="footer">
-  <span id="total">Total: R$ 0,00</span>
-  <button onclick="finalizar()">Enviar pedido</button>
-</div>
-
 <script>
-/* 🔐 SUPABASE */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* 🔗 PARAMS DO QR (MULTI-NEGÓCIO) */
+/* PARAMS DO QR */
 const params = new URLSearchParams(location.search);
 const mesa_id = params.get("mesa");
-const app_id  = params.get("app_id") || params.get("app");
+const app_id  = params.get("app_id");
 
-/* 🚫 SEM ISSO NÃO ENTRA */
 if(!mesa_id || !app_id){
   alert("QR inválido");
   throw new Error("QR inválido");
 }
 
-/* 🔎 VALIDA MESA DO NEGÓCIO */
+/* VALIDA MESA */
 const { data: mesa } = await sb
   .from("mesas")
   .select("id")
@@ -78,7 +52,7 @@ if(!mesa){
   throw new Error("Mesa inválida");
 }
 
-/* 🧾 GARANTE 1 PEDIDO POR MESA (VÁRIOS CELULARES) */
+/* GARANTE 1 PEDIDO POR MESA */
 let { data: pedido } = await sb
   .from("pedidos")
   .select("*")
@@ -99,7 +73,7 @@ if(!pedido){
 
 const pedido_id = pedido.id;
 
-/* 🖼️ BANNER POR NEGÓCIO */
+/* BANNER DO NEGÓCIO */
 const { data: negocio } = await sb
   .from("negocios")
   .select("banner_url")
@@ -111,47 +85,26 @@ if(negocio?.banner_url){
     `<img src="${negocio.banner_url}">`;
 }
 
-/* 🍕 PRODUTOS DO NEGÓCIO */
+/* PRODUTOS */
 const { data: produtos } = await sb
   .from("produtos")
-  .select("*")
+  .select("id,nome,preco")
   .eq("app_id", app_id)
-  .eq("ativo", true)
-  .order("categoria");
+  .eq("ativo", true);
 
 const lista = document.getElementById("lista");
-let total = 0;
 
-const categorias = {};
-produtos?.forEach(p=>{
-  if(!categorias[p.categoria]) categorias[p.categoria]=[];
-  categorias[p.categoria].push(p);
+produtos.forEach(p=>{
+  const div = document.createElement("div");
+  div.className = "item";
+  div.innerHTML = `
+    <span>${p.nome} - R$ ${p.preco.toFixed(2)}</span>
+    <button onclick="add(${p.id})">+</button>
+  `;
+  lista.appendChild(div);
 });
 
-/* 🎨 RENDER */
-for(const cat in categorias){
-  const bloco = document.createElement("div");
-  bloco.className = "categoria";
-  bloco.innerHTML = `<h2>${cat}</h2>`;
-
-  categorias[cat].forEach(p=>{
-    const div = document.createElement("div");
-    div.className = "item";
-    div.innerHTML = `
-      <div>
-        <strong>${p.nome}</strong><br>
-        R$ ${p.preco.toFixed(2)}
-      </div>
-      <button onclick="add(${p.id},${p.preco})">+</button>
-    `;
-    bloco.appendChild(div);
-  });
-
-  lista.appendChild(bloco);
-}
-
-/* ➕ ADD ITEM (NUNCA CRIA PEDIDO) */
-async function add(produto_id, preco){
+async function add(produto_id){
   await sb.from("itens_pedido").insert({
     pedido_id,
     produto_id,
@@ -159,19 +112,7 @@ async function add(produto_id, preco){
     pago:false,
     origem:"cliente"
   });
-
-  total += preco;
-  document.getElementById("total").innerText =
-    `Total: R$ ${total.toFixed(2)}`;
-}
-
-/* 📤 FINALIZA (NÃO FECHA MESA) */
-async function finalizar(){
-  await sb.from("pedidos")
-    .update({ status:"preparando" })
-    .eq("id", pedido_id);
-
-  alert("Pedido enviado 🍻");
+  alert("Adicionado");
 }
 </script>
 
