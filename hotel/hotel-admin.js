@@ -4,8 +4,8 @@
    ===================================================== */
 
 /* ========= SUPABASE ========= */
-const SUPABASE_URL = "SUA_URL_SUPABASE";
-const SUPABASE_KEY = "SUA_ANON_KEY";
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co",
+const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 
 const supabase = supabase.createClient(
   SUPABASE_URL,
@@ -134,3 +134,4 @@ console.log("Hotel Admin carregado:", {
   usuario: admin.usuario,
   app_id: negocioId
 });
+
