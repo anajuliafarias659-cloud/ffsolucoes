@@ -9,6 +9,9 @@ if (!admin || admin.tipo !== "hotel") {
   window.location.href = "login.html";
 }
 
+// 🔑 agora usamos negocio_id
+const NEGOCIO_ID = admin.negocio_id;
+
 // ===== ELEMENTOS =====
 const elQuartos = document.getElementById("total-quartos");
 const elReservas = document.getElementById("total-reservas");
@@ -17,7 +20,7 @@ const elUltimas = document.getElementById("ultimas-reservas");
 
 // ===== CONTAR =====
 async function contar(tabela) {
-  const url = `${SUPABASE_URL}/rest/v1/${tabela}?select=id&app_id=eq.${admin.app_id}`;
+  const url = `${SUPABASE_URL}/rest/v1/${tabela}?select=id&negocio_id=eq.${NEGOCIO_ID}`;
 
   const res = await fetch(url, {
     headers: {
@@ -42,7 +45,7 @@ async function carregarDashboard() {
   elHospedagens.innerText = await contar("hotel_hospedagens");
 
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/hotel_reservas?select=*&app_id=eq.${admin.app_id}&order=created_at.desc&limit=5`,
+    `${SUPABASE_URL}/rest/v1/hotel_reservas?select=*&negocio_id=eq.${NEGOCIO_ID}&order=created_at.desc&limit=5`,
     {
       headers: {
         apikey: SUPABASE_KEY,
@@ -66,7 +69,7 @@ async function carregarDashboard() {
   elUltimas.innerHTML = reservas.map(r => `
     <div class="reserva">
       <strong>${r.nome_cliente || "Cliente"}</strong><br>
-      Quarto ${r.quarto || "-"}
+      Quarto ${r.numero || "-"}
     </div>
   `).join("");
 }
