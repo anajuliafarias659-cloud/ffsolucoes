@@ -1,74 +1,34 @@
-// ===== CONFIG SUPABASE =====
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+async function login() {
+  const usuario = document.getElementById("usuario").value.trim();
+  const senha = document.getElementById("senha").value.trim();
 
-// ===== ELEMENTOS =====
-const usuario = document.getElementById("usuario");
-const senha = document.getElementById("senha");
-const msg = document.getElementById("msg");
-
-// ===== APP_ID =====
-const params = new URLSearchParams(window.location.search);
-let APP_ID = params.get("app_id") || localStorage.getItem("app_id");
-
-if (!APP_ID) {
-  msg.innerText = "Hotel não identificado.";
-} else {
-  localStorage.setItem("app_id", APP_ID);
-}
-
-
-if (!APP_ID) {
-  msg.innerText = "Hotel não identificado (app_id ausente).";
-}
-
-// ===== LOGIN =====
-async function loginHotel() {
-  msg.innerText = "Entrando...";
-
-  if (!APP_ID) {
-    msg.innerText = "Hotel não identificado.";
+  if (!usuario || !senha) {
+    alert("Preencha usuário e senha");
     return;
   }
 
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/admins?select=*`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: "Bearer " + SUPABASE_KEY
-        }
-      }
-    );
+  const url =
+    SUPABASE_URL +
+    "/rest/v1/admins" +
+    "?usuario=eq." + encodeURIComponent(usuario) +
+    "&senha=eq." + encodeURIComponent(senha) +
+    "&ativo=eq.verdadeiro" +
+    "&select=id,usuario,permissao,app_id";
 
-    const admins = await res.json();
-
-    const admin = admins.find(a =>
-      a.usuario === usuario.value.trim() &&
-      a.senha === senha.value.trim() &&
-      a.ativo === true &&
-      String(a.app_id) === String(APP_ID)
-    );
-
-    if (!admin) {
-      msg.innerText = "Usuário ou senha inválidos.";
-      return;
+  const res = await fetch(url, {
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: "Bearer " + SUPABASE_KEY
     }
+  });
 
-    // ===== SALVA SESSÃO =====
-    localStorage.setItem("admin_logado", JSON.stringify({
-      id: admin.id,
-      usuario: admin.usuario,
-      app_id: admin.app_id,
-      permissao: admin.permissao
-    }));
+  const data = await res.json();
 
-    // ===== REDIRECIONA =====
-    window.location.href = "dashboard.html";
-
-  } catch (e) {
-    console.error(e);
-    msg.innerText = "Erro ao conectar.";
+  if (!data.length) {
+    alert("Usuário ou senha inválidos");
+    return;
   }
+
+  sessionStorage.setItem("usuario", JSON.stringify(data[0]));
+  window.location.href = "dashboard.html";
 }
