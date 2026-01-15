@@ -7,22 +7,12 @@ const usuario = document.getElementById("usuario");
 const senha = document.getElementById("senha");
 const msg = document.getElementById("msg");
 
-// ===== APP_ID (URL → localStorage → fallback) =====
-const params = new URLSearchParams(window.location.search);
-let APP_ID = params.get("app_id") || localStorage.getItem("app_id");
-
-if (!APP_ID) {
-  msg.innerText = "Hotel não identificado.";
-} else {
-  localStorage.setItem("app_id", APP_ID);
-}
-
-// ===== LOGIN HOTEL =====
+// ===== LOGIN =====
 async function loginHotel() {
   msg.innerText = "Entrando...";
 
-  if (!APP_ID) {
-    msg.innerText = "Hotel não identificado (app_id ausente).";
+  if (!usuario.value.trim() || !senha.value.trim()) {
+    msg.innerText = "Preencha usuário e senha.";
     return;
   }
 
@@ -42,8 +32,7 @@ async function loginHotel() {
     const admin = admins.find(a =>
       a.usuario === usuario.value.trim() &&
       a.senha === senha.value.trim() &&
-      a.ativo === true &&
-      String(a.app_id) === String(APP_ID)
+      a.ativo === true
     );
 
     if (!admin) {
@@ -51,23 +40,21 @@ async function loginHotel() {
       return;
     }
 
-    // ===== SALVA SESSÃO =====
-    localStorage.setItem(
-      "admin_logado",
-      JSON.stringify({
-        id: admin.id,
-        usuario: admin.usuario,
-        app_id: admin.app_id,
-        permissao: admin.permissao,
-        tipo: "hotel"
-      })
-    );
+    // 🔥 APP_ID VEM DO ADMIN (IGUAL AO BAR)
+    localStorage.setItem("app_id", admin.app_id);
 
-    // ===== REDIRECIONA =====
+    localStorage.setItem("admin_logado", JSON.stringify({
+      id: admin.id,
+      usuario: admin.usuario,
+      app_id: admin.app_id,
+      permissao: admin.permissao,
+      tipo: "hotel"
+    }));
+
     window.location.href = "dashboard.html";
 
-  } catch (err) {
-    console.error(err);
-    msg.innerText = "Erro ao conectar com o servidor.";
+  } catch (e) {
+    console.error(e);
+    msg.innerText = "Erro ao conectar.";
   }
 }
