@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Painel do Hotel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial;background:#020617;color:#fff}
+    .wrap{max-width:1200px;margin:40px auto;padding:30px;border-radius:20px;
+      background:linear-gradient(135deg,#0f172a,#4b1fa0)}
+    h1,h2{margin:10px 0 20px}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .btn{padding:10px 16px;border-radius:10px;border:none;cursor:pointer;font-weight:bold}
+    .btn.red{background:#ef4444;color:#fff}
+    .btn.green{background:#22c55e;color:#000}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+    .card{background:#020617;padding:18px;border-radius:14px}
+    .card b{font-size:22px}
+    .list{margin-top:20px}
+    .row{background:#020617;padding:14px;border-radius:12px;margin-bottom:10px;
+      display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .badge{padding:4px 8px;border-radius:8px;font-size:12px;background:#334155}
+    .ok{background:#22c55e;color:#000}
+    .warn{background:#f59e0b;color:#000}
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <h1>🏨 Painel do Hotel</h1>
+    <button class="btn red" onclick="logout()">Sair</button>
+  </div>
+
+  <!-- RESUMO -->
+  <div class="cards">
+    <div class="card">
+      <b id="qtdQuartos">0</b>
+      <div>Quartos</div>
+    </div>
+    <div class="card">
+      <b id="qtdReservas">0</b>
+      <div>Reservas</div>
+    </div>
+    <div class="card">
+      <b id="qtdAtivas">0</b>
+      <div>Hospedagens Ativas</div>
+    </div>
+  </div>
+
+  <!-- AÇÕES -->
+  <h2>⚙️ Ações</h2>
+  <button class="btn green" onclick="irQuartos()">Gerenciar Quartos</button>
+  <button class="btn green" onclick="irReservas()">Ver Reservas</button>
+
+  <!-- ÚLTIMAS RESERVAS -->
+  <h2>📋 Últimas Reservas</h2>
+  <div id="listaReservas" class="list">Carregando...</div>
+
+</div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+const supabase = createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+// === PROTEÇÃO DE ROTA ===
+const sessao = JSON.parse(localStorage.getItem("admin_logado"));
+if (!sessao) location.href = "login.html";
+
+const APP_ID = sessao.app_id;
+
+// === LOGOUT ===
+window.logout = ()=>{
+  localStorage.removeItem("admin_logado");
+  location.href = "login.html";
+};
+
+// === NAVEGAÇÃO ===
+window.irQuartos = ()=> location.href = "quartos.html";
+window.irReservas = ()=> location.href = "reservas.html";
+
+// === DADOS DO DASHBOARD ===
+async function carregarResumo(){
+  const [{ count: qtdQuartos }, { count: qtdReservas }, { count: qtdAtivas }] =
+    await Promise.all([
+      supabase.from("hotel_quartos").select("*", { count: "exact", head: true }).eq("negocio_id", APP_ID),
+      supabase.from("hotel_reservas").select("*", { count: "exact", head: true }).eq("negocio_id", APP_ID),
+      supabase.from("hotel_reservas").select("*", { count: "exact", head: true })
+        .eq("negocio_id", APP_ID).eq("status","ativo")
+    ]);
+
+  qtdQuartosEl.textContent = qtdQuartos || 0;
+  qtdReservasEl.textContent = qtdReservas || 0;
+  qtdAtivasEl.textContent = qtdAtivas || 0;
+}
+
+async function carregarReservas(){
+  const { data } = await supabase
+    .from("hotel_reservas")
+    .select("id,hospede_nome,checkin,checkout,status")
+    .eq("negocio_id", APP_ID)
+    .order("created_at", { ascending:false })
+    .limit(5);
+
+  if(!data || !data.length){
+    listaReservas.innerHTML = "<p>Nenhuma reserva.</p>";
+    return;
+  }
+
+  listaReservas.innerHTML = "";
+  data.forEach(r=>{
+    listaReservas.innerHTML += `
+      <div class="row">
+        <div>
+          <b>${r.hospede_nome}</b><br>
+          <small>${r.checkin} → ${r.checkout}</small>
+        </div>
+        <span class="badge ${r.status==="ativo"?"ok":"warn"}">${r.status}</span>
+      </div>
+    `;
+  });
+}
+
+// ids rápidos
+const qtdQuartosEl = document.getElementById("qtdQuartos");
+const qtdReservasEl = document.getElementById("qtdReservas");
+const qtdAtivasEl = document.getElementById("qtdAtivas");
+const listaReservas = document.getElementById("listaReservas");
+
+// init
+carregarResumo();
+carregarReservas();
+</script>
+
+</body>
+</html>
