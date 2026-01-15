@@ -10,23 +10,26 @@ if (!admin || admin.tipo !== "hotel") {
   window.location.href = "login.html";
 }
 
+const NEGOCIO_ID = admin.negocio_id;
+
 // ===== FUNÇÃO =====
 async function listarQuartos() {
   const lista = document.getElementById("lista-quartos");
   lista.innerText = "Carregando...";
 
   try {
-    const url = `${SUPABASE_URL}/rest/v1/hotel_quartos?select=*&app_id=eq.${admin.app_id}`;
-
-    const res = await fetch(url, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/hotel_quartos?select=*&negocio_id=eq.${NEGOCIO_ID}`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`
+        }
       }
-    });
+    );
 
     if (!res.ok) {
-      throw new Error("Erro Supabase: " + res.status);
+      throw new Error("Erro ao buscar quartos");
     }
 
     const quartos = await res.json();
@@ -41,13 +44,12 @@ async function listarQuartos() {
         <strong>Quarto ${q.numero}</strong><br>
         Tipo: ${q.tipo}<br>
         Capacidade: ${q.capacidade}<br>
-        Diária: R$ ${q.valor_diaria}<br>
-        Status: ${q.status}
+        Diária: R$ ${q.valor_diaria}
       </div>
     `).join("");
 
   } catch (err) {
-    console.error("ERRO REAL:", err);
+    console.error(err);
     lista.innerText = "Erro ao carregar quartos.";
   }
 }
