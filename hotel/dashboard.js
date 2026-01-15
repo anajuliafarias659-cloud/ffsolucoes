@@ -1,46 +1,24 @@
-console.log("DASHBOARD HOTEL CARREGADO");
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Painel do Hotel</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
 
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+<h1>Painel do Hotel</h1>
 
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
+<div class="cards">
+  <div>Quartos: <span id="qtdQuartos">0</span></div>
+  <div>Reservas: <span id="qtdReservas">0</span></div>
+  <div>Hospedagens Ativas: <span id="qtdHospedagens">0</span></div>
+</div>
 
-if (!admin || admin.tipo !== "hotel" || !admin.app_id) {
-  window.location.replace("login.html");
-}
+<button onclick="irQuartos()">Gerenciar Quartos</button>
+<button onclick="logout()">Sair</button>
 
-// ===== FUNÇÃO DE CONTAGEM =====
-async function contar(tabela, filtroExtra = "") {
-  try {
-    let url = `${SUPABASE_URL}/rest/v1/${tabela}?select=id&app_id=eq.${admin.app_id}`;
-    if (filtroExtra) url += `&${filtroExtra}`;
-
-    const res = await fetch(url, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`
-      }
-    });
-
-    if (!res.ok) return 0;
-
-    const data = await res.json();
-    return Array.isArray(data) ? data.length : 0;
-  } catch {
-    return 0;
-  }
-}
-
-// ===== CARREGAR DASHBOARD =====
-async function carregarDashboard() {
-  document.getElementById("total-quartos").innerText =
-    await contar("hotel_quartos");
-
-  document.getElementById("total-reservas").innerText =
-    await contar("hotel_reservas");
-
-  document.getElementById("total-hospedagens").innerText =
-    await contar("hotel_hospedagens", "status=eq.ativa");
-}
-
-carregarDashboard();
+<script src="config.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>
