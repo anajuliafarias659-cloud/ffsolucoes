@@ -4,17 +4,17 @@ const supabase = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// ================== APP_ID VIA URL ==================
+// ================== APP VIA URL ==================
 const params = new URLSearchParams(window.location.search);
 const negocioId = params.get("app");
 
 if (!negocioId) {
   document.getElementById("lista-quartos").innerHTML =
-    "<p>Negócio não identificado.</p>";
-  throw new Error("Sem app_id na URL");
+    "<p>Hotel não identificado.</p>";
+  throw new Error("Sem app_id");
 }
 
-// ================== CARREGAR QUARTOS DISPONÍVEIS ==================
+// ================== CARREGAR QUARTOS ==================
 async function carregarQuartos() {
   const { data, error } = await supabase
     .from("hotel_quartos")
@@ -23,7 +23,7 @@ async function carregarQuartos() {
     .eq("status", "disponivel");
 
   if (error) {
-    console.error("Erro ao carregar quartos:", error);
+    console.error(error);
     document.getElementById("lista-quartos").innerHTML =
       "<p>Erro ao carregar quartos.</p>";
     return;
@@ -38,28 +38,23 @@ function renderizarQuartos(quartos) {
   lista.innerHTML = "";
 
   if (!quartos || quartos.length === 0) {
-    lista.innerHTML = "<p>Nenhum quarto disponível no momento.</p>";
+    lista.innerHTML = "<p>Nenhum quarto disponível.</p>";
     return;
   }
 
   quartos.forEach(q => {
     const div = document.createElement("div");
-    div.style.border = "1px solid #ccc";
-    div.style.padding = "10px";
-    div.style.marginBottom = "10px";
-
     div.innerHTML = `
       <h3>Quarto ${q.numero}</h3>
       <p>Tipo: ${q.tipo}</p>
       <p>Valor: R$ ${q.valor}</p>
       <a href="reserva.html?app=${negocioId}&quarto=${q.id}">
-        Reservar este quarto
+        Reservar
       </a>
+      <hr>
     `;
-
     lista.appendChild(div);
   });
 }
 
-// ================== INIT ==================
 carregarQuartos();
