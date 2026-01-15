@@ -1,42 +1,34 @@
-console.log("DASHBOARD NOVO CARREGADO");
+console.log("DASHBOARD CARREGADO");
 
-// ===== CONFIG =====
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-
-// ===== SESSÃO =====
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 
 if (!admin || !admin.negocio_id) {
   alert("Sessão inválida");
   window.location.href = "login.html";
+  throw new Error("Sessão inválida");
 }
 
-// ===== FUNÇÃO CONTAR =====
-async function contar(tabela) {
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/${tabela}?select=id&negocio_id=eq.${admin.negocio_id}`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`
-        }
-      }
-    );
+const negocio_id = admin.negocio_id;
 
-    if (!res.ok) throw new Error("Falha ao acessar " + tabela);
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
-    const dados = await res.json();
-    return dados.length;
+async function contar(tabela, filtro = "") {
+  const url = `${SUPABASE_URL}/rest/v1/${tabela}?select=id&negocio_id=eq.${negocio_id}${filtro}`;
 
-  } catch (e) {
-    console.warn(e.message);
-    return 0;
-  }
+  const res = await fetch(url, {
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`
+    }
+  });
+
+  if (!res.ok) return 0;
+
+  const data = await res.json();
+  return data.length;
 }
 
-// ===== CARREGAR DASHBOARD =====
 async function carregarDashboard() {
   document.getElementById("total-quartos").innerText =
     await contar("hotel_quartos");
@@ -44,9 +36,8 @@ async function carregarDashboard() {
   document.getElementById("total-reservas").innerText =
     await contar("hotel_reservas");
 
-  // ⚠️ só chama se a tabela existir
   document.getElementById("total-hospedagens").innerText =
-    await contar("hotel_hospedagens");
+    await contar("hotel_hospedagens", "&status=eq.ativa");
 }
 
 carregarDashboard();
