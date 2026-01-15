@@ -1,18 +1,18 @@
-console.log("DASHBOARD NOVO CARREGADO");
+console.log("DASHBOARD HOTEL CARREGADO");
 
 const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 
-if (!admin || !admin.negocio_id) {
-  alert("Sessão inválida");
-  window.location.href = "login.html";
+if (!admin || admin.tipo !== "hotel" || !admin.app_id) {
+  window.location.replace("login.html");
 }
 
+// ===== FUNÇÃO DE CONTAGEM =====
 async function contar(tabela, filtroExtra = "") {
   try {
-    let url = `${SUPABASE_URL}/rest/v1/${tabela}?select=id&negocio_id=eq.${admin.negocio_id}`;
+    let url = `${SUPABASE_URL}/rest/v1/${tabela}?select=id&app_id=eq.${admin.app_id}`;
     if (filtroExtra) url += `&${filtroExtra}`;
 
     const res = await fetch(url, {
@@ -31,6 +31,7 @@ async function contar(tabela, filtroExtra = "") {
   }
 }
 
+// ===== CARREGAR DASHBOARD =====
 async function carregarDashboard() {
   document.getElementById("total-quartos").innerText =
     await contar("hotel_quartos");
