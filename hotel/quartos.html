@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>🛏️ Quartos - Painel do Hotel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#020617;
+  color:#fff;
+}
+.topo{
+  background:#0f172a;
+  padding:16px 24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.topo h2{margin:0}
+.voltar{
+  background:#1e293b;
+  color:#fff;
+  border:none;
+  padding:10px 16px;
+  border-radius:10px;
+  cursor:pointer;
+}
+.container{
+  padding:32px;
+  max-width:900px;
+  margin:auto;
+}
+form{
+  background:#0f172a;
+  padding:20px;
+  border-radius:14px;
+  margin-bottom:30px;
+}
+input, select{
+  width:100%;
+  padding:10px;
+  border-radius:8px;
+  border:none;
+  margin-bottom:12px;
+  background:#1e293b;
+  color:#fff;
+}
+button{
+  padding:10px 16px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+  background:#16a34a;
+  color:#fff;
+  font-weight:bold;
+}
+.tabela{
+  width:100%;
+  border-collapse:collapse;
+}
+.tabela th, .tabela td{
+  padding:12px;
+  text-align:left;
+  border-bottom:1px solid #1e293b;
+}
+.status{
+  padding:6px 10px;
+  border-radius:6px;
+  font-size:13px;
+  font-weight:bold;
+}
+.livre{ background:#15803d; }
+.ocupado{ background:#b91c1c; }
+.limpeza{ background:#ca8a04; }
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <h2>🛏️ Quartos - Hotel</h2>
+  <button class="voltar" onclick="history.back()">⬅ Voltar</button>
+</div>
+
+<div class="container">
+  <h3>Cadastrar Novo Quarto</h3>
+
+  <form id="formQuarto">
+    <input type="text" id="numero" placeholder="Número do quarto" required>
+    <input type="text" id="tipo" placeholder="Tipo (Standard, Suíte, Luxo)">
+    <input type="number" id="preco" placeholder="Preço da diária (R$)">
+    <button type="submit">Salvar Quarto</button>
+  </form>
+
+  <h3>Lista de Quartos</h3>
+  <table class="tabela" id="tabelaQuartos">
+    <thead>
+      <tr>
+        <th>Número</th>
+        <th>Tipo</th>
+        <th>Preço</th>
+        <th>Status</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+/* ========= CONFIG SUPABASE ========= */
+const SUPABASE_URL = "https://teu-projeto.supabase.co";
+const SUPABASE_KEY = "public-anon-key";
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ========= SESSÃO ========= */
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin || !admin.app_id){
+  location.replace("../auth/login.html");
+  throw new Error("Sessão inválida");
+}
+const app_id = admin.app_id;
+
+/* ========= CADASTRAR QUARTO ========= */
+const form = document.getElementById("formQuarto");
+form.addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const numero = document.getElementById("numero").value.trim();
+  const tipo = document.getElementById("tipo").value.trim();
+  const preco = parseFloat(document.getElementById("preco").value || 0);
+
+  const { error } = await supabase.from("quartos").insert([{ 
+    app_id, numero, tipo, preco_diaria: preco, status: "livre" 
+  }]);
+  if(error){ alert("Erro ao salvar: " + error.message); return; }
+
+  form.reset();
+  carregarQuartos();
+});
+
+/* ========= LISTAR QUARTOS ========= */
+async function carregarQuartos(){
+  const tabela = document.querySelector("#tabelaQuartos tbody");
+  tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
+
+  const { data, error } = await supabase
+    .from("quartos")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("numero", { ascending: true });
+
+  if(error){ tabela.innerHTML = "<tr><td colspan='5'>Erro ao carregar</td></tr>"; return; }
+
+  if(!data || data.length === 0){
+    tabela.innerHTML = "<tr><td colspan='5'>Nenhum quarto cadastrado</td></tr>";
+    return;
+  }
+
+  tabela.innerHTML = "";
+  data.forEach(q=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${q.numero}</td>
+      <td>${q.tipo || "-"}</td>
+      <td>R$ ${q.preco_diaria?.toFixed(2) || "0.00"}</td>
+      <td><span class="status ${q.status}">${q.status}</span></td>
+      <td>
+        <select onchange="alterarStatus('${q.id}', this.value)">
+          <option value="">Mudar status</option>
+          <option value="livre">Livre</option>
+          <option value="ocupado">Ocupado</option>
+          <option value="limpeza">Limpeza</option>
+        </select>
+      </td>
+    `;
+    tabela.appendChild(tr);
+  });
+}
+
+/* ========= ALTERAR STATUS ========= */
+async function alterarStatus(id, status){
+  if(!status) return;
+  const { error } = await supabase
+    .from("quartos")
+    .update({ status })
+    .eq("id", id);
+  if(error) alert("Erro: " + error.message);
+  carregarQuartos();
+}
+
+/* ========= INICIAR ========= */
+carregarQuartos();
+</script>
+
+</body>
+</html>
