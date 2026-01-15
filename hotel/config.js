@@ -1,8 +1,7 @@
 // config.js
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co",
-const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+window.SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co",
+window.SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 
-// função utilitária
-function getUsuario() {
+window.getUsuario = function () {
   return JSON.parse(sessionStorage.getItem("usuario"));
-}
+};
