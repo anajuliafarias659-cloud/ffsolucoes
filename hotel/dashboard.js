@@ -1,3 +1,5 @@
+console.log("DASHBOARD NOVO CARREGADO");
+
 // ===== CONFIG SUPABASE =====
 const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
@@ -9,7 +11,7 @@ if (!admin || admin.tipo !== "hotel") {
   window.location.href = "login.html";
 }
 
-// 🔑 agora usamos negocio_id
+// 🔑 USANDO NEGOCIO_ID (CONFIRMADO NO BANCO)
 const NEGOCIO_ID = admin.negocio_id;
 
 // ===== ELEMENTOS =====
@@ -30,7 +32,7 @@ async function contar(tabela) {
   });
 
   if (!res.ok) {
-    console.warn(`Tabela ${tabela} indisponível`);
+    console.warn(`Falha ao acessar ${tabela}`);
     return 0;
   }
 
