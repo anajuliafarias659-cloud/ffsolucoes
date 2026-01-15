@@ -1,13 +1,7 @@
-// ===============================
-// 🔥 CONFIGURAÇÃO SUPABASE
-// ===============================
 const supabaseUrl = "https://pdajixsoowcyhnjwhgpc.supabase.co",
 const supabaseKey = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 const supabase = supabasejs.createClient(supabaseUrl, supabaseKey);
 
-// ===============================
-// 📌 BUSCAR HOTEL DO USUÁRIO
-// ===============================
 async function getHotelId() {
   const user = (await supabase.auth.getUser()).data.user;
 
@@ -25,9 +19,6 @@ async function getHotelId() {
   return data.id;
 }
 
-// ===============================
-// 📌 LISTAR QUARTOS
-// ===============================
 async function listarQuartos() {
   const hotel_id = await getHotelId();
   if (!hotel_id) return [];
@@ -46,9 +37,6 @@ async function listarQuartos() {
   return data;
 }
 
-// ===============================
-// 📌 CRIAR QUARTO
-// ===============================
 async function criarQuarto(quarto) {
   const { data, error } = await supabase
     .from("hotel_quartos")
