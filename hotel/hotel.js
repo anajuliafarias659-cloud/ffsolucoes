@@ -16,19 +16,22 @@ async function listarQuartos() {
   lista.innerText = "Carregando...";
 
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/hotel_quartos?select=*&app_id=eq.${admin.app_id}`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`
-        }
+    const url = `${SUPABASE_URL}/rest/v1/hotel_quartos?select=*&app_id=eq.${admin.app_id}`;
+
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
       }
-    );
+    });
+
+    if (!res.ok) {
+      throw new Error("Erro Supabase: " + res.status);
+    }
 
     const quartos = await res.json();
 
-    if (!quartos || quartos.length === 0) {
+    if (!Array.isArray(quartos) || quartos.length === 0) {
       lista.innerHTML = "<p>Nenhum quarto cadastrado.</p>";
       return;
     }
@@ -44,10 +47,9 @@ async function listarQuartos() {
     `).join("");
 
   } catch (err) {
-    console.error(err);
+    console.error("ERRO REAL:", err);
     lista.innerText = "Erro ao carregar quartos.";
   }
 }
 
-// garante que o HTML já carregou
 document.addEventListener("DOMContentLoaded", listarQuartos);
