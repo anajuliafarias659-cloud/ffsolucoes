@@ -1,6 +1,8 @@
 const supabaseUrl = "https://pdajixsoowcyhnjwhgpc.supabase.co";
 const supabaseKey = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-const supabase = supabasejs.createClient(supabaseUrl, supabaseKey);
+
+// AQUI ESTAVA O ERRO — AGORA CORRIGIDO
+const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
 async function getHotelId() {
   const user = (await supabase.auth.getUser()).data.user;
