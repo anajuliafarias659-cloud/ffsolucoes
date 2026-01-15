@@ -1,24 +1,25 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <title>Painel do Hotel</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
+const usuario = getUsuario();
 
-<h1>Painel do Hotel</h1>
+if (!usuario) {
+  alert("Sessão inválida");
+  window.location.href = "login.html";
+}
 
-<div class="cards">
-  <div>Quartos: <span id="qtdQuartos">0</span></div>
-  <div>Reservas: <span id="qtdReservas">0</span></div>
-  <div>Hospedagens Ativas: <span id="qtdHospedagens">0</span></div>
-</div>
+const APP_ID = usuario.app_id;
 
-<button onclick="irQuartos()">Gerenciar Quartos</button>
-<button onclick="logout()">Sair</button>
+async function carregarDashboard() {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/hotel_quartos?app_id=eq.${APP_ID}&select=id`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
 
-<script src="config.js"></script>
-<script src="dashboard.js"></script>
-</body>
-</html>
+  const data = await res.json();
+  document.getElementById("qtdQuartos").innerText = data.length;
+}
+
+carregarDashboard();
