@@ -10,48 +10,55 @@ const msg = document.getElementById("msg");
 async function loginHotel() {
   msg.innerText = "Entrando...";
 
-  if (!usuario.value.trim() || !senha.value.trim()) {
+  const user = usuario.value.trim();
+  const pass = senha.value.trim();
+
+  if (!user || !pass) {
     msg.innerText = "Preencha usuário e senha.";
     return;
   }
 
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/admins?select=*`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`
-        }
+    // 🔥 FILTRA DIRETO NO SUPABASE
+    const url =
+      `${SUPABASE_URL}/rest/v1/admins` +
+      `?usuario=eq.${encodeURIComponent(user)}` +
+      `&senha=eq.${encodeURIComponent(pass)}` +
+      `&tipo=eq.hotel` +
+      `&ativo=eq.true` +
+      `&select=id,usuario,app_id,tipo`;
+
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
       }
-    );
+    });
 
-    const admins = await res.json();
+    const data = await res.json();
 
-    const admin = admins.find(a =>
-      a.usuario === usuario.value.trim() &&
-      a.senha === senha.value.trim() &&
-      a.tipo === "hotel" &&
-      a.ativo === true
-    );
-
-    if (!admin) {
+    if (!Array.isArray(data) || data.length === 0) {
       msg.innerText = "Usuário ou senha inválidos.";
       return;
     }
 
-    // ✅ SESSÃO PADRÃO (IGUAL AOS OUTROS MÓDULOS)
-    localStorage.setItem("admin_logado", JSON.stringify({
-      id: admin.id,
-      usuario: admin.usuario,
-      app_id: admin.app_id,
-      tipo: "hotel"
-    }));
+    const admin = data[0];
+
+    // ✅ SESSÃO LIMPA E CONSISTENTE
+    localStorage.setItem(
+      "admin_logado",
+      JSON.stringify({
+        id: admin.id,
+        usuario: admin.usuario,
+        app_id: admin.app_id,
+        tipo: admin.tipo
+      })
+    );
 
     window.location.href = "dashboard.html";
 
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     msg.innerText = "Erro ao conectar.";
   }
 }
