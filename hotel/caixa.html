@@ -5,9 +5,14 @@
 <title>💰 Caixa - Painel do Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- SDK e Supabase global -->
+<!-- SUPABASE SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://anajuliafarias659-cloud.github.io/ffsolucoes/hotel/js/supabase-global.js"></script>
+<script>
+  // exatamente igual aos outros módulos
+  const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+  const SUPABASE_KEY = "sb-anon-key-aqui"; // mesma anon dos outros
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+</script>
 
 <style>
 body{
@@ -129,109 +134,94 @@ button{
 </div>
 
 <script>
-/* ========= CLIENTE SUPABASE ========= */
-window.addEventListener("DOMContentLoaded", async () => {
-  // Garante que o cliente existe
-  const supa = window.supabaseClient || (window.supabase && window.supabase.createClient(
-    "https://pdajixsoowcyhnjwhgpc.supabase.co",
-    "sb_publishable_LAtlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-  ));
+/* ========= VALIDA SESSÃO ========= */
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if (!admin || !admin.app_id) {
+  alert("Sessão inválida. Faça login novamente.");
+  location.replace("../auth/login.html");
+}
+const app_id = admin.app_id;
 
-  if (!supa) {
-    alert("Erro: Supabase não inicializado corretamente.");
-    console.error("Supabase não disponível");
+/* ========= CADASTRAR ========= */
+const form = document.getElementById("formCaixa");
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  const tipo = document.getElementById("tipo").value;
+  const descricao = document.getElementById("descricao").value.trim();
+  const valor = parseFloat(document.getElementById("valor").value || 0);
+
+  const { error } = await supabase.from("caixa").insert([
+    { app_id, tipo, descricao, valor, data_registro: new Date().toISOString() }
+  ]);
+
+  if (error) {
+    alert("Erro ao registrar: " + error.message);
+    console.error(error);
     return;
   }
 
-  /* ========= SESSÃO ========= */
-  const admin = JSON.parse(localStorage.getItem("admin_logado"));
-  if (!admin || !admin.app_id) {
-    alert("Sessão inválida. Faça login novamente.");
-    location.replace("../auth/login.html");
-    return;
-  }
-  const app_id = admin.app_id;
-
-  /* ========= CADASTRAR ========= */
-  const form = document.getElementById("formCaixa");
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const tipo = document.getElementById("tipo").value;
-    const descricao = document.getElementById("descricao").value.trim();
-    const valor = parseFloat(document.getElementById("valor").value || 0);
-
-    const { error } = await supa.from("caixa").insert([{
-      app_id, tipo, descricao, valor, data_registro: new Date().toISOString()
-    }]);
-
-    if (error) {
-      alert("Erro ao registrar: " + error.message);
-      console.error(error);
-      return;
-    }
-
-    form.reset();
-    carregarCaixa();
-  });
-
-  /* ========= LISTAR ========= */
-  async function carregarCaixa() {
-    const tabela = document.querySelector("#tabelaCaixa tbody");
-    tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
-
-    const hoje = new Date().toISOString().split("T")[0];
-    const { data, error } = await supa
-      .from("caixa")
-      .select("*")
-      .eq("app_id", app_id)
-      .gte("data_registro", hoje)
-      .order("data_registro", { ascending: false });
-
-    if (error) {
-      tabela.innerHTML = "<tr><td colspan='5'>Erro</td></tr>";
-      console.error(error);
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      tabela.innerHTML = "<tr><td colspan='5'>Nenhum registro hoje</td></tr>";
-      document.getElementById("totalDia").innerText = "R$ 0,00";
-      return;
-    }
-
-    let total = 0;
-    tabela.innerHTML = "";
-    data.forEach(r => {
-      total += r.tipo === "entrada" ? r.valor : -r.valor;
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${new Date(r.data_registro).toLocaleString("pt-BR")}</td>
-        <td class="${r.tipo}">${r.tipo.toUpperCase()}</td>
-        <td>${r.descricao}</td>
-        <td>R$ ${r.valor.toFixed(2)}</td>
-        <td><button class="excluir" onclick="remover('${r.id}')">Excluir</button></td>
-      `;
-      tabela.appendChild(tr);
-    });
-
-    document.getElementById("totalDia").innerText = "R$ " + total.toFixed(2);
-  }
-
-  /* ========= REMOVER ========= */
-  window.remover = async (id) => {
-    if (!confirm("Tem certeza que deseja excluir este registro?")) return;
-    const { error } = await supa.from("caixa").delete().eq("id", id);
-    if (error) {
-      alert("Erro ao excluir: " + error.message);
-      console.error(error);
-      return;
-    }
-    carregarCaixa();
-  };
-
-  /* ========= INICIAR ========= */
+  form.reset();
   carregarCaixa();
 });
+
+/* ========= LISTAR ========= */
+async function carregarCaixa() {
+  const tabela = document.querySelector("#tabelaCaixa tbody");
+  tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
+
+  const hoje = new Date().toISOString().split("T")[0];
+  const { data, error } = await supabase
+    .from("caixa")
+    .select("*")
+    .eq("app_id", app_id)
+    .gte("data_registro", hoje)
+    .order("data_registro", { ascending: false });
+
+  if (error) {
+    tabela.innerHTML = "<tr><td colspan='5'>Erro ao carregar</td></tr>";
+    console.error(error);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    tabela.innerHTML = "<tr><td colspan='5'>Nenhum registro hoje</td></tr>";
+    document.getElementById("totalDia").innerText = "R$ 0,00";
+    return;
+  }
+
+  let total = 0;
+  tabela.innerHTML = "";
+  data.forEach(r => {
+    total += r.tipo === "entrada" ? r.valor : -r.valor;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${new Date(r.data_registro).toLocaleString("pt-BR")}</td>
+      <td class="${r.tipo}">${r.tipo.toUpperCase()}</td>
+      <td>${r.descricao}</td>
+      <td>R$ ${r.valor.toFixed(2)}</td>
+      <td><button class="excluir" onclick="remover('${r.id}')">Excluir</button></td>
+    `;
+    tabela.appendChild(tr);
+  });
+
+  document.getElementById("totalDia").innerText = "R$ " + total.toFixed(2);
+}
+
+/* ========= REMOVER ========= */
+async function remover(id) {
+  if (!confirm("Tem certeza que deseja excluir este registro?")) return;
+  const { error } = await supabase.from("caixa").delete().eq("id", id);
+  if (error) {
+    alert("Erro ao excluir: " + error.message);
+    console.error(error);
+    return;
+  }
+  carregarCaixa();
+}
+
+/* ========= INICIAR ========= */
+carregarCaixa();
 </script>
 
 </body>
