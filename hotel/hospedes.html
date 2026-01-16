@@ -5,27 +5,92 @@
 <title>👤 Hóspedes - Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- SUPABASE GLOBAL -->
+<!-- SUPABASE SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- INIT SUPABASE (ÚNICO) -->
 <script>
-if (!window.supabaseClient) {
-  const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-  const SUPABASE_KEY = "sb_publishable_LAtlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-  window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-}
+  if (!window.db) {
+    const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_LAtlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+    window.db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
 </script>
 
+<link rel="icon" href="data:,">
+
 <style>
-body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
-.topo h2{margin:0}
-.voltar{background:#1e293b;color:#fff;border:none;padding:10px 16px;border-radius:10px;cursor:pointer}
-.container{padding:32px;max-width:1000px;margin:auto}
-form{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:30px}
-input{width:100%;padding:10px;border-radius:8px;border:none;margin-bottom:12px;background:#1e293b;color:#fff}
-button{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;background:#16a34a;color:#fff;font-weight:bold}
-.tabela{width:100%;border-collapse:collapse}
-.tabela th,.tabela td{padding:12px;text-align:left;border-bottom:1px solid #1e293b}
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #020617;
+  color: #fff;
+}
+.topo {
+  background: #0f172a;
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.topo h2 { margin: 0; }
+.voltar {
+  background: #1e293b;
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.container {
+  padding: 32px;
+  max-width: 1000px;
+  margin: auto;
+}
+form {
+  background: #0f172a;
+  padding: 20px;
+  border-radius: 14px;
+  margin-bottom: 30px;
+}
+input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  margin-bottom: 12px;
+  background: #1e293b;
+  color: #fff;
+}
+button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #16a34a;
+  color: #fff;
+  font-weight: bold;
+}
+.tabela {
+  width: 100%;
+  border-collapse: collapse;
+}
+.tabela th, .tabela td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #1e293b;
+}
+.busca {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.busca input {
+  flex: 1;
+}
+.btn-red {
+  background: #dc2626;
+}
 </style>
 </head>
 
@@ -37,6 +102,7 @@ button{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;background
 </div>
 
 <div class="container">
+
   <h3>Cadastrar Hóspede</h3>
 
   <form id="formHospede">
@@ -48,10 +114,13 @@ button{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;background
   </form>
 
   <h3>Lista de Hóspedes</h3>
-  <input type="text" id="busca" placeholder="Buscar hóspede pelo nome...">
-  <button onclick="carregarHospedes()">🔍 Buscar</button>
 
-  <table class="tabela" id="tabelaHospedes">
+  <div class="busca">
+    <input type="text" id="busca" placeholder="Buscar hóspede pelo nome...">
+    <button onclick="carregarHospedes()">🔍 Buscar</button>
+  </div>
+
+  <table class="tabela">
     <thead>
       <tr>
         <th>Nome</th>
@@ -61,26 +130,30 @@ button{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;background
         <th>Ações</th>
       </tr>
     </thead>
-    <tbody></tbody>
+    <tbody id="tabelaHospedes"></tbody>
   </table>
+
 </div>
 
 <script>
-/* ========= SUPABASE CLIENT ========= */
-const supabase = window.supabaseClient;
-
-/* ========= SESSÃO ========= */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || !admin.app_id){
-  alert("Sessão inválida, faça login novamente.");
-  location.replace("../auth/login.html");
-  throw new Error("Sessão inválida");
+/* ================= SESSÃO ================= */
+function getSessao() {
+  const admin = JSON.parse(localStorage.getItem("admin_logado"));
+  if (!admin || !admin.app_id) {
+    alert("Sessão inválida. Faça login novamente.");
+    location.replace("login.html");
+    throw new Error("Sessão inválida");
+  }
+  return admin.app_id;
 }
-const negocio_id = admin.app_id;
 
-/* ========= CADASTRAR HÓSPEDE ========= */
+const negocio_id = getSessao();
+const db = window.db;
+
+/* ================= CADASTRAR ================= */
 const form = document.getElementById("formHospede");
-form.addEventListener("submit", async (e)=>{
+
+form.addEventListener("submit", async (e) => {
   e.preventDefault();
 
   const nome = document.getElementById("nome").value.trim();
@@ -88,7 +161,12 @@ form.addEventListener("submit", async (e)=>{
   const telefone = document.getElementById("telefone").value.trim();
   const email = document.getElementById("email").value.trim();
 
-  const { error } = await supabase.from("hotel_hospedes").insert([{
+  if (!nome) {
+    alert("Informe o nome do hóspede.");
+    return;
+  }
+
+  const { error } = await db.from("hotel_hospedes").insert([{
     negocio_id,
     nome,
     documento,
@@ -96,7 +174,7 @@ form.addEventListener("submit", async (e)=>{
     email
   }]);
 
-  if(error){
+  if (error) {
     alert("Erro ao salvar: " + error.message);
     console.error(error);
     return;
@@ -106,50 +184,71 @@ form.addEventListener("submit", async (e)=>{
   carregarHospedes();
 });
 
-/* ========= LISTAR HÓSPEDES ========= */
-async function carregarHospedes(){
-  const tabela = document.querySelector("#tabelaHospedes tbody");
-  const termo = document.getElementById("busca").value.trim().toLowerCase();
+/* ================= LISTAR ================= */
+async function carregarHospedes() {
+  const tabela = document.getElementById("tabelaHospedes");
+  const termo = document.getElementById("busca").value.trim();
+
   tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
 
-  let query = supabase.from("hotel_hospedes").select("*").eq("negocio_id", negocio_id);
-  if(termo) query = query.ilike("nome", `%${termo}%`);
+  let query = db
+    .from("hotel_hospedes")
+    .select("*")
+    .eq("negocio_id", negocio_id);
+
+  if (termo) {
+    query = query.ilike("nome", `%${termo}%`);
+  }
+
   const { data, error } = await query.order("nome", { ascending: true });
 
-  if(error){
+  if (error) {
     tabela.innerHTML = "<tr><td colspan='5'>Erro ao carregar</td></tr>";
     console.error(error);
     return;
   }
 
-  if(!data || data.length === 0){
+  if (!data || data.length === 0) {
     tabela.innerHTML = "<tr><td colspan='5'>Nenhum hóspede encontrado</td></tr>";
     return;
   }
 
   tabela.innerHTML = "";
-  data.forEach(h=>{
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${h.nome}</td>
-      <td>${h.documento || "-"}</td>
-      <td>${h.telefone || "-"}</td>
-      <td>${h.email || "-"}</td>
-      <td><button onclick="excluirHospede('${h.id}')">Excluir</button></td>
+  data.forEach(h => {
+    tabela.innerHTML += `
+      <tr>
+        <td>${h.nome}</td>
+        <td>${h.documento || "-"}</td>
+        <td>${h.telefone || "-"}</td>
+        <td>${h.email || "-"}</td>
+        <td>
+          <button class="btn-red" onclick="excluirHospede('${h.id}')">Excluir</button>
+        </td>
+      </tr>
     `;
-    tabela.appendChild(tr);
   });
 }
 
-/* ========= EXCLUIR HÓSPEDE ========= */
-async function excluirHospede(id){
-  if(!confirm("Deseja excluir este hóspede?")) return;
-  const { error } = await supabase.from("hotel_hospedes").delete().eq("id", id);
-  if(error){ alert("Erro: " + error.message); return; }
+/* ================= EXCLUIR ================= */
+async function excluirHospede(id) {
+  if (!confirm("Deseja excluir este hóspede?")) return;
+
+  const { error } = await db
+    .from("hotel_hospedes")
+    .delete()
+    .eq("id", id)
+    .eq("negocio_id", negocio_id);
+
+  if (error) {
+    alert("Erro ao excluir: " + error.message);
+    console.error(error);
+    return;
+  }
+
   carregarHospedes();
 }
 
-/* ========= INICIAR ========= */
+/* ================= START ================= */
 carregarHospedes();
 </script>
 
