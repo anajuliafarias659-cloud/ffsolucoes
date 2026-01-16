@@ -5,27 +5,13 @@
 <title>📅 Reservas - Painel do Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- SUPABASE SDK -->
+<!-- SUPABASE SDK (v2) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  document.addEventListener("DOMContentLoaded", () => {
-    // Garante que o createClient esteja disponível
-    if (typeof createClient !== "function" && typeof window.supabase?.createClient === "function") {
-      window.createClient = window.supabase.createClient;
-    }
-
-    // Inicializa o cliente
-    const supabase = createClient(
-      "https://pdajixsoowcyhnjwhgpc.supabase.co",
-      "sb_publishable_LAtlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-    );
-
-    // deixa global pra outros scripts usarem
-    window.supabase = supabase;
-
-    // inicia tudo só depois que a lib estiver pronta
-    iniciarSistema();
-  });
+  const db = window._supabase ??= supabase.createClient(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co",
+    "sb_publishable_LAtlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+  );
 </script>
 
 <style>
@@ -140,186 +126,184 @@ button{
 </div>
 
 <script>
-async function iniciarSistema() {
-  /* ========= SESSÃO ========= */
-  const admin = JSON.parse(localStorage.getItem("admin_logado"));
-  if (!admin || !admin.app_id) {
-    alert("Sessão inválida, faça login novamente.");
-    location.replace("../auth/login.html");
+/* ========= SESSÃO ========= */
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if (!admin || !admin.app_id) {
+  alert("Sessão inválida, faça login novamente.");
+  location.replace("../auth/login.html");
+}
+const negocio_id = admin.app_id;
+
+/* ========= ELEMENTOS ========= */
+const hospedeSelect = document.getElementById("hospede");
+const quartoSelect = document.getElementById("quarto");
+const form = document.getElementById("formReserva");
+const valorInput = document.getElementById("valor");
+const checkinInput = document.getElementById("checkin");
+const checkoutInput = document.getElementById("checkout");
+
+/* ========= CARREGAR HÓSPEDES ========= */
+async function carregarHospedes() {
+  const { data, error } = await db
+    .from("hotel_hospedes")
+    .select("*")
+    .eq("negocio_id", negocio_id)
+    .order("nome", { ascending: true });
+
+  hospedeSelect.innerHTML = "<option value=''>Selecione o hóspede</option>";
+  if (error) console.error(error);
+  if (!data?.length) {
+    hospedeSelect.innerHTML = "<option value=''>Nenhum hóspede</option>";
+    return;
   }
-  const negocio_id = admin.app_id;
-
-  /* ========= ELEMENTOS ========= */
-  const hospedeSelect = document.getElementById("hospede");
-  const quartoSelect = document.getElementById("quarto");
-  const form = document.getElementById("formReserva");
-  const valorInput = document.getElementById("valor");
-  const checkinInput = document.getElementById("checkin");
-  const checkoutInput = document.getElementById("checkout");
-
-  /* ========= CARREGAR HÓSPEDES ========= */
-  async function carregarHospedes() {
-    const { data, error } = await supabase
-      .from("hotel_hospedes")
-      .select("*")
-      .eq("negocio_id", negocio_id)
-      .order("nome", { ascending: true });
-
-    hospedeSelect.innerHTML = "<option value=''>Selecione o hóspede</option>";
-    if (error) console.error(error);
-    if (!data?.length) {
-      hospedeSelect.innerHTML = "<option value=''>Nenhum hóspede</option>";
-      return;
-    }
-    data.forEach(h => {
-      const opt = document.createElement("option");
-      opt.value = h.id;
-      opt.textContent = h.nome;
-      hospedeSelect.appendChild(opt);
-    });
-  }
-
-  /* ========= CARREGAR QUARTOS ========= */
-  async function carregarQuartos() {
-    const { data, error } = await supabase
-      .from("hotel_quartos")
-      .select("*")
-      .eq("negocio_id", negocio_id)
-      .neq("status", "ocupado")
-      .order("numero", { ascending: true });
-
-    quartoSelect.innerHTML = "<option value=''>Selecione o quarto</option>";
-    if (error) console.error(error);
-    if (!data?.length) {
-      quartoSelect.innerHTML = "<option value=''>Nenhum quarto livre</option>";
-      return;
-    }
-    data.forEach(q => {
-      const opt = document.createElement("option");
-      opt.value = q.id;
-      opt.textContent = `Quarto ${q.numero} (${q.tipo || "Standard"}) - R$${q.preco_diaria || 0}`;
-      opt.dataset.preco = q.preco_diaria || 0;
-      quartoSelect.appendChild(opt);
-    });
-  }
-
-  /* ========= CÁLCULO AUTOMÁTICO ========= */
-  function calcularValor() {
-    const quartoSel = quartoSelect.selectedOptions[0];
-    if (!quartoSel || !checkinInput.value || !checkoutInput.value) return;
-    const preco = parseFloat(quartoSel.dataset.preco || 0);
-    const dias = (new Date(checkoutInput.value) - new Date(checkinInput.value)) / (1000 * 60 * 60 * 24);
-    valorInput.value = (dias > 0 ? dias * preco : 0).toFixed(2);
-  }
-  checkinInput.addEventListener("change", calcularValor);
-  checkoutInput.addEventListener("change", calcularValor);
-  quartoSelect.addEventListener("change", calcularValor);
-
-  /* ========= SALVAR RESERVA ========= */
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const quarto_id = quartoSelect.value;
-    const hospede_id = hospedeSelect.value;
-    const data_checkin = checkinInput.value;
-    const data_checkout = checkoutInput.value;
-    const valor_total = parseFloat(valorInput.value || 0);
-
-    const { error } = await supabase.from("hotel_reservas").insert([{
-      negocio_id,
-      quarto_id,
-      hospede_id,
-      data_checkin,
-      data_checkout,
-      valor_total,
-      status: "reservado"
-    }]);
-    if (error) {
-      alert("Erro ao salvar: " + error.message);
-      console.error(error);
-      return;
-    }
-
-    await supabase.from("hotel_quartos").update({ status: "ocupado" }).eq("id", quarto_id);
-
-    form.reset();
-    valorInput.value = "";
-    carregarQuartos();
-    carregarReservas();
+  data.forEach(h => {
+    const opt = document.createElement("option");
+    opt.value = h.id;
+    opt.textContent = h.nome;
+    hospedeSelect.appendChild(opt);
   });
+}
 
-  /* ========= LISTAR RESERVAS ========= */
-  async function carregarReservas() {
-    const tabela = document.querySelector("#tabelaReservas tbody");
-    tabela.innerHTML = "<tr><td colspan='7'>Carregando...</td></tr>";
+/* ========= CARREGAR QUARTOS ========= */
+async function carregarQuartos() {
+  const { data, error } = await db
+    .from("hotel_quartos")
+    .select("*")
+    .eq("negocio_id", negocio_id)
+    .neq("status", "ocupado")
+    .order("numero", { ascending: true });
 
-    const { data, error } = await supabase
-      .from("hotel_reservas")
-      .select("*, hotel_hospedes(nome), hotel_quartos(numero)")
-      .eq("negocio_id", negocio_id)
-      .order("data_checkin", { ascending: false });
+  quartoSelect.innerHTML = "<option value=''>Selecione o quarto</option>";
+  if (error) console.error(error);
+  if (!data?.length) {
+    quartoSelect.innerHTML = "<option value=''>Nenhum quarto livre</option>";
+    return;
+  }
+  data.forEach(q => {
+    const opt = document.createElement("option");
+    opt.value = q.id;
+    opt.textContent = `Quarto ${q.numero} (${q.tipo || "Standard"}) - R$${q.preco_diaria || 0}`;
+    opt.dataset.preco = q.preco_diaria || 0;
+    quartoSelect.appendChild(opt);
+  });
+}
 
-    if (error) {
-      tabela.innerHTML = "<tr><td colspan='7'>Erro ao carregar</td></tr>";
-      console.error(error);
-      return;
-    }
+/* ========= CÁLCULO AUTOMÁTICO ========= */
+function calcularValor() {
+  const quartoSel = quartoSelect.selectedOptions[0];
+  if (!quartoSel || !checkinInput.value || !checkoutInput.value) return;
+  const preco = parseFloat(quartoSel.dataset.preco || 0);
+  const dias = (new Date(checkoutInput.value) - new Date(checkinInput.value)) / (1000 * 60 * 60 * 24);
+  valorInput.value = (dias > 0 ? dias * preco : 0).toFixed(2);
+}
+checkinInput.addEventListener("change", calcularValor);
+checkoutInput.addEventListener("change", calcularValor);
+quartoSelect.addEventListener("change", calcularValor);
 
-    if (!data?.length) {
-      tabela.innerHTML = "<tr><td colspan='7'>Nenhuma reserva</td></tr>";
-      return;
-    }
+/* ========= SALVAR RESERVA ========= */
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const quarto_id = quartoSelect.value;
+  const hospede_id = hospedeSelect.value;
+  const data_checkin = checkinInput.value;
+  const data_checkout = checkoutInput.value;
+  const valor_total = parseFloat(valorInput.value || 0);
 
-    tabela.innerHTML = "";
-    data.forEach(r => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${r.hotel_hospedes?.nome || "-"}</td>
-        <td>${r.hotel_quartos?.numero || "-"}</td>
-        <td>${r.data_checkin}</td>
-        <td>${r.data_checkout}</td>
-        <td>R$ ${r.valor_total?.toFixed(2) || "0.00"}</td>
-        <td><span class="status ${r.status}">${r.status}</span></td>
-        <td>
-          ${r.status === "reservado"
-            ? `<button onclick="mudarStatus('${r.id}','hospedado')">Check-in</button>`
-            : r.status === "hospedado"
-              ? `<button onclick="mudarStatus('${r.id}','finalizado')">Check-out</button>`
-              : ""}
-        </td>
-      `;
-      tabela.appendChild(tr);
-    });
+  const { error } = await db.from("hotel_reservas").insert([{
+    negocio_id,
+    quarto_id,
+    hospede_id,
+    data_checkin,
+    data_checkout,
+    valor_total,
+    status: "reservado"
+  }]);
+  if (error) {
+    alert("Erro ao salvar: " + error.message);
+    console.error(error);
+    return;
   }
 
-  /* ========= MUDAR STATUS ========= */
-  window.mudarStatus = async function (id, novoStatus) {
-    const { data, error } = await supabase
-      .from("hotel_reservas")
-      .update({ status: novoStatus })
-      .eq("id", id)
-      .select();
+  await db.from("hotel_quartos").update({ status: "ocupado" }).eq("id", quarto_id);
 
-    if (error) {
-      alert("Erro ao atualizar: " + error.message);
-      console.error(error);
-      return;
-    }
-
-    if (novoStatus === "finalizado" && data?.[0]) {
-      await supabase
-        .from("hotel_quartos")
-        .update({ status: "limpeza" })
-        .eq("id", data[0].quarto_id);
-    }
-    carregarReservas();
-    carregarQuartos();
-  };
-
-  /* ========= INICIAR ========= */
-  carregarHospedes();
+  form.reset();
+  valorInput.value = "";
   carregarQuartos();
   carregarReservas();
+});
+
+/* ========= LISTAR RESERVAS ========= */
+async function carregarReservas() {
+  const tabela = document.querySelector("#tabelaReservas tbody");
+  tabela.innerHTML = "<tr><td colspan='7'>Carregando...</td></tr>";
+
+  const { data, error } = await db
+    .from("hotel_reservas")
+    .select("*, hotel_hospedes(nome), hotel_quartos(numero)")
+    .eq("negocio_id", negocio_id)
+    .order("data_checkin", { ascending: false });
+
+  if (error) {
+    tabela.innerHTML = "<tr><td colspan='7'>Erro ao carregar</td></tr>";
+    console.error(error);
+    return;
+  }
+
+  if (!data?.length) {
+    tabela.innerHTML = "<tr><td colspan='7'>Nenhuma reserva</td></tr>";
+    return;
+  }
+
+  tabela.innerHTML = "";
+  data.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${r.hotel_hospedes?.nome || "-"}</td>
+      <td>${r.hotel_quartos?.numero || "-"}</td>
+      <td>${r.data_checkin}</td>
+      <td>${r.data_checkout}</td>
+      <td>R$ ${r.valor_total?.toFixed(2) || "0.00"}</td>
+      <td><span class="status ${r.status}">${r.status}</span></td>
+      <td>
+        ${r.status === "reservado"
+          ? `<button onclick="mudarStatus('${r.id}','hospedado')">Check-in</button>`
+          : r.status === "hospedado"
+            ? `<button onclick="mudarStatus('${r.id}','finalizado')">Check-out</button>`
+            : ""}
+      </td>
+    `;
+    tabela.appendChild(tr);
+  });
 }
+
+/* ========= MUDAR STATUS ========= */
+async function mudarStatus(id, novoStatus) {
+  const { data, error } = await db
+    .from("hotel_reservas")
+    .update({ status: novoStatus })
+    .eq("id", id)
+    .select();
+
+  if (error) {
+    alert("Erro ao atualizar: " + error.message);
+    console.error(error);
+    return;
+  }
+
+  if (novoStatus === "finalizado" && data?.[0]) {
+    await db
+      .from("hotel_quartos")
+      .update({ status: "limpeza" })
+      .eq("id", data[0].quarto_id);
+  }
+  carregarReservas();
+  carregarQuartos();
+}
+
+/* ========= INICIAR ========= */
+carregarHospedes();
+carregarQuartos();
+carregarReservas();
 </script>
 
 </body>
