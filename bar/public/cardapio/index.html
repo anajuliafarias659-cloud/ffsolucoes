@@ -157,6 +157,7 @@ body{
 
 <body>
 
+<!-- TOPO -->
 <div class="topo">
   <img id="banner" class="banner" style="display:none">
   <div class="topo-conteudo">
@@ -164,13 +165,16 @@ body{
   </div>
 </div>
 
+<!-- TABS -->
 <div class="tabs">
   <button class="tab ativo" id="btnBar">🍺 Bar</button>
   <button class="tab" id="btnCozinha">🍽️ Cozinha</button>
 </div>
 
+<!-- PRODUTOS -->
 <div class="container" id="conteudo"></div>
 
+<!-- CARRINHO -->
 <div class="carrinho-btn" onclick="abrirCarrinho()">
   🛒 Ver pedido (<span id="qtd">0</span>)
 </div>
@@ -187,28 +191,35 @@ body{
 </div>
 
 <script>
-/* SUPABASE */
+/* ================= SUPABASE (APENAS UMA VEZ) ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* PARAMS */
+/* ================= PARAM ================= */
 const params = new URLSearchParams(location.search);
 const app_id = params.get("app");
-if(!app_id){ document.body.innerHTML="Indisponível"; throw ""; }
+if(!app_id){
+  document.body.innerHTML = "Indisponível";
+  throw "";
+}
 
-/* ELEMENTOS */
+/* ================= ELEMENTOS ================= */
 const conteudo = document.getElementById("conteudo");
 const qtd = document.getElementById("qtd");
 const modal = document.getElementById("modal");
+const banner = document.getElementById("banner");
+const nomeEl = document.getElementById("nome");
+const btnBar = document.getElementById("btnBar");
+const btnCozinha = document.getElementById("btnCozinha");
 
-/* STATE */
+/* ================= STATE ================= */
 let produtos = [];
 let carrinho = [];
 let filtro = "BAR";
 
-/* ===== CARRINHO LOCAL (CORREÇÃO DO ERRO) ===== */
+/* ================= CARRINHO ================= */
 function carregarCarrinho(){
   const salvo = localStorage.getItem(`cart_${app_id}`);
   if(salvo){
@@ -221,51 +232,57 @@ function salvarCarrinho(){
   qtd.innerText = carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
-/* CONFIG */
+/* ================= CONFIG ================= */
 async function carregarConfig(){
-  const {data}=await sb
+  const { data } = await sb
     .from("config_site")
-    .select("*")
-    .eq("app_id",app_id)
-    .single();
+    .select("nome_site, banner_url")
+    .eq("app_id", app_id)
+    .maybeSingle();
 
   if(!data) return;
-  nome.innerText = data.nome_site || "Cardápio";
+
+  if(data.nome_site){
+    nomeEl.innerText = data.nome_site;
+    document.title = data.nome_site;
+  }
+
   if(data.banner_url){
     banner.src = data.banner_url;
-    banner.style.display="block";
+    banner.style.display = "block";
   }
 }
 
-/* PRODUTOS */
+/* ================= PRODUTOS ================= */
 async function carregarProdutos(){
-  const {data}=await sb
+  const { data } = await sb
     .from("produtos")
     .select("id,nome,preco,foto,destino")
-    .eq("app_id",app_id)
-    .eq("ativo",true);
+    .eq("app_id", app_id)
+    .eq("ativo", true);
 
   produtos = data || [];
   render();
 }
 
-/* RENDER */
+/* ================= RENDER ================= */
 function render(){
-  conteudo.innerHTML="";
+  conteudo.innerHTML = "";
   produtos
-    .filter(p=>p.destino===filtro)
+    .filter(p => p.destino === filtro)
     .forEach(p=>{
-      conteudo.innerHTML+=`
+      conteudo.innerHTML += `
         <div class="produto">
-          ${p.foto?`<img src="${p.foto}">`:""}
+          ${p.foto ? `<img src="${p.foto}">` : ""}
           <b>${p.nome}</b>
           <div class="preco">R$ ${p.preco.toFixed(2)}</div>
           <button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
-        </div>`;
+        </div>
+      `;
     });
 }
 
-/* AÇÕES */
+/* ================= AÇÕES ================= */
 function addProduto(id){
   const p = produtos.find(x=>x.id===id);
   const i = carrinho.find(x=>x.id===id);
@@ -274,327 +291,51 @@ function addProduto(id){
 }
 
 function abrirCarrinho(){
-  modal.style.display="flex";
+  modal.style.display = "flex";
 }
 
 async function finalizarPedido(){
   if(!carrinho.length) return alert("Carrinho vazio");
 
-  const cliente={
-    nome:nomeCliente.value,
-    whatsapp:whatsCliente.value,
-    endereco:enderecoCliente.value
+  const cliente = {
+    nome: nomeCliente.value,
+    whatsapp: whatsCliente.value,
+    endereco: enderecoCliente.value
   };
 
-  const total=carrinho.reduce((s,i)=>s+i.preco*i.qtd,0);
+  const total = carrinho.reduce((s,i)=>s+i.preco*i.qtd,0);
 
   await sb.from("pedidos").insert({
     app_id,
-    tipo:"DELIVERY",
-    status:"novo",
-    itens:{produtos:carrinho},
+    tipo: "DELIVERY",
+    status: "novo",
+    itens: { produtos: carrinho },
     cliente,
     total
   });
 
   localStorage.removeItem(`cart_${app_id}`);
-  carrinho=[];
-  qtd.innerText=0;
-  modal.style.display="none";
-  alert("Pedido enviado!");
+  carrinho = [];
+  qtd.innerText = 0;
+  modal.style.display = "none";
+  alert("Pedido enviado com sucesso!");
 }
 
-/* TABS */
-btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
-btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
-
-/* INIT */
-(async()=>{
-  carregarCarrinho();   // ✅ agora existe
-  await carregarConfig();
-  await carregarProdutos();
-})();
-</script>
-
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<title>Cardápio Delivery</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<style>
-:root{
-  --primary:#8b5e3c;
-  --bg:#f6f1eb;
-  --text:#2e1f14;
-  --border:#e6ded5;
-}
-*{box-sizing:border-box}
-body{
-  margin:0;
-  font-family:system-ui;
-  background:var(--bg);
-  color:var(--text);
-}
-
-/* TOPO */
-.topo{
-  height:220px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  position:relative;
-}
-.banner{
-  position:absolute;
-  inset:0;
-  width:100%;
-  height:100%;
-  object-fit:cover;
-}
-.topo::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  background:rgba(0,0,0,.35);
-}
-.topo-conteudo{
-  position:relative;
-  color:#fff;
-  text-align:center;
-}
-
-/* TABS */
-.tabs{
-  display:flex;
-  gap:12px;
-  padding:16px;
-  max-width:1100px;
-  margin:auto;
-}
-.tab{
-  flex:1;
-  padding:14px;
-  border-radius:14px;
-  border:2px solid var(--border);
-  background:#fff;
-  font-weight:900;
-  cursor:pointer;
-}
-.tab.ativo{
-  background:var(--primary);
-  color:#fff;
-  border-color:var(--primary);
-}
-
-/* PRODUTOS */
-.container{
-  max-width:1100px;
-  margin:auto;
-  padding:10px 16px 140px;
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-  gap:18px;
-}
-.produto{
-  background:#fff;
-  border-radius:16px;
-  padding:12px;
-  border:1px solid var(--border);
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-.produto img{
-  width:100%;
-  height:150px;
-  object-fit:cover;
-  border-radius:12px;
-}
-.preco{font-weight:800}
-.add-btn{
-  margin-top:auto;
-  padding:10px;
-  border:none;
-  border-radius:12px;
-  background:var(--primary);
-  color:#fff;
-  font-weight:900;
-}
-
-/* CARRINHO */
-.carrinho-btn{
-  position:fixed;
-  bottom:22px;
-  left:50%;
-  transform:translateX(-50%);
-  background:var(--primary);
-  color:#fff;
-  padding:16px 30px;
-  border-radius:999px;
-  font-weight:900;
-  cursor:pointer;
-}
-
-/* MODAL */
-.modal{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.5);
-  display:none;
-  align-items:center;
-  justify-content:center;
-}
-.modal-box{
-  background:#fff;
-  color:#000;
-  padding:20px;
-  border-radius:16px;
-  width:90%;
-  max-width:420px;
-}
-.modal-box h3{margin-top:0}
-.modal-box input{
-  width:100%;
-  padding:12px;
-  margin:6px 0;
-}
-.modal-box button{
-  width:100%;
-  padding:14px;
-  background:var(--primary);
-  color:#fff;
-  border:none;
-  border-radius:12px;
-  font-weight:900;
-}
-</style>
-</head>
-
-<body>
-
-<div class="topo">
-  <img id="banner" class="banner" style="display:none">
-  <div class="topo-conteudo">
-    <h1 id="nome">Cardápio Delivery</h1>
-  </div>
-</div>
-
-<div class="tabs">
-  <button class="tab ativo" id="btnBar">🍺 Bar</button>
-  <button class="tab" id="btnCozinha">🍽️ Cozinha</button>
-</div>
-
-<div class="container" id="conteudo"></div>
-
-<div class="carrinho-btn" onclick="abrirCarrinho()">
-  🛒 Ver pedido (<span id="qtd">0</span>)
-</div>
-
-<!-- MODAL -->
-<div class="modal" id="modal">
-  <div class="modal-box">
-    <h3>Finalizar pedido</h3>
-    <input id="nomeCliente" placeholder="Seu nome">
-    <input id="whatsCliente" placeholder="WhatsApp">
-    <input id="enderecoCliente" placeholder="Endereço">
-    <button onclick="finalizarPedido()">Enviar pedido</button>
-  </div>
-</div>
-
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const params = new URLSearchParams(location.search);
-const app_id = params.get("app");
-if(!app_id){ document.body.innerHTML="Indisponível"; throw ""; }
-
-const conteudo = document.getElementById("conteudo");
-const qtd = document.getElementById("qtd");
-const modal = document.getElementById("modal");
-
-let produtos=[], carrinho=[], filtro="BAR";
-
-/* CONFIG */
-async function carregarConfig(){
-  const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).single();
-  if(!data) return;
-  nome.innerText=data.nome_site||"Cardápio";
-  if(data.banner_url){ banner.src=data.banner_url; banner.style.display="block"; }
-}
-
-/* PRODUTOS */
-async function carregarProdutos(){
-  const {data}=await sb.from("produtos")
-    .select("id,nome,preco,foto,destino")
-    .eq("app_id",app_id)
-    .eq("ativo",true);
-  produtos=data||[];
+/* ================= TABS ================= */
+btnBar.onclick = ()=>{
+  filtro="BAR";
+  btnBar.classList.add("ativo");
+  btnCozinha.classList.remove("ativo");
   render();
-}
+};
+btnCozinha.onclick = ()=>{
+  filtro="COZINHA";
+  btnCozinha.classList.add("ativo");
+  btnBar.classList.remove("ativo");
+  render();
+};
 
-function render(){
-  conteudo.innerHTML="";
-  produtos.filter(p=>p.destino===filtro).forEach(p=>{
-    conteudo.innerHTML+=`
-      <div class="produto">
-        ${p.foto?`<img src="${p.foto}">`:""}
-        <b>${p.nome}</b>
-        <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-        <button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
-      </div>`;
-  });
-}
-
-function addProduto(id){
-  const p=produtos.find(x=>x.id===id);
-  const i=carrinho.find(x=>x.id===id);
-  i?i.qtd++:carrinho.push({...p,qtd:1});
-  salvarCarrinho();
-}
-
-function salvarCarrinho(){
-  localStorage.setItem(`cart_${app_id}`,JSON.stringify(carrinho));
-  qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
-}
-
-function abrirCarrinho(){ modal.style.display="flex"; }
-
-async function finalizarPedido(){
-  if(!carrinho.length) return alert("Carrinho vazio");
-  const cliente={
-    nome:nomeCliente.value,
-    whatsapp:whatsCliente.value,
-    endereco:enderecoCliente.value
-  };
-  const total=carrinho.reduce((s,i)=>s+i.preco*i.qtd,0);
-
-  await sb.from("pedidos").insert({
-    app_id,
-    tipo:"DELIVERY",
-    status:"novo",
-    itens:{produtos:carrinho},
-    cliente,
-    total
-  });
-
-  localStorage.removeItem(`cart_${app_id}`);
-  carrinho=[];
-  qtd.innerText=0;
-  modal.style.display="none";
-  alert("Pedido enviado!");
-}
-
-btnBar.onclick=()=>{filtro="BAR";render();}
-btnCozinha.onclick=()=>{filtro="COZINHA";render();}
-
+/* ================= INIT ================= */
 (async()=>{
   carregarCarrinho();
   await carregarConfig();
@@ -604,4 +345,3 @@ btnCozinha.onclick=()=>{filtro="COZINHA";render();}
 
 </body>
 </html>
-
