@@ -7,149 +7,186 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-:root{
-  --primary:#8b5e3c;
-  --bg:#f6f1eb;
-  --text:#2e1f14;
+body{
+  margin:0;
+  font-family:system-ui;
+  background:#f6f1eb;
 }
-*{box-sizing:border-box}
-body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
-
-.topo{
-  background:var(--primary);
+header{
+  background:#8b5e3c;
   color:#fff;
   padding:20px;
   text-align:center;
-  font-weight:900;
+  font-weight:800;
 }
-
 .tabs{
   display:flex;
-  gap:12px;
-  padding:14px;
+  gap:10px;
+  padding:10px;
 }
-.tab{
+.tabs button{
   flex:1;
   padding:12px;
-  border-radius:12px;
   border:none;
-  font-weight:900;
-  cursor:pointer;
+  border-radius:12px;
+  font-weight:700;
 }
-.tab.ativo{background:var(--primary);color:#fff}
-
+.tabs .ativo{
+  background:#8b5e3c;
+  color:#fff;
+}
+.tabs button:not(.ativo){
+  background:#fff;
+}
 .container{
-  padding:14px;
+  padding:12px;
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-  gap:16px;
-  padding-bottom:200px;
+  grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+  gap:12px;
 }
-
-.produto{
+.card{
   background:#fff;
   border-radius:14px;
-  padding:12px;
+  padding:10px;
 }
-.produto img{
+.card img{
   width:100%;
-  height:140px;
+  height:120px;
   object-fit:cover;
   border-radius:10px;
 }
-.add{
-  margin-top:10px;
+.card button{
+  margin-top:8px;
   width:100%;
-  padding:10px;
+  padding:8px;
   border:none;
   border-radius:10px;
-  background:var(--primary);
+  background:#8b5e3c;
   color:#fff;
-  font-weight:900;
+  font-weight:700;
 }
-
-.total-bar{
+.footer{
   position:fixed;
-  bottom:70px;
-  left:0;right:0;
+  bottom:0;
+  left:0;
+  right:0;
   background:#fff;
-  padding:14px;
-  text-align:center;
-  font-weight:900;
+  padding:10px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
   border-top:1px solid #ddd;
 }
-
-.finalizar{
-  position:fixed;
-  bottom:10px;
-  left:50%;
-  transform:translateX(-50%);
-  padding:14px 30px;
+.footer button{
+  padding:12px 18px;
   border:none;
-  border-radius:999px;
-  background:var(--primary);
+  border-radius:20px;
+  background:#8b5e3c;
   color:#fff;
-  font-weight:900;
+  font-weight:800;
+}
+
+/* MODAL */
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.6);
+  display:none;
+  align-items:center;
+  justify-content:center;
+}
+.modal .box{
+  background:#fff;
+  padding:20px;
+  border-radius:16px;
+  width:90%;
+  max-width:420px;
+}
+.modal input, .modal textarea{
+  width:100%;
+  padding:10px;
+  margin-top:8px;
+  border-radius:10px;
+  border:1px solid #ccc;
+}
+.modal button{
+  width:100%;
+  margin-top:10px;
+  padding:12px;
+  border:none;
+  border-radius:12px;
+  background:#8b5e3c;
+  color:#fff;
+  font-weight:800;
 }
 </style>
 </head>
 
 <body>
 
-<div class="topo">🍽️ Cardápio Delivery</div>
+<header id="titulo">Cardápio Delivery</header>
 
 <div class="tabs">
-  <button class="tab ativo" id="btnBar">🍺 Bar</button>
-  <button class="tab" id="btnCozinha">🍽️ Cozinha</button>
+  <button id="btnBar" class="ativo">🍺 Bar</button>
+  <button id="btnCozinha">🍽️ Cozinha</button>
 </div>
 
 <div class="container" id="lista"></div>
 
-<div class="total-bar">
-  Total: R$ <span id="total">0.00</span>
+<div class="footer">
+  <div>Total: R$ <span id="total">0.00</span></div>
+  <button onclick="abrirModal()">Finalizar pedido</button>
 </div>
 
-<button class="finalizar" onclick="finalizarPedido()">Finalizar pedido</button>
+<!-- MODAL -->
+<div class="modal" id="modal">
+  <div class="box">
+    <h3>Finalizar pedido</h3>
+    <input id="nome" placeholder="Seu nome">
+    <input id="whatsapp" placeholder="WhatsApp">
+    <input id="endereco" placeholder="Endereço">
+    <textarea id="referencia" placeholder="Referência"></textarea>
+    <button onclick="enviarPedido()">Enviar pedido</button>
+    <button onclick="fecharModal()" style="background:#999">Cancelar</button>
+  </div>
+</div>
 
 <script>
-/* ===== SUPABASE ===== */
+/* PARAMS */
+const params = new URLSearchParams(location.search);
+const app_id = params.get("app");
+if(!app_id){ alert("App inválido"); throw ""; }
+
+/* SUPABASE */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* PARAMS */
-const params = new URLSearchParams(location.search);
-const app_id = params.get("app");
-if(!app_id){
-  document.body.innerHTML="Indisponível";
-  throw "";
-}
-
 /* STATE */
 let produtos = [];
-let carrinho = [];
 let filtro = "BAR";
+const CART_KEY = `carrinho_${app_id}`;
+let carrinho = JSON.parse(localStorage.getItem(CART_KEY)) || [];
 
 /* ELEMENTOS */
 const lista = document.getElementById("lista");
 const totalEl = document.getElementById("total");
-const btnBar = document.getElementById("btnBar");
-const btnCozinha = document.getElementById("btnCozinha");
+const modal = document.getElementById("modal");
+
+/* CONFIG */
+async function carregarConfig(){
+  const {data} = await sb.from("config_site").select("nome_site").eq("app_id",app_id).single();
+  if(data?.nome_site) titulo.innerText = data.nome_site;
+}
 
 /* PRODUTOS */
 async function carregarProdutos(){
-  const { data, error } = await sb
+  const {data} = await sb
     .from("produtos")
-    .select("id,nome,preco,foto,destino")
-    .eq("app_id", app_id)
-    .eq("ativo", true);
-
-  if(error){
-    console.error(error);
-    lista.innerHTML="Erro ao carregar produtos";
-    return;
-  }
+    .select("*")
+    .eq("app_id",app_id)
+    .eq("ativo",true);
 
   produtos = data || [];
   render();
@@ -158,91 +195,71 @@ async function carregarProdutos(){
 /* RENDER */
 function render(){
   lista.innerHTML="";
-
-  const filtrados = produtos.filter(p =>
-    (p.destino||"").toUpperCase().trim() === filtro
-  );
-
-  if(filtrados.length === 0){
-    lista.innerHTML="<p>Nenhum produto disponível</p>";
-    return;
-  }
-
-  filtrados.forEach(p=>{
+  produtos.filter(p=>p.destino===filtro).forEach(p=>{
     lista.innerHTML += `
-      <div class="produto">
+      <div class="card">
         ${p.foto ? `<img src="${p.foto}">` : ""}
         <b>${p.nome}</b>
-        <div>R$ ${Number(p.preco).toFixed(2)}</div>
-        <button class="add" onclick="add('${p.id}')">Adicionar</button>
+        <div>R$ ${p.preco.toFixed(2)}</div>
+        <button onclick="add('${p.id}')">Adicionar</button>
       </div>
     `;
   });
 }
 
 /* CARRINHO */
+function salvarCarrinho(){
+  localStorage.setItem(CART_KEY, JSON.stringify(carrinho));
+  totalEl.innerText = carrinho.reduce((s,i)=>s+i.preco*i.qtd,0).toFixed(2);
+}
+
 function add(id){
   const p = produtos.find(x=>x.id===id);
   const i = carrinho.find(x=>x.id===id);
   i ? i.qtd++ : carrinho.push({...p,qtd:1});
-  atualizarTotal();
+  salvarCarrinho();
 }
 
-function atualizarTotal(){
-  const t = carrinho.reduce((s,i)=>s+i.qtd*i.preco,0);
-  totalEl.innerText = t.toFixed(2);
-}
+/* MODAL */
+function abrirModal(){ modal.style.display="flex"; }
+function fecharModal(){ modal.style.display="none"; }
 
-/* FINALIZAR */
-async function finalizarPedido(){
-  if(carrinho.length===0){
-    alert("Carrinho vazio");
-    return;
-  }
+/* ENVIO */
+async function enviarPedido(){
+  if(carrinho.length===0){ alert("Carrinho vazio"); return; }
 
-  const nome = prompt("Seu nome:");
-  const whatsapp = prompt("WhatsApp:");
-  const endereco = prompt("Endereço:");
-
-  if(!nome || !whatsapp) return;
-
-  const itens = carrinho.map(i=>({
-    nome:i.nome,
-    qtd:i.qtd,
-    preco:i.preco
-  }));
-
-  const total = carrinho.reduce((s,i)=>s+i.qtd*i.preco,0);
-
-  await sb.from("pedidos").insert({
+  const payload = {
     app_id,
+    tipo:"delivery",
     status:"novo",
-    total,
-    cliente:{nome,whatsapp,endereco},
-    itens:{produtos:itens}
-  });
+    cliente_nome:nome.value,
+    cliente_whatsapp:whatsapp.value,
+    endereco:endereco.value,
+    referencia:referencia.value,
+    total: carrinho.reduce((s,i)=>s+i.preco*i.qtd,0),
+    itens:{ produtos:carrinho }
+  };
 
-  alert("Pedido enviado 🍻");
+  const {error} = await sb.from("pedidos").insert(payload);
+  if(error){ console.error(error); alert("Erro ao enviar"); return; }
+
+  localStorage.removeItem(CART_KEY);
   carrinho=[];
-  atualizarTotal();
+  salvarCarrinho();
+  fecharModal();
+  alert("Pedido enviado 🍔");
 }
 
-/* BOTÕES */
-btnBar.onclick=()=>{
-  filtro="BAR";
-  btnBar.classList.add("ativo");
-  btnCozinha.classList.remove("ativo");
-  render();
-};
-btnCozinha.onclick=()=>{
-  filtro="COZINHA";
-  btnCozinha.classList.add("ativo");
-  btnBar.classList.remove("ativo");
-  render();
-};
+/* TABS */
+btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
+btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
 
 /* START */
-carregarProdutos();
+(async()=>{
+  await carregarConfig();
+  await carregarProdutos();
+  salvarCarrinho();
+})();
 </script>
 
 </body>
