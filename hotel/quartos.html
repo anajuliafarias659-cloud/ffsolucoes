@@ -10,15 +10,15 @@
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between}
-.voltar{background:#1e293b;color:#fff;border:none;padding:10px 16px;border-radius:10px}
+.voltar{background:#1e293b;color:#fff;border:none;padding:10px 16px;border-radius:10px;cursor:pointer}
 .container{max-width:1000px;margin:30px auto;padding:20px}
 .card{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:25px}
 input{width:100%;padding:12px;margin-top:10px;border-radius:8px;border:none;background:#1e293b;color:#fff}
 button{padding:10px 14px;border:none;border-radius:8px;font-weight:bold;cursor:pointer}
 .btn-green{background:#16a34a;color:#fff}
 .btn-red{background:#dc2626;color:#fff}
-table{width:100%;border-collapse:collapse;margin-top:10px}
-th,td{padding:10px;border-bottom:1px solid #1e293b;text-align:left}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px;border-bottom:1px solid #1e293b}
 .fotos img{height:60px;border-radius:6px;margin-right:6px}
 </style>
 </head>
@@ -33,128 +33,150 @@ th,td{padding:10px;border-bottom:1px solid #1e293b;text-align:left}
 <div class="container">
 
 <div class="card">
-<h3>Cadastrar Quarto</h3>
-<input id="numero" placeholder="Número do quarto">
-<input id="tipo" placeholder="Tipo (Standard, Suíte, Luxo)">
-<input id="preco" type="number" placeholder="Preço da diária">
-<input id="fotosQuarto" type="file" multiple accept="image/*">
-<button class="btn-green" onclick="salvarQuarto()">Salvar Quarto</button>
+  <h3>Cadastrar Novo Quarto</h3>
+  <input id="numero" placeholder="Número do quarto">
+  <input id="tipo" placeholder="Tipo (Standard, Suíte, Luxo)">
+  <input id="preco" type="number" placeholder="Preço da diária (R$)">
+  <input id="fotosQuarto" type="file" multiple>
+  <button class="btn-green" onclick="salvarQuarto()">Salvar Quarto</button>
 </div>
 
 <div class="card">
-<h3>Lista de Quartos</h3>
-<table>
-<thead>
-<tr>
-<th>Número</th>
-<th>Tipo</th>
-<th>Preço</th>
-<th>Fotos</th>
-<th>Ações</th>
-</tr>
-</thead>
-<tbody id="lista"></tbody>
-</table>
+  <h3>Lista de Quartos</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Número</th>
+        <th>Tipo</th>
+        <th>Preço</th>
+        <th>Fotos</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody id="tabela"></tbody>
+  </table>
 </div>
 
 </div>
 
 <script>
+/* ====== SESSÃO ====== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin || !admin.app_id){
   alert("Sessão inválida");
-  location.replace("login.html");
+  location.href="login.html";
 }
-
 const negocio_id = admin.app_id;
 
-const db = supabase.createClient(
+/* ====== SUPABASE ====== */
+const supabase = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-async function uploadFotos(quarto_id){
-  const input = document.getElementById("fotosQuarto");
-  if(!input.files.length) return [];
-
-  const urls = [];
-
-  for(const file of input.files){
-    const buffer = await file.arrayBuffer();
-    const jpg = new File([buffer], file.name.replace(/\..+$/, ".jpg"), { type:"image/jpeg" });
-
-    const path = `hotel-quartos/${negocio_id}/${quarto_id}/${Date.now()}.jpg`;
-
-    const { error } = await db.storage
-      .from("hotel-quartos")
-      .upload(path, jpg, { upsert:true, contentType:"image/jpeg" });
-
-    if(error) continue;
-
-    const { data } = db.storage.from("hotel-quartos").getPublicUrl(path);
-    urls.push(data.publicUrl);
-  }
-
-  return urls;
-}
-
+/* ====== SALVAR QUARTO ====== */
 async function salvarQuarto(){
-  const numero = numeroInput.value.trim();
-  const tipo = tipoInput.value.trim();
-  const preco = parseFloat(precoInput.value);
+  const numero = document.getElementById("numero").value.trim();
+  const tipo = document.getElementById("tipo").value.trim();
+  const preco = parseFloat(document.getElementById("preco").value);
+  const files = document.getElementById("fotosQuarto").files;
 
-  if(!numero || !tipo || !preco) return alert("Preencha tudo");
-
-  const { data, error } = await db.from("hotel_quartos")
-    .insert([{ negocio_id, numero, tipo, preco_diaria:preco, status:"livre" }])
-    .select()
-    .single();
-
-  if(error) return alert(error.message);
-
-  const fotos = await uploadFotos(data.id);
-
-  if(fotos.length){
-    await db.from("hotel_quartos")
-      .update({ fotos })
-      .eq("id", data.id);
+  if(!numero || !tipo || !preco){
+    alert("Preencha todos os campos");
+    return;
   }
 
-  carregar();
-}
+  const fotos = [];
 
-async function excluirQuarto(id){
-  if(!confirm("Excluir quarto e fotos?")) return;
+  for(const file of files){
+    const path = `${negocio_id}/${Date.now()}_${file.name}`;
+    const { error } = await supabase
+      .storage
+      .from("hotel-quartos")
+      .upload(path, file, { upsert:false });
 
-  const { data } = await db.from("hotel_quartos").select("fotos").eq("id",id).single();
-
-  if(data?.fotos){
-    for(const url of data.fotos){
-      const path = url.split("/hotel-quartos/")[1];
-      await db.storage.from("hotel-quartos").remove([path]);
+    if(error){
+      alert("Erro upload: " + error.message);
+      return;
     }
+
+    const { data } = supabase
+      .storage
+      .from("hotel-quartos")
+      .getPublicUrl(path);
+
+    fotos.push(data.publicUrl);
   }
 
-  await db.from("hotel_quartos").delete().eq("id",id);
+  const { error } = await supabase.from("hotel_quartos").insert({
+    negocio_id,
+    numero,
+    tipo,
+    preco_diaria: preco,
+    status:"livre",
+    fotos
+  });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  document.getElementById("numero").value="";
+  document.getElementById("tipo").value="";
+  document.getElementById("preco").value="";
+  document.getElementById("fotosQuarto").value="";
+
   carregar();
 }
 
+/* ====== LISTAR ====== */
 async function carregar(){
-  const tbody = document.getElementById("lista");
-  tbody.innerHTML = "";
+  const tabela = document.getElementById("tabela");
+  tabela.innerHTML="<tr><td colspan='5'>Carregando...</td></tr>";
 
-  const { data } = await db.from("hotel_quartos").select("*").eq("negocio_id",negocio_id);
+  const { data, error } = await supabase
+    .from("hotel_quartos")
+    .select("*")
+    .eq("negocio_id",negocio_id)
+    .order("numero");
 
+  if(error){
+    tabela.innerHTML="<tr><td colspan='5'>Erro</td></tr>";
+    return;
+  }
+
+  tabela.innerHTML="";
   data.forEach(q=>{
-    tbody.innerHTML += `
+    tabela.innerHTML+=`
       <tr>
         <td>${q.numero}</td>
         <td>${q.tipo}</td>
         <td>R$ ${q.preco_diaria.toFixed(2)}</td>
-        <td class="fotos">${(q.fotos||[]).map(f=>`<img src="${f}">`).join("")}</td>
-        <td><button class="btn-red" onclick="excluirQuarto('${q.id}')">Excluir</button></td>
-      </tr>`;
+        <td class="fotos">
+          ${(q.fotos||[]).map(f=>`<img src="${f}">`).join("")}
+        </td>
+        <td>
+          <button class="btn-red" onclick="excluirFotos('${q.id}')">Excluir Fotos</button>
+          <button class="btn-red" onclick="excluirQuarto('${q.id}')">Excluir Quarto</button>
+        </td>
+      </tr>
+    `;
   });
+}
+
+/* ====== EXCLUIR FOTOS ====== */
+async function excluirFotos(id){
+  if(!confirm("Excluir todas as fotos?")) return;
+  await supabase.from("hotel_quartos").update({fotos:[]}).eq("id",id);
+  carregar();
+}
+
+/* ====== EXCLUIR QUARTO ====== */
+async function excluirQuarto(id){
+  if(!confirm("Excluir quarto?")) return;
+  await supabase.from("hotel_quartos").delete().eq("id",id);
+  carregar();
 }
 
 carregar();
