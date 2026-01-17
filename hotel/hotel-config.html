@@ -8,103 +8,174 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{
-  background:#020617;
-  color:#fff;
-  font-family:Segoe UI,system-ui,sans-serif;
-}
-.container{
-  max-width:700px;
-  margin:auto;
-  padding:24px;
-}
-.card{
-  background:#0f172a;
-  padding:24px;
-  border-radius:18px;
-}
-input{
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#020617;color:#fff}
+
+.container{max-width:900px;margin:auto;padding:24px}
+.card{background:#0f172a;padding:22px;border-radius:18px;margin-bottom:22px}
+
+h1{font-size:22px;margin-bottom:14px}
+label{display:block;font-size:14px;margin:14px 0 6px}
+input,textarea{
   width:100%;
   padding:12px;
   border-radius:12px;
   border:none;
-  margin-bottom:12px;
+  outline:none;
+  background:#020617;
+  color:#fff;
 }
+textarea{min-height:90px;resize:vertical}
+
 button{
+  margin-top:16px;
   background:#16a34a;
   color:#fff;
   border:none;
   padding:12px 18px;
-  border-radius:12px;
+  border-radius:14px;
   font-weight:700;
   cursor:pointer;
 }
-.alert{
-  background:#7c2d12;
-  padding:12px;
-  border-radius:12px;
-  margin-bottom:16px;
+
+.banner-preview{
+  width:100%;
+  height:220px;
+  object-fit:cover;
+  border-radius:14px;
+  margin-top:14px;
+  display:none;
 }
 </style>
 </head>
 
 <body>
+
 <div class="container">
 
-  <div id="alerta" class="alert" style="display:none">
-    ⚠️ Abra esta página com <b>?id=SEU_NEGOCIO_ID</b>
+  <h1>⚙️ Configurações do Hotel</h1>
+
+  <!-- DADOS -->
+  <div class="card">
+    <label>Nome do hotel</label>
+    <input id="nome">
+
+    <label>Descrição</label>
+    <textarea id="descricao"></textarea>
+
+    <label>WhatsApp</label>
+    <input id="whatsapp" placeholder="55999999999">
+
+    <button onclick="salvarDados()">Salvar dados</button>
   </div>
 
+  <!-- BANNER -->
   <div class="card">
-    <h2>Banner do Site</h2>
-    <input type="file" id="bannerInput" accept="image/*">
-    <button onclick="enviarBanner()">Enviar Banner</button>
+    <label>Banner do site</label>
+    <input type="file" id="bannerFile" accept="image/*">
+    <button onclick="enviarBanner()">Enviar banner</button>
+    <img id="preview" class="banner-preview">
   </div>
 
 </div>
 
 <script>
-const params = new URLSearchParams(window.location.search);
-const negocio_id = params.get("id");
-
-const alerta = document.getElementById("alerta");
+/* ================== PARAM ================== */
+const params = new URLSearchParams(window.location.search)
+const negocio_id = params.get("id")
 
 if(!negocio_id){
-  alerta.style.display = "block";
+  document.body.innerHTML = "<h2 style='padding:30px'>Negócio não informado</h2>"
+  throw new Error("Sem negocio_id")
 }
 
-const sb = window.supabase.createClient(
+/* ================== SUPABASE ================== */
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
   { auth:{ persistSession:false } }
-);
+)
+
+/* ================== LOAD CONFIG ================== */
+async function carregarConfig(){
+  const { data } = await sb
+    .from("site_config")
+    .select("*")
+    .eq("negocio_id", negocio_id)
+    .single()
+
+  if(data){
+    nome.value = data.nome || ""
+    descricao.value = data.descricao || ""
+    whatsapp.value = data.whatsapp || ""
+
+    if(data.banner_path){
+      preview.src = bannerURL(data.banner_path)
+      preview.style.display = "block"
+    }
+  }
+}
+
+carregarConfig()
+
+/* ================== SALVAR DADOS ================== */
+async function salvarDados(){
+  const payload = {
+    negocio_id,
+    nome: nome.value,
+    descricao: descricao.value,
+    whatsapp: whatsapp.value,
+    updated_at: new Date()
+  }
+
+  const { error } = await sb
+    .from("site_config")
+    .upsert(payload)
+
+  if(error){
+    alert("Erro ao salvar dados")
+    console.error(error)
+    return
+  }
+
+  alert("Dados salvos com sucesso")
+}
+
+/* ================== BANNER ================== */
+function bannerURL(path){
+  return `https://pdajixsoowcyhnjwhgpc.supabase.co/storage/v1/object/public/banners/${path}`
+}
 
 async function enviarBanner(){
-  if(!negocio_id){
-    alert("Negócio não informado na URL");
-    return;
-  }
+  const file = bannerFile.files[0]
+  if(!file) return alert("Escolha uma imagem")
 
-  const file = document.getElementById("bannerInput").files[0];
-  if(!file){
-    alert("Escolha uma imagem");
-    return;
-  }
-
-  const path = `${negocio_id}/banner.jpg`;
+  const path = `${negocio_id}/banner.jpg`
 
   const { error } = await sb.storage
     .from("banners")
-    .upload(path, file, { upsert:true });
+    .upload(path, file, { upsert:true })
 
   if(error){
-    console.error(error);
-    alert("Erro ao enviar banner");
-    return;
+    alert("Erro ao enviar banner")
+    console.error(error)
+    return
   }
 
-  alert("Banner enviado com sucesso!");
+  await sb
+    .from("site_config")
+    .upsert({
+      negocio_id,
+      banner_path: path,
+      updated_at: new Date()
+    })
+
+  preview.src = bannerURL(path) + "?v=" + Date.now()
+  preview.style.display = "block"
+
+  alert("Banner atualizado")
 }
 </script>
+
 </body>
 </html>
