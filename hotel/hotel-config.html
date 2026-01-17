@@ -2,142 +2,175 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Configurações do Hotel</title>
+<title>Configurar Site do Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui}
-body{background:#020617;color:#fff}
-.container{max-width:900px;margin:auto;padding:24px}
-.card{background:#0f172a;padding:22px;border-radius:18px;margin-bottom:22px}
-label{display:block;margin:12px 0 6px}
-input,textarea{width:100%;padding:12px;border-radius:12px;border:none;background:#020617;color:#fff}
-button{margin-top:14px;background:#16a34a;color:#fff;border:none;padding:12px 18px;border-radius:14px;font-weight:700}
-img{width:100%;height:220px;object-fit:cover;border-radius:14px;margin-top:14px;display:none}
+body{
+  background:#020617;
+  color:#fff;
+  font-family:'Segoe UI',system-ui,sans-serif;
+}
+.container{
+  max-width:480px;
+  margin:40px auto;
+  padding:24px;
+  background:#0f172a;
+  border-radius:18px;
+}
+h2{text-align:center;margin-bottom:20px}
+label{display:block;margin-top:14px;font-size:.9rem}
+input,button{
+  width:100%;
+  padding:14px;
+  margin-top:6px;
+  border-radius:12px;
+  border:none;
+}
+input{background:#020617;color:#fff}
+button{
+  background:#22c55e;
+  color:#022c22;
+  font-weight:700;
+  cursor:pointer;
+  margin-top:20px;
+}
+.preview{
+  margin-top:10px;
+  max-height:140px;
+  width:100%;
+  object-fit:cover;
+  border-radius:12px;
+  display:none;
+}
+.btn-voltar{
+  background:transparent;
+  border:1px solid #334155;
+  color:#cbd5f5;
+  margin-bottom:14px;
+}
 </style>
 </head>
 
 <body>
 
 <div class="container">
-  <h2>⚙️ Configurações do Hotel</h2>
+  <h2>🏨 Configurar Banner do Hotel</h2>
 
-  <div class="card">
-    <label>Nome do hotel</label>
-    <input id="nome">
+  <button class="btn-voltar" onclick="history.back()">← Voltar</button>
 
-    <label>Descrição</label>
-    <textarea id="descricao"></textarea>
+  <label>Banner do site</label>
+  <input type="file" id="bannerInput" accept="image/*">
+  <img id="bannerPreview" class="preview">
 
-    <label>WhatsApp</label>
-    <input id="whatsapp">
-
-    <button onclick="salvar()">Salvar dados</button>
-  </div>
-
-  <div class="card">
-    <label>Banner do site</label>
-    <input type="file" id="banner">
-    <button onclick="uploadBanner()">Enviar banner</button>
-    <img id="preview">
-  </div>
+  <button onclick="salvarBanner()">Salvar banner</button>
 </div>
 
 <script>
-const params = new URLSearchParams(location.search)
-const id = params.get("id")
-
-if(!id){
-  document.body.innerHTML = "<h2 style='padding:30px'>Negócio não informado</h2>"
-  throw new Error("sem id")
-}
-
+/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-)
+);
 
-const preview = document.getElementById("preview")
+/* ================= AUTH / MULTI NEGÓCIO ================= */
+/*
+  padrão igual ao bar:
+  admin_logado no localStorage
+  cada admin tem seu negocio_id
+*/
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
 
-function bannerUrl(path){
-  return `https://pdajixsoowcyhnjwhgpc.supabase.co/storage/v1/object/public/banners/${path}`
+if(!admin?.negocio_id){
+  alert("Sessão expirada");
+  location.href="../auth/login.html";
 }
 
-async function carregar(){
-  const { data, error } = await sb
-    .from("negocios")
-    .select("nome, descricao, whatsapp, banner")
-    .eq("id", id)
-    .single()
+const negocio_id = admin.negocio_id;
 
-  if(error){
-    console.error(error)
-    return
+/* ================= ELEMENTOS ================= */
+const bannerInput   = document.getElementById("bannerInput");
+const bannerPreview = document.getElementById("bannerPreview");
+
+/* ================= PREVIEW ================= */
+bannerInput.onchange = ()=>{
+  const f = bannerInput.files[0];
+  if(f){
+    bannerPreview.src = URL.createObjectURL(f);
+    bannerPreview.style.display = "block";
   }
+};
 
-  nome.value = data.nome || ""
-  descricao.value = data.descricao || ""
-  whatsapp.value = data.whatsapp || ""
+/* ================= UPLOAD (PADRÃO BAR) ================= */
+async function uploadBanner(file){
+  if(!file) return null;
 
-  if(data.banner){
-    preview.src = bannerUrl(data.banner)
-    preview.style.display = "block"
-  }
-}
+  const ext  = file.name.split(".").pop();
+  const path = `${negocio_id}/${Date.now()}.${ext}`;
 
-async function salvar(){
   const { error } = await sb
-    .from("negocios")
-    .update({
-      nome: nome.value,
-      descricao: descricao.value,
-      whatsapp: whatsapp.value
-    })
-    .eq("id", id)
+    .storage
+    .from("banners")
+    .upload(path, file, { upsert:true });
 
   if(error){
-    alert("Erro ao salvar")
-    console.error(error)
-    return
+    console.error(error);
+    return null;
   }
 
-  alert("Dados salvos com sucesso")
-}
-
-async function uploadBanner(){
-  const file = banner.files[0]
-  if(!file) return alert("Escolha um arquivo")
-
-  const path = `${id}/banner.jpg`
-
-  const { error: uploadError } = await sb.storage
+  const { data } = sb
+    .storage
     .from("banners")
-    .upload(path, file, { upsert:true })
+    .getPublicUrl(path);
 
-  if(uploadError){
-    alert("Erro no upload")
-    console.error(uploadError)
-    return
-  }
-
-  const { error: updateError } = await sb
-    .from("negocios")
-    .update({ banner: path })
-    .eq("id", id)
-
-  if(updateError){
-    alert("Erro ao salvar banner")
-    console.error(updateError)
-    return
-  }
-
-  preview.src = bannerUrl(path) + "?v=" + Date.now()
-  preview.style.display = "block"
-  alert("Banner atualizado")
+  return data.publicUrl;
 }
 
-carregar()
+/* ================= SALVAR CONFIG ================= */
+async function salvarBanner(){
+  const file = bannerInput.files[0];
+  if(!file){
+    alert("Escolha uma imagem");
+    return;
+  }
+
+  const banner_url = await uploadBanner(file);
+  if(!banner_url){
+    alert("Erro ao enviar banner");
+    return;
+  }
+
+  const { error } = await sb
+    .from("config_hotel")
+    .upsert({
+      negocio_id,
+      banner_url
+    });
+
+  if(error){
+    console.error(error);
+    alert("Erro ao salvar no banco");
+    return;
+  }
+
+  alert("Banner do hotel salvo com sucesso 🔥");
+}
+
+/* ================= LOAD ================= */
+(async()=>{
+  const { data } = await sb
+    .from("config_hotel")
+    .select("banner_url")
+    .eq("negocio_id", negocio_id)
+    .maybeSingle();
+
+  if(data?.banner_url){
+    bannerPreview.src = data.banner_url;
+    bannerPreview.style.display = "block";
+  }
+})();
 </script>
 
 </body>
