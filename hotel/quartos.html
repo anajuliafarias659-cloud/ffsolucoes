@@ -19,7 +19,6 @@
 
     const supabaseUrl = "https://pdajixsoowcyhnjwhgpc.supabase.co";
     const supabaseKey = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-
     const db = supabase.createClient(supabaseUrl, supabaseKey);
   </script>
 
@@ -93,40 +92,46 @@
 
 <body>
 
-  <div class="topo">
-    <h2>🛏️ Quartos - Hotel</h2>
-    <button class="voltar" onclick="history.back()">⬅ Voltar</button>
+<div class="topo">
+  <h2>🛏️ Quartos - Hotel</h2>
+  <button class="voltar" onclick="history.back()">⬅ Voltar</button>
+</div>
+
+<div class="container">
+
+  <!-- CADASTRO -->
+  <div class="card">
+    <h3>Cadastrar Novo Quarto</h3>
+
+    <input id="numero" placeholder="Número do quarto">
+    <input id="tipo" placeholder="Tipo (Standard, Suíte, Luxo)">
+    <input id="preco" type="number" placeholder="Preço da diária (R$)">
+
+    <!-- 🔥 NOVO: FOTOS -->
+    <label style="margin-top:12px;display:block;">📷 Fotos do quarto</label>
+    <input type="file" id="fotosQuarto" multiple accept="image/*">
+
+    <button class="btn-green" onclick="salvarQuarto()">Salvar Quarto</button>
   </div>
 
-  <div class="container">
-
-    <!-- CADASTRO -->
-    <div class="card">
-      <h3>Cadastrar Novo Quarto</h3>
-      <input id="numero" placeholder="Número do quarto">
-      <input id="tipo" placeholder="Tipo (Standard, Suíte, Luxo)">
-      <input id="preco" type="number" placeholder="Preço da diária (R$)">
-      <button class="btn-green" onclick="salvarQuarto()">Salvar Quarto</button>
-    </div>
-
-    <!-- LISTA -->
-    <div class="card">
-      <h3>Lista de Quartos</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Número</th>
-            <th>Tipo</th>
-            <th>Preço</th>
-            <th>Status</th>
-            <th>Ações</th>
-          </tr>
-        </thead>
-        <tbody id="tabelaQuartos"></tbody>
-      </table>
-    </div>
-
+  <!-- LISTA -->
+  <div class="card">
+    <h3>Lista de Quartos</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Número</th>
+          <th>Tipo</th>
+          <th>Preço</th>
+          <th>Status</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="tabelaQuartos"></tbody>
+    </table>
   </div>
+
+</div>
 
 <script>
   if (!admin.app_id) {
@@ -136,6 +141,35 @@
 
   const negocio_id = admin.app_id;
 
+  /* ===== UPLOAD DAS FOTOS ===== */
+  async function uploadFotos(quarto_id) {
+    const input = document.getElementById("fotosQuarto");
+    const files = input.files;
+    if (!files.length) return [];
+
+    const fotos = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const path = `hotel-quartos/${negocio_id}/${quarto_id}/${Date.now()}_${i}.jpg`;
+
+      const { error } = await db.storage
+        .from("hotel-quartos")
+        .upload(path, file, { upsert: true });
+
+      if (error) continue;
+
+      const { data } = db.storage
+        .from("hotel-quartos")
+        .getPublicUrl(path);
+
+      fotos.push(data.publicUrl);
+    }
+
+    return fotos;
+  }
+
+  /* ===== SALVAR QUARTO ===== */
   async function salvarQuarto() {
     const numero = document.getElementById("numero").value.trim();
     const tipo = document.getElementById("tipo").value.trim();
@@ -146,22 +180,35 @@
       return;
     }
 
-    const { error } = await db.from("hotel_quartos").insert([
-      { negocio_id, numero, tipo, preco_diaria, status: "livre" }
-    ]);
+    const { data, error } = await db
+      .from("hotel_quartos")
+      .insert([{ negocio_id, numero, tipo, preco_diaria, status: "livre" }])
+      .select()
+      .single();
 
     if (error) {
       alert("Erro ao salvar: " + error.message);
       return;
     }
 
+    /* 🔥 UPLOAD DAS FOTOS */
+    const fotos = await uploadFotos(data.id);
+    if (fotos.length) {
+      await db
+        .from("hotel_quartos")
+        .update({ fotos })
+        .eq("id", data.id);
+    }
+
     document.getElementById("numero").value = "";
     document.getElementById("tipo").value = "";
     document.getElementById("preco").value = "";
+    document.getElementById("fotosQuarto").value = "";
 
     carregarQuartos();
   }
 
+  /* ===== LISTAR QUARTOS ===== */
   async function carregarQuartos() {
     const tabela = document.getElementById("tabelaQuartos");
     tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
@@ -200,13 +247,7 @@
 
   async function deletarQuarto(id) {
     if (!confirm("Deseja excluir este quarto?")) return;
-
-    const { error } = await db.from("hotel_quartos").delete().eq("id", id);
-    if (error) {
-      alert("Erro ao excluir");
-      return;
-    }
-
+    await db.from("hotel_quartos").delete().eq("id", id);
     carregarQuartos();
   }
 
