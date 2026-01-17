@@ -4,148 +4,80 @@
 <meta charset="UTF-8">
 <title>Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-  body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
-  .container{max-width:1100px;margin:auto;padding:24px}
-  .card{background:#0f172a;padding:24px;border-radius:18px;margin-bottom:24px}
-  h1,h2,h3{margin:0 0 10px}
-  .banner{
-    height:240px;border-radius:18px;margin-bottom:24px;
-    background:#111827; background-size:cover; background-position:center;
-    box-shadow:0 10px 30px rgba(0,0,0,.35);
-  }
-  .quartos{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
-  .quarto{background:#020617;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-  .quarto img{width:100%;height:180px;object-fit:cover;display:block}
-  .quarto .info{padding:16px}
-  .preco{font-size:18px;font-weight:bold;margin:8px 0}
-  .btn{display:inline-block;margin-top:10px;padding:12px 16px;background:#16a34a;color:#fff;text-decoration:none;border-radius:10px;font-weight:bold}
-  .vazio{opacity:.7}
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.container{max-width:1100px;margin:auto;padding:24px}
+.card{background:#0f172a;padding:24px;border-radius:18px;margin-bottom:24px}
+.quartos{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+.quarto{background:#020617;border-radius:16px;overflow:hidden}
+.quarto img{width:100%;height:180px;object-fit:cover}
+.info{padding:16px}
+.preco{font-weight:bold;margin:8px 0}
+.btn{display:inline-block;padding:10px 14px;background:#16a34a;color:#fff;border-radius:10px;text-decoration:none}
 </style>
 </head>
 
 <body>
 <div class="container">
 
-  <div id="banner" class="banner"></div>
-
   <div class="card">
-    <h1 id="nomeHotel">Hotel</h1>
-    <p id="descHotel" class="vazio">Confira nossos quartos disponíveis</p>
+    <h1>Hotel</h1>
+    <p>Quartos disponíveis</p>
   </div>
 
   <div class="card">
-    <h2>Quartos disponíveis</h2>
-    <div id="listaQuartos" class="quartos">
-      <p class="vazio">Carregando...</p>
-    </div>
+    <div id="lista" class="quartos">Carregando...</div>
   </div>
 
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
 const supabase = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== MULTI NEGÓCIOS ===== */
-const params = new URLSearchParams(window.location.search);
+const params = new URLSearchParams(location.search);
 const negocio_id = params.get("id");
 
-if (!negocio_id) {
-  document.body.innerHTML = "<h2 style='padding:40px;color:white'>Negócio não informado</h2>";
-  throw new Error("Sem negocio_id");
+if(!negocio_id){
+  document.body.innerHTML = "Negócio não informado";
+  throw new Error("Sem id");
 }
 
-/* ===== ELEMENTOS ===== */
-const elLista = document.getElementById("listaQuartos");
-const elNome = document.getElementById("nomeHotel");
-const elDesc = document.getElementById("descHotel");
-const elBanner = document.getElementById("banner");
+const lista = document.getElementById("lista");
 
-/* ===== helper: tenta buscar 1 registro sem quebrar o site ===== */
-async function tryFetch(table, whereCol, whereVal, selectCols) {
-  try {
-    const { data, error } = await supabase
-      .from(table)
-      .select(selectCols)
-      .eq(whereCol, whereVal)
-      .maybeSingle();
-
-    if (error) {
-      // loga mas não derruba
-      console.warn(`[${table}] erro`, error.message);
-      return null;
-    }
-    return data || null;
-  } catch (e) {
-    console.warn(`[${table}] exception`, e);
-    return null;
-  }
-}
-
-/* ===== CONFIG DO HOTEL (NÃO PODE QUEBRAR) ===== */
-async function carregarConfig() {
-  // prioridade 1: hotel_config (se existir)
-  let cfg = await tryFetch("hotel_config", "negocio_id", negocio_id, "nome,descricao,banner_url");
-
-  // fallback 1: estabelecimentos por id
-  if (!cfg) cfg = await tryFetch("estabelecimentos", "id", negocio_id, "nome,descricao,banner_url");
-
-  // fallback 2: estabelecimentos por negocio_id (muito comum)
-  if (!cfg) cfg = await tryFetch("estabelecimentos", "negocio_id", negocio_id, "nome,descricao,banner_url");
-
-  if (!cfg) return; // sem config? segue o baile
-
-  if (cfg.nome) elNome.innerText = cfg.nome;
-  if (cfg.descricao) elDesc.innerText = cfg.descricao;
-
-  if (cfg.banner_url) {
-    elBanner.style.backgroundImage = `url('${cfg.banner_url}')`;
-  } else {
-    // se não tiver banner, não some, só mantém o fundo
-    elBanner.style.backgroundImage = "";
-  }
-}
-
-/* ===== QUARTOS ===== */
-async function carregarQuartos() {
-  elLista.innerHTML = "<p class='vazio'>Carregando...</p>";
-
+async function carregar(){
   const { data, error } = await supabase
     .from("hotel_quartos")
-    .select("id,tipo,preco_diaria,fotos,status")
+    .select("tipo,preco_diaria,fotos")
     .eq("negocio_id", negocio_id)
-    .eq("status", "livre");
+    .eq("status","livre");
 
-  if (error) {
+  if(error){
+    lista.innerHTML = "Erro ao carregar";
     console.error(error);
-    elLista.innerHTML = "<p class='vazio'>Erro ao carregar quartos</p>";
     return;
   }
 
-  if (!data || !data.length) {
-    elLista.innerHTML = "<p class='vazio'>Nenhum quarto disponível</p>";
+  if(!data.length){
+    lista.innerHTML = "Nenhum quarto disponível";
     return;
   }
 
-  elLista.innerHTML = "";
-  data.forEach(q => {
-    const foto = (q.fotos && Array.isArray(q.fotos) && q.fotos.length) ? q.fotos[0] : null;
-
-    elLista.innerHTML += `
+  lista.innerHTML = "";
+  data.forEach(q=>{
+    const foto = q.fotos && q.fotos.length ? q.fotos[0] : "";
+    lista.innerHTML += `
       <div class="quarto">
-        ${foto ? `<img src="${foto}" alt="Quarto">` : ""}
+        ${foto ? `<img src="${foto}">` : ""}
         <div class="info">
           <h3>${q.tipo}</h3>
-          <div class="preco">Diária: R$ ${Number(q.preco_diaria).toFixed(2)}</div>
+          <div class="preco">R$ ${Number(q.preco_diaria).toFixed(2)}</div>
           <a class="btn" target="_blank"
-             href="https://wa.me/55SEUNUMERO?text=Olá! Quero reservar o quarto ${q.tipo}">
+            href="https://wa.me/55SEUNUMERO?text=Quero reservar ${q.tipo}">
             Reservar no WhatsApp
           </a>
         </div>
@@ -154,10 +86,7 @@ async function carregarQuartos() {
   });
 }
 
-/* ===== START ===== */
-carregarConfig();   // se der ruim, não derruba nada
-carregarQuartos();
+carregar();
 </script>
-
 </body>
 </html>
