@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>🏨 Painel do Hotel</title>
+<title>Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -10,113 +10,173 @@
 <style>
 body{
   margin:0;
-  font-family:Arial,sans-serif;
+  font-family:Arial, sans-serif;
   background:#020617;
   color:#fff;
 }
-.topo{
-  background:#0f172a;
-  padding:16px 24px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-.topo h2{margin:0}
-.sair{
-  background:#e53935;
-  color:#fff;
-  border:none;
-  padding:10px 16px;
-  border-radius:10px;
-  cursor:pointer;
-  font-weight:bold;
-}
 .container{
-  padding:32px;
-  max-width:1000px;
+  max-width:1100px;
   margin:auto;
-}
-.grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:20px;
+  padding:24px;
 }
 .card{
   background:#0f172a;
-  padding:24px;
+  padding:20px;
   border-radius:18px;
-  cursor:pointer;
-  transition:.2s;
+  margin-bottom:24px;
 }
-.card:hover{ transform:scale(1.03) }
-.card h3{ margin:0 0 10px }
-.card p{ opacity:.8; font-size:14px }
+h1,h2{margin:0 0 10px}
+.quartos{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:20px;
+}
+.quarto{
+  background:#020617;
+  border-radius:16px;
+  overflow:hidden;
+  box-shadow:0 10px 30px rgba(0,0,0,.3);
+}
+.quarto img{
+  width:100%;
+  height:180px;
+  object-fit:cover;
+  display:block;
+}
+.quarto .info{
+  padding:16px;
+}
+.preco{
+  font-size:18px;
+  font-weight:bold;
+  margin:8px 0;
+}
+.btn{
+  display:inline-block;
+  margin-top:10px;
+  padding:10px 14px;
+  background:#16a34a;
+  color:#fff;
+  text-decoration:none;
+  border-radius:10px;
+  font-weight:bold;
+}
+.vazio{
+  opacity:.7;
+}
 </style>
 </head>
 
 <body>
 
-<div class="topo">
-  <h2>🏨 Painel do Hotel</h2>
-  <button class="sair" onclick="logout()">Sair</button>
-</div>
-
 <div class="container">
-  <p>
-    Bem-vindo, <b id="nome"></b><br>
-    <small style="opacity:.6">
-      ID do Negócio: <span id="appId"></span>
-    </small>
-  </p>
 
-  <div class="grid">
-
-    <div class="card" onclick="location.href='quartos.html'">
-      <h3>🛏️ Quartos</h3>
-      <p>Cadastro e status dos quartos</p>
-    </div>
-
-    <div class="card" onclick="location.href='reservas.html'">
-      <h3>📅 Reservas</h3>
-      <p>Controle de check-in e check-out</p>
-    </div>
-
-    <div class="card" onclick="location.href='hospedes.html'">
-      <h3>👤 Hóspedes</h3>
-      <p>Cadastro e histórico</p>
-    </div>
-
-    <div class="card" onclick="location.href='caixa.html'">
-      <h3>💰 Caixa</h3>
-      <p>Entradas e saídas financeiras</p>
-    </div>
-
-    <div class="card" onclick="window.open('../chat-admin.html','_blank')">
-      <h3>💬 Suporte</h3>
-      <p>Falar com o suporte</p>
-    </div>
-
+  <div class="card">
+    <h1 id="nomeHotel">Hotel</h1>
+    <p id="descHotel" class="vazio">Confira nossos quartos disponíveis</p>
   </div>
+
+  <div class="card">
+    <h2>Quartos disponíveis</h2>
+    <div id="listaQuartos" class="quartos">
+      <p class="vazio">Carregando...</p>
+    </div>
+  </div>
+
 </div>
 
 <script>
-/* ========= SESSÃO ========= */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
+/* =========================
+   CONFIG SUPABASE
+========================= */
+const supabase = window.supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
 
-if(!admin || !admin.app_id){
-  // se não tiver logado, volta pro login
-  location.replace("login.html");
-  throw new Error("Sessão inválida");
+/* =========================
+   NEGOCIO ID (MULTI)
+========================= */
+const params = new URLSearchParams(window.location.search);
+const negocio_id = params.get("id");
+
+if (!negocio_id) {
+  document.body.innerHTML = "<h2 style='color:white;padding:40px'>Negócio não informado</h2>";
+  throw new Error("Sem negocio_id");
 }
 
-document.getElementById("nome").innerText = admin.usuario;
-document.getElementById("appId").innerText = admin.app_id;
+/* =========================
+   ELEMENTOS
+========================= */
+const lista = document.getElementById("listaQuartos");
+const nomeHotel = document.getElementById("nomeHotel");
+const descHotel = document.getElementById("descHotel");
 
-/* ========= LOGOUT ========= */
-function logout(){
-  localStorage.removeItem("admin_logado");
-  location.href = "login.html";
+/* =========================
+   CARREGAR CONFIG DO HOTEL
+========================= */
+async function carregarConfig() {
+  const { data } = await supabase
+    .from("hotel_config")
+    .select("nome, descricao")
+    .eq("negocio_id", negocio_id)
+    .single();
+
+  if (data) {
+    nomeHotel.innerText = data.nome || "Hotel";
+    descHotel.innerText = data.descricao || "";
+  }
 }
+
+/* =========================
+   CARREGAR QUARTOS
+========================= */
+async function carregarQuartos() {
+  lista.innerHTML = "<p class='vazio'>Carregando...</p>";
+
+  const { data, error } = await supabase
+    .from("hotel_quartos")
+    .select("id, tipo, preco_diaria, fotos")
+    .eq("negocio_id", negocio_id)
+    .eq("status", "livre");
+
+  if (error) {
+    lista.innerHTML = "<p class='vazio'>Erro ao carregar quartos</p>";
+    console.error(error);
+    return;
+  }
+
+  if (!data.length) {
+    lista.innerHTML = "<p class='vazio'>Nenhum quarto disponível</p>";
+    return;
+  }
+
+  lista.innerHTML = "";
+
+  data.forEach(q => {
+    const foto = q.fotos && q.fotos.length ? q.fotos[0] : null;
+
+    lista.innerHTML += `
+      <div class="quarto">
+        ${foto ? `<img src="${foto}">` : ""}
+        <div class="info">
+          <h3>${q.tipo}</h3>
+          <div class="preco">Diária: R$ ${Number(q.preco_diaria).toFixed(2)}</div>
+          <a class="btn" target="_blank"
+             href="https://wa.me/55SEUNUMERO?text=Olá! Quero reservar o quarto ${q.tipo}">
+            Reservar no WhatsApp
+          </a>
+        </div>
+      </div>
+    `;
+  });
+}
+
+/* =========================
+   START
+========================= */
+carregarConfig();
+carregarQuartos();
 </script>
 
 </body>
