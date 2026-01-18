@@ -2,16 +2,55 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Catálogo</title>
+<title>Mercado</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
+:root{
+  --cor-primaria:#16a34a;
+  --cor-fundo:#020617;
+  --cor-card:#0f172a;
+}
+
 *{box-sizing:border-box}
-body{margin:0;font-family:Arial;background:#020617;color:#fff}
-header{background:#0f172a;padding:18px;text-align:center}
-.container{max-width:1200px;margin:auto;padding:20px}
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:var(--cor-fundo);
+  color:#fff;
+}
+
+/* ===== BANNER ===== */
+.banner{
+  width:100%;
+  height:240px;
+  background-size:cover;
+  background-position:center;
+  position:relative;
+}
+.banner::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(to top,rgba(2,6,23,.9),rgba(2,6,23,.2));
+}
+.banner-content{
+  position:absolute;
+  bottom:20px;
+  left:20px;
+  z-index:2;
+}
+.banner-content h1{margin:0}
+.banner-content p{opacity:.85}
+
+/* ===== PRODUTOS ===== */
+.container{
+  max-width:1200px;
+  margin:auto;
+  padding:20px;
+}
 
 .grid{
   display:grid;
@@ -20,7 +59,7 @@ header{background:#0f172a;padding:18px;text-align:center}
 }
 
 .produto{
-  background:#0f172a;
+  background:var(--cor-card);
   padding:14px;
   border-radius:16px;
   text-align:center;
@@ -33,8 +72,15 @@ header{background:#0f172a;padding:18px;text-align:center}
   border-radius:12px;
 }
 
-.produto h3{font-size:15px;margin:8px 0}
-.preco{color:#22c55e;font-weight:bold}
+.produto h3{
+  font-size:15px;
+  margin:8px 0;
+}
+
+.preco{
+  color:var(--cor-primaria);
+  font-weight:bold;
+}
 
 .produto button{
   margin-top:8px;
@@ -42,12 +88,12 @@ header{background:#0f172a;padding:18px;text-align:center}
   padding:10px;
   border:none;
   border-radius:10px;
-  background:#22c55e;
+  background:var(--cor-primaria);
   font-weight:bold;
   cursor:pointer;
 }
 
-/* CARRINHO */
+/* ===== CARRINHO ===== */
 #carrinho{
   position:fixed;
   bottom:0;
@@ -57,11 +103,10 @@ header{background:#0f172a;padding:18px;text-align:center}
   border-top:1px solid #1e293b;
   padding:14px;
 }
-
 #carrinho button{
   width:100%;
   padding:14px;
-  background:#22c55e;
+  background:var(--cor-primaria);
   border:none;
   border-radius:12px;
   font-weight:bold;
@@ -71,18 +116,23 @@ header{background:#0f172a;padding:18px;text-align:center}
 
 <body>
 
-<header>
-  <h1 id="nomeMercado">Catálogo</h1>
-  <p id="descricao"></p>
-</header>
+<!-- BANNER -->
+<div class="banner" id="banner">
+  <div class="banner-content">
+    <h1 id="nomeMercado">Mercado</h1>
+    <p id="descricao"></p>
+  </div>
+</div>
 
+<!-- PRODUTOS -->
 <div class="container">
   <div class="grid" id="lista"></div>
 </div>
 
+<!-- CARRINHO -->
 <div id="carrinho" style="display:none">
   <div id="resumo"></div>
-  <button onclick="finalizar()">📲 Finalizar no WhatsApp</button>
+  <button onclick="finalizar()">📲 Finalizar pedido no WhatsApp</button>
 </div>
 
 <script>
@@ -96,84 +146,94 @@ const params = new URLSearchParams(window.location.search);
 const app = params.get("app");
 if(!app){ document.body.innerText="Mercado não encontrado"; throw ""; }
 
-let carrinho = [];
+let carrinho=[];
+let whatsapp="";
 
-/* CONFIG DO SITE (nome + whatsapp) */
-let whatsapp = "";
+/* ===== CONFIG DO SITE ===== */
 (async()=>{
   const { data } = await supabaseClient
     .from("config_site")
-    .select("nome,descricao,whatsapp")
-    .eq("app_id", app)
+    .select("nome,descricao,whatsapp,banner,tema")
+    .eq("app_id",app)
     .single();
 
-  if(data){
-    nomeMercado.innerText = data.nome;
-    descricao.innerText = data.descricao || "";
-    whatsapp = data.whatsapp;
+  if(!data) return;
+
+  nomeMercado.innerText=data.nome;
+  descricao.innerText=data.descricao||"";
+  whatsapp=data.whatsapp;
+
+  if(data.banner){
+    banner.style.backgroundImage=`url(${data.banner})`;
+  }else{
+    banner.style.backgroundImage="linear-gradient(135deg,#16a34a,#0f172a)";
+  }
+
+  /* THEMES */
+  if(data.tema==="natal"){
+    setTema("#dc2626","#14532d");
+  }
+  if(data.tema==="saojoao"){
+    setTema("#facc15","#7c2d12");
+  }
+  if(data.tema==="anonovo"){
+    setTema("#22c55e","#020617");
   }
 })();
 
-/* PRODUTOS */
+function setTema(primaria,card){
+  document.documentElement.style.setProperty("--cor-primaria",primaria);
+  document.documentElement.style.setProperty("--cor-card",card);
+}
+
+/* ===== PRODUTOS ===== */
 async function carregar(){
   const { data } = await supabaseClient
     .from("produtos")
     .select("id,nome,preco,imagem")
-    .eq("app_id", app)
-    .eq("ativo", true)
+    .eq("app_id",app)
+    .eq("ativo",true)
     .order("nome");
 
-  lista.innerHTML = data.map(p=>`
+  lista.innerHTML=data.map(p=>`
     <div class="produto">
       ${p.imagem?`<img src="${p.imagem}">`:""}
       <h3>${p.nome}</h3>
       <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-      <button onclick='addCarrinho(${JSON.stringify(p)})'>Adicionar</button>
+      <button onclick='add(${JSON.stringify(p)})'>Adicionar</button>
     </div>
   `).join("");
 }
 carregar();
 
-/* CARRINHO */
-function addCarrinho(p){
-  const item = carrinho.find(i=>i.id===p.id);
-  if(item) item.qtd++;
-  else carrinho.push({...p,qtd:1});
-  atualizarCarrinho();
+/* ===== CARRINHO ===== */
+function add(p){
+  const i=carrinho.find(x=>x.id===p.id);
+  i?i.qtd++:carrinho.push({...p,qtd:1});
+  atualizar();
 }
 
-function atualizarCarrinho(){
-  if(carrinho.length===0){
-    carrinhoDiv.style.display="none";
+function atualizar(){
+  if(!carrinho.length){
+    carrinho.style.display="none";
     return;
   }
-
   carrinhoDiv.style.display="block";
-  resumo.innerHTML = carrinho.map(i=>`
-    ${i.qtd}x ${i.nome} - R$ ${(i.preco*i.qtd).toFixed(2)}
-  `).join("<br>");
+  resumo.innerHTML=carrinho.map(i=>
+    `${i.qtd}x ${i.nome} - R$ ${(i.preco*i.qtd).toFixed(2)}`
+  ).join("<br>");
 }
+const carrinhoDiv=document.getElementById("carrinho");
 
-const carrinhoDiv = document.getElementById("carrinho");
-
-/* FINALIZAR */
+/* ===== FINALIZAR ===== */
 function finalizar(){
-  if(!whatsapp){
-    alert("WhatsApp do mercado não configurado");
-    return;
-  }
-
-  let msg = `🛒 *Novo pedido*%0A%0A`;
-  let total = 0;
-
+  let msg="🛒 *Novo pedido*%0A%0A";
+  let total=0;
   carrinho.forEach(i=>{
-    msg += `${i.qtd}x ${i.nome} - R$ ${(i.preco*i.qtd).toFixed(2)}%0A`;
-    total += i.preco*i.qtd;
+    msg+=`${i.qtd}x ${i.nome} - R$ ${(i.preco*i.qtd).toFixed(2)}%0A`;
+    total+=i.preco*i.qtd;
   });
-
-  msg += `%0A*Total:* R$ ${total.toFixed(2)}`;
-  msg += `%0A%0A📍 Entrega a combinar`;
-
+  msg+=`%0A*Total:* R$ ${total.toFixed(2)}%0A📍 Entrega a combinar`;
   window.open(`https://wa.me/55${whatsapp}?text=${msg}`,"_blank");
 }
 </script>
