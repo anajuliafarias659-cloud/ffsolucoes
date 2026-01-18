@@ -47,8 +47,6 @@ body{
 /* ===== SEÇÕES ===== */
 .section{
   padding:20px 12px;
-  max-width:1200px;
-  margin:auto;
 }
 
 /* ===== SOBRE ===== */
@@ -58,23 +56,23 @@ body{
   opacity:.9;
 }
 .endereco{
-  margin-top:8px;
+  margin-top:6px;
   font-size:13px;
   opacity:.75;
 }
 
 /* ===== CATEGORIA ===== */
 .categoria{
-  margin-bottom:26px;
+  margin-bottom:24px;
 }
 .categoria h3{
   border-left:4px solid var(--primaria);
   padding-left:8px;
   font-size:16px;
-  margin-bottom:10px;
+  margin-bottom:8px;
 }
 
-/* ===== GRID MOBILE FIRST ===== */
+/* ===== GRID MOBILE ===== */
 .grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
@@ -118,12 +116,8 @@ body{
 
 /* ===== RESPONSIVO MAIOR ===== */
 @media(min-width:768px){
-  .grid{
-    grid-template-columns:repeat(5,1fr);
-  }
-  .produto img{
-    height:120px;
-  }
+  .grid{grid-template-columns:repeat(5,1fr)}
+  .produto img{height:120px}
 }
 
 /* ===== CARRINHO ===== */
@@ -136,8 +130,8 @@ body{
   padding:14px;
   border-radius:50%;
   font-size:18px;
-  z-index:10;
   cursor:pointer;
+  z-index:10;
 }
 
 .carrinho{
@@ -146,16 +140,32 @@ body{
   background:#020617;
   display:none;
   z-index:20;
-  overflow:auto;
 }
 .carrinho .box{
   padding:16px;
 }
 
+.item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-size:14px;
+  margin-bottom:8px;
+}
+
+.item button{
+  background:#334155;
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  padding:4px 8px;
+  font-size:12px;
+}
+
 input,textarea{
   width:100%;
-  padding:10px;
   margin-top:8px;
+  padding:10px;
   border-radius:8px;
   border:none;
   background:#0f172a;
@@ -172,7 +182,6 @@ input,textarea{
   font-weight:700;
 }
 
-/* ===== FOOTER ===== */
 footer{
   text-align:center;
   padding:16px;
@@ -235,7 +244,7 @@ const carrinhoKey = "carrinho_"+app;
 let carrinho = JSON.parse(localStorage.getItem(carrinhoKey)) || [];
 let whatsappMercado = "";
 
-/* CONFIG */
+/* ===== CONFIG ===== */
 (async()=>{
   const { data } = await sb.from("config_site").select("*").eq("app_id",app).maybeSingle();
   if(!data) return;
@@ -265,7 +274,7 @@ let whatsappMercado = "";
   whatsappMercado = data.whatsapp || "";
 })();
 
-/* PRODUTOS */
+/* ===== PRODUTOS ===== */
 async function carregarProdutos(){
   const { data } = await sb.from("produtos")
     .select("*")
@@ -300,13 +309,32 @@ async function carregarProdutos(){
   `).join("");
 }
 
+/* ===== CARRINHO COM QTD ===== */
 function addCarrinho(p){
-  carrinho.push(p);
-  localStorage.setItem(carrinhoKey, JSON.stringify(carrinho));
-  alert("Adicionado");
+  const i = carrinho.findIndex(x=>x.id===p.id);
+  if(i>=0){
+    carrinho[i].qtd++;
+  }else{
+    carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1});
+  }
+  salvarCarrinho();
+  renderCarrinho();
 }
 
-/* CARRINHO */
+function removerItem(id){
+  const i = carrinho.findIndex(x=>x.id===id);
+  if(i>=0){
+    carrinho[i].qtd--;
+    if(carrinho[i].qtd<=0) carrinho.splice(i,1);
+    salvarCarrinho();
+    renderCarrinho();
+  }
+}
+
+function salvarCarrinho(){
+  localStorage.setItem(carrinhoKey, JSON.stringify(carrinho));
+}
+
 const carrinhoEl = document.getElementById("carrinho");
 
 function abrirCarrinho(){
@@ -316,17 +344,34 @@ function abrirCarrinho(){
 function fecharCarrinho(){
   carrinhoEl.style.display="none";
 }
+
 function renderCarrinho(){
   itens.innerHTML="";
   let total=0;
+
+  if(carrinho.length===0){
+    itens.innerHTML="<p>Carrinho vazio</p>";
+    return;
+  }
+
   carrinho.forEach(p=>{
-    total+=p.preco;
-    itens.innerHTML+=`<div>${p.nome} — R$ ${p.preco.toFixed(2)}</div>`;
+    const sub=p.preco*p.qtd;
+    total+=sub;
+    itens.innerHTML+=`
+      <div class="item">
+        <span>${p.nome} x${p.qtd}</span>
+        <span>
+          R$ ${sub.toFixed(2)}
+          <button onclick="removerItem('${p.id}')">−</button>
+        </span>
+      </div>
+    `;
   });
+
   itens.innerHTML+=`<hr><b>Total: R$ ${total.toFixed(2)}</b>`;
 }
 
-/* FINALIZAR */
+/* ===== FINALIZAR ===== */
 function finalizar(){
   if(!whatsappMercado){
     alert("WhatsApp do mercado não configurado");
@@ -334,10 +379,15 @@ function finalizar(){
   }
 
   let msg="🛒 *Novo Pedido*\n\n";
+  let total=0;
+
   carrinho.forEach(p=>{
-    msg+=`• ${p.nome} - R$ ${p.preco.toFixed(2)}\n`;
+    const sub=p.preco*p.qtd;
+    total+=sub;
+    msg+=`• ${p.nome} x${p.qtd} - R$ ${sub.toFixed(2)}\n`;
   });
 
+  msg+=`\n💰 Total: R$ ${total.toFixed(2)}`;
   msg+=`\n👤 ${cliente.value || "Não informado"}`;
   msg+=`\n📍 ${localizacao.value || "Não informado"}`;
   msg+=`\n📝 ${observacao.value || ""}`;
@@ -348,7 +398,7 @@ function finalizar(){
   );
 
   carrinho=[];
-  localStorage.removeItem(carrinhoKey);
+  salvarCarrinho();
   fecharCarrinho();
 }
 
