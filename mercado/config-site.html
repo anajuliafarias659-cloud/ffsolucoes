@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <title>Configurar Mercado</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="icon" href="data:,">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -21,15 +23,18 @@ body{
 }
 h2{text-align:center;margin-bottom:10px}
 label{display:block;margin-top:14px}
-input,textarea,select,button{
+input,select,textarea,button{
   width:100%;
   padding:14px;
   margin-top:6px;
   border-radius:12px;
   border:none;
 }
-input,textarea,select{background:#020617;color:#fff}
-textarea{resize:none;min-height:90px}
+input,select,textarea{
+  background:#020617;
+  color:#fff;
+}
+textarea{min-height:80px}
 button{
   background:#22c55e;
   color:#022c22;
@@ -40,7 +45,7 @@ button{
 .preview{
   margin-top:10px;
   width:100%;
-  max-height:180px;
+  max-height:200px;
   object-fit:cover;
   border-radius:12px;
   display:none;
@@ -55,7 +60,7 @@ small{opacity:.7}
   <h2>🛒 Configurar Mercado</h2>
 
   <label>Nome do mercado</label>
-  <input id="nome" placeholder="Ex: Mercado Central">
+  <input id="nome_site" placeholder="Ex: Mercado Central">
 
   <label>Descrição curta</label>
   <input id="descricao" placeholder="Ex: Tudo para sua casa">
@@ -67,20 +72,17 @@ small{opacity:.7}
   <input id="whatsapp" placeholder="Ex: 88999999999">
 
   <label>Tema do site</label>
-  <select id="tema">
+  <select id="tema_site">
     <option value="padrao">Padrão</option>
-    <option value="carnaval">🎭 Carnaval</option>
-    <option value="saojoao">🔥 São João</option>
+    <option value="sao-joao">🔥 São João</option>
     <option value="natal">🎄 Natal</option>
     <option value="anonovo">✨ Ano Novo</option>
+    <option value="carnaval">🎭 Carnaval</option>
   </select>
 
   <label>Banner do site</label>
   <input type="file" id="bannerInput" accept="image/*">
   <img id="bannerPreview" class="preview">
-
-  <label>Benefícios (um por linha)</label>
-  <textarea id="beneficios" placeholder="Entrega rápida&#10;Preços baixos&#10;Qualidade garantida"></textarea>
 
   <button onclick="salvar()">Salvar configurações</button>
   <small id="status"></small>
@@ -93,9 +95,6 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// no HOTEL tu usa "banners", então mantive igual pra não ter erro
-const BUCKET_BANNERS = "banners";
-
 /* ===== ADMIN ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin?.app_id){
@@ -105,15 +104,16 @@ if(!admin?.app_id){
 const app_id = admin.app_id;
 
 /* ===== ELEMENTOS ===== */
-const nomeEl = document.getElementById("nome");
-const descEl = document.getElementById("descricao");
-const sobreEl = document.getElementById("sobre");
-const whatsappEl = document.getElementById("whatsapp");
-const temaEl = document.getElementById("tema");
+const nomeSite = document.getElementById("nome_site");
+const descricao = document.getElementById("descricao");
+const sobre = document.getElementById("sobre");
+const whatsapp = document.getElementById("whatsapp");
+const temaSite = document.getElementById("tema_site");
 const bannerInput = document.getElementById("bannerInput");
 const bannerPreview = document.getElementById("bannerPreview");
-const beneficiosEl = document.getElementById("beneficios");
 const statusEl = document.getElementById("status");
+
+let banner_url_atual = null;
 
 /* ===== PREVIEW ===== */
 bannerInput.onchange = ()=>{
@@ -124,105 +124,80 @@ bannerInput.onchange = ()=>{
   }
 };
 
-/* ===== UPLOAD ===== */
+/* ===== UPLOAD BANNER ===== */
 async function uploadBanner(file){
   if(!file) return null;
 
-  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const ext = file.name.split(".").pop();
   const path = `${app_id}/${Date.now()}.${ext}`;
 
   const { error } = await sb.storage
-    .from(BUCKET_BANNERS)
-    .upload(path, file, { upsert:true });
+    .from("banners")
+    .upload(path,file,{upsert:true});
 
   if(error){
     console.error(error);
     return null;
   }
 
-  return sb.storage.from(BUCKET_BANNERS).getPublicUrl(path).data.publicUrl;
+  return sb.storage
+    .from("banners")
+    .getPublicUrl(path)
+    .data.publicUrl;
 }
 
 /* ===== SALVAR ===== */
 async function salvar(){
   statusEl.innerText = "Salvando...";
 
-  let banner_url = null;
   if(bannerInput.files[0]){
-    banner_url = await uploadBanner(bannerInput.files[0]);
+    banner_url_atual = await uploadBanner(bannerInput.files[0]);
   }
-
-  const beneficiosArr = beneficiosEl.value
-    ? beneficiosEl.value.split("\n").map(b=>b.trim()).filter(Boolean)
-    : [];
 
   const payload = {
     app_id,
-    nome_site: nomeEl.value || null,
-    descricao_site: descEl.value || null,
-    sobre_site: sobreEl.value || null,
-    whatsapp: whatsappEl.value || null,
-    tema_site: temaEl.value || "padrao",
-    beneficios: beneficiosArr
+    nome_site: nomeSite.value || null,
+    descricao: descricao.value || null,
+    sobre: sobre.value || null,
+    whatsapp: whatsapp.value || null,
+    tema_site: temaSite.value || "padrao",
+    banner_url: banner_url_atual || null
   };
 
-  if(banner_url) payload.banner_url = banner_url;
-
-  const { data: existente, error: errFind } = await sb
+  const { error } = await sb
     .from("config_site")
-    .select("id")
-    .eq("app_id", app_id)
-    .maybeSingle();
+    .upsert(payload,{ onConflict:"app_id" });
 
-  if(errFind){
-    console.error(errFind);
-    statusEl.innerText = "";
-    alert("Erro ao verificar registro");
+  if(error){
+    console.error(error);
+    statusEl.innerText="";
+    alert("Erro ao salvar");
     return;
   }
 
-  const res = existente
-    ? await sb.from("config_site").update(payload).eq("app_id", app_id)
-    : await sb.from("config_site").insert(payload);
-
-  if(res.error){
-    console.error(res.error);
-    statusEl.innerText = "";
-    alert("Erro ao salvar no banco");
-    return;
-  }
-
-  statusEl.innerText = "Salvo com sucesso 🔥";
+  statusEl.innerText="Salvo com sucesso 🔥";
 }
 
 /* ===== LOAD ===== */
 (async()=>{
-  const { data, error } = await sb
+  const { data } = await sb
     .from("config_site")
-    .select("nome_site,descricao_site,sobre_site,whatsapp,tema_site,banner_url,beneficios")
-    .eq("app_id", app_id)
+    .select("nome_site,descricao,sobre,whatsapp,tema_site,banner_url")
+    .eq("app_id",app_id)
     .maybeSingle();
-
-  if(error){
-    console.error(error);
-    return;
-  }
 
   if(!data) return;
 
-  nomeEl.value = data.nome_site || "";
-  descEl.value = data.descricao_site || "";
-  sobreEl.value = data.sobre_site || "";
-  whatsappEl.value = data.whatsapp || "";
-  temaEl.value = data.tema_site || "padrao";
-
-  if(Array.isArray(data.beneficios)){
-    beneficiosEl.value = data.beneficios.join("\n");
-  }
+  nomeSite.value = data.nome_site || "";
+  descricao.value = data.descricao || "";
+  sobre.value = data.sobre || "";
+  whatsapp.value = data.whatsapp || "";
+  temaSite.value = data.tema_site || "padrao";
 
   if(data.banner_url){
+    banner_url_atual = data.banner_url;
     bannerPreview.src = data.banner_url;
-    bannerPreview.style.display = "block";
+    bannerPreview.style.display="block";
   }
 })();
 </script>
