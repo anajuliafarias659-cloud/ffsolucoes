@@ -5,14 +5,21 @@
 <title>Configurar Site | Mercado</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<link rel="icon" href="data:,">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
+:root{
+  --bg:#020617;
+  --card:#0f172a;
+  --primary:#22c55e;
+}
+
 *{box-sizing:border-box}
 body{
   margin:0;
   font-family:Arial,sans-serif;
-  background:#020617;
+  background:var(--bg);
   color:#fff;
 }
 
@@ -29,7 +36,7 @@ body{
 }
 
 .box{
-  background:#0f172a;
+  background:var(--card);
   padding:20px;
   border-radius:16px;
   margin-bottom:20px;
@@ -52,19 +59,28 @@ input,textarea,select{
 textarea{min-height:80px}
 
 button{
-  background:#22c55e;
+  background:var(--primary);
   font-weight:bold;
   cursor:pointer;
 }
 
 .preview{
   width:100%;
-  height:180px;
+  height:200px;
   background:#020617;
   background-size:cover;
   background-position:center;
   border-radius:14px;
   margin-top:10px;
+  border:1px solid #1e293b;
+}
+
+.tema-preview{
+  margin-top:10px;
+  padding:10px;
+  border-radius:12px;
+  text-align:center;
+  font-weight:bold;
 }
 </style>
 </head>
@@ -81,7 +97,7 @@ button{
   <h3>🏪 Informações do Mercado</h3>
   <input id="nome" placeholder="Nome do mercado">
   <input id="descricao" placeholder="Descrição curta">
-  <textarea id="sobre" placeholder="Texto sobre o mercado"></textarea>
+  <textarea id="sobre" placeholder="Sobre o mercado"></textarea>
 </div>
 
 <div class="box">
@@ -92,17 +108,20 @@ button{
 
 <div class="box">
   <h3>🎨 Tema do Site</h3>
-  <select id="tema">
+  <select id="tema" onchange="previewTema()">
     <option value="padrao">Padrão</option>
-    <option value="natal">Natal</option>
     <option value="saojoao">São João</option>
+    <option value="natal">Natal</option>
     <option value="anonovo">Ano Novo</option>
+    <option value="carnaval">Carnaval</option>
   </select>
+  <div class="tema-preview" id="temaPreview">Tema padrão</div>
 </div>
 
 <div class="box">
   <h3>⭐ Benefícios (um por linha)</h3>
-  <textarea id="beneficios" placeholder="Entrega rápida&#10;Preços justos&#10;Qualidade garantida"></textarea>
+  <textarea id="beneficios"
+    placeholder="Entrega rápida&#10;Preços justos&#10;Qualidade garantida"></textarea>
 </div>
 
 <div class="box">
@@ -119,12 +138,10 @@ button{
 <script>
 /* ===== VALIDA ADMIN ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-
-if(!admin || admin.tipo !== "mercado"){
-  location.href = "login.html";
+if(!admin || admin.tipo!=="mercado"){
+  location.href="login.html";
   throw "";
 }
-
 const app = admin.app_id;
 
 /* ===== SUPABASE ===== */
@@ -133,57 +150,101 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let bannerUrlAtual = "";
+let bannerUrlAtual="";
+
+/* ===== PREVIEW TEMA ===== */
+function previewTema(){
+  const t=tema.value;
+  const map={
+    padrao:["#22c55e","#0f172a","Padrão"],
+    saojoao:["#facc15","#7c2d12","🎉 São João"],
+    natal:["#dc2626","#14532d","🎄 Natal"],
+    anonovo:["#22c55e","#020617","✨ Ano Novo"],
+    carnaval:["#ec4899","#581c87","🎭 Carnaval"]
+  };
+  const [p,b,label]=map[t];
+  temaPreview.style.background=`linear-gradient(135deg,${p},${b})`;
+  temaPreview.innerText=label;
+}
 
 /* ===== CARREGAR CONFIG ===== */
 (async()=>{
   const { data } = await supabaseClient
     .from("config_site")
     .select("*")
-    .eq("app_id", app)
+    .eq("app_id",app)
     .single();
 
   if(!data) return;
 
-  nome.value = data.nome || "";
-  descricao.value = data.descricao || "";
-  sobre.value = data.sobre || "";
-  whatsapp.value = data.whatsapp || "";
-  tema.value = data.tema || "padrao";
+  nome.value=data.nome||"";
+  descricao.value=data.descricao||"";
+  sobre.value=data.sobre||"";
+  whatsapp.value=data.whatsapp||"";
+  tema.value=data.tema||"padrao";
 
   if(data.beneficios){
-    beneficios.value = data.beneficios.join("\n");
+    beneficios.value=data.beneficios.join("\n");
   }
 
   if(data.banner){
-    bannerUrlAtual = data.banner;
-    preview.style.backgroundImage = `url(${data.banner})`;
+    bannerUrlAtual=data.banner;
+    preview.style.backgroundImage=`url(${data.banner})`;
   }
+
+  previewTema();
 })();
 
 /* ===== UPLOAD BANNER ===== */
 bannerFile.onchange = async ()=>{
-  const file = bannerFile.files[0];
+  const file=bannerFile.files[0];
   if(!file) return;
 
-  const path = `${app}/banner_${Date.now()}.jpg`;
+  const path=`${app}/banner_${Date.now()}.jpg`;
 
   await supabaseClient
     .storage
     .from("site-banners")
-    .upload(path, file, { upsert:true });
+    .upload(path,file,{upsert:true});
 
-  bannerUrlAtual = supabaseClient
+  bannerUrlAtual=supabaseClient
     .storage
     .from("site-banners")
     .getPublicUrl(path)
     .data.publicUrl;
 
-  preview.style.backgroundImage = `url(${bannerUrlAtual})`;
+  preview.style.backgroundImage=`url(${bannerUrlAtual})`;
 };
 
-/* ===== SALVAR ===== */
+/* ===== SALVAR (GLOBAL – SEM BUG) ===== */
 async function salvar(){
-  const payload = {
-    app_id: app,
-    nome: nome.value,
+  const payload={
+    app_id:app,
+    nome:nome.value,
+    descricao:descricao.value,
+    sobre:sobre.value,
+    whatsapp:whatsapp.value,
+    tema:tema.value,
+    banner:bannerUrlAtual,
+    beneficios:beneficios.value
+      .split("\n")
+      .map(b=>b.trim())
+      .filter(b=>b)
+  };
+
+  const { error } = await supabaseClient
+    .from("config_site")
+    .upsert(payload,{onConflict:"app_id"});
+
+  if(error){
+    console.error(error);
+    alert("Erro ao salvar");
+    return;
+  }
+
+  alert("Configurações salvas com sucesso!");
+}
+</script>
+
+</body>
+</html>
