@@ -57,9 +57,6 @@ small{opacity:.7}
   <label>Nome do mercado</label>
   <input id="nome" placeholder="Ex: Mercado Central">
 
-  <label>Descrição curta</label>
-  <input id="descricao" placeholder="Ex: Tudo para sua casa">
-
   <label>Sobre o mercado</label>
   <textarea id="sobre" placeholder="Fale sobre seu mercado"></textarea>
 
@@ -96,11 +93,52 @@ const sb = supabase.createClient(
 
 /* ===== ADMIN ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin?.app_id){
+if(!admin || !admin.app_id){
   alert("Sessão expirada");
   location.href="login.html";
 }
 const app_id = admin.app_id;
+
+/* ===== ELEMENTOS ===== */
+const nome = document.getElementById("nome");
+const sobre = document.getElementById("sobre");
+const whatsapp = document.getElementById("whatsapp");
+const tema = document.getElementById("tema");
+const bannerInput = document.getElementById("bannerInput");
+const bannerPreview = document.getElementById("bannerPreview");
+const beneficios = document.getElementById("beneficios");
+const status = document.getElementById("status");
+
+/* ===== PREVIEW ===== */
+bannerInput.onchange = ()=>{
+  const f = bannerInput.files[0];
+  if(f){
+    bannerPreview.src = URL.createObjectURL(f);
+    bannerPreview.style.display="block";
+  }
+};
+
+/* ===== UPLOAD BANNER (AGORA EXISTE) ===== */
+async function uploadBanner(file){
+  if(!file) return null;
+
+  const ext = file.name.split(".").pop();
+  const path = `${app_id}/${Date.now()}.${ext}`;
+
+  const { error } = await sb.storage
+    .from("site-banners")
+    .upload(path, file, { upsert:true });
+
+  if(error){
+    console.error(error);
+    return null;
+  }
+
+  return sb.storage
+    .from("site-banners")
+    .getPublicUrl(path)
+    .data.publicUrl;
+}
 
 /* ===== SALVAR ===== */
 async function salvar(){
@@ -116,7 +154,10 @@ async function salvar(){
     nome_site: nome.value || null,
     sobre_site: sobre.value || null,
     whatsapp: whatsapp.value || null,
-    tema_site: tema.value || "padrao"
+    tema_site: tema.value || "padrao",
+    beneficios: beneficios.value
+      ? beneficios.value.split("\n").map(b=>b.trim()).filter(b=>b)
+      : null
   };
 
   if(banner_url) payload.banner_url = banner_url;
@@ -133,15 +174,39 @@ async function salvar(){
 
   if(res.error){
     console.error(res.error);
-    status.innerText = "";
+    status.innerText="";
     alert("Erro ao salvar");
     return;
   }
 
-  status.innerText = "Salvo com sucesso 🔥";
+  status.innerText="Salvo com sucesso 🔥";
 }
-</script>
 
+/* ===== LOAD ===== */
+(async()=>{
+  const { data } = await sb
+    .from("config_site")
+    .select("nome_site,sobre_site,whatsapp,tema_site,banner_url,beneficios")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!data) return;
+
+  nome.value = data.nome_site || "";
+  sobre.value = data.sobre_site || "";
+  whatsapp.value = data.whatsapp || "";
+  tema.value = data.tema_site || "padrao";
+
+  if(data.beneficios){
+    beneficios.value = data.beneficios.join("\n");
+  }
+
+  if(data.banner_url){
+    bannerPreview.src = data.banner_url;
+    bannerPreview.style.display="block";
+  }
+})();
+</script>
 
 </body>
 </html>
