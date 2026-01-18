@@ -52,37 +52,47 @@ body{
   padding:40px 20px;
 }
 
+/* ===== CATEGORIAS ===== */
+.categoria{
+  margin-bottom:42px;
+}
+.categoria h3{
+  margin-bottom:16px;
+  font-size:20px;
+  border-left:4px solid var(--primaria);
+  padding-left:12px;
+}
+
 .grid{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
   gap:18px;
 }
 
+/* ===== PRODUTO ===== */
 .produto{
   background:var(--card);
   padding:14px;
   border-radius:16px;
   text-align:center;
 }
-
 .produto img{
   width:100%;
   height:150px;
   object-fit:cover;
   border-radius:12px;
 }
-
-.produto h3{
+.produto h4{
   font-size:15px;
   margin:10px 0 6px;
 }
-
 .preco{
   color:var(--primaria);
   font-weight:700;
   font-size:16px;
 }
 
+/* ===== FOOTER ===== */
 footer{
   text-align:center;
   padding:20px;
@@ -104,16 +114,15 @@ footer{
 <!-- ===== SOBRE ===== -->
 <section class="section">
   <h2>🏪 Sobre o mercado</h2>
-
   <p id="descricaoSobre" style="opacity:.85"></p>
   <p id="sobre" style="margin-top:10px"></p>
   <p id="endereco" style="margin-top:14px;opacity:.75"></p>
 </section>
 
-<!-- ===== PRODUTOS ===== -->
+<!-- ===== PRODUTOS POR CATEGORIA ===== -->
 <section class="section">
   <h2>🛒 Produtos</h2>
-  <div class="grid" id="listaProdutos"></div>
+  <div id="listaProdutos"></div>
 </section>
 
 <footer>
@@ -137,52 +146,43 @@ if(!app){
 
 /* ===== CONFIG SITE ===== */
 (async()=>{
-  const { data, error } = await sb
+  const { data } = await sb
     .from("config_site")
     .select("*")
     .eq("app_id", app)
     .maybeSingle();
 
-  if(error || !data){
-    console.warn("Config do site não encontrada");
-    return;
-  }
+  if(!data) return;
 
-  /* nome */
   nome.innerText = data.nome_site || "Mercado";
   nomeRodape.innerText = data.nome_site || "Mercado";
   ano.innerText = new Date().getFullYear();
 
-  /* descrição curta (banner) */
   if(data.descricao){
     descricao.innerText = data.descricao;
     descricaoSobre.innerText = data.descricao;
   }else{
-    descricao.style.display = "none";
-    descricaoSobre.style.display = "none";
+    descricao.style.display="none";
+    descricaoSobre.style.display="none";
   }
 
-  /* sobre */
   if(data.sobre){
     sobre.innerText = data.sobre;
   }else{
-    sobre.style.display = "none";
+    sobre.style.display="none";
   }
 
-  /* endereço */
   if(data.endereco){
     endereco.innerHTML = "📍 " + data.endereco +
       (data.cidade ? " – " + data.cidade : "");
   }else{
-    endereco.style.display = "none";
+    endereco.style.display="none";
   }
 
-  /* banner */
   if(data.banner_url){
     banner.style.backgroundImage = `url(${data.banner_url})`;
   }
 
-  /* tema */
   aplicarTema(data.tema_site);
 })();
 
@@ -193,31 +193,45 @@ function aplicarTema(t){
   if(t==="anonovo") setTema("#22c55e","#020617");
   if(t==="carnaval") setTema("#ec4899","#581c87");
 }
-
 function setTema(primaria,card){
   document.documentElement.style.setProperty("--primaria",primaria);
   document.documentElement.style.setProperty("--card",card);
 }
 
-/* ===== PRODUTOS ===== */
+/* ===== PRODUTOS COM CATEGORIAS ===== */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
     .select("*")
     .eq("app_id",app)
     .eq("ativo",true)
-    .order("nome");
+    .order("categoria",{ ascending:true })
+    .order("nome",{ ascending:true });
 
   if(!data || data.length===0){
     listaProdutos.innerHTML="<p>Nenhum produto disponível.</p>";
     return;
   }
 
-  listaProdutos.innerHTML = data.map(p=>`
-    <div class="produto">
-      ${p.imagem ? `<img src="${p.imagem}">` : ""}
-      <h3>${p.nome}</h3>
-      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+  const categorias = {};
+  data.forEach(p=>{
+    const cat = p.categoria || "Outros";
+    if(!categorias[cat]) categorias[cat] = [];
+    categorias[cat].push(p);
+  });
+
+  listaProdutos.innerHTML = Object.keys(categorias).map(cat=>`
+    <div class="categoria">
+      <h3>${cat}</h3>
+      <div class="grid">
+        ${categorias[cat].map(p=>`
+          <div class="produto">
+            ${p.imagem ? `<img src="${p.imagem}">` : ""}
+            <h4>${p.nome}</h4>
+            <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+          </div>
+        `).join("")}
+      </div>
     </div>
   `).join("");
 }
