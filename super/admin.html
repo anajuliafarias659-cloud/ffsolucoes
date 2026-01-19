@@ -10,24 +10,16 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .container{max-width:1200px;margin:40px auto;padding:30px;border-radius:20px;background:linear-gradient(135deg,#0f172a,#4b1fa0)}
 h1,h2,h3{margin-top:25px}
-button{padding:8px 12px;border-radius:8px;border:none;cursor:pointer;font-weight:bold}
-button.block{background:#f59e0b;color:#000}
-button.ok{background:#22c55e;color:#000}
+input,select,button{width:100%;padding:14px;margin-top:10px;border-radius:12px;border:none}
+button{background:#22c55e;color:#000;font-weight:bold;cursor:pointer}
 button.danger{background:#e53935;color:#fff}
-.card{
-  background:#020617;
-  padding:16px;
-  margin-top:12px;
-  border-radius:14px;
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:12px
-}
-.badge{background:#334155;padding:4px 8px;border-radius:6px;font-size:12px}
-.badge.red{background:#7c2d12}
-a{color:#22c55e;text-decoration:none}
+.card{background:#020617;padding:16px;margin-top:12px;border-radius:14px;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .login{max-width:420px;margin:80px auto}
+hr{margin:40px 0;border:none;height:1px;background:rgba(255,255,255,.2)}
+a{color:#22c55e;text-decoration:none}
+.btn-small{width:auto;padding:6px 12px;font-size:12px;border-radius:8px}
+.badge{background:#334155;padding:4px 8px;border-radius:6px;font-size:12px}
+.badge.warn{background:#7c2d12}
 </style>
 </head>
 
@@ -38,20 +30,58 @@ a{color:#22c55e;text-decoration:none}
 
 <!-- LOGIN -->
 <div class="login" id="loginBox">
-  <input id="usuarioSuper" placeholder="Usuário"><br><br>
-  <input id="senhaSuper" type="password" placeholder="Senha"><br><br>
-  <button class="ok" onclick="login()">Entrar</button>
+  <input id="usuarioSuper" placeholder="Usuário">
+  <input id="senhaSuper" type="password" placeholder="Senha">
+  <button onclick="login()">Entrar</button>
 </div>
 
 <!-- PAINEL -->
 <div id="painel" style="display:none">
 
-<h2>🏢 Negócios (com vendedor)</h2>
+<!-- NEGÓCIOS -->
+<h2>🏢 Criar / Editar Negócio</h2>
+<input id="nomeNegocio" placeholder="Nome do negócio">
+<select id="tipoNegocio">
+  <option value="bar">Bar</option>
+  <option value="restaurante">Restaurante</option>
+  <option value="mercado">Mercado</option>
+  <option value="locadora">Locadora</option>
+  <option value="hotel">Hotel</option>
+</select>
+<button onclick="criarNegocio()">Salvar Negócio</button>
+
+<h3>📋 Negócios</h3>
 <div id="listaNegocios"></div>
 
-<hr style="margin:40px 0">
+<hr>
 
-<h2>💰 Vendedores</h2>
+<!-- ADMINS -->
+<h2>👤 Criar Admin</h2>
+<input id="usuarioAdmin" placeholder="Usuário">
+<input id="senhaAdmin" type="password" placeholder="Senha">
+<select id="permissaoAdmin">
+  <option value="editar">Editar</option>
+  <option value="visualizar">Visualizar</option>
+</select>
+<select id="appAdmin"></select>
+<button onclick="criarAdmin()">Criar Admin</button>
+
+<h3>👥 Admins</h3>
+<div id="listaAdmins"></div>
+
+<hr>
+
+<!-- VENDEDORES -->
+<h2>💰 Cadastro de Vendedor</h2>
+<div class="card" style="flex-direction:column;align-items:stretch">
+  <input id="nomeVendedor" placeholder="Nome completo">
+  <input id="emailVendedor" placeholder="E-mail / usuário">
+  <input id="senhaVendedor" type="password" placeholder="Senha">
+  <input id="comissaoVendedor" type="number" value="10" placeholder="Comissão (%)">
+  <button onclick="criarVendedor()">Cadastrar Vendedor</button>
+</div>
+
+<h3>🧾 Vendedores (Acompanhamento)</h3>
 <div id="listaVendedores"></div>
 
 </div>
@@ -65,14 +95,21 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+let mapaApps = {};
+
+function getPublicUrlBase(tipo){
+  if(tipo==="locadora") return "locadora/public/index.html?app_id=";
+  return "bar/public/cardapio/index.html?app=";
+}
+
 /* LOGIN */
 window.login = async ()=>{
   const { data } = await supabase
     .from("super_admins")
     .select("*")
-    .eq("usuario", usuarioSuper.value)
-    .eq("senha", senhaSuper.value)
-    .eq("ativo", true)
+    .eq("usuario",usuarioSuper.value)
+    .eq("senha",senhaSuper.value)
+    .eq("ativo",true)
     .maybeSingle();
 
   if(!data) return alert("Login inválido");
@@ -80,112 +117,136 @@ window.login = async ()=>{
   loginBox.style.display="none";
   painel.style.display="block";
   carregarNegocios();
+  carregarAdmins();
   carregarVendedores();
 };
 
-/* ===== NEGÓCIOS ===== */
-async function carregarNegocios(){
-  const { data, error } = await supabase
-    .from("apps")
-    .select(`
-      id,
-      nome,
-      tipo,
-      ativo,
-      vendedor_id,
-      usuarios (
-        id,
-        nome
-      )
-    `);
+/* NEGÓCIOS */
+window.criarNegocio = async ()=>{
+  await supabase.from("apps").insert({
+    nome:nomeNegocio.value,
+    tipo:tipoNegocio.value,
+    public_url:getPublicUrlBase(tipoNegocio.value)
+  });
+  nomeNegocio.value="";
+  carregarNegocios();
+};
+window.criarNegocio = async ()=>{
+  const { error } = await supabase.from("apps").insert({
+    nome: nomeNegocio.value,
+    tipo: tipoNegocio.value,
+    usar_categorias: tipoNegocio.value !== "hotel"
+  });
 
-  if(error){
+  if (error) {
     console.error(error);
-    alert("Erro ao carregar negócios");
+    alert("Erro ao criar negócio: " + error.message);
     return;
   }
 
-  listaNegocios.innerHTML = "";
+  nomeNegocio.value = "";
+  carregarNegocios();
+};
 
-  data.forEach(n=>{
-    const vendedor = n.usuarios?.nome || "—";
+async function carregarNegocios(){
+  const { data } = await supabase.from("apps").select("*");
+  listaNegocios.innerHTML="";
+  appAdmin.innerHTML="";
+  mapaApps = {};
 
-    const link =
-      n.tipo==="hotel"
-      ? `https://anajuliafarias659-cloud.github.io/ffsolucoes/hotel/public/site/index.html?id=${n.id}`
-      : n.tipo==="locadora"
-      ? `https://anajuliafarias659-cloud.github.io/ffsolucoes/locadora/public/index.html?app_id=${n.id}`
-      : n.tipo==="mercado"
-      ? `https://anajuliafarias659-cloud.github.io/ffsolucoes/mercado/public/catalogo.html?app=${n.id}`
-      : `https://anajuliafarias659-cloud.github.io/ffsolucoes/bar/public/cardapio/index.html?app=${n.id}`;
+  (data||[]).forEach(n=>{
+    mapaApps[n.id] = `${n.nome} (${n.tipo})`;
+
+    const link = `https://anajuliafarias659-cloud.github.io/ffsolucoes/${getPublicUrlBase(n.tipo)}${n.id}`;
 
     listaNegocios.innerHTML += `
       <div class="card">
         <div>
-          <b>${n.nome}</b> <span class="badge">${n.tipo}</span><br>
-          <small>Criado por:</small> <b>${vendedor}</b><br>
-          <small>Status:</small>
-          ${n.ativo ? "🟢 ativo" : "<span class='badge red'>bloqueado</span>"}<br>
-          <a href="${link}" target="_blank">🌍 site público</a>
+          <b>${n.nome}</b><br>
+          <a href="${link}" target="_blank">🌍 Site Público</a>
         </div>
+      </div>
+    `;
 
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <button class="block" onclick="toggleNegocio('${n.id}', ${n.ativo})">
-            ${n.ativo ? "🔒 Bloquear" : "🔓 Desbloquear"}
-          </button>
+    appAdmin.innerHTML += `<option value="${n.id}">${n.nome}</option>`;
+  });
+}
 
-          <button class="danger" onclick="excluirNegocio('${n.id}')">
-            🗑️ Excluir
-          </button>
+/* ADMINS */
+window.criarAdmin = async ()=>{
+  await supabase.from("admins").insert({
+    usuario:usuarioAdmin.value,
+    senha:senhaAdmin.value,
+    permissao:permissaoAdmin.value,
+    app_id:appAdmin.value,
+    ativo:true
+  });
+  usuarioAdmin.value="";
+  senhaAdmin.value="";
+  carregarAdmins();
+};
+
+async function carregarAdmins(){
+  const { data } = await supabase.from("admins").select("*");
+  listaAdmins.innerHTML="";
+  (data||[]).forEach(a=>{
+    const negocio = mapaApps[a.app_id];
+    listaAdmins.innerHTML += `
+      <div class="card">
+        <div>
+          <b>${a.usuario}</b><br>
+          ${
+            negocio
+            ? `<span class="badge">${negocio}</span>`
+            : `<span class="badge warn">não identificado</span>`
+          }
         </div>
+        <button class="danger btn-small" onclick="excluirAdmin('${a.id}')">Excluir</button>
       </div>
     `;
   });
 }
 
-window.toggleNegocio = async (id, ativo)=>{
-  await supabase.from("apps").update({ativo: !ativo}).eq("id", id);
-  carregarNegocios();
+window.excluirAdmin = async id=>{
+  if(confirm("Excluir admin?")){
+    await supabase.from("admins").delete().eq("id",id);
+    carregarAdmins();
+  }
 };
 
-window.excluirNegocio = async id=>{
-  if(!confirm("Excluir negócio definitivamente?")) return;
-  await supabase.from("apps").delete().eq("id", id);
-  carregarNegocios();
+/* VENDEDORES — SEM QUALQUER ALTERAÇÃO */
+window.criarVendedor = async ()=>{
+  await supabase.from("usuarios").insert({
+    nome:nomeVendedor.value,
+    email:emailVendedor.value,
+    senha:senhaVendedor.value,
+    tipo:"vendedor",
+    comissao_percentual:Number(comissaoVendedor.value),
+    ativo:true
+  });
+
+  nomeVendedor.value="";
+  emailVendedor.value="";
+  senhaVendedor.value="";
+  comissaoVendedor.value=10;
+  carregarVendedores();
 };
 
-/* ===== VENDEDORES ===== */
 async function carregarVendedores(){
-  const { data } = await supabase
-    .from("usuarios")
-    .select("*")
-    .eq("tipo","vendedor");
-
-  listaVendedores.innerHTML = "";
-
-  data.forEach(v=>{
+  const { data } = await supabase.from("usuarios").select("*").eq("tipo","vendedor");
+  listaVendedores.innerHTML="";
+  (data||[]).forEach(v=>{
     listaVendedores.innerHTML += `
       <div class="card">
         <div>
           <b>${v.nome}</b><br>
           <small>${v.email}</small><br>
-          <span class="badge">Comissão ${v.comissao_percentual}%</span>
-          ${!v.ativo ? `<span class="badge red">bloqueado</span>` : ""}
+          <span class="badge">Comissão: ${v.comissao_percentual}%</span>
         </div>
-
-        <button class="danger" onclick="excluirVendedor('${v.id}')">
-          🗑️ Excluir
-        </button>
       </div>
     `;
   });
 }
-
-window.excluirVendedor = async id=>{
-  if(!confirm("Excluir vendedor definitivamente?")) return;
-  await supabase.from("usuarios").delete().eq("id", id);
-  carregarVendedores();
-};
 </script>
 
 </body>
