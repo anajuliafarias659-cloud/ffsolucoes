@@ -78,6 +78,22 @@ a{color:#22c55e;text-decoration:none}
 
 <h3>🧾 Vendedores</h3>
 <div id="listaVendedores"></div>
+<hr>
+
+<h2>💬 Chat</h2>
+
+<div id="chatBox" style="
+  background:#020617;
+  height:300px;
+  overflow-y:auto;
+  padding:10px;
+  border-radius:12px;
+  margin-bottom:10px
+"></div>
+<select id="destinatario"></select>
+
+<input id="mensagemChat" placeholder="Digite a mensagem">
+<button onclick="enviarMensagem()">Enviar</button>
 
 </div>
 </div>
@@ -122,9 +138,10 @@ window.login = async ()=>{
   loginBox.style.display="none";
   painel.style.display="block";
 
-  carregarNegocios();
-  carregarAdmins();
-  carregarVendedores();
+  await carregarNegocios();
+await carregarAdmins();
+await carregarVendedores();
+
 };
 
 /* NEGÓCIOS */
@@ -159,16 +176,57 @@ window.desbloquearNegocio = async id=>{
   await supabase.from("apps").update({ bloqueado:false }).eq("id", id);
   carregarNegocios();
 };
+async function carregarAdminsChat(){
+  const { data, error } = await supabase
+    .from("admins")
+    .select("id, usuario")
+    .eq("ativo", true);
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  destinatario.innerHTML = "";
+
+  (data || []).forEach(a=>{
+    destinatario.innerHTML += `
+      <option value="${a.id}">
+        ${a.usuario}
+      </option>
+    `;
+  });
+}
 
 async function carregarNegocios(){
-  const { data } = await supabase.from("apps").select("*");
 
-  listaNegocios.innerHTML="";
-  appAdmin.innerHTML="";
-  mapaApps={};
+  // 1️⃣ Busca todos os apps
+  const { data: apps } = await supabase
+    .from("apps")
+    .select("*");
 
-  (data||[]).forEach(n=>{
-    mapaApps[n.id]=`${n.nome} (${n.tipo})`;
+  // 2️⃣ Busca todos os vendedores
+  const { data: vendedores } = await supabase
+    .from("usuarios")
+    .select("id, nome")
+    .eq("tipo", "vendedor");
+
+  // 3️⃣ Mapa vendedor_id -> nome
+  const mapaVendedores = {};
+  (vendedores || []).forEach(v=>{
+    mapaVendedores[v.id] = v.nome;
+  });
+
+  listaNegocios.innerHTML = "";
+  appAdmin.innerHTML = "";
+  mapaApps = {};
+
+  (apps || []).forEach(n=>{
+    mapaApps[n.id] = `${n.nome} (${n.tipo})`;
+
+    const criador = n.vendedor_id
+      ? mapaVendedores[n.vendedor_id] || "Vendedor (não encontrado)"
+      : "Super Admin";
 
     const status = n.bloqueado
       ? `<span class="badge warn">BLOQUEADO</span>`
@@ -176,10 +234,13 @@ async function carregarNegocios(){
 
     const link = gerarLinkPublico(n);
 
-    listaNegocios.innerHTML+=`
+    listaNegocios.innerHTML += `
       <div class="card">
         <div>
           <b>${n.nome}</b><br>
+          <small style="opacity:.8">
+            Criado por: <b>${criador}</b>
+          </small><br>
           ${status}<br>
           <a href="${link}" target="_blank">🌍 Site Público</a>
         </div>
@@ -187,14 +248,17 @@ async function carregarNegocios(){
         <div style="display:flex;gap:6px">
           <button class="btn-small" onclick="editarNegocio('${n.id}','${n.nome}')">✏️</button>
           <button class="btn-small danger" onclick="excluirNegocio('${n.id}')">🗑️</button>
-          ${n.bloqueado ? `<button class="btn-small" onclick="desbloquearNegocio('${n.id}')">🔓</button>` : ``}
+          ${n.bloqueado
+            ? `<button class="btn-small" onclick="desbloquearNegocio('${n.id}')">🔓</button>`
+            : ``}
         </div>
       </div>
     `;
 
-    appAdmin.innerHTML+=`<option value="${n.id}">${n.nome}</option>`;
+    appAdmin.innerHTML += `<option value="${n.id}">${n.nome}</option>`;
   });
 }
+
 
 /* ADMINS */
 window.criarAdmin = async ()=>{
@@ -212,18 +276,61 @@ window.criarAdmin = async ()=>{
 
 async function carregarAdmins(){
   const { data } = await supabase.from("admins").select("*");
-  listaAdmins.innerHTML="";
-  (data||[]).forEach(a=>{
-    listaAdmins.innerHTML+=`
+
+  listaAdmins.innerHTML = "";
+
+  (data || []).forEach(a=>{
+    listaAdmins.innerHTML += `
       <div class="card">
         <div>
           <b>${a.usuario}</b><br>
-          <span class="badge">${mapaApps[a.app_id]||"não identificado"}</span>
+          <span class="badge">
+            ${mapaApps[a.app_id] || "não identificado"}
+          </span>
+        </div>
+
+        <div style="display:flex;gap:6px">
+          <button class="btn-small" onclick="editarAdmin('${a.id}','${a.usuario}')">✏️</button>
+          <button class="btn-small danger" onclick="excluirAdmin('${a.id}')">🗑️</button>
         </div>
       </div>
     `;
   });
 }
+
+// ✏️ EDITAR ADMIN
+window.editarAdmin = async (id, usuarioAtual)=>{
+  const novoUsuario = prompt("Novo usuário:", usuarioAtual);
+  if(!novoUsuario) return;
+
+  const novaSenha = prompt("Nova senha (deixe vazio para não alterar):");
+
+  const dados = { usuario: novoUsuario };
+  if(novaSenha){
+    dados.senha = novaSenha;
+  }
+
+  await supabase
+    .from("admins")
+    .update(dados)
+    .eq("id", id);
+
+  carregarAdmins();
+};
+
+// 🗑️ EXCLUIR ADMIN
+window.excluirAdmin = async (id)=>{
+  if(!confirm("Excluir este admin?")) return;
+
+  await supabase
+    .from("admins")
+    .delete()
+    .eq("id", id);
+
+  carregarAdmins();
+};
+
+
 
 /* VENDEDORES */
 window.criarVendedor = async ()=>{
@@ -246,17 +353,77 @@ async function carregarVendedores(){
   const { data } = await supabase.from("usuarios").select("*").eq("tipo","vendedor");
   listaVendedores.innerHTML="";
   (data||[]).forEach(v=>{
-    listaVendedores.innerHTML+=`
-      <div class="card">
-        <div>
-          <b>${v.nome}</b><br>
-          <small>${v.email}</small><br>
-          <span class="badge">Comissão: ${v.comissao_percentual}%</span>
-        </div>
+  const status = v.ativo
+    ? `<span class="badge">ATIVO</span>`
+    : `<span class="badge warn">INATIVO</span>`;
+
+  const botao = v.ativo
+    ? `<button class="btn-small danger" onclick="desativarVendedor('${v.id}')">🚫</button>`
+    : `<button class="btn-small" onclick="ativarVendedor('${v.id}')">✅</button>`;
+
+  listaVendedores.innerHTML += `
+    <div class="card">
+      <div>
+        <b>${v.nome}</b><br>
+        <small>${v.email}</small><br>
+        ${status}
+        <span class="badge">Comissão: ${v.comissao_percentual}%</span>
       </div>
+
+      <div style="display:flex;gap:6px">
+        ${botao}
+      </div>
+    </div>
+  `;
+});
+async function carregarAdminsChat(){
+  const { data, error } = await supabase
+    .from("admins")
+    .select("id, usuario")
+    .eq("ativo", true);
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  destinatario.innerHTML = "";
+
+  (data || []).forEach(a=>{
+    destinatario.innerHTML += `
+      <option value="${a.id}">
+        ${a.usuario}
+      </option>
     `;
   });
 }
+
+
+}
+// 🔒 DESATIVAR VENDEDOR
+window.desativarVendedor = async (id)=>{
+  if(!confirm("Desativar este vendedor?")) return;
+
+  await supabase
+    .from("usuarios")
+    .update({ ativo: false })
+    .eq("id", id);
+
+  carregarVendedores();
+};
+
+// 🔓 ATIVAR VENDEDOR
+window.ativarVendedor = async (id)=>{
+  if(!confirm("Ativar este vendedor?")) return;
+
+  await supabase
+    .from("usuarios")
+    .update({ ativo: true })
+    .eq("id", id);
+
+  carregarVendedores();
+};
+
 </script>
 
 </body>
