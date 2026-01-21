@@ -5,7 +5,6 @@
 <title>Locadora</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -16,7 +15,7 @@
 
 *{
   box-sizing:border-box;
-  font-family:Arial,sans-serif;
+  font-family:'Segoe UI',system-ui,sans-serif;
 }
 
 body{
@@ -33,7 +32,7 @@ body{
 .banner img{
   width:100%;
   height:360px;
-  object-fit:cover;          /* PC */
+  object-fit:cover;      /* PC */
   object-position:center;
   display:block;
 }
@@ -42,7 +41,7 @@ body{
 @media(max-width:600px){
   .banner img{
     height:220px;
-    object-fit:contain;      /* celular */
+    object-fit:contain;  /* celular */
     background:#020617;
   }
 }
@@ -116,73 +115,65 @@ body{
 <section class="lista" id="listaVeiculos"></section>
 
 <script>
-/* ================= APP_ID ================= */
-const params = new URLSearchParams(window.location.search);
-const appId = params.get("app_id");
+/* ================= RESOLVER APP_ID ================= */
+function obterAppId(){
+  // 1️⃣ tenta pela URL
+  const params = new URLSearchParams(window.location.search);
+  const urlAppId = params.get("app_id");
+  if(urlAppId) return urlAppId;
 
-if(!appId){
+  // 2️⃣ tenta pelo localStorage (admin)
+  try{
+    const admin = JSON.parse(localStorage.getItem("admin_logado"));
+    if(admin?.app_id) return admin.app_id;
+  }catch(e){}
+
+  return null;
+}
+
+const app_id = obterAppId();
+
+if(!app_id){
   document.body.innerHTML = `
     <h2 style="padding:30px;text-align:center">
       Locadora não identificada
     </h2>
   `;
 }else{
-  iniciarApp(appId);
+  iniciarApp(app_id);
 }
 
 /* ================= TEMAS ================= */
 const temas = {
-  ano_novo:{
-    cor:"#16a34a",
-    banner:"/temas/ano-novo.jpg"
-  },
   carnaval:{
     cor:"#9333ea",
     banner:"/temas/carnaval.jpg"
   },
-  sao_joao:{
+  "sao-joao":{
     cor:"#ea580c",
     banner:"/temas/sao-joao.jpg"
   },
   natal:{
     cor:"#dc2626",
     banner:"/temas/natal.jpg"
+  },
+  pascoa:{
+    cor:"#16a34a",
+    banner:"/temas/pascoa.jpg"
+  },
+  black:{
+    cor:"#111827",
+    banner:"/temas/black.jpg"
   }
 };
 
-/* ================= TEMA AUTOMÁTICO ================= */
-const temasAutomaticos = {
-  ano_novo:{ inicio:"12-26", fim:"01-05" },
-  carnaval:{ inicio:"02-01", fim:"02-20" },
-  sao_joao:{ inicio:"06-01", fim:"06-30" },
-  natal:{ inicio:"12-01", fim:"12-25" }
-};
-
-function dataHoje(){
-  const d = new Date();
-  return `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function aplicarTemaAutomatico(){
-  const hoje = dataHoje();
-
-  for(const key in temasAutomaticos){
-    const t = temasAutomaticos[key];
-    if(t.inicio <= hoje && hoje <= t.fim){
-      aplicarTemaManual(key);
-      return true;
-    }
-  }
-  return false;
-}
-
-/* ================= APLICAR TEMA ================= */
-function aplicarTemaManual(nome){
+function aplicarTema(nome){
   const t = temas[nome];
-  if(!t) return;
+  if(!t) return false;
 
   document.documentElement.style.setProperty("--primaria", t.cor);
   document.getElementById("bannerImg").src = t.banner;
+  return true;
 }
 
 /* ================= APP ================= */
@@ -195,17 +186,22 @@ async function iniciarApp(APP_ID){
 
   /* CONFIG SITE */
   async function carregarConfig(){
-    const { data } = await sb
+    const { data, error } = await sb
       .from("config_site")
-      .select("nome_site,logo_url,cor_primaria,tema")
+      .select("nome_site,logo_url,cor_primaria,tema_site")
       .eq("app_id", APP_ID)
-      .single();
+      .maybeSingle();
+
+    if(error){
+      console.error(error);
+      return;
+    }
 
     if(!data) return;
 
     document.title = data.nome_site || "Locadora";
 
-    /* padrão */
+    // padrão
     document.documentElement.style.setProperty(
       "--primaria",
       data.cor_primaria || "#e30613"
@@ -215,13 +211,9 @@ async function iniciarApp(APP_ID){
       document.getElementById("bannerImg").src = data.logo_url;
     }
 
-    /* prioridade de tema */
-    if(data.tema && data.tema !== "padrao"){
-      if(data.tema === "automatico"){
-        aplicarTemaAutomatico();
-      }else{
-        aplicarTemaManual(data.tema);
-      }
+    // tema do painel (prioridade)
+    if(data.tema_site && data.tema_site !== "padrao"){
+      aplicarTema(data.tema_site);
     }
   }
 
@@ -231,10 +223,15 @@ async function iniciarApp(APP_ID){
 
   /* VEÍCULOS */
   async function carregarVeiculos(){
-    const { data } = await sb
+    const { data, error } = await sb
       .from("veiculos")
       .select("id,modelo,diaria,status,data_fim,foto_url")
       .eq("app_id", APP_ID);
+
+    if(error){
+      console.error(error);
+      return;
+    }
 
     const lista = document.getElementById("listaVeiculos");
     lista.innerHTML = "";
