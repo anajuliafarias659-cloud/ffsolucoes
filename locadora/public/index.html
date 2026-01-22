@@ -5,6 +5,7 @@
 <title>Locadora</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -23,22 +24,105 @@ body{
   background:var(--bg);
 }
 
-/* ================= BANNER (CERTO AGORA) ================= */
+/* ================= BANNER (SEM DISTORCER) ================= */
 .banner{
   width:100%;
-  height:180px;                 /* altura correta no PC */
-  background-color:#000;
+  background:#000;
   background-repeat:no-repeat;
   background-position:center;
-  background-size:cover;        /* PC: sem faixa preta */
+  background-size:contain;      /* regra: não corta, não estica */
+  min-height:200px;             /* PC: não fica anão */
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  padding:18px 16px;
+  position:relative;
 }
 
-/* 📱 MOBILE */
-@media(max-width:600px){
+@media (min-width:1024px){
   .banner{
-    height:120px;
-    background-size:contain;    /* mobile: não corta */
+    min-height:240px;           /* PC: proporcional */
+    padding:22px 16px;
   }
+}
+
+/* Mobile (tua base tava ok) */
+@media (max-width:600px){
+  .banner{
+    min-height:120px;
+    padding:12px 12px;
+  }
+}
+
+/* Barra com nome + telefone */
+.brand{
+  width:min(1200px, 100%);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(0,0,0,.55);
+  backdrop-filter: blur(6px);
+}
+
+.brand .left{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  min-width:0;
+}
+
+.brand .title{
+  color:#fff;
+  font-size:18px;
+  font-weight:800;
+  line-height:1.1;
+  margin:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.brand .subtitle{
+  color:rgba(255,255,255,.85);
+  font-size:13px;
+  margin:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.brand .actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+
+.pill{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 12px;
+  border-radius:12px;
+  font-weight:800;
+  text-decoration:none;
+  cursor:pointer;
+  border:0;
+  user-select:none;
+  white-space:nowrap;
+}
+
+.pill.primary{
+  background:var(--primaria);
+  color:#fff;
+}
+
+.pill.ghost{
+  background:rgba(255,255,255,.12);
+  color:#fff;
 }
 
 /* ================= LISTA ================= */
@@ -72,9 +156,7 @@ body{
   flex:1;
 }
 
-.card h3{
-  margin:0;
-}
+.card h3{margin:0}
 
 .preco{
   font-weight:700;
@@ -104,12 +186,25 @@ body{
 <body>
 
 <!-- ================= BANNER ================= -->
-<header class="banner" id="banner"></header>
+<header class="banner" id="banner">
+  <div class="brand">
+    <div class="left">
+      <h1 class="title" id="siteNome">Locadora</h1>
+      <p class="subtitle" id="siteFone"> </p>
+    </div>
+
+    <div class="actions">
+      <a class="pill ghost" id="btnLigar" href="#" style="display:none;">📞 Ligar</a>
+      <a class="pill primary" id="btnWhats" href="#" target="_blank" rel="noopener" style="display:none;">💬 WhatsApp</a>
+    </div>
+  </div>
+</header>
 
 <!-- ================= LISTA ================= -->
 <section class="lista" id="listaVeiculos"></section>
 
 <script>
+/* ================= APP_ID ================= */
 const params = new URLSearchParams(window.location.search);
 const appId = params.get("app_id");
 
@@ -123,6 +218,17 @@ if(!appId){
   iniciarApp(appId);
 }
 
+function soNumeros(str){
+  return (str || "").toString().replace(/\D/g, "");
+}
+
+function formatarTelefoneBr(num){
+  const n = soNumeros(num);
+  // tenta formatar +55 (se vier sem)
+  const with55 = n.startsWith("55") ? n : ("55" + n);
+  return with55;
+}
+
 async function iniciarApp(APP_ID){
 
   const sb = supabase.createClient(
@@ -130,24 +236,61 @@ async function iniciarApp(APP_ID){
     "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
   );
 
+  /* CONFIG SITE */
   async function carregarConfig(){
-    const { data } = await sb
+    const { data, error } = await sb
       .from("config_site")
-      .select("nome_site,banner_url,cor_primaria")
+      .select("*")
       .eq("app_id", APP_ID)
       .single();
 
-    if(!data) return;
+    if(error || !data) return;
 
+    // título / cor
     document.title = data.nome_site || "Locadora";
-    document.documentElement.style.setProperty(
-      "--primaria",
-      data.cor_primaria || "#e30613"
-    );
+    document.documentElement.style.setProperty("--primaria", data.cor_primaria || "#e30613");
 
+    // nome no banner
+    document.getElementById("siteNome").textContent = data.nome_site || "Locadora";
+
+    // pega telefone de vários campos possíveis
+    const foneRaw =
+      data.celular ||
+      data.telefone ||
+      data.whatsapp ||
+      data.contato ||
+      data.fone ||
+      "";
+
+    const siteFone = document.getElementById("siteFone");
+    if(foneRaw){
+      siteFone.textContent = `📱 ${foneRaw}`;
+    } else {
+      siteFone.textContent = ""; // se não tiver, some
+    }
+
+    // botões ligar/whats
+    const btnLigar = document.getElementById("btnLigar");
+    const btnWhats = document.getElementById("btnWhats");
+
+    if(foneRaw){
+      const tel = formatarTelefoneBr(foneRaw);
+      btnLigar.href = `tel:+${tel}`;
+      btnLigar.style.display = "inline-flex";
+
+      btnWhats.href = `https://wa.me/${tel}`;
+      btnWhats.style.display = "inline-flex";
+    } else {
+      btnLigar.style.display = "none";
+      btnWhats.style.display = "none";
+    }
+
+    // banner (mata cache)
     if(data.banner_url){
       document.getElementById("banner").style.backgroundImage =
-        `url('${data.banner_url}?v=${Date.now()}')`; // mata cache
+        `url('${data.banner_url}?v=${Date.now()}')`;
+    } else {
+      document.getElementById("banner").style.backgroundImage = "none";
     }
   }
 
@@ -155,6 +298,7 @@ async function iniciarApp(APP_ID){
     return new Date(d + "T00:00:00").toLocaleDateString("pt-BR");
   }
 
+  /* VEÍCULOS */
   async function carregarVeiculos(){
     const { data } = await sb
       .from("veiculos")
@@ -174,7 +318,7 @@ async function iniciarApp(APP_ID){
 
       lista.innerHTML += `
         <div class="card">
-          <img src="${v.foto_url || 'https://via.placeholder.com/400x200?text=Veículo'}">
+          <img src="${v.foto_url || 'https://via.placeholder.com/400x200?text=Veículo'}" alt="">
           <div class="info">
             <h3>${v.modelo}</h3>
             <div class="preco">R$ ${v.diaria} / diária</div>
