@@ -2,174 +2,152 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Locadora</title>
+<title>Configurar Locadora</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-:root{
-  --primaria:#e30613;
-  --bg:#f4f4f4;
-}
-
-*{box-sizing:border-box;font-family:Arial,sans-serif}
-
 body{
-  margin:0;
-  background:var(--bg);
-}
-
-/* THEMES */
-body.tema-natal{--bg:#fff5f5}
-body.tema-sao-joao{--bg:#fff7ed}
-body.tema-black{--bg:#020617;color:#fff}
-
-/* BANNER */
-.banner img{
-  width:100%;
-  height:360px;
-  object-fit:cover;
-  display:block;
-}
-@media(max-width:600px){
-  .banner img{height:220px}
-}
-
-/* LISTA */
-.lista{
-  max-width:1200px;
-  margin:20px auto;
-  padding:16px;
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
-  gap:20px;
-}
-
-.card{
-  background:#fff;
-  border-radius:18px;
-  overflow:hidden;
-  box-shadow:0 10px 25px rgba(0,0,0,.12);
-  display:flex;
-  flex-direction:column;
-}
-
-body.tema-black .card{background:#0f172a}
-
-.card img{
-  width:100%;
-  height:180px;
-  object-fit:contain;
-  background:#f1f1f1;
-}
-
-.card .info{padding:14px;flex:1}
-.preco{font-weight:700;margin:6px 0}
-
-.status.disponivel{color:#16a34a;font-weight:700}
-.status.alugado{color:#e30613;font-weight:700}
-
-.btn{
-  margin:12px;
-  background:var(--primaria);
+  background:#020617;
   color:#fff;
-  padding:12px;
+  font-family:'Segoe UI',system-ui,sans-serif;
+}
+.container{
+  max-width:520px;
+  margin:40px auto;
+  padding:24px;
+  background:#0f172a;
+  border-radius:18px;
+}
+label{margin-top:14px;display:block}
+input,select,button{
+  width:100%;
+  padding:14px;
+  margin-top:6px;
   border-radius:12px;
-  text-align:center;
-  font-weight:700;
-  cursor:pointer;
+  border:none;
+}
+input,select{background:#020617;color:#fff}
+button{background:#22c55e;font-weight:700;margin-top:22px;cursor:pointer}
+.preview{
+  margin-top:10px;
+  width:100%;
+  max-height:180px;
+  object-fit:contain;
+  display:none;
 }
 </style>
 </head>
 
 <body>
 
-<header class="banner">
-  <img id="bannerImg" src="https://via.placeholder.com/1600x400?text=Locadora">
-</header>
+<script>
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin?.app_id){
+  alert("Sessão expirada");
+  location.href="../auth/login.html";
+}
+const app_id = admin.app_id;
+</script>
 
-<section class="lista" id="listaVeiculos"></section>
+<div class="container">
+  <h2>🚗 Configurar Locadora</h2>
+
+  <label>Nome da locadora</label>
+  <input id="nomeSite">
+
+  <label>Cor primária</label>
+  <input type="color" id="corPrimaria">
+
+  <label>Tema</label>
+  <select id="temaSite">
+    <option value="padrao">Padrão</option>
+    <option value="natal">🎄 Natal</option>
+    <option value="sao-joao">🔥 São João</option>
+    <option value="black">🖤 Black</option>
+  </select>
+
+  <label>Banner</label>
+  <input type="file" id="bannerInput" accept="image/*">
+  <img id="bannerPreview" class="preview">
+
+  <button onclick="salvar()">Salvar</button>
+</div>
 
 <script>
-const params = new URLSearchParams(location.search);
-const APP_ID = params.get("app_id");
-
-if(!APP_ID){
-  document.body.innerHTML="<h2 style='padding:30px;text-align:center'>Locadora não identificada</h2>";
-  throw "";
-}
-
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-async function carregarConfig(){
+const nomeSite=document.getElementById("nomeSite");
+const corPrimaria=document.getElementById("corPrimaria");
+const temaSite=document.getElementById("temaSite");
+const bannerInput=document.getElementById("bannerInput");
+const bannerPreview=document.getElementById("bannerPreview");
+
+bannerInput.onchange=()=>{
+  const f=bannerInput.files[0];
+  if(f){
+    bannerPreview.src=URL.createObjectURL(f);
+    bannerPreview.style.display="block";
+  }
+};
+
+async function uploadBanner(file){
+  if(!file) return null;
+  const ext=file.name.split(".").pop();
+  const path=`${app_id}/${Date.now()}.${ext}`;
+
+  await sb.storage.from("banners").upload(path,file);
+  return sb.storage.from("banners").getPublicUrl(path).data.publicUrl;
+}
+
+async function salvar(){
+  let banner_url=null;
+  if(bannerInput.files[0]){
+    banner_url=await uploadBanner(bannerInput.files[0]);
+  }
+
+  const payload={
+    app_id,
+    nome_site:nomeSite.value,
+    cor_primaria:corPrimaria.value,
+    tema_site:temaSite.value
+  };
+  if(banner_url) payload.banner_url=banner_url;
+
   const { data } = await sb
     .from("config_site")
-    .select("nome_site,banner_url,cor_primaria,tema_site")
-    .eq("app_id",APP_ID)
-    .single();
+    .select("id")
+    .eq("app_id",app_id)
+    .maybeSingle();
+
+  data
+    ? await sb.from("config_site").update(payload).eq("app_id",app_id)
+    : await sb.from("config_site").insert(payload);
+
+  alert("Salvo 🚀");
+}
+
+(async()=>{
+  const { data } = await sb
+    .from("config_site")
+    .select("nome_site,cor_primaria,tema_site,banner_url")
+    .eq("app_id",app_id)
+    .maybeSingle();
 
   if(!data) return;
 
-  document.title = data.nome_site || "Locadora";
-  document.documentElement.style.setProperty("--primaria", data.cor_primaria || "#e30613");
+  nomeSite.value=data.nome_site||"";
+  corPrimaria.value=data.cor_primaria||"#e30613";
+  temaSite.value=data.tema_site||"padrao";
 
   if(data.banner_url){
-    document.getElementById("bannerImg").src = data.banner_url;
+    bannerPreview.src=data.banner_url;
+    bannerPreview.style.display="block";
   }
-
-  if(data.tema_site && data.tema_site !== "padrao"){
-    document.body.classList.add("tema-"+data.tema_site);
-  }
-}
-
-function formatarData(d){
-  return new Date(d+"T00:00:00").toLocaleDateString("pt-BR");
-}
-
-async function carregarVeiculos(){
-  const { data } = await sb
-    .from("veiculos")
-    .select("id,modelo,diaria,status,data_fim,foto_url")
-    .eq("app_id",APP_ID);
-
-  const lista = document.getElementById("listaVeiculos");
-  lista.innerHTML="";
-
-  if(!data?.length){
-    lista.innerHTML="<p>Nenhum veículo cadastrado.</p>";
-    return;
-  }
-
-  data.forEach(v=>{
-    lista.innerHTML+=`
-      <div class="card">
-        <img src="${v.foto_url || 'https://via.placeholder.com/400x200'}">
-        <div class="info">
-          <h3>${v.modelo}</h3>
-          <div class="preco">R$ ${v.diaria} / diária</div>
-          ${
-            v.status==="alugado"
-              ? `<div class="status alugado">🔒 Alugado até ${formatarData(v.data_fim)}</div>`
-              : `<div class="status disponivel">✅ Disponível</div>`
-          }
-        </div>
-        <div class="btn" onclick="verVeiculo('${v.id}')">Ver detalhes</div>
-      </div>
-    `;
-  });
-}
-
-window.verVeiculo=id=>{
-  location.href=`veiculo.html?app_id=${APP_ID}&id=${id}`;
-};
-
-(async()=>{
-  await carregarConfig();
-  await carregarVeiculos();
 })();
 </script>
 
