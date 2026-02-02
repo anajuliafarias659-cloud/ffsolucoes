@@ -53,6 +53,14 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 }
 .preco{color:#22c55e;font-weight:bold}
 small{opacity:.7}
+.sem-foto{
+  height:110px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  opacity:.3;
+  font-size:12px;
+}
 </style>
 </head>
 
@@ -68,7 +76,7 @@ small{opacity:.7}
 <div class="box">
   <h2>➕ Cadastrar Roupa</h2>
 
-  <input id="nome" placeholder="Nome da peça (ex: Camisa Nike)">
+  <input id="nome" placeholder="Nome da peça">
   <input id="preco" type="number" step="0.01" placeholder="Preço">
   <input id="estoque" type="number" placeholder="Estoque total">
 
@@ -83,20 +91,20 @@ small{opacity:.7}
 
   <div style="margin-top:10px">
     <b>Tamanhos</b><br>
-    <label><input type="checkbox" value="PP"> PP</label>
-    <label><input type="checkbox" value="P"> P</label>
-    <label><input type="checkbox" value="M"> M</label>
-    <label><input type="checkbox" value="G"> G</label>
-    <label><input type="checkbox" value="GG"> GG</label>
-    <label><input type="checkbox" value="XG"> XG</label>
+    <label><input type="checkbox" class="tam" value="PP"> PP</label>
+    <label><input type="checkbox" class="tam" value="P"> P</label>
+    <label><input type="checkbox" class="tam" value="M"> M</label>
+    <label><input type="checkbox" class="tam" value="G"> G</label>
+    <label><input type="checkbox" class="tam" value="GG"> GG</label>
+    <label><input type="checkbox" class="tam" value="XG"> XG</label>
   </div>
 
   <div style="margin-top:10px">
     <b>Cores</b><br>
-    <label><input type="checkbox" value="Preto"> Preto</label>
-    <label><input type="checkbox" value="Branco"> Branco</label>
-    <label><input type="checkbox" value="Azul"> Azul</label>
-    <label><input type="checkbox" value="Vermelho"> Vermelho</label>
+    <label><input type="checkbox" class="cor" value="Preto"> Preto</label>
+    <label><input type="checkbox" class="cor" value="Branco"> Branco</label>
+    <label><input type="checkbox" class="cor" value="Azul"> Azul</label>
+    <label><input type="checkbox" class="cor" value="Vermelho"> Vermelho</label>
   </div>
 
   <input id="foto" type="file" accept="image/*">
@@ -113,71 +121,80 @@ small{opacity:.7}
 </div>
 
 <script>
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin){ location.href="login.html"; }
+// ================== LOGIN SIMPLES ==================
+const admin = JSON.parse(localStorage.getItem("admin_logado")) || {
+  app_id: "loja_roupas_01"
+};
+// Se quiser forçar login depois, descomenta:
+// if(!admin) location.href="login.html";
 
+// ================== SUPABASE ==================
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-function getChecked(){
-  return [...document.querySelectorAll("input[type=checkbox]:checked")]
-    .map(i=>i.value);
-}
-
+// ================== CADASTRO ==================
 async function cadastrar(){
-  if(!nome.value || preco.value<=0) return alert("Preencha corretamente");
-
-  let imagem=null;
-  if(foto.files[0]){
-    const path=`${admin.app_id}/${Date.now()}_${foto.files[0].name}`;
-    await sb.storage.from("produtos").upload(path,foto.files[0],{upsert:true});
-    imagem=sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+  if(!nome.value || preco.value <= 0){
+    alert("Preencha nome e preço corretamente");
+    return;
   }
 
-  const checks=getChecked();
-  const tamanhos=checks.filter(t=>["PP","P","M","G","GG","XG"].includes(t));
-  const cores=checks.filter(c=>!tamanhos.includes(c));
+  const tamanhos = [...document.querySelectorAll(".tam:checked")].map(i=>i.value);
+  const cores = [...document.querySelectorAll(".cor:checked")].map(i=>i.value);
+
+  let imagem = null;
+  if(foto.files[0]){
+    const path = `${admin.app_id}/${Date.now()}_${foto.files[0].name}`;
+    await sb.storage.from("produtos").upload(path, foto.files[0], { upsert:true });
+    imagem = sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+  }
 
   await sb.from("produtos").insert({
     app_id: admin.app_id,
     nome: nome.value,
     preco: Number(preco.value),
-    estoque: Number(estoque.value),
+    estoque: Number(estoque.value || 0),
     categoria: categoria.value,
     tamanhos,
     cores,
     imagem,
-    ativo:true
+    ativo: true
   });
 
-  nome.value=preco.value=estoque.value="";
+  nome.value = preco.value = estoque.value = "";
   document.querySelectorAll("input[type=checkbox]").forEach(i=>i.checked=false);
+  foto.value = "";
+
   carregar();
 }
 
+// ================== LISTAGEM ==================
 async function carregar(){
-  const {data}=await sb.from("produtos")
+  const { data } = await sb.from("produtos")
     .select("*")
-    .eq("app_id",admin.app_id)
+    .eq("app_id", admin.app_id)
     .order("categoria");
 
-  lista.innerHTML=data.map(p=>`
+  lista.innerHTML = (data || []).map(p=>`
     <div class="produto">
-      ${p.imagem?`<img src="${p.imagem}">`:""}
+      ${p.imagem 
+        ? `<img src="${p.imagem}">`
+        : `<div class="sem-foto">Sem foto</div>`}
       <b>${p.nome}</b>
       <div class="preco">R$ ${p.preco.toFixed(2)}</div>
       <small>${(p.tamanhos||[]).join(", ")} | ${(p.cores||[]).join(", ")}</small>
-      <br>
+      <br><br>
       <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
     </div>
   `).join("");
 }
 
+// ================== EXCLUIR ==================
 async function excluir(id){
-  if(confirm("Excluir peça?")){
-    await sb.from("produtos").delete().eq("id",id);
+  if(confirm("Excluir esta peça?")){
+    await sb.from("produtos").delete().eq("id", id);
     carregar();
   }
 }
