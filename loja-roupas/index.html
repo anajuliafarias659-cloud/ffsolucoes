@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -10,39 +9,30 @@
 
 <style>
 *{box-sizing:border-box}
-body{
-  margin:0;
-  font-family:Arial;
-  background:#020617;
-  color:#fff;
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+
+/* BANNER */
+.banner{
+  width:100%;
+  height:260px;
+  background:#0f172a;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.banner img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
 }
 
 .topo{
-  background:#0f172a;
+  background:#020617;
   padding:20px;
   text-align:center;
 }
 
-.container{
-  max-width:1200px;
-  margin:30px auto;
-  padding:0 20px;
-}
-
-.filtros{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-bottom:20px;
-}
-
-select,input{
-  padding:12px;
-  border-radius:10px;
-  border:none;
-  background:#0f172a;
-  color:#fff;
-}
+.container{max-width:1200px;margin:30px auto;padding:0 20px}
 
 .grid{
   display:grid;
@@ -64,134 +54,78 @@ select,input{
   border-radius:12px;
 }
 
-.sem-foto{
-  height:180px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  opacity:.3;
-  font-size:14px;
-}
-
-.nome{
-  margin:10px 0 5px;
-  font-weight:bold;
-}
-
-.preco{
-  color:#22c55e;
-  font-size:18px;
-  font-weight:bold;
-}
-
+.preco{color:#22c55e;font-weight:bold}
 small{opacity:.7}
-
-.botao{
-  margin-top:10px;
-  padding:10px;
-  border-radius:10px;
-  border:none;
-  background:#22c55e;
-  color:#000;
-  font-weight:bold;
-  cursor:pointer;
-  width:100%;
-}
 </style>
 </head>
 
 <body>
 
+<!-- BANNER -->
+<div id="banner" class="banner"></div>
+
 <div class="topo">
-  <h1>👕 Loja de Roupas</h1>
-  <p>Confira nossas peças disponíveis</p>
+  <h1 id="nomeLoja">👕 Loja de Roupas</h1>
+  <p id="descLoja">Confira nossas peças disponíveis</p>
 </div>
 
 <div class="container">
-
-  <!-- FILTROS -->
-  <div class="filtros">
-    <input id="busca" placeholder="Buscar produto..." oninput="filtrar()">
-
-    <select id="categoria" onchange="filtrar()">
-      <option value="">Todas categorias</option>
-      <option>Camisetas</option>
-      <option>Calças</option>
-      <option>Bermudas</option>
-      <option>Vestidos</option>
-      <option>Casacos</option>
-      <option>Outros</option>
-    </select>
-  </div>
-
-  <!-- PRODUTOS -->
   <div id="produtos" class="grid"></div>
-
 </div>
 
 <script>
-// ================== CONFIG ==================
-const APP_ID = "loja_roupas_01";
-
+/* ========= SUPABASE ========= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let lista = [];
+/* ========= APP_ID ========= */
+const params = new URLSearchParams(window.location.search);
+const APP_ID = params.get("app");
 
-// ================== CARREGAR ==================
-async function carregar(){
+if(!APP_ID){
+  document.body.innerHTML = "<h2 style='padding:20px'>App não informado</h2>";
+  throw new Error("app_id ausente");
+}
+
+/* ========= SITE CONFIG ========= */
+async function carregarConfig(){
+  const { data } = await sb
+    .from("site_config")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .maybeSingle();
+
+  if(data){
+    if(data.banner){
+      banner.innerHTML = `<img src="${data.banner}">`;
+    }
+    if(data.nome) nomeLoja.innerText = data.nome;
+    if(data.descricao) descLoja.innerText = data.descricao;
+  }
+}
+
+/* ========= PRODUTOS ========= */
+async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
     .select("*")
     .eq("ativo", true)
-    .eq("app_id", APP_ID)
-    .order("nome");
+    .eq("app_id", APP_ID);
 
-  lista = data || [];
-  render(lista);
-}
-
-// ================== RENDER ==================
-function render(dados){
-  produtos.innerHTML = dados.map(p=>`
+  produtos.innerHTML = (data || []).map(p=>`
     <div class="card">
-      ${p.imagem
-        ? `<img src="${p.imagem}">`
-        : `<div class="sem-foto">Sem imagem</div>`}
-
-      <div class="nome">${p.nome}</div>
+      ${p.imagem ? `<img src="${p.imagem}">` : ""}
+      <b>${p.nome}</b>
       <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-      <small>${p.categoria}</small><br>
-      <small>${(p.tamanhos||[]).join(", ")} | ${(p.cores||[]).join(", ")}</small>
-
-      <button class="botao" onclick="comprar('${p.nome}')">
-        Comprar
-      </button>
+      <small>${p.categoria}</small>
     </div>
   `).join("");
 }
 
-// ================== FILTRO ==================
-function filtrar(){
-  const txt = busca.value.toLowerCase();
-  const cat = categoria.value;
-
-  const filtrado = lista.filter(p =>
-    (!txt || p.nome.toLowerCase().includes(txt)) &&
-    (!cat || p.categoria === cat)
-  );
-
-  render(filtrado);
-}
-
-// ================== AÇÃO ==================
-function comprar(nome){
-  alert(`Produto selecionado: ${nome}\n(Conectar com WhatsApp ou checkout depois)`);
-}
-
-carregar();
+carregarConfig();
+carregarProdutos();
 </script>
 
 </body>
