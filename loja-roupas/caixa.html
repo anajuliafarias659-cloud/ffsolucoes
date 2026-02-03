@@ -18,7 +18,7 @@ input,button{
   padding:12px;
   margin-top:10px;
   border-radius:10px;
-  border:none;
+  border:none
 }
 input{background:#020617;color:#fff}
 
@@ -38,20 +38,19 @@ button{background:#22c55e;font-weight:bold}
   color:#22c55e
 }
 
-/* autocomplete */
 .sugestoes{
   background:#020617;
   border:1px solid #334155;
   border-radius:8px;
   max-height:150px;
-  overflow-y:auto;
+  overflow-y:auto
 }
 .sugestoes div{
   padding:8px;
-  cursor:pointer;
+  cursor:pointer
 }
 .sugestoes div:hover{
-  background:#334155;
+  background:#334155
 }
 </style>
 </head>
@@ -69,7 +68,7 @@ button{background:#22c55e;font-weight:bold}
   <div class="box">
     <h3>🛒 Registrar Venda</h3>
 
-    <input id="produto" placeholder="Digite o nome do produto">
+    <input id="produtoInput" placeholder="Digite o produto">
     <div id="listaProdutos" class="sugestoes"></div>
 
     <input id="preco" type="number" step="0.01" placeholder="Preço">
@@ -90,26 +89,45 @@ button{background:#22c55e;font-weight:bold}
 </div>
 
 <script>
+/* ===== SESSÃO ===== */
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin || !admin.app_id){
+  alert("Sessão inválida");
+  location.href = "../auth/login.html";
+}
+const app_id = admin.app_id;
+
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const produtoInput = document.getElementById("produto");
+/* ===== ELEMENTOS ===== */
+const produtoInput = document.getElementById("produtoInput");
 const listaProdutos = document.getElementById("listaProdutos");
 const precoInput = document.getElementById("preco");
+const quantidadeInput = document.getElementById("quantidade");
+const pagoInput = document.getElementById("pago");
 const lista = document.getElementById("lista");
 const total = document.getElementById("total");
 
+/* ===== PRODUTOS ===== */
 let produtos = [];
 let produtoSelecionado = null;
 
-/* ===== CARREGAR PRODUTOS ===== */
 async function carregarProdutos(){
-  const { data } = await sb
+  const { data, error } = await sb
     .from("produtos")
     .select("id,nome,preco")
+    .eq("app_id", app_id)
+    .eq("ativo", true)
     .order("nome");
+
+  if(error){
+    console.error(error);
+    return;
+  }
 
   produtos = data || [];
 }
@@ -122,67 +140,68 @@ produtoInput.addEventListener("input", ()=>{
 
   if(!termo) return;
 
-  const filtrados = produtos.filter(p =>
-    p.nome.toLowerCase().includes(termo)
-  );
-
-  filtrados.forEach(p=>{
-    const div = document.createElement("div");
-    div.innerText = `${p.nome} — R$ ${Number(p.preco).toFixed(2)}`;
-    div.onclick = ()=>{
-      produtoSelecionado = p;
-      produtoInput.value = p.nome;
-      precoInput.value = p.preco;
-      listaProdutos.innerHTML = "";
-    };
-    listaProdutos.appendChild(div);
-  });
+  produtos
+    .filter(p => p.nome.toLowerCase().includes(termo))
+    .forEach(p=>{
+      const div = document.createElement("div");
+      div.textContent = `${p.nome} — R$ ${Number(p.preco).toFixed(2)}`;
+      div.onclick = ()=>{
+        produtoSelecionado = p;
+        produtoInput.value = p.nome;
+        precoInput.value = p.preco;
+        listaProdutos.innerHTML = "";
+      };
+      listaProdutos.appendChild(div);
+    });
 });
 
-/* ===== VENDER ===== */
-async function vender(){
-  if(!produtoSelecionado){
-    alert("Selecione um produto da lista");
-    return;
-  }
-
-  const q = Number(quantidade.value);
-  const pagoVal = Number(pago.value);
-
-  if(q<=0 || pagoVal<=0){
-    alert("Dados inválidos");
-    return;
-  }
-
-  await sb.from("caixa").insert({
-    tipo:"entrada",
-    descricao:`Venda: ${produtoSelecionado.nome} x${q}`,
-    valor:pagoVal
-  });
-
-  produtoInput.value="";
-  precoInput.value="";
-  quantidade.value=1;
-  pago.value="";
-  produtoSelecionado=null;
-
-  carregarCaixa();
-}
-
-/* ===== FECHAMENTO POR TEMPO ===== */
+/* ===== FECHAMENTO ===== */
 async function getUltimoFechamento(){
   const { data } = await sb
     .from("caixa_fechamento")
     .select("fechado_em")
-    .order("id",{ascending:false})
+    .eq("app_id", app_id)
+    .order("id", { ascending:false })
     .limit(1);
 
   return data && data.length ? data[0].fechado_em : null;
 }
 
+/* ===== VENDA ===== */
+async function vender(){
+  if(!produtoSelecionado){
+    alert("Selecione um produto");
+    return;
+  }
+
+  const q = Number(quantidadeInput.value);
+  const pago = Number(pagoInput.value);
+
+  if(q <= 0 || pago <= 0){
+    alert("Dados inválidos");
+    return;
+  }
+
+  await sb.from("caixa").insert({
+    app_id,
+    tipo: "entrada",
+    descricao: `Venda: ${produtoSelecionado.nome} x${q}`,
+    valor: pago
+  });
+
+  produtoSelecionado = null;
+  produtoInput.value = "";
+  precoInput.value = "";
+  quantidadeInput.value = 1;
+  pagoInput.value = "";
+
+  carregarCaixa();
+}
+
+/* ===== CAIXA ===== */
 async function carregarCaixa(){
   const fechadoEm = await getUltimoFechamento();
-  let query = sb.from("caixa").select("*");
+  let query = sb.from("caixa").select("*").eq("app_id", app_id);
 
   if(fechadoEm){
     query = query.gt("created_at", fechadoEm);
@@ -190,8 +209,8 @@ async function carregarCaixa(){
 
   const { data } = await query.order("created_at");
 
-  let soma = 0;
   lista.innerHTML = "";
+  let soma = 0;
 
   if(!data || !data.length){
     lista.innerHTML = `<div class="item"><span>📭 Caixa vazio</span><span>-</span></div>`;
@@ -212,16 +231,16 @@ async function carregarCaixa(){
   total.innerText = `Saldo: R$ ${soma.toFixed(2)}`;
 }
 
+/* ===== FECHAR CAIXA ===== */
 async function fecharCaixa(){
   const fechadoEm = await getUltimoFechamento();
-  let query = sb.from("caixa").select("*");
+  let query = sb.from("caixa").select("*").eq("app_id", app_id);
 
   if(fechadoEm){
     query = query.gt("created_at", fechadoEm);
   }
 
   const { data } = await query.order("created_at");
-
   if(!data || !data.length){
     alert("Nada para fechar");
     return;
@@ -230,9 +249,10 @@ async function fecharCaixa(){
   let totalRecebido = 0;
   data.forEach(m => totalRecebido += Number(m.valor));
 
-  const ultimo = data[data.length-1].created_at;
+  const ultimo = data[data.length - 1].created_at;
 
   await sb.from("caixa_fechamento").insert({
+    app_id,
     total_recebido: totalRecebido,
     total_vendas: data.length,
     fechado_em: ultimo
