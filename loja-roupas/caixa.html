@@ -59,6 +59,22 @@ const sb = supabase.createClient(
 const lista = document.getElementById("lista");
 const total = document.getElementById("total");
 
+/* ===== ÚLTIMO FECHAMENTO ===== */
+async function getUltimoFechamento(){
+  const { data, error } = await sb
+    .from("caixa_fechamento")
+    .select("fechado_em")
+    .order("id", { ascending:false })
+    .limit(1);
+
+  if(error){
+    console.error("ERRO FECHAMENTO:", error);
+    return null;
+  }
+
+  return data && data.length ? data[0].fechado_em : null;
+}
+
 /* ===== VENDA ===== */
 async function vender(){
   const nome = produto.value.trim();
@@ -91,29 +107,20 @@ async function vender(){
   carregarCaixa();
 }
 
-/* ===== CARREGAR CAIXA (POR TEMPO) ===== */
+/* ===== CARREGAR CAIXA ===== */
 async function carregarCaixa(){
-  const { data: ultimoFechamento, error: e1 } = await sb
-    .from("caixa_fechamento")
-    .select("fechado_em")
-    .order("id", { ascending:false })
-    .limit(1);
-
-  if(e1){
-    console.error(e1);
-    return;
-  }
+  const ultimoFechadoEm = await getUltimoFechamento();
 
   let query = sb.from("caixa").select("*");
 
-  if(ultimoFechamento && ultimoFechamento.length && ultimoFechamento[0].fechado_em){
-    query = query.gt("created_at", ultimoFechamento[0].fechado_em);
+  if(ultimoFechadoEm){
+    query = query.gt("created_at", ultimoFechadoEm);
   }
 
   const { data, error } = await query.order("created_at");
 
   if(error){
-    console.error(error);
+    console.error("ERRO CAIXA:", error);
     alert(error.message);
     return;
   }
@@ -136,10 +143,15 @@ async function carregarCaixa(){
 
 /* ===== FECHAR CAIXA ===== */
 async function fecharCaixa(){
-  const { data: movimentos, error } = await sb
-    .from("caixa")
-    .select("*")
-    .order("created_at");
+  const ultimoFechadoEm = await getUltimoFechamento();
+
+  let query = sb.from("caixa").select("*");
+
+  if(ultimoFechadoEm){
+    query = query.gt("created_at", ultimoFechadoEm);
+  }
+
+  const { data: movimentos, error } = await query.order("created_at");
 
   if(error){
     console.error(error);
@@ -171,7 +183,7 @@ async function fecharCaixa(){
     return;
   }
 
-  carregarCaixa(); // zera e NÃO volta
+  carregarCaixa(); // zera e permanece zerado
 }
 
 carregarCaixa();
