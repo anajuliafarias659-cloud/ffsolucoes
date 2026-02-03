@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -13,8 +14,8 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .voltar{background:#334155;color:#fff;border:none;padding:10px 16px;border-radius:10px;font-weight:bold}
 .container{padding:32px;max-width:900px;margin:auto}
 .box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
-input,select,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
-input,select{background:#020617;color:#fff}
+input,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
+input{background:#020617;color:#fff}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
 .fechar{background:#2563eb}
 .item{display:flex;justify-content:space-between;border-bottom:1px solid #1e293b;padding:8px 0}
@@ -35,21 +36,16 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 
 <div class="container">
 
-  <!-- VENDA -->
   <div class="box">
     <h3>🛒 Registrar Venda</h3>
-
-    <input id="produtoInput" placeholder="Produto">
-    <input id="precoInput" type="number" step="0.01" placeholder="Preço">
-    <input id="quantidadeInput" type="number" min="1" value="1">
-    <input id="valorPago" type="number" step="0.01" placeholder="Valor pago">
-
+    <input id="produto" placeholder="Produto">
+    <input id="preco" type="number" step="0.01" placeholder="Preço">
+    <input id="qtd" type="number" value="1" min="1">
+    <input id="pago" type="number" step="0.01" placeholder="Valor pago">
     <div id="trocoInfo"></div>
-
-    <button onclick="vender()">Registrar Venda</button>
+    <button onclick="registrarVenda()">Registrar Venda</button>
   </div>
 
-  <!-- CAIXA -->
   <div class="box">
     <h3>📄 Caixa Atual</h3>
     <div id="lista"></div>
@@ -60,41 +56,33 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== SESSÃO ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin){ alert("Sessão inválida"); location.href="../auth/login.html"; }
 const app_uuid = admin.app_id;
 
-/* ===== ELEMENTOS ===== */
+const produto = document.getElementById("produto");
+const preco = document.getElementById("preco");
+const qtd = document.getElementById("qtd");
+const pago = document.getElementById("pago");
 const lista = document.getElementById("lista");
 const total = document.getElementById("total");
-const produtoInput = document.getElementById("produtoInput");
-const precoInput = document.getElementById("precoInput");
-const quantidadeInput = document.getElementById("quantidadeInput");
-const valorPago = document.getElementById("valorPago");
 const trocoInfo = document.getElementById("trocoInfo");
 
-/* ===== TROCO ===== */
-valorPago.addEventListener("input", calcularTroco);
-quantidadeInput.addEventListener("input", calcularTroco);
+pago.addEventListener("input", calcularTroco);
+qtd.addEventListener("input", calcularTroco);
 
 function calcularTroco(){
-  const preco = Number(precoInput.value);
-  const q = Number(quantidadeInput.value);
-  const pago = Number(valorPago.value);
-  if(!preco || !q || !pago){ trocoInfo.innerText=""; return; }
-
-  const diff = pago - (preco*q);
-  if(diff>0){
+  const diff = pago.value - (preco.value * qtd.value);
+  if(!pago.value) return trocoInfo.innerText="";
+  if(diff > 0){
     trocoInfo.className="troco-ok";
     trocoInfo.innerText=`Troco: R$ ${diff.toFixed(2)}`;
-  }else if(diff<0){
+  }else if(diff < 0){
     trocoInfo.className="troco-desc";
     trocoInfo.innerText=`Desconto: R$ ${Math.abs(diff).toFixed(2)}`;
   }else{
@@ -103,60 +91,46 @@ function calcularTroco(){
   }
 }
 
-/* ===== VENDA ===== */
-async function vender(){
-  const nome = produtoInput.value.trim();
-  const preco = Number(precoInput.value);
-  const q = Number(quantidadeInput.value);
-  const pago = Number(valorPago.value);
-
-  if(!nome || preco<=0 || q<=0 || pago<=0){
-    alert("Preencha todos os campos");
+async function registrarVenda(){
+  if(!produto.value || preco.value<=0 || pago.value<=0){
+    alert("Preencha tudo");
     return;
   }
 
-  await sb.from("caixa").insert({
+  const { error } = await sb.from("caixa").insert({
     app_id: app_uuid,
     tipo: "entrada",
-    descricao: `Venda: ${nome} x${q}`,
-    valor: pago
+    descricao: `Venda: ${produto.value} x${qtd.value}`,
+    valor: pago.value
   });
 
-  produtoInput.value="";
-  precoInput.value="";
-  quantidadeInput.value=1;
-  valorPago.value="";
-  trocoInfo.innerText="";
+  if(error){ alert("Erro ao registrar venda"); return; }
 
+  produto.value=""; preco.value=""; qtd.value=1; pago.value=""; trocoInfo.innerText="";
   carregarCaixa();
 }
 
-/* ===== ÚLTIMO FECHAMENTO ===== */
-async function getUltimoCaixaId(){
+async function ultimoFechamento(){
   const { data } = await sb
     .from("caixa_fechamento")
     .select("ultimo_caixa_id")
     .eq("app_uuid", app_uuid)
-    .order("id", { ascending:false })
+    .order("id",{ascending:false})
     .limit(1);
 
-  return data && data.length && data[0].ultimo_caixa_id
-    ? data[0].ultimo_caixa_id
-    : 0;
+  return data?.[0]?.ultimo_caixa_id || 0;
 }
 
-/* ===== CAIXA (ZERA DE VERDADE) ===== */
 async function carregarCaixa(){
-  const ultimoId = await getUltimoCaixaId();
+  const ult = await ultimoFechamento();
+  let q = sb.from("caixa").select("*").eq("app_id", app_uuid);
+  if(ult>0) q = q.gt("id", ult);
 
-  let query = sb.from("caixa").select("*").eq("app_id", app_uuid);
-  if(ultimoId>0) query = query.gt("id", ultimoId);
-
-  const { data } = await query.order("id");
-
-  let saldo=0;
+  const { data } = await q.order("id");
   lista.innerHTML="";
-  (data||[]).forEach(m=>{
+  let saldo=0;
+
+  data?.forEach(m=>{
     saldo+=Number(m.valor);
     lista.innerHTML+=`
       <div class="item">
@@ -167,35 +141,53 @@ async function carregarCaixa(){
 
   total.innerText=`Saldo: R$ ${saldo.toFixed(2)}`;
 }
-carregarCaixa();
 
-/* ===== FECHAR CAIXA ===== */
 async function fecharCaixa(){
-  const ultimoId = await getUltimoCaixaId();
+  const ult = await ultimoFechamento();
+  let q = sb.from("caixa").select("*").eq("app_id", app_uuid);
+  if(ult>0) q = q.gt("id", ult);
 
-  let query = sb.from("caixa").select("*").eq("app_id", app_uuid);
-  if(ultimoId>0) query = query.gt("id", ultimoId);
+  const { data } = await q.order("id");
+  if(!data.length){ alert("Nada para fechar"); return; }
 
-  const { data } = await query.order("id");
-  if(!data || !data.length){
-    alert("Nada para fechar");
-    return;
-  }
-
-  const ultimoCaixaId = data[data.length-1].id;
-  let totalRecebido=0;
+  let totalRecebido = 0;
   data.forEach(m=> totalRecebido+=Number(m.valor));
 
-  await sb.from("caixa_fechamento").insert({
-    app_uuid: app_uuid,
-    data: new Date().toISOString().slice(0,10),
+  gerarPDF(data, totalRecebido);
+
+  const { error } = await sb.from("caixa_fechamento").insert({
+    app_uuid,
+    data: new Date(),
     total_recebido: totalRecebido,
     total_vendas: data.length,
-    ultimo_caixa_id: ultimoCaixaId
+    ultimo_caixa_id: data[data.length-1].id
   });
 
-  carregarCaixa(); // 🔥 zera de verdade
+  if(error){ alert("Erro ao fechar caixa"); return; }
+
+  alert("Caixa fechado com sucesso");
+  carregarCaixa();
 }
+
+function gerarPDF(itens, total){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(14);
+  doc.text("Fechamento de Caixa", 20, 20);
+
+  let y=30;
+  itens.forEach(i=>{
+    doc.setFontSize(10);
+    doc.text(`${i.descricao} - R$ ${Number(i.valor).toFixed(2)}`,20,y);
+    y+=7;
+  });
+
+  doc.setFontSize(12);
+  doc.text(`Total: R$ ${total.toFixed(2)}`,20,y+10);
+  doc.save("fechamento_caixa.pdf");
+}
+
+carregarCaixa();
 </script>
 
 </body>
