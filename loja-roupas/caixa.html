@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <title>Caixa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -50,7 +52,8 @@ button{background:#22c55e;font-weight:bold}
     </select>
 
     <input id="totalVenda" disabled placeholder="Total da venda">
-    <input id="pago" type="number" step="0.01" placeholder="Valor pago (somente dinheiro)">
+    <input id="pago" type="number" step="0.01" placeholder="Valor pago">
+    <input id="desconto" disabled placeholder="Desconto">
     <input id="troco" disabled placeholder="Troco">
 
     <button onclick="vender()">Registrar Venda</button>
@@ -89,6 +92,7 @@ const quantidadeInput = document.getElementById("quantidade");
 const formaPagamentoInput = document.getElementById("formaPagamento");
 const totalVendaInput = document.getElementById("totalVenda");
 const pagoInput = document.getElementById("pago");
+const descontoInput = document.getElementById("desconto");
 const trocoInput = document.getElementById("troco");
 const lista = document.getElementById("lista");
 const total = document.getElementById("total");
@@ -98,17 +102,13 @@ let produtoSelecionado = null;
 
 /* ===== PRODUTOS ===== */
 async function carregarProdutos(){
-  const { data, error } = await sb
+  const { data } = await sb
     .from("produtos")
     .select("id,nome,preco,estoque")
     .eq("app_id", app_id)
     .eq("ativo", true)
     .order("nome");
 
-  if(error){
-    alert(error.message);
-    return;
-  }
   produtos = data || [];
 }
 carregarProdutos();
@@ -130,31 +130,33 @@ produtoInput.addEventListener("input", ()=>{
         precoInput.value = p.preco;
         estoqueInput.value = p.estoque;
         listaProdutos.innerHTML = "";
-        calcularTotal();
+        calcularValores();
       };
       listaProdutos.appendChild(d);
     });
 });
 
-/* ===== TOTAL E TROCO ===== */
-function calcularTotal(){
+/* ===== CALCULOS ===== */
+quantidadeInput.addEventListener("input", calcularValores);
+pagoInput.addEventListener("input", calcularValores);
+formaPagamentoInput.addEventListener("change", calcularValores);
+
+function calcularValores(){
   if(!produtoSelecionado) return;
+
   const q = Number(quantidadeInput.value);
   const totalVenda = produtoSelecionado.preco * q;
-  totalVendaInput.value = totalVenda.toFixed(2);
-  calcularTroco();
-}
-
-quantidadeInput.addEventListener("input", calcularTotal);
-pagoInput.addEventListener("input", calcularTroco);
-formaPagamentoInput.addEventListener("change", calcularTroco);
-
-function calcularTroco(){
-  const forma = formaPagamentoInput.value;
-  const totalVenda = Number(totalVendaInput.value);
   const pago = Number(pagoInput.value);
 
-  if(forma === "dinheiro" && pago){
+  totalVendaInput.value = totalVenda.toFixed(2);
+
+  let desconto = 0;
+  if(pago && pago < totalVenda){
+    desconto = totalVenda - pago;
+  }
+  descontoInput.value = desconto > 0 ? `R$ ${desconto.toFixed(2)}` : "";
+
+  if(formaPagamentoInput.value === "dinheiro" && pago){
     const troco = pago - totalVenda;
     trocoInput.value = troco >= 0 ? troco.toFixed(2) : "Valor insuficiente";
   } else {
@@ -172,7 +174,7 @@ async function vender(){
   const q = Number(quantidadeInput.value);
   const forma = formaPagamentoInput.value;
   const totalVenda = Number(totalVendaInput.value);
-  let pago = Number(pagoInput.value || totalVenda);
+  const pago = Number(pagoInput.value || totalVenda);
 
   if(!forma){
     alert("Escolha a forma de pagamento");
@@ -191,7 +193,7 @@ async function vender(){
     desconto = totalVenda - pago;
     if(desconto > descontoMax){
       alert("Desconto máximo permitido é 10%");
-      return; // ❌ não vende
+      return;
     }
   }
 
@@ -199,21 +201,15 @@ async function vender(){
     ? `Venda: ${produtoSelecionado.nome} x${q} (${forma}) | Desconto R$ ${desconto.toFixed(2)}`
     : `Venda: ${produtoSelecionado.nome} x${q} (${forma})`;
 
-  const { error } = await sb.from("caixa").insert({
+  await sb.from("caixa").insert({
     app_id,
     tipo: "entrada",
     descricao,
     valor: pago
   });
 
-  if(error){
-    alert(error.message);
-    return;
-  }
-
-  const novoEstoque = produtoSelecionado.estoque - q;
   await sb.from("produtos")
-    .update({ estoque: novoEstoque })
+    .update({ estoque: produtoSelecionado.estoque - q })
     .eq("id", produtoSelecionado.id);
 
   produtoSelecionado = null;
@@ -224,10 +220,38 @@ async function vender(){
   formaPagamentoInput.value = "";
   totalVendaInput.value = "";
   pagoInput.value = "";
+  descontoInput.value = "";
   trocoInput.value = "";
 
   carregarProdutos();
   carregarCaixa();
+}
+
+/* ===== PDF ===== */
+function gerarPDFRelatorio(vendas, totalRecebido){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y = 15;
+
+  doc.setFontSize(14);
+  doc.text("Relatório de Fechamento de Caixa", 14, y);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.text(`Data/Hora: ${new Date().toLocaleString()}`, 14, y);
+  y += 8;
+
+  vendas.forEach((v,i)=>{
+    if(y > 270){ doc.addPage(); y = 15; }
+    doc.text(`${i+1}. ${v.descricao} - R$ ${Number(v.valor).toFixed(2)}`,14,y);
+    y += 6;
+  });
+
+  y += 6;
+  doc.setFontSize(12);
+  doc.text(`TOTAL RECEBIDO: R$ ${totalRecebido.toFixed(2)}`,14,y);
+
+  doc.save(`fechamento-caixa-${Date.now()}.pdf`);
 }
 
 /* ===== CAIXA ===== */
@@ -268,7 +292,6 @@ async function carregarCaixa(){
   total.innerText = `Saldo: R$ ${soma.toFixed(2)}`;
 }
 
-/* ===== FECHAR CAIXA ===== */
 async function fecharCaixa(){
   const fechadoEm = await getUltimoFechamento();
   let query = sb.from("caixa").select("*").eq("app_id",app_id);
@@ -278,7 +301,7 @@ async function fecharCaixa(){
   if(!data?.length){ alert("Nada para fechar"); return; }
 
   let totalRecebido = 0;
-  data.forEach(m=> totalRecebido += Number(m.valor));
+  data.forEach(v => totalRecebido += Number(v.valor));
 
   await sb.from("caixa_fechamento").insert({
     total_recebido: totalRecebido,
@@ -286,6 +309,7 @@ async function fecharCaixa(){
     fechado_em: data[data.length-1].created_at
   });
 
+  gerarPDFRelatorio(data, totalRecebido);
   carregarCaixa();
 }
 
