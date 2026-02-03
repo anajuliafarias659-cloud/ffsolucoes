@@ -10,7 +10,192 @@
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between}
+.container{padding:24px;max-width:900px;margin:auto}a<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Caixa | Loja</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between}
 .container{padding:24px;max-width:900px;margin:auto}
+.box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
+input,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
+input{background:#020617;color:#fff}
+button{background:#22c55e;font-weight:bold}
+.fechar{background:#2563eb}
+.item{display:flex;justify-content:space-between;border-bottom:1px solid #1e293b;padding:6px 0}
+.total{font-size:20px;font-weight:bold;text-align:right;color:#22c55e}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <h2>💰 Caixa</h2>
+  <button onclick="location.href='admin.html'">⬅ Painel</button>
+</div>
+
+<div class="container">
+
+  <!-- VENDA -->
+  <div class="box">
+    <h3>🛒 Registrar Venda</h3>
+    <input id="produto" placeholder="Produto">
+    <input id="preco" type="number" step="0.01" placeholder="Preço">
+    <input id="quantidade" type="number" min="1" value="1">
+    <input id="pago" type="number" step="0.01" placeholder="Valor pago">
+    <button onclick="vender()">Registrar Venda</button>
+  </div>
+
+  <!-- CAIXA -->
+  <div class="box">
+    <h3>📄 Caixa Atual</h3>
+    <div id="lista"></div>
+    <div id="total" class="total"></div>
+    <button class="fechar" onclick="fecharCaixa()">🧾 Fechar Caixa</button>
+  </div>
+
+</div>
+
+<script>
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const lista = document.getElementById("lista");
+const total = document.getElementById("total");
+
+async function vender(){
+  const nome = produto.value.trim();
+  const precoVal = Number(preco.value);
+  const q = Number(quantidade.value);
+  const pagoVal = Number(pago.value);
+
+  if(!nome || precoVal<=0 || q<=0 || pagoVal<=0){
+    alert("Dados inválidos");
+    return;
+  }
+
+  const { error } = await sb.from("caixa").insert({
+    tipo: "entrada",
+    descricao: `Venda: ${nome} x${q}`,
+    valor: pagoVal
+  });
+
+  if(error){
+    console.error("ERRO VENDA:", error);
+    alert(error.message);
+    return;
+  }
+
+  produto.value="";
+  preco.value="";
+  quantidade.value=1;
+  pago.value="";
+
+  carregarCaixa();
+}
+
+async function getUltimoCaixaId(){
+  const { data, error } = await sb
+    .from("caixa_fechamento")
+    .select("ultimo_caixa_id")
+    .order("id",{ascending:false})
+    .limit(1);
+
+  if(error){
+    console.error("ERRO ULTIMO CAIXA:", error);
+    return 0;
+  }
+
+  return data && data.length ? Number(data[0].ultimo_caixa_id) : 0;
+}
+
+async function carregarCaixa(){
+  const ultimoId = await getUltimoCaixaId();
+
+  let query = sb.from("caixa").select("*");
+  if(ultimoId > 0){
+    query = query.gt("id", ultimoId);
+  }
+
+  const { data, error } = await query.order("id");
+
+  if(error){
+    console.error("ERRO CARREGAR CAIXA:", error);
+    return;
+  }
+
+  let soma = 0;
+  lista.innerHTML = "";
+
+  (data||[]).forEach(m=>{
+    soma += Number(m.valor);
+    lista.innerHTML += `
+      <div class="item">
+        <span>${m.descricao}</span>
+        <span>R$ ${Number(m.valor).toFixed(2)}</span>
+      </div>
+    `;
+  });
+
+  total.innerText = `Saldo: R$ ${soma.toFixed(2)}`;
+}
+
+async function fecharCaixa(){
+  const ultimoId = await getUltimoCaixaId();
+
+  let query = sb.from("caixa").select("*");
+  if(ultimoId > 0){
+    query = query.gt("id", ultimoId);
+  }
+
+  const { data, error } = await query.order("id");
+
+  if(error){
+    console.error("ERRO BUSCAR CAIXA:", error);
+    alert(error.message);
+    return;
+  }
+
+  if(!data || !data.length){
+    alert("Nada para fechar");
+    return;
+  }
+
+  const ultimoCaixaId = data[data.length - 1].id;
+  let totalRecebido = 0;
+  data.forEach(m => totalRecebido += Number(m.valor));
+
+  const { error: erroFechamento } = await sb
+    .from("caixa_fechamento")
+    .insert({
+      total_recebido: totalRecebido,
+      total_vendas: data.length,
+      ultimo_caixa_id: ultimoCaixaId
+    });
+
+  if(erroFechamento){
+    console.error("ERRO FECHAMENTO:", erroFechamento);
+    alert(erroFechamento.message);
+    return;
+  }
+
+  carregarCaixa(); // zera e NÃO volta
+}
+
+carregarCaixa();
+</script>
+
+</body>
+</html>
+
 .box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
 input,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 input{background:#020617;color:#fff}
