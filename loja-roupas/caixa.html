@@ -12,12 +12,47 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between}
 .container{padding:24px;max-width:900px;margin:auto}
 .box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
-input,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
+
+input,button{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border-radius:10px;
+  border:none;
+}
 input{background:#020617;color:#fff}
+
 button{background:#22c55e;font-weight:bold}
 .fechar{background:#2563eb}
-.item{display:flex;justify-content:space-between;border-bottom:1px solid #1e293b;padding:6px 0}
-.total{font-size:20px;font-weight:bold;text-align:right;color:#22c55e}
+
+.item{
+  display:flex;
+  justify-content:space-between;
+  border-bottom:1px solid #1e293b;
+  padding:6px 0
+}
+.total{
+  font-size:20px;
+  font-weight:bold;
+  text-align:right;
+  color:#22c55e
+}
+
+/* autocomplete */
+.sugestoes{
+  background:#020617;
+  border:1px solid #334155;
+  border-radius:8px;
+  max-height:150px;
+  overflow-y:auto;
+}
+.sugestoes div{
+  padding:8px;
+  cursor:pointer;
+}
+.sugestoes div:hover{
+  background:#334155;
+}
 </style>
 </head>
 
@@ -33,10 +68,14 @@ button{background:#22c55e;font-weight:bold}
   <!-- VENDA -->
   <div class="box">
     <h3>🛒 Registrar Venda</h3>
-    <input id="produto" placeholder="Produto">
+
+    <input id="produto" placeholder="Digite o nome do produto">
+    <div id="listaProdutos" class="sugestoes"></div>
+
     <input id="preco" type="number" step="0.01" placeholder="Preço">
     <input id="quantidade" type="number" min="1" value="1">
     <input id="pago" type="number" step="0.01" placeholder="Valor pago">
+
     <button onclick="vender()">Registrar Venda</button>
   </div>
 
@@ -56,88 +95,110 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+const produtoInput = document.getElementById("produto");
+const listaProdutos = document.getElementById("listaProdutos");
+const precoInput = document.getElementById("preco");
 const lista = document.getElementById("lista");
 const total = document.getElementById("total");
 
-/* ===== ÚLTIMO FECHAMENTO ===== */
-async function getUltimoFechamento(){
-  const { data, error } = await sb
-    .from("caixa_fechamento")
-    .select("fechado_em")
-    .order("id", { ascending:false })
-    .limit(1);
+let produtos = [];
+let produtoSelecionado = null;
 
-  if(error){
-    console.error("ERRO FECHAMENTO:", error);
-    return null;
+/* ===== CARREGAR PRODUTOS ===== */
+async function carregarProdutos(){
+  const { data } = await sb
+    .from("produtos")
+    .select("id,nome,preco")
+    .order("nome");
+
+  produtos = data || [];
+}
+carregarProdutos();
+
+/* ===== AUTOCOMPLETE ===== */
+produtoInput.addEventListener("input", ()=>{
+  const termo = produtoInput.value.toLowerCase();
+  listaProdutos.innerHTML = "";
+
+  if(!termo) return;
+
+  const filtrados = produtos.filter(p =>
+    p.nome.toLowerCase().includes(termo)
+  );
+
+  filtrados.forEach(p=>{
+    const div = document.createElement("div");
+    div.innerText = `${p.nome} — R$ ${Number(p.preco).toFixed(2)}`;
+    div.onclick = ()=>{
+      produtoSelecionado = p;
+      produtoInput.value = p.nome;
+      precoInput.value = p.preco;
+      listaProdutos.innerHTML = "";
+    };
+    listaProdutos.appendChild(div);
+  });
+});
+
+/* ===== VENDER ===== */
+async function vender(){
+  if(!produtoSelecionado){
+    alert("Selecione um produto da lista");
+    return;
   }
 
-  return data && data.length ? data[0].fechado_em : null;
-}
-
-/* ===== VENDA ===== */
-async function vender(){
-  const nome = produto.value.trim();
-  const precoVal = Number(preco.value);
   const q = Number(quantidade.value);
   const pagoVal = Number(pago.value);
 
-  if(!nome || precoVal<=0 || q<=0 || pagoVal<=0){
+  if(q<=0 || pagoVal<=0){
     alert("Dados inválidos");
     return;
   }
 
-  const { error } = await sb.from("caixa").insert({
-    tipo: "entrada",
-    descricao: `Venda: ${nome} x${q}`,
-    valor: pagoVal
+  await sb.from("caixa").insert({
+    tipo:"entrada",
+    descricao:`Venda: ${produtoSelecionado.nome} x${q}`,
+    valor:pagoVal
   });
 
-  if(error){
-    console.error(error);
-    alert(error.message);
-    return;
-  }
-
-  produto.value="";
-  preco.value="";
+  produtoInput.value="";
+  precoInput.value="";
   quantidade.value=1;
   pago.value="";
+  produtoSelecionado=null;
 
   carregarCaixa();
 }
 
-async function carregarCaixa(){
-  const ultimoFechadoEm = await getUltimoFechamento();
+/* ===== FECHAMENTO POR TEMPO ===== */
+async function getUltimoFechamento(){
+  const { data } = await sb
+    .from("caixa_fechamento")
+    .select("fechado_em")
+    .order("id",{ascending:false})
+    .limit(1);
 
+  return data && data.length ? data[0].fechado_em : null;
+}
+
+async function carregarCaixa(){
+  const fechadoEm = await getUltimoFechamento();
   let query = sb.from("caixa").select("*");
 
-  if(ultimoFechadoEm){
-    query = query.gt("created_at", ultimoFechadoEm);
+  if(fechadoEm){
+    query = query.gt("created_at", fechadoEm);
   }
 
-  const { data, error } = await query.order("created_at");
-
-  if(error){
-    console.error("ERRO CAIXA:", error);
-    alert(error.message);
-    return;
-  }
-
-  lista.innerHTML = "";
-
-  if(!data || data.length === 0){
-    lista.innerHTML = `
-      <div class="item" style="opacity:.7">
-        <span>📭 Caixa zerado / sem movimentos</span>
-        <span>—</span>
-      </div>
-    `;
-    total.innerText = `Saldo: R$ 0.00`;
-    return;
-  }
+  const { data } = await query.order("created_at");
 
   let soma = 0;
+  lista.innerHTML = "";
+
+  if(!data || !data.length){
+    lista.innerHTML = `<div class="item"><span>📭 Caixa vazio</span><span>-</span></div>`;
+    total.innerText = "Saldo: R$ 0.00";
+    return;
+  }
+
   data.forEach(m=>{
     soma += Number(m.valor);
     lista.innerHTML += `
@@ -151,50 +212,33 @@ async function carregarCaixa(){
   total.innerText = `Saldo: R$ ${soma.toFixed(2)}`;
 }
 
-
-/* ===== FECHAR CAIXA ===== */
 async function fecharCaixa(){
-  const ultimoFechadoEm = await getUltimoFechamento();
-
+  const fechadoEm = await getUltimoFechamento();
   let query = sb.from("caixa").select("*");
 
-  if(ultimoFechadoEm){
-    query = query.gt("created_at", ultimoFechadoEm);
+  if(fechadoEm){
+    query = query.gt("created_at", fechadoEm);
   }
 
-  const { data: movimentos, error } = await query.order("created_at");
+  const { data } = await query.order("created_at");
 
-  if(error){
-    console.error(error);
-    alert(error.message);
-    return;
-  }
-
-  if(!movimentos || !movimentos.length){
+  if(!data || !data.length){
     alert("Nada para fechar");
     return;
   }
 
   let totalRecebido = 0;
-  movimentos.forEach(m => totalRecebido += Number(m.valor));
+  data.forEach(m => totalRecebido += Number(m.valor));
 
-  const ultimoMovimento = movimentos[movimentos.length - 1].created_at;
+  const ultimo = data[data.length-1].created_at;
 
-  const { error: erroFechamento } = await sb
-    .from("caixa_fechamento")
-    .insert({
-      total_recebido: totalRecebido,
-      total_vendas: movimentos.length,
-      fechado_em: ultimoMovimento
-    });
+  await sb.from("caixa_fechamento").insert({
+    total_recebido: totalRecebido,
+    total_vendas: data.length,
+    fechado_em: ultimo
+  });
 
-  if(erroFechamento){
-    console.error(erroFechamento);
-    alert(erroFechamento.message);
-    return;
-  }
-
-  carregarCaixa(); // zera e permanece zerado
+  carregarCaixa();
 }
 
 carregarCaixa();
