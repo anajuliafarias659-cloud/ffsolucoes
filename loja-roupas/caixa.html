@@ -5,27 +5,20 @@
 <title>Caixa | Loja</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between;align-items:center}
+.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between}
 .container{padding:24px;max-width:900px;margin:auto}
 .box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
 input,select,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 input,select{background:#020617;color:#fff}
-button{background:#22c55e;font-weight:bold;cursor:pointer}
+button{background:#22c55e;font-weight:bold}
 .fechar{background:#2563eb}
-.lista .item{display:flex;justify-content:space-between;border-bottom:1px solid #1e293b;padding:6px 0}
+.item{display:flex;justify-content:space-between;border-bottom:1px solid #1e293b;padding:6px 0}
 .total{font-size:20px;font-weight:bold;text-align:right;color:#22c55e}
-#trocoInfo{margin-top:10px;font-weight:bold}
-.ok{color:#22c55e}
-.desc{color:#eab308}
-.exato{color:#38bdf8}
 </style>
 </head>
 
@@ -33,234 +26,117 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 
 <div class="topo">
   <h2>💰 Caixa da Loja</h2>
-  <button onclick="voltar()">⬅ Painel</button>
+  <button onclick="location.href='admin.html'">⬅ Painel</button>
 </div>
 
 <div class="container">
 
-  <!-- VENDA -->
-  <div class="box">
-    <h3>🛒 Registrar Venda</h3>
+<div class="box">
+  <h3>🛒 Registrar Venda</h3>
+  <input id="produtoInput" placeholder="Produto">
+  <input id="precoInput" type="number" step="0.01" placeholder="Preço">
+  <input id="quantidadeInput" type="number" min="1" value="1">
+  <input id="valorPago" type="number" step="0.01" placeholder="Valor pago">
+  <button onclick="vender()">Registrar Venda</button>
+</div>
 
-    <input id="produtoInput" placeholder="Nome do produto">
-    <input id="precoInput" type="number" step="0.01" placeholder="Preço">
-    <input id="quantidadeInput" type="number" min="1" value="1">
-
-    <select id="formaPagamento">
-      <option value="dinheiro">💵 Dinheiro</option>
-      <option value="pix">📱 Pix</option>
-      <option value="cartao">💳 Cartão</option>
-    </select>
-
-    <input id="valorPago" type="number" step="0.01" placeholder="Valor pago">
-    <div id="trocoInfo"></div>
-
-    <button onclick="vender()">Registrar Venda</button>
-  </div>
-
-  <!-- CAIXA -->
-  <div class="box">
-    <h3>📄 Caixa Atual</h3>
-    <div id="lista" class="lista"></div>
-    <div id="total" class="total"></div>
-    <button class="fechar" onclick="fecharCaixa()">🧾 Fechar Caixa (PDF)</button>
-  </div>
+<div class="box">
+  <h3>📄 Caixa Atual</h3>
+  <div id="lista"></div>
+  <div id="total" class="total"></div>
+  <button class="fechar" onclick="fecharCaixa()">🧾 Fechar Caixa</button>
+</div>
 
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== SESSÃO ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin){
-  alert("Sessão inválida");
-  location.href="../auth/login.html";
-}
+if(!admin){ alert("Sessão inválida"); location.href="../auth/login.html"; }
 const app_id = admin.app_id;
 
-/* ===== ELEMENTOS ===== */
-const produtoInput = document.getElementById("produtoInput");
-const precoInput = document.getElementById("precoInput");
-const quantidadeInput = document.getElementById("quantidadeInput");
-const valorPago = document.getElementById("valorPago");
 const lista = document.getElementById("lista");
 const total = document.getElementById("total");
-const trocoInfo = document.getElementById("trocoInfo");
 
-function voltar(){ location.href="admin.html"; }
-
-/* ===== TROCO / DESCONTO ===== */
-valorPago.addEventListener("input",()=>{
-  const preco = Number(precoInput.value);
-  const q = Number(quantidadeInput.value);
-  const pago = Number(valorPago.value);
-
-  if(!preco || !q || !pago){
-    trocoInfo.innerText="";
-    return;
-  }
-
-  const totalVenda = preco * q;
-  const diff = pago - totalVenda;
-
-  if(diff > 0){
-    trocoInfo.className="ok";
-    trocoInfo.innerText = `🟢 Troco: R$ ${diff.toFixed(2)}`;
-  }else if(diff < 0){
-    trocoInfo.className="desc";
-    trocoInfo.innerText = `🟡 Desconto: R$ ${Math.abs(diff).toFixed(2)}`;
-  }else{
-    trocoInfo.className="exato";
-    trocoInfo.innerText = "🔵 Pagamento exato";
-  }
-});
-
-/* ===== VENDER ===== */
 async function vender(){
   const nome = produtoInput.value.trim();
   const preco = Number(precoInput.value);
   const q = Number(quantidadeInput.value);
   const pago = Number(valorPago.value);
-
-  if(!nome || preco<=0 || q<=0 || pago<=0){
-    alert("Preencha todos os dados corretamente");
-    return;
-  }
-
-  const totalVenda = preco * q;
-  const diff = pago - totalVenda;
-
-  let extra = "";
-  if(diff > 0){
-    extra = ` | Pago: R$ ${pago.toFixed(2)} | Troco: R$ ${diff.toFixed(2)}`;
-  }else if(diff < 0){
-    extra = ` | Pago: R$ ${pago.toFixed(2)} | Desconto: R$ ${Math.abs(diff).toFixed(2)}`;
-  }else{
-    extra = ` | Pago: R$ ${pago.toFixed(2)}`;
-  }
+  if(!nome || preco<=0 || q<=0 || pago<=0) return alert("Dados inválidos");
 
   await sb.from("caixa").insert({
     app_id,
-    tipo: "entrada",
-    descricao: `Venda: ${nome} x${q}${extra}`,
-    valor: pago
+    tipo:"entrada",
+    descricao:`Venda: ${nome} x${q}`,
+    valor:pago
   });
 
   produtoInput.value="";
   precoInput.value="";
   quantidadeInput.value=1;
   valorPago.value="";
-  trocoInfo.innerText="";
-
   carregarCaixa();
 }
 
-/* ===== LISTAR CAIXA (APÓS ÚLTIMO FECHAMENTO) ===== */
-async function carregarCaixa(){
-  const { data: ultimo } = await sb
+async function getUltimoCaixaId(){
+  const { data } = await sb
     .from("caixa_fechamento")
-    .select("fechado_em")
+    .select("ultimo_caixa_id")
     .eq("app_id", app_id)
-    .order("fechado_em", { ascending:false })
+    .order("id",{ascending:false})
     .limit(1);
 
-  let query = sb.from("caixa").select("*").eq("app_id", app_id);
+  return data && data.length ? data[0].ultimo_caixa_id : 0;
+}
 
-  if(ultimo && ultimo.length){
-    query = query.gte("created_at", ultimo[0].fechado_em);
-  }
+async function carregarCaixa(){
+  const ultimoId = await getUltimoCaixaId();
+
+  let query = sb.from("caixa").select("*").eq("app_id", app_id);
+  if(ultimoId) query = query.gt("id", ultimoId);
 
   const { data } = await query.order("id");
 
-  let soma = 0;
-  lista.innerHTML = "";
-
+  let soma=0;
+  lista.innerHTML="";
   (data||[]).forEach(m=>{
-    soma += Number(m.valor);
-    lista.innerHTML += `
+    soma+=Number(m.valor);
+    lista.innerHTML+=`
       <div class="item">
         <span>${m.descricao}</span>
         <span>R$ ${Number(m.valor).toFixed(2)}</span>
-      </div>
-    `;
+      </div>`;
   });
-
-  total.innerText = `Saldo: R$ ${soma.toFixed(2)}`;
+  total.innerText=`Saldo: R$ ${soma.toFixed(2)}`;
 }
 carregarCaixa();
 
-/* ===== FECHAMENTO DE CAIXA (PDF COMPLETO) ===== */
 async function fecharCaixa(){
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  const { data: ultimo } = await sb
-    .from("caixa_fechamento")
-    .select("fechado_em")
-    .eq("app_id", app_id)
-    .order("fechado_em", { ascending:false })
-    .limit(1);
+  const ultimoId = await getUltimoCaixaId();
 
   let query = sb.from("caixa").select("*").eq("app_id", app_id);
-  if(ultimo && ultimo.length){
-    query = query.gte("created_at", ultimo[0].fechado_em);
-  }
+  if(ultimoId) query = query.gt("id", ultimoId);
 
-  const { data: movimentos } = await query.order("id");
+  const { data } = await query.order("id");
+  if(!data || !data.length) return alert("Nada para fechar");
 
-  if(!movimentos || !movimentos.length){
-    alert("Nenhuma movimentação para fechar");
-    return;
-  }
-
-  let recebido=0, descontos=0, vendas=0;
-
-  movimentos.forEach(m=>{
-    recebido += Number(m.valor);
-    if(m.descricao.startsWith("Venda")) vendas++;
-    if(m.descricao.includes("Desconto")){
-      const d = m.descricao.match(/Desconto: R\$ ([0-9.]+)/);
-      if(d) descontos += Number(d[1]);
-    }
-  });
+  const ultimoCaixaId = data[data.length-1].id;
+  let totalRecebido = 0;
+  data.forEach(m=> totalRecebido+=Number(m.valor));
 
   await sb.from("caixa_fechamento").insert({
     app_id,
-    data: new Date().toISOString().slice(0,10),
-    total_recebido: recebido,
-    total_descontos: descontos,
-    total_vendas: vendas
+    total_recebido: totalRecebido,
+    total_vendas: data.length,
+    ultimo_caixa_id: ultimoCaixaId
   });
 
-  doc.setFontSize(16);
-  doc.text("Relatório de Fechamento de Caixa", 20, 20);
-  doc.setFontSize(12);
-  doc.text(`Data: ${new Date().toLocaleDateString()}`, 20, 35);
-  doc.text(`Vendas: ${vendas}`, 20, 45);
-  doc.text(`Total recebido: R$ ${recebido.toFixed(2)}`, 20, 55);
-  doc.text(`Descontos: R$ ${descontos.toFixed(2)}`, 20, 65);
-
-  doc.line(20, 72, 190, 72);
-
-  let y = 82;
-  movimentos.forEach(m=>{
-    doc.text(`${m.descricao} | R$ ${Number(m.valor).toFixed(2)}`,20,y);
-    y += 8;
-    if(y > 270){
-      doc.addPage();
-      y = 20;
-    }
-  });
-
-  doc.save(`fechamento-caixa-${new Date().toLocaleDateString()}.pdf`);
-
-  lista.innerHTML="";
-  total.innerText="Saldo: R$ 0.00";
+  carregarCaixa(); // 🔥 zera de verdade
 }
 </script>
 
