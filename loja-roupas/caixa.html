@@ -33,6 +33,7 @@ input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none;bac
 
 <div class="container">
 
+  <!-- VENDA -->
   <div class="box">
     <h3>🛒 Registrar Venda</h3>
     <input id="produto" placeholder="Produto">
@@ -43,6 +44,7 @@ input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none;bac
     <button onclick="registrarVenda()">Registrar Venda</button>
   </div>
 
+  <!-- CAIXA -->
   <div class="box">
     <h3>📄 Caixa Atual</h3>
     <div id="lista"></div>
@@ -61,118 +63,163 @@ const sb = supabase.createClient(
 
 /* ===== SESSÃO ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin){
+if(!admin || !admin.app_id){
   alert("Sessão inválida");
   location.href="../auth/login.html";
 }
 
-/* 🔥 UUID REAL DO APP */
+/* 🔥 UUID (STRING) — NÃO É NÚMERO */
 const app_uuid = admin.app_id;
 
 /* ===== ELEMENTOS ===== */
-const produto=document.getElementById("produto");
-const preco=document.getElementById("preco");
-const qtd=document.getElementById("qtd");
-const pago=document.getElementById("pago");
-const lista=document.getElementById("lista");
-const totalEl=document.getElementById("total");
-const trocoInfo=document.getElementById("trocoInfo");
+const produto = document.getElementById("produto");
+const preco   = document.getElementById("preco");
+const qtd     = document.getElementById("qtd");
+const pago    = document.getElementById("pago");
+const lista   = document.getElementById("lista");
+const totalEl = document.getElementById("total");
+const trocoInfo = document.getElementById("trocoInfo");
 
 /* ===== TROCO ===== */
-pago.addEventListener("input",calcTroco);
-qtd.addEventListener("input",calcTroco);
+pago.addEventListener("input", calcTroco);
+qtd.addEventListener("input", calcTroco);
 
 function calcTroco(){
-  const total=preco.value*qtd.value;
-  const p=Number(pago.value);
-  if(!p||!total){trocoInfo.innerText="";return;}
-  const d=p-total;
-  if(d>0){trocoInfo.className="troco-ok";trocoInfo.innerText=`Troco: R$ ${d.toFixed(2)}`;}
-  else if(d<0){trocoInfo.className="troco-desc";trocoInfo.innerText=`Desconto: R$ ${Math.abs(d).toFixed(2)}`;}
-  else{trocoInfo.className="troco-exato";trocoInfo.innerText="Pagamento exato";}
+  const total = Number(preco.value) * Number(qtd.value);
+  const p = Number(pago.value);
+  if(!p || !total){ trocoInfo.innerText=""; return; }
+
+  const d = p - total;
+  if(d > 0){
+    trocoInfo.className = "troco-ok";
+    trocoInfo.innerText = `Troco: R$ ${d.toFixed(2)}`;
+  }else if(d < 0){
+    trocoInfo.className = "troco-desc";
+    trocoInfo.innerText = `Desconto: R$ ${Math.abs(d).toFixed(2)}`;
+  }else{
+    trocoInfo.className = "troco-exato";
+    trocoInfo.innerText = "Pagamento exato";
+  }
 }
 
-/* ===== VENDA ===== */
+/* ===== REGISTRAR VENDA ===== */
 async function registrarVenda(){
-  if(!produto.value||preco.value<=0||pago.value<=0){
-    alert("Preencha tudo"); return;
+  if(!produto.value || preco.value<=0 || pago.value<=0){
+    alert("Preencha todos os campos");
+    return;
   }
 
-  await sb.from("caixa").insert({
-    app_uuid,
-    tipo:"entrada",
-    descricao:`Venda: ${produto.value} x${qtd.value}`,
-    valor:Number(pago.value),
-    desconto:Math.max(0,(preco.value*qtd.value)-pago.value)
+  const totalVenda = Number(preco.value) * Number(qtd.value);
+  const valorPago = Number(pago.value);
+
+  const { error } = await sb.from("caixa").insert({
+    app_uuid: app_uuid,
+    tipo: "entrada",
+    descricao: `Venda: ${produto.value} x${qtd.value}`,
+    valor: valorPago,
+    desconto: Math.max(0, totalVenda - valorPago)
   });
 
-  produto.value="";preco.value="";qtd.value=1;pago.value="";trocoInfo.innerText="";
+  if(error){
+    console.error("ERRO VENDA:", error);
+    alert("Erro ao registrar venda");
+    return;
+  }
+
+  produto.value="";
+  preco.value="";
+  qtd.value=1;
+  pago.value="";
+  trocoInfo.innerText="";
+
   carregarCaixa();
 }
 
 /* ===== ÚLTIMO FECHAMENTO ===== */
 async function ultimaData(){
-  const { data } = await sb
+  const { data, error } = await sb
     .from("caixa_fechamento")
     .select("data")
-    .eq("app_uuid",app_uuid)
-    .order("id",{ascending:false})
+    .eq("app_uuid", app_uuid)
+    .order("id", { ascending:false })
     .limit(1);
+
+  if(error){
+    console.error("ERRO ULTIMA DATA:", error);
+    return null;
+  }
 
   return data?.[0]?.data || null;
 }
 
-/* ===== CAIXA ===== */
+/* ===== CARREGAR CAIXA ===== */
 async function carregarCaixa(){
-  const ult=await ultimaData();
-  let q=sb.from("caixa").select("*").eq("app_uuid",app_uuid);
-  if(ult) q=q.gt("created_at",ult);
+  const ult = await ultimaData();
 
-  const { data } = await q.order("id");
-  let saldo=0;
-  lista.innerHTML="";
-  (data||[]).forEach(m=>{
-    saldo+=Number(m.valor);
-    lista.innerHTML+=`
+  let q = sb.from("caixa").select("*").eq("app_uuid", app_uuid);
+  if(ult) q = q.gt("created_at", ult);
+
+  const { data, error } = await q.order("id");
+  if(error){
+    console.error("ERRO CAIXA:", error);
+    return;
+  }
+
+  let saldo = 0;
+  lista.innerHTML = "";
+
+  (data || []).forEach(m=>{
+    saldo += Number(m.valor);
+    lista.innerHTML += `
       <div class="item">
         <span>${m.descricao}</span>
         <span>R$ ${Number(m.valor).toFixed(2)}</span>
-      </div>`;
+      </div>
+    `;
   });
-  totalEl.innerText=`Saldo: R$ ${saldo.toFixed(2)}`;
+
+  totalEl.innerText = `Saldo: R$ ${saldo.toFixed(2)}`;
 }
 
 /* ===== FECHAR CAIXA ===== */
 async function fecharCaixa(){
   try{
-    const ult=await ultimaData();
-    let q=sb.from("caixa").select("*").eq("app_uuid",app_uuid);
-    if(ult) q=q.gt("created_at",ult);
+    const ult = await ultimaData();
 
-    const { data } = await q.order("id");
-    if(!data||!data.length){alert("Nada para fechar");return;}
+    let q = sb.from("caixa").select("*").eq("app_uuid", app_uuid);
+    if(ult) q = q.gt("created_at", ult);
 
-    let totalRecebido=0,totalDescontos=0;
+    const { data, error: e1 } = await q.order("id");
+    if(e1) throw e1;
+
+    if(!data || !data.length){
+      alert("Nada para fechar");
+      return;
+    }
+
+    let totalRecebido = 0;
+    let totalDescontos = 0;
+
     data.forEach(m=>{
-      totalRecebido+=Number(m.valor);
-      totalDescontos+=Number(m.desconto||0);
+      totalRecebido += Number(m.valor);
+      totalDescontos += Number(m.desconto || 0);
     });
 
-    const { error } = await sb.from("caixa_fechamento").insert({
-      app_uuid,
-      data:new Date(),
-      total_recebido:totalRecebido,
-      total_descontos:totalDescontos
+    const { error: e2 } = await sb.from("caixa_fechamento").insert({
+      app_uuid: app_uuid,
+      data: new Date(),
+      total_recebido: totalRecebido,
+      total_descontos: totalDescontos
     });
 
-    if(error) throw error;
+    if(e2) throw e2;
 
     alert("Caixa fechado com sucesso");
     carregarCaixa();
 
-  }catch(e){
-    console.error("ERRO REAL:",e);
-    alert("Erro ao fechar caixa (veja o console)");
+  }catch(err){
+    console.error("ERRO FECHAMENTO FINAL:", err);
+    alert("Erro ao fechar caixa. Veja o console.");
   }
 }
 
