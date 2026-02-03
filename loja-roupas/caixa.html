@@ -103,27 +103,24 @@ button{
     <div id="listaProdutos"></div>
   </div>
 
-  <!-- ENTRADA -->
+  <!-- ENTRADA / SAÍDA MANUAL -->
   <div class="box">
     <h3>➕ Entrada Manual</h3>
     <input id="descEntrada" placeholder="Descrição">
     <input id="valorEntrada" type="number" step="0.01" placeholder="Valor">
-    <button onclick="entrada()">Registrar entrada</button>
-  </div>
+    <button onclick="entradaManual()">Registrar entrada</button>
 
-  <!-- SAÍDA -->
-  <div class="box">
-    <h3>➖ Saída</h3>
+    <h3 style="margin-top:20px;">➖ Saída</h3>
     <input id="descSaida" placeholder="Descrição">
     <input id="valorSaida" type="number" step="0.01" placeholder="Valor">
     <button class="saida" onclick="saida()">Registrar saída</button>
   </div>
 
-  <!-- MOVIMENTOS -->
+  <!-- MOVIMENTAÇÕES -->
   <div class="box">
-    <h3>📄 Movimentações</h3>
+    <h3>📄 Movimentações do Caixa</h3>
     <div id="lista" class="lista"></div>
-    <div id="total" class="total"></div>
+    <div id="totais" class="total"></div>
   </div>
 
 </div>
@@ -131,13 +128,11 @@ button{
 <script>
 /* ========= SESSÃO ========= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-
 if(!admin || admin.tipo !== "loja"){
   alert("Sessão inválida");
   location.href = "../auth/login.html";
   throw new Error("Sessão inválida");
 }
-
 const app_id = admin.app_id;
 
 /* ========= SUPABASE ========= */
@@ -155,7 +150,6 @@ function voltar(){
 let produtos = [];
 
 async function carregarProdutos(){
-  // Carrega todos produtos, mas não mostra
   const { data } = await sb
     .from("produtos")
     .select("*")
@@ -164,7 +158,7 @@ async function carregarProdutos(){
     .order("nome");
 
   produtos = data || [];
-  renderProdutos([]); // inicialmente vazio
+  renderProdutos([]);
 }
 
 function renderProdutos(lista){
@@ -185,7 +179,7 @@ function renderProdutos(lista){
 function filtrarProdutos(){
   const txt = document.getElementById("buscaProduto").value.toLowerCase().trim();
   if(txt.length < 1){
-    renderProdutos([]); // não mostra nada se não digitou
+    renderProdutos([]);
     return;
   }
   renderProdutos(produtos.filter(p => p.nome.toLowerCase().includes(txt)));
@@ -202,21 +196,21 @@ async function venderProduto(id){
   // Atualiza estoque
   await sb.from("produtos").update({ estoque: produto.estoque - 1 }).eq("id", id);
 
-  // Registra entrada no caixa
+  // Registra venda no caixa
   await sb.from("caixa").insert({
     app_id,
-    tipo: "entrada",
+    tipo: "venda",
     descricao: `Venda: ${produto.nome}`,
     valor: Number(produto.preco)
   });
 
-  // Atualiza lista de produtos e movimentos
+  // Atualiza lista
   carregarProdutos();
   carregarMovimentos();
 }
 
 /* ========= ENTRADAS E SAÍDAS MANUAIS ========= */
-async function entrada(){
+async function entradaManual(){
   if(!descEntrada.value || valorEntrada.value <= 0) return;
 
   await sb.from("caixa").insert({
@@ -252,20 +246,41 @@ async function carregarMovimentos(){
     .eq("app_id", app_id)
     .order("created_at", { ascending:true });
 
-  let saldo = 0;
+  let totalVendas = 0;
+  let totalEntradas = 0;
+  let totalSaidas = 0;
+
   lista.innerHTML = "";
 
   (data || []).forEach(m=>{
-    saldo += m.tipo === "entrada" ? m.valor : -m.valor;
+    let sinal = "+";
+    if(m.tipo === "venda"){
+      totalVendas += m.valor;
+      sinal = "+";
+    } else if(m.tipo === "entrada"){
+      totalEntradas += m.valor;
+      sinal = "+";
+    } else if(m.tipo === "saida"){
+      totalSaidas += m.valor;
+      sinal = "-";
+    }
+
     lista.innerHTML += `
       <div class="item">
         <span>${m.descricao}</span>
-        <span>${m.tipo === "entrada" ? "+" : "-"} R$ ${m.valor.toFixed(2)}</span>
+        <span>${sinal} R$ ${m.valor.toFixed(2)}</span>
       </div>
     `;
   });
 
-  total.innerText = `Saldo: R$ ${saldo.toFixed(2)}`;
+  const saldoFinal = totalVendas + totalEntradas - totalSaidas;
+
+  totais.innerHTML = `
+    Total Vendas: R$ ${totalVendas.toFixed(2)}<br>
+    Total Entradas Manuais: R$ ${totalEntradas.toFixed(2)}<br>
+    Total Saídas: R$ ${totalSaidas.toFixed(2)}<br>
+    <b>Saldo Final: R$ ${saldoFinal.toFixed(2)}</b>
+  `;
 }
 
 /* ========= INIT ========= */
