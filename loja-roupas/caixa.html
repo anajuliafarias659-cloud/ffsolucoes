@@ -72,17 +72,22 @@ button{
   color:#22c55e;
   text-align:right;
 }
-.produto-item{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:6px;
+.sugestao{
+  background:#0f172a;
+  border:1px solid #334155;
+  border-radius:10px;
+  max-height:120px;
+  overflow-y:auto;
+  position:absolute;
+  width:calc(100% - 24px);
+  z-index:10;
 }
-.produto-item button{
-  width:60px;
-  background:#22c55e;
-  font-size:12px;
-  padding:6px;
+.sugestao div{
+  padding:8px;
+  cursor:pointer;
+}
+.sugestao div:hover{
+  background:#334155;
 }
 </style>
 </head>
@@ -96,37 +101,25 @@ button{
 
 <div class="container">
 
-  <!-- FILTRO / VENDA -->
+  <!-- VENDA -->
   <div class="box">
-    <h3>🛒 Vender Produto</h3>
-    <input id="buscaProduto" placeholder="Digite o nome da peça..." oninput="filtrarProdutos()">
-    <div id="listaProdutos"></div>
+    <h3>🛒 Venda</h3>
+    <input id="produtoInput" placeholder="Digite o nome do produto">
+    <div id="sugestoes" class="sugestao" style="display:none;"></div>
+    <input id="quantidadeInput" type="number" placeholder="Quantidade" value="1">
+    <button onclick="vender()">Registrar Venda</button>
   </div>
 
-  <!-- ENTRADA / SAÍDA MANUAL -->
-  <div class="box">
-    <h3>➕ Entrada Manual</h3>
-    <input id="descEntrada" placeholder="Descrição">
-    <input id="valorEntrada" type="number" step="0.01" placeholder="Valor">
-    <button onclick="entradaManual()">Registrar entrada</button>
-
-    <h3 style="margin-top:20px;">➖ Saída</h3>
-    <input id="descSaida" placeholder="Descrição">
-    <input id="valorSaida" type="number" step="0.01" placeholder="Valor">
-    <button class="saida" onclick="saida()">Registrar saída</button>
-  </div>
-
-  <!-- MOVIMENTAÇÕES -->
+  <!-- MOVIMENTOS -->
   <div class="box">
     <h3>📄 Movimentações do Caixa</h3>
     <div id="lista" class="lista"></div>
-    <div id="totais" class="total"></div>
+    <div id="total" class="total"></div>
   </div>
 
 </div>
 
 <script>
-/* ========= SESSÃO ========= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin || admin.tipo !== "loja"){
   alert("Sessão inválida");
@@ -135,20 +128,18 @@ if(!admin || admin.tipo !== "loja"){
 }
 const app_id = admin.app_id;
 
-/* ========= SUPABASE ========= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ========= NAVEGAÇÃO ========= */
 function voltar(){
-  location.href = "admin.html"; // volta para admin
+  location.href = "admin.html";
 }
 
-/* ========= PRODUTOS ========= */
 let produtos = [];
 
+/* CARREGA PRODUTOS */
 async function carregarProdutos(){
   const { data } = await sb
     .from("produtos")
@@ -158,87 +149,74 @@ async function carregarProdutos(){
     .order("nome");
 
   produtos = data || [];
-  renderProdutos([]);
+}
+carregarProdutos();
+
+/* AUTOCOMPLETE */
+const input = document.getElementById("produtoInput");
+const sugestoesEl = document.getElementById("sugestoes");
+
+input.addEventListener("input", ()=>{
+  const valor = input.value.toLowerCase();
+  if(!valor){ sugestoesEl.style.display = "none"; return; }
+
+  const filtrados = produtos.filter(p=>p.nome.toLowerCase().includes(valor));
+  if(filtrados.length === 0){ sugestoesEl.style.display = "none"; return; }
+
+  sugestoesEl.innerHTML = filtrados.map(p=>
+    `<div onclick="selecionarProduto('${p.id}','${p.nome}',${p.preco},${p.estoque})">
+       ${p.nome} - R$ ${p.preco.toFixed(2)} | Estoque: ${p.estoque}
+     </div>`
+  ).join("");
+  sugestoesEl.style.display = "block";
+});
+
+let produtoSelecionado = null;
+
+function selecionarProduto(id,nome,preco,estoque){
+  input.value = nome;
+  produtoSelecionado = { id, nome, preco, estoque };
+  sugestoesEl.style.display = "none";
+  quantidadeInput.value = 1;
 }
 
-function renderProdutos(lista){
-  const el = document.getElementById("listaProdutos");
-  if(lista.length === 0){
-    el.innerHTML = "<i>Digite o nome da peça para buscar...</i>";
+/* REGISTRAR VENDA */
+async function vender(){
+  if(!produtoSelecionado){
+    alert("Selecione um produto válido");
+    return;
+  }
+  const q = Number(quantidadeInput.value);
+  if(q <= 0 || q > produtoSelecionado.estoque){
+    alert("Quantidade inválida ou estoque insuficiente");
     return;
   }
 
-  el.innerHTML = lista.map(p=>`
-    <div class="produto-item">
-      <span>${p.nome} | R$ ${p.preco.toFixed(2)} | Estoque: ${p.estoque}</span>
-      <button onclick="venderProduto(${p.id})" ${p.estoque<=0?'disabled':''}>Vender</button>
-    </div>
-  `).join("");
-}
+  const valorTotal = produtoSelecionado.preco * q;
 
-function filtrarProdutos(){
-  const txt = document.getElementById("buscaProduto").value.toLowerCase().trim();
-  if(txt.length < 1){
-    renderProdutos([]);
-    return;
-  }
-  renderProdutos(produtos.filter(p => p.nome.toLowerCase().includes(txt)));
-}
-
-/* ========= VENDER PRODUTO ========= */
-async function venderProduto(id){
-  const produto = produtos.find(p => p.id === id);
-  if(!produto || produto.estoque <= 0) return;
-
-  const confirmVenda = confirm(`Vender 1 unidade de "${produto.nome}" por R$ ${produto.preco.toFixed(2)}?`);
-  if(!confirmVenda) return;
-
-  // Atualiza estoque
-  await sb.from("produtos").update({ estoque: produto.estoque - 1 }).eq("id", id);
-
-  // Registra venda no caixa
-  await sb.from("caixa").insert({
-    app_id,
-    tipo: "venda",
-    descricao: `Venda: ${produto.nome}`,
-    valor: Number(produto.preco)
-  });
-
-  // Atualiza lista
-  carregarProdutos();
-  carregarMovimentos();
-}
-
-/* ========= ENTRADAS E SAÍDAS MANUAIS ========= */
-async function entradaManual(){
-  if(!descEntrada.value || valorEntrada.value <= 0) return;
-
+  // Registrar no caixa
   await sb.from("caixa").insert({
     app_id,
     tipo: "entrada",
-    descricao: descEntrada.value,
-    valor: Number(valorEntrada.value)
+    descricao: `Venda: ${produtoSelecionado.nome} x${q}`,
+    valor: valorTotal
   });
 
-  descEntrada.value = valorEntrada.value = "";
+  // Baixar estoque
+  await sb.from("produtos")
+    .update({ estoque: produtoSelecionado.estoque - q })
+    .eq("id", produtoSelecionado.id);
+
+  // Reset
+  input.value = "";
+  quantidadeInput.value = 1;
+  produtoSelecionado = null;
+
   carregarMovimentos();
+  carregarProdutos();
 }
 
-async function saida(){
-  if(!descSaida.value || valorSaida.value <= 0) return;
-
-  await sb.from("caixa").insert({
-    app_id,
-    tipo: "saida",
-    descricao: descSaida.value,
-    valor: Number(valorSaida.value)
-  });
-
-  descSaida.value = valorSaida.value = "";
-  carregarMovimentos();
-}
-
-/* ========= MOVIMENTAÇÕES ========= */
+/* LISTAR MOVIMENTOS */
 async function carregarMovimentos(){
   const { data } = await sb
     .from("caixa")
@@ -246,45 +224,21 @@ async function carregarMovimentos(){
     .eq("app_id", app_id)
     .order("created_at", { ascending:true });
 
-  let totalVendas = 0;
-  let totalEntradas = 0;
-  let totalSaidas = 0;
-
+  let saldo = 0;
   lista.innerHTML = "";
 
   (data || []).forEach(m=>{
-    let sinal = "+";
-    if(m.tipo === "venda"){
-      totalVendas += m.valor;
-      sinal = "+";
-    } else if(m.tipo === "entrada"){
-      totalEntradas += m.valor;
-      sinal = "+";
-    } else if(m.tipo === "saida"){
-      totalSaidas += m.valor;
-      sinal = "-";
-    }
-
+    saldo += m.tipo === "entrada" ? m.valor : -m.valor;
     lista.innerHTML += `
       <div class="item">
         <span>${m.descricao}</span>
-        <span>${sinal} R$ ${m.valor.toFixed(2)}</span>
+        <span>${m.tipo === "entrada" ? "+" : "-"} R$ ${m.valor.toFixed(2)}</span>
       </div>
     `;
   });
 
-  const saldoFinal = totalVendas + totalEntradas - totalSaidas;
-
-  totais.innerHTML = `
-    Total Vendas: R$ ${totalVendas.toFixed(2)}<br>
-    Total Entradas Manuais: R$ ${totalEntradas.toFixed(2)}<br>
-    Total Saídas: R$ ${totalSaidas.toFixed(2)}<br>
-    <b>Saldo Final: R$ ${saldoFinal.toFixed(2)}</b>
-  `;
+  total.innerText = `Saldo: R$ ${saldo.toFixed(2)}`;
 }
-
-/* ========= INIT ========= */
-carregarProdutos();
 carregarMovimentos();
 </script>
 
