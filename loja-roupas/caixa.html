@@ -6,15 +6,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between}
 .container{padding:24px;max-width:900px;margin:auto}
 .box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
-input,select,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
-input,select{background:#020617;color:#fff}
+input,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
+input{background:#020617;color:#fff}
 button{background:#22c55e;font-weight:bold}
 .fechar{background:#2563eb}
 .item{display:flex;justify-content:space-between;border-bottom:1px solid #1e293b;padding:6px 0}
@@ -25,27 +24,29 @@ button{background:#22c55e;font-weight:bold}
 <body>
 
 <div class="topo">
-  <h2>💰 Caixa da Loja</h2>
+  <h2>💰 Caixa</h2>
   <button onclick="location.href='admin.html'">⬅ Painel</button>
 </div>
 
 <div class="container">
 
-<div class="box">
-  <h3>🛒 Registrar Venda</h3>
-  <input id="produtoInput" placeholder="Produto">
-  <input id="precoInput" type="number" step="0.01" placeholder="Preço">
-  <input id="quantidadeInput" type="number" min="1" value="1">
-  <input id="valorPago" type="number" step="0.01" placeholder="Valor pago">
-  <button onclick="vender()">Registrar Venda</button>
-</div>
+  <!-- VENDA -->
+  <div class="box">
+    <h3>🛒 Registrar Venda</h3>
+    <input id="produto" placeholder="Produto">
+    <input id="preco" type="number" step="0.01" placeholder="Preço">
+    <input id="quantidade" type="number" min="1" value="1">
+    <input id="pago" type="number" step="0.01" placeholder="Valor pago">
+    <button onclick="vender()">Registrar Venda</button>
+  </div>
 
-<div class="box">
-  <h3>📄 Caixa Atual</h3>
-  <div id="lista"></div>
-  <div id="total" class="total"></div>
-  <button class="fechar" onclick="fecharCaixa()">🧾 Fechar Caixa</button>
-</div>
+  <!-- CAIXA -->
+  <div class="box">
+    <h3>📄 Caixa Atual</h3>
+    <div id="lista"></div>
+    <div id="total" class="total"></div>
+    <button class="fechar" onclick="fecharCaixa()">🧾 Fechar Caixa</button>
+  </div>
 
 </div>
 
@@ -55,31 +56,31 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin){ alert("Sessão inválida"); location.href="../auth/login.html"; }
-const app_id = admin.app_id;
-
 const lista = document.getElementById("lista");
 const total = document.getElementById("total");
 
 async function vender(){
-  const nome = produtoInput.value.trim();
-  const preco = Number(precoInput.value);
-  const q = Number(quantidadeInput.value);
-  const pago = Number(valorPago.value);
-  if(!nome || preco<=0 || q<=0 || pago<=0) return alert("Dados inválidos");
+  const nome = produto.value.trim();
+  const precoVal = Number(preco.value);
+  const q = Number(quantidade.value);
+  const pagoVal = Number(pago.value);
+
+  if(!nome || precoVal<=0 || q<=0 || pagoVal<=0){
+    alert("Dados inválidos");
+    return;
+  }
 
   await sb.from("caixa").insert({
-    app_id,
-    tipo:"entrada",
-    descricao:`Venda: ${nome} x${q}`,
-    valor:pago
+    tipo: "entrada",
+    descricao: `Venda: ${nome} x${q}`,
+    valor: pagoVal
   });
 
-  produtoInput.value="";
-  precoInput.value="";
-  quantidadeInput.value=1;
-  valorPago.value="";
+  produto.value="";
+  preco.value="";
+  quantidade.value=1;
+  pago.value="";
+
   carregarCaixa();
 }
 
@@ -87,7 +88,6 @@ async function getUltimoCaixaId(){
   const { data } = await sb
     .from("caixa_fechamento")
     .select("ultimo_caixa_id")
-    .eq("app_id", app_id)
     .order("id",{ascending:false})
     .limit(1);
 
@@ -97,47 +97,63 @@ async function getUltimoCaixaId(){
 async function carregarCaixa(){
   const ultimoId = await getUltimoCaixaId();
 
-  let query = sb.from("caixa").select("*").eq("app_id", app_id);
-  if(ultimoId) query = query.gt("id", ultimoId);
+  let query = sb.from("caixa").select("*");
+  if(ultimoId > 0){
+    query = query.gt("id", ultimoId);
+  }
 
   const { data } = await query.order("id");
 
-  let soma=0;
-  lista.innerHTML="";
+  let soma = 0;
+  lista.innerHTML = "";
+
   (data||[]).forEach(m=>{
-    soma+=Number(m.valor);
-    lista.innerHTML+=`
+    soma += Number(m.valor);
+    lista.innerHTML += `
       <div class="item">
         <span>${m.descricao}</span>
         <span>R$ ${Number(m.valor).toFixed(2)}</span>
-      </div>`;
+      </div>
+    `;
   });
-  total.innerText=`Saldo: R$ ${soma.toFixed(2)}`;
+
+  total.innerText = `Saldo: R$ ${soma.toFixed(2)}`;
 }
-carregarCaixa();
 
 async function fecharCaixa(){
   const ultimoId = await getUltimoCaixaId();
 
-  let query = sb.from("caixa").select("*").eq("app_id", app_id);
-  if(ultimoId) query = query.gt("id", ultimoId);
+  let query = sb.from("caixa").select("*");
+  if(ultimoId > 0){
+    query = query.gt("id", ultimoId);
+  }
 
   const { data } = await query.order("id");
-  if(!data || !data.length) return alert("Nada para fechar");
+  if(!data || !data.length){
+    alert("Nada para fechar");
+    return;
+  }
 
-  const ultimoCaixaId = data[data.length-1].id;
+  const ultimoCaixaId = data[data.length - 1].id;
   let totalRecebido = 0;
-  data.forEach(m=> totalRecebido+=Number(m.valor));
+  data.forEach(m => totalRecebido += Number(m.valor));
 
-  await sb.from("caixa_fechamento").insert({
-    app_id,
+  const { error } = await sb.from("caixa_fechamento").insert({
     total_recebido: totalRecebido,
     total_vendas: data.length,
     ultimo_caixa_id: ultimoCaixaId
   });
 
-  carregarCaixa(); // 🔥 zera de verdade
+  if(error){
+    console.error(error);
+    alert(error.message);
+    return;
+  }
+
+  carregarCaixa(); // zera e NÃO volta
 }
+
+carregarCaixa();
 </script>
 
 </body>
