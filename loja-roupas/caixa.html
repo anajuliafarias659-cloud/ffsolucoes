@@ -162,7 +162,7 @@ function calcularTroco(){
   }
 }
 
-/* ===== VENDA ===== */
+/* ===== VENDA (DESCONTO ATÉ 10%) ===== */
 async function vender(){
   if(!produtoSelecionado){
     alert("Selecione um produto");
@@ -172,7 +172,7 @@ async function vender(){
   const q = Number(quantidadeInput.value);
   const forma = formaPagamentoInput.value;
   const totalVenda = Number(totalVendaInput.value);
-  const pago = Number(pagoInput.value || 0);
+  let pago = Number(pagoInput.value || totalVenda);
 
   if(!forma){
     alert("Escolha a forma de pagamento");
@@ -184,18 +184,26 @@ async function vender(){
     return;
   }
 
-  if(forma === "dinheiro" && pago < totalVenda){
-    alert("Valor pago insuficiente");
-    return;
+  let desconto = 0;
+  const descontoMax = totalVenda * 0.10;
+
+  if(pago < totalVenda){
+    desconto = totalVenda - pago;
+    if(desconto > descontoMax){
+      alert("Desconto máximo permitido é 10%");
+      return; // ❌ não vende
+    }
   }
 
-  const descricao = `Venda: ${produtoSelecionado.nome} x${q} (${forma})`;
+  const descricao = desconto > 0
+    ? `Venda: ${produtoSelecionado.nome} x${q} (${forma}) | Desconto R$ ${desconto.toFixed(2)}`
+    : `Venda: ${produtoSelecionado.nome} x${q} (${forma})`;
 
   const { error } = await sb.from("caixa").insert({
     app_id,
     tipo: "entrada",
     descricao,
-    valor: totalVenda
+    valor: pago
   });
 
   if(error){
@@ -204,9 +212,7 @@ async function vender(){
   }
 
   const novoEstoque = produtoSelecionado.estoque - q;
-
-  await sb
-    .from("produtos")
+  await sb.from("produtos")
     .update({ estoque: novoEstoque })
     .eq("id", produtoSelecionado.id);
 
