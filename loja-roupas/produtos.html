@@ -62,6 +62,7 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
   border-radius:14px;
   text-align:center;
   font-size:13px;
+  cursor:pointer;
 }
 .produto img{
   width:100%;
@@ -78,6 +79,35 @@ small{opacity:.7}
   justify-content:center;
   opacity:.3;
   font-size:12px;
+}
+
+/* ===== GALERIA MODAL ===== */
+.modal{
+  display:none;
+  position:fixed;
+  top:0; left:0;
+  width:100%; height:100%;
+  background:rgba(0,0,0,0.85);
+  justify-content:center;
+  align-items:center;
+  z-index:1000;
+}
+.modal-content{
+  max-width:90%;
+  max-height:90%;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.modal img{
+  max-width:100%;
+  max-height:80vh;
+  border-radius:12px;
+}
+.modal button{
+  align-self:flex-end;
+  background:#e53935;
+  padding:8px 12px;
 }
 </style>
 </head>
@@ -126,7 +156,7 @@ small{opacity:.7}
     <label><input type="checkbox" class="cor" value="Vermelho"> Vermelho</label>
   </div>
 
-  <!-- INPUT PARA MULTIPLAS FOTOS -->
+  <!-- INPUT MULTIPLO -->
   <input id="fotos" type="file" accept="image/*" multiple>
 
   <button onclick="cadastrar()">Cadastrar peça</button>
@@ -138,6 +168,14 @@ small{opacity:.7}
   <div id="lista" class="grid"></div>
 </div>
 
+</div>
+
+<!-- GALERIA MODAL -->
+<div id="modal" class="modal" onclick="fecharModal()">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button onclick="fecharModal()">Fechar</button>
+    <div id="modal-imagens"></div>
+  </div>
 </div>
 
 <script>
@@ -173,8 +211,13 @@ async function cadastrar(){
   let imagens = [];
 
   for(let i=0; i<arquivos.length; i++){
-    const path = `${admin.app_id}/${Date.now()}_${arquivos[i].name}`;
-    await sb.storage.from("produtos").upload(path, arquivos[i], { upsert:true });
+    const arquivo = arquivos[i];
+    const path = `${admin.app_id}/${Date.now()}_${i}_${arquivo.name}`;
+    const { error } = await sb.storage.from("produtos").upload(path, arquivo, { upsert: true });
+    if(error){
+      console.error("Erro ao enviar imagem:", error.message);
+      continue;
+    }
     const url = sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
     imagens.push(url);
   }
@@ -187,7 +230,7 @@ async function cadastrar(){
     categoria: categoria.value,
     tamanhos,
     cores,
-    imagens, // array de URLs
+    imagens,
     ativo: true
   });
 
@@ -208,7 +251,7 @@ async function carregar(){
     .order("categoria");
 
   lista.innerHTML = (data || []).map(p=>`
-    <div class="produto">
+    <div class="produto" onclick="abrirGaleria(${JSON.stringify(p.imagens)})">
       ${p.imagens && p.imagens.length > 0 ? `<img src="${p.imagens[0]}">` : `<div class="sem-foto">Sem foto</div>`}
       <b>${p.nome}</b>
       <div class="preco">R$ ${p.preco.toFixed(2)}</div>
@@ -225,6 +268,18 @@ async function excluir(id){
     await sb.from("produtos").delete().eq("id", id);
     carregar();
   }
+}
+
+/* ========= GALERIA MODAL ========= */
+function abrirGaleria(imagens){
+  if(!imagens || imagens.length === 0) return;
+  const container = document.getElementById("modal-imagens");
+  container.innerHTML = imagens.map(url => `<img src="${url}">`).join("");
+  document.getElementById("modal").style.display = "flex";
+}
+
+function fecharModal(){
+  document.getElementById("modal").style.display = "none";
 }
 
 carregar();
