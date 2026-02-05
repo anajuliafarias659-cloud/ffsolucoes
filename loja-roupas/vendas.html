@@ -4,19 +4,12 @@
 <meta charset="UTF-8">
 <title>Loja</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-/* ===== TODO O CSS ORIGINAL — NÃO ALTERADO ===== */
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
 :root{--cor-primaria:#22c55e;--cor-banner:#0f172a;--cor-card:#0f172a}
-body.ano_novo{--cor-primaria:#22c55e;--cor-banner:#064e3b;--cor-card:#052e16}
-body.sao_joao{--cor-primaria:#f59e0b;--cor-banner:#78350f;--cor-card:#451a03}
-body.carnaval{--cor-primaria:#a855f7;--cor-banner:#3b0764;--cor-card:#2e1065}
-body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
-
 .banner{width:100%;height:260px;background:var(--cor-banner)}
 .banner img{width:100%;height:100%;object-fit:cover}
 .topo{padding:24px;text-align:center;background:var(--cor-banner)}
@@ -25,13 +18,29 @@ body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
 .card{background:var(--cor-card);border-radius:14px;padding:12px;text-align:center}
 .card img{width:100%;height:160px;object-fit:cover;border-radius:10px}
 .botao{margin-top:8px;width:100%;padding:10px;border:none;border-radius:10px;background:var(--cor-primaria);font-weight:bold;cursor:pointer}
+
+#carrinhoBtn{
+  position:fixed;bottom:20px;right:20px;
+  background:#22c55e;color:#000;border:none;
+  border-radius:50%;width:60px;height:60px;
+  font-size:22px;cursor:pointer
+}
+#badge{
+  position:absolute;top:-5px;right:-5px;
+  background:#ef4444;color:#fff;border-radius:50%;
+  padding:2px 7px;font-size:12px;display:none
+}
+
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:999}
+.modal-content{background:#020617;padding:20px;border-radius:16px;max-width:95%;width:420px}
+.item{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.item button{background:#ef4444;border:none;border-radius:6px;color:#fff;padding:2px 8px}
 </style>
 </head>
 
 <body>
 
 <div id="banner" class="banner"></div>
-
 <div class="topo">
   <h1 id="nomeLoja">Loja</h1>
   <p id="descLoja"></p>
@@ -41,8 +50,19 @@ body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
   <div id="produtos" class="grid"></div>
 </div>
 
+<button id="carrinhoBtn" onclick="abrirCarrinho()">🛒 <span id="badge">0</span></button>
+
+<div id="modal" class="modal">
+  <div class="modal-content">
+    <h3>Carrinho</h3>
+    <div id="listaCarrinho"></div>
+    <p><b>Total:</b> R$ <span id="total">0.00</span></p>
+    <button class="botao" onclick="finalizar()">💬 Enviar pedido no WhatsApp</button>
+    <button class="botao" style="background:#ef4444" onclick="fecharCarrinho()">Fechar</button>
+  </div>
+</div>
+
 <script>
-/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -53,43 +73,73 @@ let APP_ID = params.get("app") || localStorage.getItem("APP_ID");
 if(!APP_ID){ document.body.innerHTML="Link inválido"; throw new Error(); }
 localStorage.setItem("APP_ID", APP_ID);
 
+let carrinho = JSON.parse(localStorage.getItem("carrinho_"+APP_ID)) || [];
+let WHATS="", NOME_LOJA="";
+
 async function init(){
   const { data: cfg } = await sb.from("config_site")
-    .select("nome_site, descricao_site, banner_url, tema")
+    .select("nome_site, descricao_site, banner_url, whatsapp")
     .eq("app_id", APP_ID).single();
 
+  NOME_LOJA = cfg.nome_site;
+  WHATS = cfg.whatsapp;
   nomeLoja.innerText = cfg.nome_site;
   descLoja.innerText = cfg.descricao_site || "";
-  document.body.className = cfg.tema || "";
   banner.innerHTML = cfg.banner_url ? `<img src="${cfg.banner_url}">` : "";
 
   const { data } = await sb.from("produtos")
-    .select("*")
-    .eq("ativo", true)
-    .eq("app_id", APP_ID);
+    .select("*").eq("ativo", true).eq("app_id", APP_ID);
 
   produtos.innerHTML = data.map(p=>{
-    /* ===== ÚNICO AJUSTE (IMAGEM DO CELULAR) ===== */
-    let imgs = [];
+    // 🔥 ÚNICO AJUSTE: imagem do celular
+    let imgs=[];
     try{
-      if(Array.isArray(p.imagens)) imgs = p.imagens;
-      else if(typeof p.imagens === "string") imgs = JSON.parse(p.imagens);
-      else if(p.imagem) imgs = [p.imagem];
-    }catch(e){ imgs = []; }
+      if(Array.isArray(p.imagens)) imgs=p.imagens;
+      else if(typeof p.imagens==="string") imgs=JSON.parse(p.imagens);
+      else if(p.imagem) imgs=[p.imagem];
+    }catch(e){}
 
     const capa = imgs[0] || "";
 
     return `
       <div class="card">
-        ${capa ? `<img src="${capa}" loading="lazy">` : ""}
+        ${capa ? `<img src="${capa}">` : ""}
         <b>${p.nome}</b><br>
         R$ ${p.preco.toFixed(2)}
         <button class="botao" onclick='add(${JSON.stringify(p)})'>Adicionar</button>
-      </div>
-    `;
+      </div>`;
   }).join("");
+
+  atualizarBadge();
 }
 
+function add(p){
+  const id=String(p.id);
+  const item=carrinho.find(i=>String(i.id)===id);
+  if(item) item.qtd++; else carrinho.push({...p,id,qtd:1});
+  salvar(); atualizarBadge();
+}
+function salvar(){localStorage.setItem("carrinho_"+APP_ID,JSON.stringify(carrinho))}
+function atualizarBadge(){
+  const t=carrinho.reduce((s,i)=>s+i.qtd,0);
+  badge.innerText=t; badge.style.display=t>0?"block":"none";
+}
+function abrirCarrinho(){modal.style.display="flex";renderCarrinho()}
+function fecharCarrinho(){modal.style.display="none"}
+function renderCarrinho(){
+  let soma=0;
+  listaCarrinho.innerHTML=carrinho.map(i=>{
+    soma+=i.preco*i.qtd;
+    return `<div class="item">${i.nome} x${i.qtd}</div>`;
+  }).join("");
+  total.innerText=soma.toFixed(2);
+}
+function finalizar(){
+  let msg=`🛍️ *${NOME_LOJA}*\n\n`;
+  carrinho.forEach(i=>msg+=`• ${i.nome} x${i.qtd}\n`);
+  msg+=`\n💰 Total: R$ ${total.innerText}`;
+  window.open(`https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`);
+}
 init();
 </script>
 
