@@ -160,24 +160,12 @@ body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
   color:#064e3b;
   font-size:14px;
 }
-.form-finalizacao select:focus,
-.form-finalizacao input:focus{
-  outline:none;
-  border-color:#22c55e;
-  box-shadow:0 0 0 3px rgba(34,197,94,.25);
-}
 .form-finalizacao .botao{
-  margin-top:10px;
   background:#22c55e;
   color:#022c22;
   font-size:15px;
   padding:12px;
   border-radius:14px;
-  transition:.2s;
-}
-.form-finalizacao .botao:hover{
-  box-shadow:0 0 18px rgba(34,197,94,.9);
-  transform:translateY(-1px);
 }
 </style>
 </head>
@@ -210,19 +198,22 @@ body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
       <h4>🧾 Dados do cliente</h4>
 
       <label>Nome completo</label>
-      <input id="cliNome" placeholder="Seu nome completo">
+      <input id="cliNome">
 
       <label>CPF</label>
-      <input id="cliCpf" placeholder="000.000.000-00">
+      <input id="cliCpf">
 
       <label>Endereço</label>
-      <input id="cliEndereco" placeholder="Rua, número, bairro">
+      <input id="cliEndereco">
+
+      <label>Ponto de referência</label>
+      <input id="cliReferencia">
 
       <button class="botao" type="button" onclick="enviarLocalizacao()">
-        📍 Enviar localização em tempo real
+        📍 Usar minha localização
       </button>
 
-      <hr style="margin:14px 0;border:none;border-top:1px solid #86efac">
+      <hr style="border:none;border-top:1px solid #86efac;margin:14px 0">
 
       <h4>💳 Pagamento</h4>
 
@@ -235,7 +226,7 @@ body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
 
       <div id="trocoDiv" style="display:none">
         <label>Troco para quanto?</label>
-        <input id="trocoValor" placeholder="Ex: 100,00">
+        <input id="trocoValor">
       </div>
 
       <button class="botao" onclick="finalizar()">
@@ -250,51 +241,36 @@ body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== APP_ID ===== */
 const params = new URLSearchParams(location.search);
 let APP_ID = params.get("app") || localStorage.getItem("APP_ID");
-if(!APP_ID){
-  document.body.innerHTML = "Link inválido";
-  throw new Error("app_id ausente");
-}
+if(!APP_ID){ document.body.innerHTML="Link inválido"; throw new Error(); }
 localStorage.setItem("APP_ID", APP_ID);
 
-/* ===== ESTADO ===== */
 let carrinho = JSON.parse(localStorage.getItem("carrinho_"+APP_ID)) || [];
 let CLIENTE = JSON.parse(localStorage.getItem("cliente_"+APP_ID)) || {
-  nome:"", cpf:"", endereco:""
+  nome:"", cpf:"", endereco:"", referencia:"", localizacao:""
 };
-let WHATS = "";
-let NOME_LOJA = "";
+let WHATS="", NOME_LOJA="";
 
-/* ===== INIT ===== */
 async function init(){
-  const { data: cfg } = await sb
-    .from("config_site")
+  const { data: cfg } = await sb.from("config_site")
     .select("nome_site, descricao_site, banner_url, tema, whatsapp")
-    .eq("app_id", APP_ID)
-    .single();
+    .eq("app_id", APP_ID).single();
 
   NOME_LOJA = cfg.nome_site;
   WHATS = cfg.whatsapp;
   nomeLoja.innerText = cfg.nome_site;
   descLoja.innerText = cfg.descricao_site || "";
   document.body.className = cfg.tema || "";
-
   banner.innerHTML = cfg.banner_url ? `<img src="${cfg.banner_url}">` : "";
 
-  const { data } = await sb
-    .from("produtos")
-    .select("*")
-    .eq("ativo", true)
-    .eq("app_id", APP_ID)
-    .order("nome");
+  const { data } = await sb.from("produtos")
+    .select("*").eq("ativo", true).eq("app_id", APP_ID);
 
   produtos.innerHTML = data.map(p=>`
     <div class="card">
@@ -305,110 +281,79 @@ async function init(){
     </div>
   `).join("");
 
-  // preenche cliente se já existir
-  cliNome.value = CLIENTE.nome || "";
-  cliCpf.value = CLIENTE.cpf || "";
-  cliEndereco.value = CLIENTE.endereco || "";
+  cliNome.value = CLIENTE.nome;
+  cliCpf.value = CLIENTE.cpf;
+  cliEndereco.value = CLIENTE.endereco;
+  cliReferencia.value = CLIENTE.referencia;
 
   atualizarBadge();
 }
 
-/* ===== CARRINHO ===== */
 function add(p){
   const id = String(p.id);
-  const item = carrinho.find(i => String(i.id) === id);
-  if(item) item.qtd++;
-  else carrinho.push({...p, id, qtd:1});
-  salvarCarrinho();
-  atualizarBadge();
+  const item = carrinho.find(i=>String(i.id)===id);
+  if(item) item.qtd++; else carrinho.push({...p,id,qtd:1});
+  salvar(); atualizarBadge();
 }
 
 function remover(id){
-  id = String(id);
-  const item = carrinho.find(i => String(i.id) === id);
+  id=String(id);
+  const item = carrinho.find(i=>String(i.id)===id);
   if(!item) return;
-  item.qtd--;
-  if(item.qtd <= 0){
-    carrinho = carrinho.filter(i => String(i.id) !== id);
-  }
-  salvarCarrinho();
-  renderCarrinho();
-  atualizarBadge();
+  item.qtd--; if(item.qtd<=0) carrinho=carrinho.filter(i=>String(i.id)!==id);
+  salvar(); renderCarrinho(); atualizarBadge();
 }
 
-function salvarCarrinho(){
-  localStorage.setItem("carrinho_"+APP_ID, JSON.stringify(carrinho));
-}
+function salvar(){ localStorage.setItem("carrinho_"+APP_ID, JSON.stringify(carrinho)); }
 
 function atualizarBadge(){
-  const totalItens = carrinho.reduce((s,i)=>s+i.qtd,0);
-  badge.innerText = totalItens;
-  badge.style.display = totalItens > 0 ? "block" : "none";
+  const t = carrinho.reduce((s,i)=>s+i.qtd,0);
+  badge.innerText=t; badge.style.display=t>0?"block":"none";
 }
 
-/* ===== MODAL ===== */
 function abrirCarrinho(){ modal.style.display="flex"; renderCarrinho(); }
 function fecharCarrinho(){ modal.style.display="none"; }
 
 function renderCarrinho(){
-  let soma = 0;
-  listaCarrinho.innerHTML = carrinho.map(i=>{
-    soma += i.preco * i.qtd;
-    return `
-      <div class="item">
-        ${i.nome} x${i.qtd}
-        <button onclick="remover('${i.id}')">-</button>
-      </div>
-    `;
+  let soma=0;
+  listaCarrinho.innerHTML=carrinho.map(i=>{
+    soma+=i.preco*i.qtd;
+    return `<div class="item">${i.nome} x${i.qtd}
+      <button onclick="remover('${i.id}')">-</button></div>`;
   }).join("");
-  total.innerText = soma.toFixed(2);
+  total.innerText=soma.toFixed(2);
 }
 
-/* ===== PAGAMENTO ===== */
-function troco(){
-  trocoDiv.style.display = pagamento.value === "Dinheiro" ? "block" : "none";
-}
+function troco(){ trocoDiv.style.display = pagamento.value==="Dinheiro"?"block":"none"; }
 
-/* ===== LOCALIZAÇÃO ===== */
 function enviarLocalizacao(){
-  window.open("https://www.google.com/maps");
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const link=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+    CLIENTE.localizacao=link;
+    localStorage.setItem("cliente_"+APP_ID, JSON.stringify(CLIENTE));
+    alert("Localização capturada ✔");
+  },()=>alert("Não foi possível obter localização"));
 }
 
-/* ===== FINALIZAR ===== */
 function finalizar(){
-  const nome = cliNome.value.trim();
-  const cpf = cliCpf.value.trim();
-  const endereco = cliEndereco.value.trim();
-  if(!nome || !cpf || !endereco){
-    alert("Preencha nome, CPF e endereço");
-    return;
-  }
+  const {value:nome}=cliNome, {value:cpf}=cliCpf, {value:endereco}=cliEndereco, {value:referencia}=cliReferencia;
+  if(!nome||!cpf||!endereco){ alert("Preencha nome, CPF e endereço"); return; }
 
-  CLIENTE = { nome, cpf, endereco };
+  CLIENTE={nome,cpf,endereco,referencia,localizacao:CLIENTE.localizacao||"não enviada"};
   localStorage.setItem("cliente_"+APP_ID, JSON.stringify(CLIENTE));
 
-  let msg = `🛍️ Pedido - ${NOME_LOJA}%0A%0A`;
-  msg += `👤 Cliente: ${nome}%0A`;
-  msg += `📄 CPF: ${cpf}%0A`;
-  msg += `🏠 Endereço: ${endereco}%0A`;
-  msg += `📍 Localização: cliente irá enviar em tempo real%0A%0A`;
+  let msg = `🛍️ *${NOME_LOJA.toUpperCase()}*\n\n`;
+  msg+=`👤 *Cliente:* *${nome}*\n📄 *CPF:* ${cpf}\n🏠 *Endereço:* ${endereco}\n`;
+  if(referencia) msg+=`📌 *Referência:* ${referencia}\n`;
+  msg+=`📍 *Localização:* ${CLIENTE.localizacao}\n\n🧾 *Itens do pedido*\n`;
+  carrinho.forEach(i=>msg+=`• ${i.nome} x${i.qtd}\n`);
+  msg+=`\n💰 *Total:* R$ ${total.innerText}\n💳 *Pagamento:* ${pagamento.value}`;
+  if(pagamento.value==="Dinheiro") msg+=`\n💵 *Troco para:* ${trocoValor.value||"não informado"}`;
 
-  carrinho.forEach(i=>{
-    msg += `• ${i.nome} x${i.qtd}%0A`;
-  });
-
-  msg += `%0ATotal: R$ ${total.innerText}%0A`;
-  msg += `Pagamento: ${pagamento.value}`;
-  if(pagamento.value === "Dinheiro"){
-    msg += `%0ATroco para: ${trocoValor.value || "não informado"}`;
-  }
-
-  window.open(`https://wa.me/${WHATS}?text=${msg}`);
+  window.open(`https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`);
 
   localStorage.removeItem("carrinho_"+APP_ID);
-  carrinho = [];
-  atualizarBadge();
-  fecharCarrinho();
+  carrinho=[]; atualizarBadge(); fecharCarrinho();
 }
 
 init();
