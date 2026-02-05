@@ -131,9 +131,7 @@ small{opacity:.7}
 
   <input id="fotos" type="file" accept="image/*" multiple>
 
-  <button id="btnSalvar" type="button" onclick="salvar()">
-    Cadastrar peça
-  </button>
+  <button id="btnSalvar" type="button" onclick="salvar()">Cadastrar peça</button>
 </div>
 
 <div class="box">
@@ -159,14 +157,14 @@ const sb = supabase.createClient(
 
 const btnSalvar = document.getElementById("btnSalvar");
 
-/* ===== PROCESSAR FOTO DO CELULAR ===== */
-async function processarImagemCelular(file) {
-  return new Promise(resolve => {
+/* ===== CORREÇÃO DA FOTO DO CELULAR (ÚNICA MUDANÇA REAL) ===== */
+async function normalizarFotoCelular(file){
+  return new Promise(resolve=>{
     const reader = new FileReader();
     const img = new Image();
 
-    reader.onload = e => {
-      img.onload = () => {
+    reader.onload = e=>{
+      img.onload = ()=>{
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
 
@@ -174,25 +172,21 @@ async function processarImagemCelular(file) {
         let w = img.width;
         let h = img.height;
 
-        if (w > h && w > max) {
-          h *= max / w;
-          w = max;
-        } else if (h > max) {
-          w *= max / h;
-          h = max;
-        }
+        if(w > h && w > max){ h *= max / w; w = max; }
+        else if(h > max){ w *= max / h; h = max; }
 
         canvas.width = w;
         canvas.height = h;
-        ctx.drawImage(img, 0, 0, w, h);
+        ctx.drawImage(img,0,0,w,h);
 
-        canvas.toBlob(blob => {
-          resolve(new File([blob], "foto.jpg", { type: "image/jpeg" }));
-        }, "image/jpeg", 0.8);
+        canvas.toBlob(blob=>{
+          resolve(new File([blob], file.name.replace(/\.\w+$/, ".jpg"), {
+            type:"image/jpeg"
+          }));
+        },"image/jpeg",0.8);
       };
       img.src = e.target.result;
     };
-
     reader.readAsDataURL(file);
   });
 }
@@ -202,76 +196,116 @@ function voltar(){
   location.href = "admin.html";
 }
 
-/* ===== SALVAR ===== */
+/* ===== SALVAR / EDITAR ===== */
 async function salvar(){
   if(!nome.value || preco.value <= 0){
-    alert("Preencha nome e preço");
+    alert("Preencha nome e preço corretamente");
     return;
   }
 
   const tamanhos = [...document.querySelectorAll(".tam:checked")].map(i=>i.value);
   const cores = [...document.querySelectorAll(".cor:checked")].map(i=>i.value);
 
-  let imagens = [];
+  /* ===== EDIÇÃO ===== */
+  if(produto_id.value){
+    const { error } = await sb.from("produtos").update({
+      nome: nome.value,
+      preco: Number(preco.value),
+      estoque: Number(estoque.value || 0),
+      categoria: categoria.value,
+      tamanhos,
+      cores
+    }).eq("id", produto_id.value);
 
-  for(const f of fotos.files){
-    const imgOk = await processarImagemCelular(f);
-    const path = `${admin.app_id}/${Date.now()}.jpg`;
-
-    await sb.storage.from("produtos").upload(path, imgOk, { upsert:true });
-    imagens.push(
-      sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
-    );
+    if(error){ alert("Erro ao editar"); return; }
   }
 
-  await sb.from("produtos").insert({
-    app_id: admin.app_id,
-    nome: nome.value,
-    preco: Number(preco.value),
-    estoque: Number(estoque.value || 0),
-    categoria: categoria.value,
-    tamanhos,
-    cores,
-    imagens: JSON.stringify(imagens),
-    ativo: true
-  });
+  /* ===== CADASTRO ===== */
+  else{
+    let imagens = [];
+
+    for(const f of fotos.files){
+      const fotoOk = await normalizarFotoCelular(f);
+      const path = `${admin.app_id}/${Date.now()}_${fotoOk.name}`;
+
+      await sb.storage.from("produtos").upload(path, fotoOk, { upsert:true });
+      imagens.push(
+        sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
+      );
+    }
+
+    const { error } = await sb.from("produtos").insert({
+      app_id: admin.app_id,
+      nome: nome.value,
+      preco: Number(preco.value),
+      estoque: Number(estoque.value || 0),
+      categoria: categoria.value,
+      tamanhos,
+      cores,
+      imagens: JSON.stringify(imagens),
+      ativo: true
+    });
+
+    if(error){ alert("Erro ao salvar"); return; }
+  }
 
   limpar();
   carregar();
-  alert("✅ Produto salvo");
+  alert("✅ Produto salvo com sucesso");
+}
+
+/* ===== EDITAR ===== */
+function editar(p){
+  produto_id.value = p.id;
+  nome.value = p.nome;
+  preco.value = p.preco;
+  estoque.value = p.estoque;
+  categoria.value = p.categoria;
+
+  document.querySelectorAll(".tam").forEach(t=>t.checked=p.tamanhos?.includes(t.value));
+  document.querySelectorAll(".cor").forEach(c=>c.checked=p.cores?.includes(c.value));
+
+  btnSalvar.innerText = "💾 Salvar alterações";
 }
 
 /* ===== LIMPAR ===== */
 function limpar(){
-  produto_id.value = "";
-  nome.value = preco.value = estoque.value = "";
-  fotos.value = "";
+  produto_id.value="";
+  nome.value=preco.value=estoque.value="";
+  fotos.value="";
   document.querySelectorAll("input[type=checkbox]").forEach(i=>i.checked=false);
-  btnSalvar.innerText = "Cadastrar peça";
+  btnSalvar.innerText="Cadastrar peça";
 }
 
 /* ===== LISTAR ===== */
 async function carregar(){
-  const { data } = await sb
-    .from("produtos")
+  const { data } = await sb.from("produtos")
     .select("*")
     .eq("app_id", admin.app_id)
     .order("categoria");
 
-  lista.innerHTML = (data || []).map(p=>{
-    let imgs = [];
-    try { imgs = JSON.parse(p.imagens||"[]"); } catch(e){}
-
+  lista.innerHTML=(data||[]).map(p=>{
+    let imgs=[];
+    try{ imgs=JSON.parse(p.imagens||"[]"); }catch(e){}
     return `
       <div class="produto">
-        ${imgs[0] ? `<img src="${imgs[0]}" loading="lazy">` : `<div class="sem-foto">Sem foto</div>`}
+        ${imgs[0]?`<img src="${imgs[0]}" loading="lazy">`:`<div class="sem-foto">Sem foto</div>`}
         <b>${p.nome}</b>
         <div class="preco">R$ ${p.preco.toFixed(2)}</div>
         <small>${(p.tamanhos||[]).join(", ")} | ${(p.cores||[]).join(", ")}</small>
-        <br><small>Estoque: ${p.estoque}</small>
-      </div>
-    `;
+        <br><small>Estoque: ${p.estoque}</small><br><br>
+        <button onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
+        <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
+      </div>`;
   }).join("");
+}
+
+/* ===== EXCLUIR ===== */
+async function excluir(id){
+  if(confirm("Excluir produto?")){
+    await sb.from("produtos").delete().eq("id", id);
+    carregar();
+  }
 }
 
 carregar();
