@@ -17,18 +17,29 @@ body{
 }
 :root{
   --cor-primaria:#22c55e;
+  --cor-banner:#0f172a;
   --cor-card:#0f172a;
 }
+body.ano_novo{--cor-primaria:#22c55e;--cor-banner:#064e3b;--cor-card:#052e16}
+body.sao_joao{--cor-primaria:#f59e0b;--cor-banner:#78350f;--cor-card:#451a03}
+body.carnaval{--cor-primaria:#a855f7;--cor-banner:#3b0764;--cor-card:#2e1065}
+body.natal{--cor-primaria:#ef4444;--cor-banner:#7f1d1d;--cor-card:#450a0a}
+
+/* banner */
+.banner{width:100%;height:260px;background:var(--cor-banner)}
+.banner img{width:100%;height:100%;object-fit:cover}
 
 /* topo */
 .topo{
-  padding:20px;
+  padding:24px;
   text-align:center;
-  background:#0f172a;
+  background:var(--cor-banner);
 }
+.topo h1{margin:0}
+.topo p{opacity:.8}
 
 /* produtos */
-.container{padding:20px}
+.container{padding:20px;max-width:1200px;margin:auto}
 .grid{
   display:grid;
   gap:16px;
@@ -125,9 +136,7 @@ body{
   border-radius:14px;
   margin-top:12px;
 }
-.form-finalizacao label{
-  font-weight:bold;
-}
+.form-finalizacao label{font-weight:bold}
 .form-finalizacao select,
 .form-finalizacao input{
   width:100%;
@@ -148,8 +157,11 @@ body{
 
 <body>
 
+<div id="banner" class="banner"></div>
+
 <div class="topo">
-  <h2 id="nomeLoja">Loja</h2>
+  <h1 id="nomeLoja">Loja</h1>
+  <p id="descLoja"></p>
 </div>
 
 <div class="container">
@@ -157,8 +169,7 @@ body{
 </div>
 
 <button id="carrinhoBtn" onclick="abrirCarrinho()">
-  🛒
-  <span id="badge">0</span>
+  🛒 <span id="badge">0</span>
 </button>
 
 <div id="modal" class="modal">
@@ -178,17 +189,13 @@ body{
 
       <div id="trocoDiv" style="display:none">
         <label>Troco para quanto?</label>
-        <input id="trocoValor" placeholder="Ex: 100,00">
+        <input id="trocoValor">
       </div>
 
-      <button class="botao" onclick="finalizar()">
-        Finalizar no WhatsApp
-      </button>
+      <button class="botao" onclick="finalizar()">Finalizar no WhatsApp</button>
     </div>
 
-    <button class="botao" style="background:#ef4444" onclick="fecharCarrinho()">
-      Fechar
-    </button>
+    <button class="botao" style="background:#ef4444" onclick="fecharCarrinho()">Fechar</button>
   </div>
 </div>
 
@@ -210,20 +217,25 @@ localStorage.setItem("APP_ID", APP_ID);
 
 /* ===== VARIÁVEIS ===== */
 let carrinho = JSON.parse(localStorage.getItem("carrinho_"+APP_ID)) || [];
-let WHATS = "";
-let NOME_LOJA = "";
+let WHATS="", NOME_LOJA="";
 
 /* ===== INIT ===== */
 async function init(){
   const { data: cfg } = await sb
     .from("config_site")
-    .select("nome_site, whatsapp")
+    .select("nome_site, descricao_site, banner_url, tema, whatsapp")
     .eq("app_id", APP_ID)
     .single();
 
   NOME_LOJA = cfg.nome_site;
   WHATS = cfg.whatsapp;
   nomeLoja.innerText = cfg.nome_site;
+  descLoja.innerText = cfg.descricao_site || "";
+  document.body.className = cfg.tema || "";
+
+  banner.innerHTML = cfg.banner_url
+    ? `<img src="${cfg.banner_url}">`
+    : "";
 
   const { data } = await sb
     .from("produtos")
@@ -237,9 +249,7 @@ async function init(){
       <img src="${p.imagem}">
       <b>${p.nome}</b><br>
       R$ ${p.preco.toFixed(2)}
-      <button class="botao" onclick='add(${JSON.stringify(p)})'>
-        Adicionar
-      </button>
+      <button class="botao" onclick='add(${JSON.stringify(p)})'>Adicionar</button>
     </div>
   `).join("");
 
@@ -250,82 +260,55 @@ async function init(){
 function add(p){
   const item = carrinho.find(i=>i.id===p.id);
   if(item) item.qtd++;
-  else carrinho.push({...p, qtd:1});
-  salvarCarrinho();
+  else carrinho.push({...p,qtd:1});
+  salvar();
   atualizarBadge();
 }
-
 function remover(id){
   const item = carrinho.find(i=>i.id===id);
   item.qtd--;
-  if(item.qtd<=0){
-    carrinho = carrinho.filter(i=>i.id!==id);
-  }
-  salvarCarrinho();
-  renderCarrinho();
-  atualizarBadge();
+  if(item.qtd<=0) carrinho=carrinho.filter(i=>i.id!==id);
+  salvar(); renderCarrinho(); atualizarBadge();
 }
-
-function salvarCarrinho(){
+function salvar(){
   localStorage.setItem("carrinho_"+APP_ID, JSON.stringify(carrinho));
 }
-
 function atualizarBadge(){
-  const totalItens = carrinho.reduce((s,i)=>s+i.qtd,0);
-  badge.innerText = totalItens;
-  badge.style.display = totalItens>0 ? "block":"none";
+  const t = carrinho.reduce((s,i)=>s+i.qtd,0);
+  badge.innerText=t;
+  badge.style.display=t>0?"block":"none";
 }
 
 /* ===== MODAL ===== */
-function abrirCarrinho(){
-  modal.style.display="flex";
-  renderCarrinho();
-}
-function fecharCarrinho(){
-  modal.style.display="none";
-}
-
+function abrirCarrinho(){ modal.style.display="flex"; renderCarrinho(); }
+function fecharCarrinho(){ modal.style.display="none"; }
 function renderCarrinho(){
   let soma=0;
   listaCarrinho.innerHTML = carrinho.map(i=>{
-    soma += i.preco*i.qtd;
-    return `
-      <div class="item">
-        ${i.nome} x${i.qtd}
-        <button onclick="remover(${i.id})">-</button>
-      </div>
-    `;
+    soma+=i.preco*i.qtd;
+    return `<div class="item">${i.nome} x${i.qtd}
+      <button onclick="remover(${i.id})">-</button></div>`;
   }).join("");
-  total.innerText = soma.toFixed(2);
+  total.innerText=soma.toFixed(2);
 }
 
 /* ===== PAGAMENTO ===== */
 function troco(){
-  trocoDiv.style.display =
-    pagamento.value==="Dinheiro" ? "block":"none";
+  trocoDiv.style.display = pagamento.value==="Dinheiro"?"block":"none";
 }
 
 /* ===== FINALIZAR ===== */
 function finalizar(){
-  let msg = `🛍️ Pedido - ${NOME_LOJA}%0A%0A`;
-
-  carrinho.forEach(i=>{
-    msg += `• ${i.nome} x${i.qtd}%0A`;
-  });
-
-  msg += `%0ATotal: R$ ${total.innerText}%0A`;
-  msg += `Pagamento: ${pagamento.value}`;
-
-  if(pagamento.value==="Dinheiro"){
-    msg += `%0ATroco para: ${trocoValor.value || "não informado"}`;
-  }
+  let msg=`🛍️ Pedido - ${NOME_LOJA}%0A%0A`;
+  carrinho.forEach(i=>msg+=`• ${i.nome} x${i.qtd}%0A`);
+  msg+=`%0ATotal: R$ ${total.innerText}%0A`;
+  msg+=`Pagamento: ${pagamento.value}`;
+  if(pagamento.value==="Dinheiro")
+    msg+=`%0ATroco para: ${trocoValor.value||"não informado"}`;
 
   window.open(`https://wa.me/${WHATS}?text=${msg}`);
-
   localStorage.removeItem("carrinho_"+APP_ID);
-  carrinho = [];
-  atualizarBadge();
-  fecharCarrinho();
+  carrinho=[]; atualizarBadge(); fecharCarrinho();
 }
 
 init();
