@@ -159,7 +159,6 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ========= ELEMENTOS ========= */
 const btnSalvar = document.getElementById("btnSalvar");
 
 /* ========= NAVEGAÇÃO ========= */
@@ -169,58 +168,70 @@ function voltar(){
 
 /* ========= SALVAR / CADASTRAR ========= */
 async function salvar(){
-  if(!nome.value || preco.value <= 0){
-    alert("Preencha nome e preço corretamente");
-    return;
-  }
-
-  const tamanhos = [...document.querySelectorAll(".tam:checked")].map(i=>i.value);
-  const cores = [...document.querySelectorAll(".cor:checked")].map(i=>i.value);
-
-  // 👉 MODO EDIÇÃO
-  if(produto_id.value){
-    const { error } = await sb.from("produtos").update({
-      nome: nome.value,
-      preco: Number(preco.value),
-      estoque: Number(estoque.value || 0),
-      categoria: categoria.value,
-      tamanhos,
-      cores
-    }).eq("id", produto_id.value);
-
-    if(error){
-      alert("Erro ao salvar edição");
-      console.error(error);
+  try{
+    if(!nome.value || preco.value <= 0){
+      alert("Preencha nome e preço corretamente");
       return;
     }
-  }
-  // 👉 MODO CADASTRO
-  else {
-    let imagens = [];
 
-    for(const f of fotos.files){
-      const path = `${admin.app_id}/${Date.now()}_${f.name}`;
-      await sb.storage.from("produtos").upload(path, f, { upsert:true });
-      imagens.push(
-        sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
-      );
+    const tamanhos = [...document.querySelectorAll(".tam:checked")].map(i=>i.value);
+    const cores = [...document.querySelectorAll(".cor:checked")].map(i=>i.value);
+
+    /* ===== EDIÇÃO ===== */
+    if(produto_id.value){
+      const { error } = await sb.from("produtos").update({
+        nome: nome.value,
+        preco: Number(preco.value),
+        estoque: Number(estoque.value || 0),
+        categoria: categoria.value,
+        tamanhos,
+        cores
+      }).eq("id", produto_id.value);
+
+      if(error) throw error;
     }
 
-    await sb.from("produtos").insert({
-      app_id: admin.app_id,
-      nome: nome.value,
-      preco: Number(preco.value),
-      estoque: Number(estoque.value || 0),
-      categoria: categoria.value,
-      tamanhos,
-      cores,
-      imagens,
-      ativo:true
-    });
-  }
+    /* ===== CADASTRO ===== */
+    else {
+      let imagens = [];
 
-  limpar();
-  carregar();
+      for(const f of fotos.files){
+        const path = `${admin.app_id}/${Date.now()}_${f.name}`;
+
+        const { error: upErr } = await sb
+          .storage.from("produtos")
+          .upload(path, f, { upsert:true });
+
+        if(upErr) throw upErr;
+
+        imagens.push(
+          sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
+        );
+      }
+
+      const { error } = await sb.from("produtos").insert({
+        app_id: admin.app_id,
+        nome: nome.value,
+        preco: Number(preco.value),
+        estoque: Number(estoque.value || 0),
+        categoria: categoria.value,
+        tamanhos,
+        cores,
+        imagens: JSON.stringify(imagens), // 🔑 CORREÇÃO
+        ativo: true
+      });
+
+      if(error) throw error;
+    }
+
+    limpar();
+    carregar();
+    alert("✅ Produto salvo com sucesso");
+
+  } catch(err){
+    console.error("ERRO AO SALVAR:", err);
+    alert("Erro ao salvar produto. Veja o console.");
+  }
 }
 
 /* ========= EDITAR ========= */
@@ -239,20 +250,42 @@ function editar(p){
     c.checked = p.cores?.includes(c.value)
   );
 
-  btnSalvar.style.display = "block";
   btnSalvar.innerText = "💾 Salvar alterações";
 }
 
-/* ========= REPOR ========= */
-async function reporEstoque(id, atual){
-  const qtd = Number(prompt("Quantidade para repor:",0));
-  if(isNaN(qtd)) return;
+/* ========= LIMPAR ========= */
+function limpar(){
+  produto_id.value = "";
+  nome.value = preco.value = estoque.value = "";
+  fotos.value = "";
+  document.querySelectorAll("input[type=checkbox]").forEach(i=>i.checked=false);
+  btnSalvar.innerText = "Cadastrar peça";
+}
 
-  await sb.from("produtos")
-    .update({ estoque: atual + qtd })
-    .eq("id", id);
+/* ========= LISTAR ========= */
+async function carregar(){
+  const { data } = await sb
+    .from("produtos")
+    .select("*")
+    .eq("app_id", admin.app_id)
+    .order("categoria");
 
-  carregar();
+  lista.innerHTML = (data || []).map(p=>{
+    let imgs = [];
+    try_toggle: try { imgs = JSON.parse(p.imagens||"[]"); } catch(e){}
+
+    return `
+      <div class="produto">
+        ${imgs[0] ? `<img src="${imgs[0]}">` : `<div class="sem-foto">Sem foto</div>`}
+        <b>${p.nome}</b>
+        <div class="preco">R$ ${p.preco.toFixed(2)}</div>
+        <small>${(p.tamanhos||[]).join(", ")} | ${(p.cores||[]).join(", ")}</small>
+        <br><small>Estoque: ${p.estoque}</small><br><br>
+        <button onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
+        <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
+      </div>
+    `;
+  }).join("");
 }
 
 /* ========= EXCLUIR ========= */
@@ -263,43 +296,10 @@ async function excluir(id){
   }
 }
 
-/* ========= LIMPAR ========= */
-function limpar(){
-  produto_id.value = "";
-  nome.value = preco.value = estoque.value = "";
-  fotos.value = "";
-
-  document.querySelectorAll("input[type=checkbox]").forEach(i=>i.checked=false);
-
-  btnSalvar.style.display = "block";
-  btnSalvar.innerText = "Cadastrar peça";
-}
-
-/* ========= LISTAR ========= */
-async function carregar(){
-  const { data } = await sb.from("produtos")
-    .select("*")
-    .eq("app_id", admin.app_id)
-    .order("categoria");
-
-  lista.innerHTML = (data || []).map(p=>`
-    <div class="produto">
-      ${p.imagens?.length
-        ? `<img src="${p.imagens[0]}">`
-        : `<div class="sem-foto">Sem foto</div>`}
-      <b>${p.nome}</b>
-      <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-      <small>${(p.tamanhos||[]).join(", ")} | ${(p.cores||[]).join(", ")}</small>
-      <br><small>Estoque: ${p.estoque}</small><br><br>
-      <button onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
-      <button onclick="reporEstoque('${p.id}', ${p.estoque})">➕ Repor</button>
-      <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
-    </div>
-  `).join("");
-}
-
 carregar();
 </script>
 
+
 </body>
 </html>
+
