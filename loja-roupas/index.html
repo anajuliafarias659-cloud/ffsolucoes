@@ -163,30 +163,35 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== APP_ID VIA URL LIMPA (/loja/APP_ID) ===== */
-const partes = window.location.pathname.split("/").filter(Boolean);
-let APP_ID = partes[partes.length - 1];
+/* ===== IDENTIFICA LOJA (SLUG OU APP_ID) ===== */
+async function resolverAppId(){
+  const partes = window.location.pathname.split("/").filter(Boolean);
+  let valor = partes[partes.length - 1];
 
-// se não for "loja", salva
-if (APP_ID && APP_ID !== "loja") {
-  localStorage.setItem("APP_ID", APP_ID);
+  if(!valor || valor === "loja"){
+    valor = localStorage.getItem("APP_ID");
+  }
+
+  if(!valor) return null;
+
+  // tenta como slug
+  const { data } = await sb
+    .from("config_site")
+    .select("app_id")
+    .eq("slug", valor)
+    .maybeSingle();
+
+  if(data?.app_id){
+    localStorage.setItem("APP_ID", data.app_id);
+    return data.app_id;
+  }
+
+  // fallback: assume que já é app_id
+  localStorage.setItem("APP_ID", valor);
+  return valor;
 }
 
-// fallback PWA
-if (!APP_ID || APP_ID === "loja") {
-  APP_ID = localStorage.getItem("APP_ID");
-}
-
-// valida
-if (!APP_ID) {
-  document.body.innerHTML = `
-    <h2 style="padding:40px;text-align:center">
-      Loja não encontrada<br>
-      <small>Link inválido</small>
-    </h2>`;
-  throw new Error("APP_ID ausente");
-}
-
+let APP_ID = null;
 let lista = [];
 
 /* ===== CONFIG SITE ===== */
@@ -258,8 +263,21 @@ function fecharModal(e){
 }
 
 /* ===== INIT ===== */
-carregarConfig();
-carregarProdutos();
+(async ()=>{
+  APP_ID = await resolverAppId();
+
+  if(!APP_ID){
+    document.body.innerHTML = `
+      <h2 style="padding:40px;text-align:center">
+        Loja não encontrada<br>
+        <small>Link inválido</small>
+      </h2>`;
+    return;
+  }
+
+  carregarConfig();
+  carregarProdutos();
+})();
 
 /* ===== PWA ===== */
 if ("serviceWorker" in navigator) {
