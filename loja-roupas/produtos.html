@@ -96,7 +96,6 @@ small{opacity:.7}
 <div class="box">
   <h2>➕ Cadastrar / Editar Roupa</h2>
 
-  <!-- CONTROLE DE EDIÇÃO -->
   <input type="hidden" id="produto_id">
 
   <input id="nome" placeholder="Nome da peça">
@@ -132,7 +131,6 @@ small{opacity:.7}
 
   <input id="fotos" type="file" accept="image/*" multiple>
 
-  <!-- BOTÃO ÚNICO -->
   <button id="btnSalvar" type="button" onclick="salvar()">
     Cadastrar peça
   </button>
@@ -146,14 +144,14 @@ small{opacity:.7}
 </div>
 
 <script>
-/* ========= SESSÃO ========= */
+/* ===== SESSÃO ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin || admin.tipo !== "loja"){
   location.replace("../auth/login.html");
   throw new Error("Sessão inválida");
 }
 
-/* ========= SUPABASE ========= */
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -161,99 +159,89 @@ const sb = supabase.createClient(
 
 const btnSalvar = document.getElementById("btnSalvar");
 
-/* ========= NAVEGAÇÃO ========= */
+/* ===== PROCESSAR FOTO DO CELULAR ===== */
+async function processarImagemCelular(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    const img = new Image();
+
+    reader.onload = e => {
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const max = 1200;
+        let w = img.width;
+        let h = img.height;
+
+        if (w > h && w > max) {
+          h *= max / w;
+          w = max;
+        } else if (h > max) {
+          w *= max / h;
+          h = max;
+        }
+
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(img, 0, 0, w, h);
+
+        canvas.toBlob(blob => {
+          resolve(new File([blob], "foto.jpg", { type: "image/jpeg" }));
+        }, "image/jpeg", 0.8);
+      };
+      img.src = e.target.result;
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ===== NAVEGAÇÃO ===== */
 function voltar(){
   location.href = "admin.html";
 }
 
-/* ========= SALVAR / CADASTRAR ========= */
+/* ===== SALVAR ===== */
 async function salvar(){
-  try{
-    if(!nome.value || preco.value <= 0){
-      alert("Preencha nome e preço corretamente");
-      return;
-    }
-
-    const tamanhos = [...document.querySelectorAll(".tam:checked")].map(i=>i.value);
-    const cores = [...document.querySelectorAll(".cor:checked")].map(i=>i.value);
-
-    /* ===== EDIÇÃO ===== */
-    if(produto_id.value){
-      const { error } = await sb.from("produtos").update({
-        nome: nome.value,
-        preco: Number(preco.value),
-        estoque: Number(estoque.value || 0),
-        categoria: categoria.value,
-        tamanhos,
-        cores
-      }).eq("id", produto_id.value);
-
-      if(error) throw error;
-    }
-
-    /* ===== CADASTRO ===== */
-    else {
-      let imagens = [];
-
-      for(const f of fotos.files){
-        const path = `${admin.app_id}/${Date.now()}_${f.name}`;
-
-        const { error: upErr } = await sb
-          .storage.from("produtos")
-          .upload(path, f, { upsert:true });
-
-        if(upErr) throw upErr;
-
-        imagens.push(
-          sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
-        );
-      }
-
-      const { error } = await sb.from("produtos").insert({
-        app_id: admin.app_id,
-        nome: nome.value,
-        preco: Number(preco.value),
-        estoque: Number(estoque.value || 0),
-        categoria: categoria.value,
-        tamanhos,
-        cores,
-        imagens: JSON.stringify(imagens), // 🔑 CORREÇÃO
-        ativo: true
-      });
-
-      if(error) throw error;
-    }
-
-    limpar();
-    carregar();
-    alert("✅ Produto salvo com sucesso");
-
-  } catch(err){
-    console.error("ERRO AO SALVAR:", err);
-    alert("Erro ao salvar produto. Veja o console.");
+  if(!nome.value || preco.value <= 0){
+    alert("Preencha nome e preço");
+    return;
   }
+
+  const tamanhos = [...document.querySelectorAll(".tam:checked")].map(i=>i.value);
+  const cores = [...document.querySelectorAll(".cor:checked")].map(i=>i.value);
+
+  let imagens = [];
+
+  for(const f of fotos.files){
+    const imgOk = await processarImagemCelular(f);
+    const path = `${admin.app_id}/${Date.now()}.jpg`;
+
+    await sb.storage.from("produtos").upload(path, imgOk, { upsert:true });
+    imagens.push(
+      sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
+    );
+  }
+
+  await sb.from("produtos").insert({
+    app_id: admin.app_id,
+    nome: nome.value,
+    preco: Number(preco.value),
+    estoque: Number(estoque.value || 0),
+    categoria: categoria.value,
+    tamanhos,
+    cores,
+    imagens: JSON.stringify(imagens),
+    ativo: true
+  });
+
+  limpar();
+  carregar();
+  alert("✅ Produto salvo");
 }
 
-/* ========= EDITAR ========= */
-function editar(p){
-  produto_id.value = p.id;
-
-  nome.value = p.nome;
-  preco.value = p.preco;
-  estoque.value = p.estoque;
-  categoria.value = p.categoria;
-
-  document.querySelectorAll(".tam").forEach(t =>
-    t.checked = p.tamanhos?.includes(t.value)
-  );
-  document.querySelectorAll(".cor").forEach(c =>
-    c.checked = p.cores?.includes(c.value)
-  );
-
-  btnSalvar.innerText = "💾 Salvar alterações";
-}
-
-/* ========= LIMPAR ========= */
+/* ===== LIMPAR ===== */
 function limpar(){
   produto_id.value = "";
   nome.value = preco.value = estoque.value = "";
@@ -262,7 +250,7 @@ function limpar(){
   btnSalvar.innerText = "Cadastrar peça";
 }
 
-/* ========= LISTAR ========= */
+/* ===== LISTAR ===== */
 async function carregar(){
   const { data } = await sb
     .from("produtos")
@@ -272,34 +260,22 @@ async function carregar(){
 
   lista.innerHTML = (data || []).map(p=>{
     let imgs = [];
-    try_toggle: try { imgs = JSON.parse(p.imagens||"[]"); } catch(e){}
+    try { imgs = JSON.parse(p.imagens||"[]"); } catch(e){}
 
     return `
       <div class="produto">
-        ${imgs[0] ? `<img src="${imgs[0]}">` : `<div class="sem-foto">Sem foto</div>`}
+        ${imgs[0] ? `<img src="${imgs[0]}" loading="lazy">` : `<div class="sem-foto">Sem foto</div>`}
         <b>${p.nome}</b>
         <div class="preco">R$ ${p.preco.toFixed(2)}</div>
         <small>${(p.tamanhos||[]).join(", ")} | ${(p.cores||[]).join(", ")}</small>
-        <br><small>Estoque: ${p.estoque}</small><br><br>
-        <button onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
-        <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
+        <br><small>Estoque: ${p.estoque}</small>
       </div>
     `;
   }).join("");
 }
 
-/* ========= EXCLUIR ========= */
-async function excluir(id){
-  if(confirm("Excluir produto?")){
-    await sb.from("produtos").delete().eq("id", id);
-    carregar();
-  }
-}
-
 carregar();
 </script>
 
-
 </body>
 </html>
-
