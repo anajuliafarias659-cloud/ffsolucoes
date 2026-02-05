@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Loja de Roupas</title>
+<title>Loja</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -19,11 +19,15 @@ body{
   --cor-primaria:#22c55e;
   --cor-card:#0f172a;
 }
+
+/* topo */
 .topo{
   padding:20px;
   text-align:center;
   background:#0f172a;
 }
+
+/* produtos */
 .container{padding:20px}
 .grid{
   display:grid;
@@ -52,6 +56,8 @@ body{
   font-weight:bold;
   cursor:pointer;
 }
+
+/* botão carrinho */
 #carrinhoBtn{
   position:fixed;
   bottom:20px;
@@ -65,24 +71,41 @@ body{
   font-size:22px;
   cursor:pointer;
 }
+#badge{
+  position:absolute;
+  top:-5px;
+  right:-5px;
+  background:#ef4444;
+  color:#fff;
+  border-radius:50%;
+  padding:2px 7px;
+  font-size:12px;
+  display:none;
+}
+
+/* modal */
 .modal{
   position:fixed;
   inset:0;
-  background:rgba(0,0,0,.8);
+  background:rgba(0,0,0,.85);
   display:none;
   justify-content:center;
   align-items:center;
+  z-index:999;
 }
 .modal-content{
   background:#020617;
   padding:20px;
   border-radius:16px;
-  max-width:90%;
+  max-width:95%;
   width:420px;
 }
+
+/* carrinho */
 .item{
   display:flex;
   justify-content:space-between;
+  align-items:center;
   margin-bottom:8px;
 }
 .item button{
@@ -90,7 +113,35 @@ body{
   border:none;
   border-radius:6px;
   color:#fff;
-  padding:2px 6px;
+  padding:2px 8px;
+  cursor:pointer;
+}
+
+/* formulário verde */
+.form-finalizacao{
+  background:#dcfce7;
+  color:#064e3b;
+  padding:16px;
+  border-radius:14px;
+  margin-top:12px;
+}
+.form-finalizacao label{
+  font-weight:bold;
+}
+.form-finalizacao select,
+.form-finalizacao input{
+  width:100%;
+  margin-top:6px;
+  margin-bottom:10px;
+  padding:10px;
+  border-radius:10px;
+  border:1px solid #86efac;
+  background:#fff;
+  color:#064e3b;
+}
+.form-finalizacao .botao{
+  background:#22c55e;
+  color:#022c22;
 }
 </style>
 </head>
@@ -105,119 +156,178 @@ body{
   <div id="produtos" class="grid"></div>
 </div>
 
-<button id="carrinhoBtn" onclick="abrirCarrinho()">🛒</button>
+<button id="carrinhoBtn" onclick="abrirCarrinho()">
+  🛒
+  <span id="badge">0</span>
+</button>
 
 <div id="modal" class="modal">
   <div class="modal-content">
     <h3>Carrinho</h3>
+
     <div id="listaCarrinho"></div>
-    <p><b>Total:</b> R$ <span id="total"></span></p>
+    <p><b>Total:</b> R$ <span id="total">0.00</span></p>
 
-    <label>Pagamento:</label><br>
-    <select id="pagamento" onchange="troco()">
-      <option>PIX</option>
-      <option>Cartão</option>
-      <option>Dinheiro</option>
-    </select>
+    <div class="form-finalizacao">
+      <label>Forma de pagamento</label>
+      <select id="pagamento" onchange="troco()">
+        <option>PIX</option>
+        <option>Cartão</option>
+        <option>Dinheiro</option>
+      </select>
 
-    <div id="trocoDiv" style="display:none">
-      <input id="trocoValor" placeholder="Troco para quanto?">
+      <div id="trocoDiv" style="display:none">
+        <label>Troco para quanto?</label>
+        <input id="trocoValor" placeholder="Ex: 100,00">
+      </div>
+
+      <button class="botao" onclick="finalizar()">
+        Finalizar no WhatsApp
+      </button>
     </div>
 
-    <button class="botao" onclick="finalizar()">Finalizar no WhatsApp</button>
-    <button class="botao" style="background:#ef4444" onclick="fechar()">Fechar</button>
+    <button class="botao" style="background:#ef4444" onclick="fecharCarrinho()">
+      Fechar
+    </button>
   </div>
 </div>
 
 <script>
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* ===== APP_ID ===== */
 const params = new URLSearchParams(location.search);
-const APP_ID = params.get("app");
+let APP_ID = params.get("app") || localStorage.getItem("APP_ID");
+if(!APP_ID){
+  document.body.innerHTML="Link inválido";
+  throw new Error("app_id ausente");
+}
+localStorage.setItem("APP_ID", APP_ID);
+
+/* ===== VARIÁVEIS ===== */
 let carrinho = JSON.parse(localStorage.getItem("carrinho_"+APP_ID)) || [];
 let WHATS = "";
+let NOME_LOJA = "";
 
+/* ===== INIT ===== */
 async function init(){
-  const { data: cfg } = await sb.from("config_site")
+  const { data: cfg } = await sb
+    .from("config_site")
     .select("nome_site, whatsapp")
     .eq("app_id", APP_ID)
     .single();
 
-  nomeLoja.innerText = cfg.nome_site;
+  NOME_LOJA = cfg.nome_site;
   WHATS = cfg.whatsapp;
+  nomeLoja.innerText = cfg.nome_site;
 
-  const { data } = await sb.from("produtos")
-    .select("*").eq("ativo", true).eq("app_id", APP_ID);
+  const { data } = await sb
+    .from("produtos")
+    .select("*")
+    .eq("ativo", true)
+    .eq("app_id", APP_ID)
+    .order("nome");
 
   produtos.innerHTML = data.map(p=>`
     <div class="card">
       <img src="${p.imagem}">
       <b>${p.nome}</b><br>
       R$ ${p.preco.toFixed(2)}
-      <button class="botao" onclick='add(${JSON.stringify(p)})'>Adicionar</button>
+      <button class="botao" onclick='add(${JSON.stringify(p)})'>
+        Adicionar
+      </button>
     </div>
   `).join("");
+
+  atualizarBadge();
 }
 
+/* ===== CARRINHO ===== */
 function add(p){
   const item = carrinho.find(i=>i.id===p.id);
   if(item) item.qtd++;
-  else carrinho.push({...p,qtd:1});
-  salvar();
-}
-
-function abrirCarrinho(){
-  modal.style.display="flex";
-  renderCarrinho();
-}
-
-function fechar(){ modal.style.display="none"; }
-
-function renderCarrinho(){
-  let total=0;
-  listaCarrinho.innerHTML = carrinho.map(i=>{
-    total+=i.preco*i.qtd;
-    return `
-      <div class="item">
-        ${i.nome} x${i.qtd}
-        <button onclick="remover(${i.id})">-</button>
-      </div>`;
-  }).join("");
-  document.getElementById("total").innerText = total.toFixed(2);
+  else carrinho.push({...p, qtd:1});
+  salvarCarrinho();
+  atualizarBadge();
 }
 
 function remover(id){
   const item = carrinho.find(i=>i.id===id);
   item.qtd--;
-  if(item.qtd<=0) carrinho=carrinho.filter(i=>i.id!==id);
-  salvar();
+  if(item.qtd<=0){
+    carrinho = carrinho.filter(i=>i.id!==id);
+  }
+  salvarCarrinho();
   renderCarrinho();
+  atualizarBadge();
 }
 
-function salvar(){
+function salvarCarrinho(){
   localStorage.setItem("carrinho_"+APP_ID, JSON.stringify(carrinho));
 }
 
-function troco(){
-  trocoDiv.style.display = pagamento.value==="Dinheiro" ? "block":"none";
+function atualizarBadge(){
+  const totalItens = carrinho.reduce((s,i)=>s+i.qtd,0);
+  badge.innerText = totalItens;
+  badge.style.display = totalItens>0 ? "block":"none";
 }
 
-function finalizar(){
-  let msg="Pedido:%0A";
-  carrinho.forEach(i=>{
-    msg+=`${i.nome} x${i.qtd}%0A`;
-  });
-  msg+=`%0ATotal: R$ ${total.innerText}%0A`;
-  msg+=`Pagamento: ${pagamento.value}`;
-  if(pagamento.value==="Dinheiro"){
-    msg+=`%0ATroco para: ${trocoValor.value}`;
-  }
-  window.open(`https://wa.me/${WHATS}?text=${msg}`);
-  localStorage.removeItem("carrinho_"+APP_ID);
+/* ===== MODAL ===== */
+function abrirCarrinho(){
+  modal.style.display="flex";
+  renderCarrinho();
 }
+function fecharCarrinho(){
+  modal.style.display="none";
+}
+
+function renderCarrinho(){
+  let soma=0;
+  listaCarrinho.innerHTML = carrinho.map(i=>{
+    soma += i.preco*i.qtd;
+    return `
+      <div class="item">
+        ${i.nome} x${i.qtd}
+        <button onclick="remover(${i.id})">-</button>
+      </div>
+    `;
+  }).join("");
+  total.innerText = soma.toFixed(2);
+}
+
+/* ===== PAGAMENTO ===== */
+function troco(){
+  trocoDiv.style.display =
+    pagamento.value==="Dinheiro" ? "block":"none";
+}
+
+/* ===== FINALIZAR ===== */
+function finalizar(){
+  let msg = `🛍️ Pedido - ${NOME_LOJA}%0A%0A`;
+
+  carrinho.forEach(i=>{
+    msg += `• ${i.nome} x${i.qtd}%0A`;
+  });
+
+  msg += `%0ATotal: R$ ${total.innerText}%0A`;
+  msg += `Pagamento: ${pagamento.value}`;
+
+  if(pagamento.value==="Dinheiro"){
+    msg += `%0ATroco para: ${trocoValor.value || "não informado"}`;
+  }
+
+  window.open(`https://wa.me/${WHATS}?text=${msg}`);
+
+  localStorage.removeItem("carrinho_"+APP_ID);
+  carrinho = [];
+  atualizarBadge();
+  fecharCarrinho();
+}
+
 init();
 </script>
 
