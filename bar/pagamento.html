@@ -31,6 +31,8 @@ select,input{
   border-radius:10px;
   border:none
 }
+
+small{opacity:.7}
 </style>
 </head>
 
@@ -72,7 +74,7 @@ let mesaId = null;
 
 <div class="container">
   <div class="box">
-    <p>Total do Pedido:</p>
+    <p>Total do Pedido</p>
     <h2 id="totalPedido">R$ 0,00</h2>
 
     <label>Forma de pagamento</label>
@@ -83,16 +85,19 @@ let mesaId = null;
     </select>
 
     <div id="boxDinheiro">
-      <label>Valor recebido</label>
+      <label>Valor pago</label>
       <input
         type="number"
         id="valorRecebido"
         placeholder="0.00"
         oninput="calcularTroco()"
       />
+      <small>Pagamento mínimo permitido: R$ 10,00</small>
 
-      <p>Troco:</p>
+      <p>Troco</p>
       <h3 id="troco">R$ 0,00</h3>
+
+      <p id="infoDesconto" style="display:none;color:#facc15"></p>
     </div>
 
     <button onclick="confirmarPagamento()">✅ Confirmar Pagamento</button>
@@ -102,32 +107,19 @@ let mesaId = null;
 <script>
 /* ========= CARREGAR PEDIDO ========= */
 async function carregarPedido(){
-  // buscar pedido (mesa)
-  const { data: pedido, error: erroPedido } = await sb
+  const { data: pedido } = await sb
     .from("pedidos")
     .select("id, mesa_id")
     .eq("id", pedidoId)
     .eq("app_id", appId)
     .single();
 
-  if(erroPedido || !pedido){
-    alert("Pedido não encontrado");
-    location.href = getBasePath() + "/caixa.html";
-    return;
-  }
-
   mesaId = pedido.mesa_id;
 
-  // buscar itens
-  const { data: itens, error: erroItens } = await sb
+  const { data: itens } = await sb
     .from("pedido_itens")
     .select("preco, quantidade")
     .eq("pedido_id", pedidoId);
-
-  if(erroItens){
-    alert("Erro ao carregar itens");
-    return;
-  }
 
   totalPedido = 0;
   itens.forEach(i=>{
@@ -138,44 +130,67 @@ async function carregarPedido(){
     `R$ ${totalPedido.toFixed(2)}`;
 }
 
-/* ========= TROCO ========= */
+/* ========= TROCO / DESCONTO ========= */
 function calcularTroco(){
-  const recebido =
-    Number(document.getElementById("valorRecebido").value || 0);
+  const recebido = Number(
+    document.getElementById("valorRecebido").value || 0
+  );
 
   const troco = recebido - totalPedido;
+  const info = document.getElementById("infoDesconto");
+
+  if(recebido < totalPedido){
+    const desconto = totalPedido - recebido;
+    info.style.display = "block";
+    info.innerText = `Desconto aplicado: R$ ${desconto.toFixed(2)}`;
+  } else {
+    info.style.display = "none";
+  }
 
   document.getElementById("troco").innerText =
     troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
 }
 
-/* ========= CONFIRMAR ========= */
+/* ========= CONFIRMAR PAGAMENTO ========= */
 async function confirmarPagamento(){
   const forma = document.getElementById("formaPagamento").value;
+  const valorPago = Number(
+    document.getElementById("valorRecebido").value || 0
+  );
+
+  if(valorPago < 10){
+    alert("Pagamento mínimo permitido é R$ 10,00");
+    return;
+  }
 
   if(totalPedido <= 0){
     alert("Total inválido");
     return;
   }
 
-  // 1. marcar pedido como pago
+  const desconto = valorPago < totalPedido
+    ? totalPedido - valorPago
+    : 0;
+
+  /* 1️⃣ Atualiza pedido */
   await sb
     .from("pedidos")
     .update({
       status: "pago",
       forma_pagamento: forma,
+      valor_pago: valorPago,
+      desconto: desconto,
       pago_em: new Date().toISOString()
     })
     .eq("id", pedidoId)
     .eq("app_id", appId);
 
-  // 2. buscar itens para baixa
+  /* 2️⃣ Baixa estoque */
   const { data: itens } = await sb
     .from("pedido_itens")
     .select("produto_id, quantidade")
     .eq("pedido_id", pedidoId);
 
-  // 3. baixar estoque
   for(const item of itens){
     await sb.rpc("baixar_estoque", {
       p_produto_id: item.produto_id,
@@ -184,7 +199,7 @@ async function confirmarPagamento(){
     });
   }
 
-  // 4. liberar mesa
+  /* 3️⃣ Libera mesa */
   if(mesaId){
     await sb
       .from("mesas")
@@ -193,14 +208,14 @@ async function confirmarPagamento(){
       .eq("app_id", appId);
   }
 
-  // 5. finalizar pedido
+  /* 4️⃣ Finaliza pedido */
   await sb
     .from("pedidos")
     .update({ status: "finalizado" })
     .eq("id", pedidoId)
     .eq("app_id", appId);
 
-  // 6. voltar pro caixa
+  /* 5️⃣ Volta pro caixa */
   location.href = getBasePath() + "/caixa.html";
 }
 
