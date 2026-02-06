@@ -4,133 +4,207 @@
 <meta charset="UTF-8">
 <title>Pagamento</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px 24px}
 .container{max-width:600px;margin:auto;padding:24px}
-.card{background:#0f172a;padding:20px;border-radius:16px}
-h2{margin-top:0}
-select,input,button{
+.box{background:#0f172a;padding:20px;border-radius:16px}
+
+button{
   width:100%;
   padding:14px;
-  border-radius:10px;
   border:none;
+  border-radius:10px;
+  background:#22c55e;
+  font-weight:bold;
+  cursor:pointer;
   margin-top:12px
 }
-button{background:#22c55e;font-weight:bold;cursor:pointer}
-.troco{color:#22c55e;font-weight:bold;margin-top:10px}
+
+select,input{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border-radius:10px;
+  border:none
+}
 </style>
 </head>
 
 <body>
 
-<div class="container">
-  <div class="card">
-    <h2>💳 Pagamento</h2>
-    <div id="resumo"></div>
-
-    <select id="forma" onchange="ajustarForma()">
-      <option value="dinheiro">Dinheiro</option>
-      <option value="pix">PIX</option>
-      <option value="debito">Débito</option>
-      <option value="credito">Crédito</option>
-    </select>
-
-    <input id="valorPago" type="number" step="0.01" placeholder="Valor pago">
-
-    <div id="troco" class="troco"></div>
-
-    <button onclick="finalizar()">✅ Finalizar pagamento</button>
-  </div>
-</div>
-
 <script>
+/* ========= BASE PATH ========= */
+function getBasePath(){
+  const path = window.location.pathname;
+  if(path.includes("/ffsolucoes/")){
+    return "/ffsolucoes/bar";
+  }
+  return "/bar";
+}
+
+/* ========= SUPABASE ========= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* ========= PARAMETROS ========= */
 const params = new URLSearchParams(location.search);
 const pedidoId = params.get("pedido");
-const app_id = params.get("app_id");
+const appId = params.get("app") || localStorage.getItem("app_id");
+
+if(!pedidoId || !appId){
+  alert("Pedido inválido");
+  location.href = getBasePath() + "/caixa.html";
+}
 
 let totalPedido = 0;
+let mesaId = null;
+</script>
 
-async function carregar(){
-  const { data: itens } = await sb
-    .from("pedido_itens")
-    .select("preco,quantidade")
-    .eq("pedido_id", pedidoId)
-    .eq("app_id", app_id);
+<div class="topo">
+  <h2>💳 Pagamento</h2>
+</div>
 
-  itens.forEach(i=>{
-    totalPedido += i.preco * i.quantidade;
-  });
+<div class="container">
+  <div class="box">
+    <p>Total do Pedido:</p>
+    <h2 id="totalPedido">R$ 0,00</h2>
 
-  document.getElementById("resumo").innerHTML =
-    `<p>Total: <strong>R$ ${totalPedido.toFixed(2)}</strong></p>`;
+    <label>Forma de pagamento</label>
+    <select id="formaPagamento">
+      <option value="dinheiro">Dinheiro</option>
+      <option value="pix">PIX</option>
+      <option value="cartao">Cartão</option>
+    </select>
 
-  document.getElementById("valorPago").value = totalPedido.toFixed(2);
-}
+    <div id="boxDinheiro">
+      <label>Valor recebido</label>
+      <input
+        type="number"
+        id="valorRecebido"
+        placeholder="0.00"
+        oninput="calcularTroco()"
+      />
 
-function ajustarForma(){
-  const forma = document.getElementById("forma").value;
-  const input = document.getElementById("valorPago");
-  document.getElementById("troco").innerHTML = "";
+      <p>Troco:</p>
+      <h3 id="troco">R$ 0,00</h3>
+    </div>
 
-  if(forma !== "dinheiro"){
-    input.value = totalPedido.toFixed(2);
-    input.disabled = true;
-  } else {
-    input.disabled = false;
-  }
-}
+    <button onclick="confirmarPagamento()">✅ Confirmar Pagamento</button>
+  </div>
+</div>
 
-function calcularTroco(){
-  const pago = Number(document.getElementById("valorPago").value || 0);
-  const troco = pago - totalPedido;
+<script>
+/* ========= CARREGAR PEDIDO ========= */
+async function carregarPedido(){
+  // buscar pedido (mesa)
+  const { data: pedido, error: erroPedido } = await sb
+    .from("pedidos")
+    .select("id, mesa_id")
+    .eq("id", pedidoId)
+    .eq("app_id", appId)
+    .single();
 
-  document.getElementById("troco").innerHTML =
-    troco >= 0 ? `Troco: R$ ${troco.toFixed(2)}` : "";
-}
-
-document.getElementById("valorPago").addEventListener("input", calcularTroco);
-
-async function finalizar(){
-  const forma = document.getElementById("forma").value;
-  let pago = Number(document.getElementById("valorPago").value || 0);
-
-  if(forma !== "dinheiro"){
-    pago = totalPedido;
-  }
-
-  if(pago < totalPedido){
-    alert("Valor insuficiente");
+  if(erroPedido || !pedido){
+    alert("Pedido não encontrado");
+    location.href = getBasePath() + "/caixa.html";
     return;
   }
 
-  const troco = forma === "dinheiro" ? pago - totalPedido : 0;
+  mesaId = pedido.mesa_id;
 
-  await sb.from("pagamentos").insert({
-    app_id,
-    pedido_id: pedidoId,
-    tipo: forma,
-    valor: totalPedido,
-    troco
+  // buscar itens
+  const { data: itens, error: erroItens } = await sb
+    .from("pedido_itens")
+    .select("preco, quantidade")
+    .eq("pedido_id", pedidoId);
+
+  if(erroItens){
+    alert("Erro ao carregar itens");
+    return;
+  }
+
+  totalPedido = 0;
+  itens.forEach(i=>{
+    totalPedido += Number(i.preco) * Number(i.quantidade);
   });
 
-  await sb.from("pedidos")
-    .update({ status:"pago" })
-    .eq("id", pedidoId)
-    .eq("app_id", app_id);
-
-  alert("Pagamento finalizado");
-  location.href = "caixa.html";
+  document.getElementById("totalPedido").innerText =
+    `R$ ${totalPedido.toFixed(2)}`;
 }
 
-carregar();
-ajustarForma();
+/* ========= TROCO ========= */
+function calcularTroco(){
+  const recebido =
+    Number(document.getElementById("valorRecebido").value || 0);
+
+  const troco = recebido - totalPedido;
+
+  document.getElementById("troco").innerText =
+    troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
+}
+
+/* ========= CONFIRMAR ========= */
+async function confirmarPagamento(){
+  const forma = document.getElementById("formaPagamento").value;
+
+  if(totalPedido <= 0){
+    alert("Total inválido");
+    return;
+  }
+
+  // 1. marcar pedido como pago
+  await sb
+    .from("pedidos")
+    .update({
+      status: "pago",
+      forma_pagamento: forma,
+      pago_em: new Date().toISOString()
+    })
+    .eq("id", pedidoId)
+    .eq("app_id", appId);
+
+  // 2. buscar itens para baixa
+  const { data: itens } = await sb
+    .from("pedido_itens")
+    .select("produto_id, quantidade")
+    .eq("pedido_id", pedidoId);
+
+  // 3. baixar estoque
+  for(const item of itens){
+    await sb.rpc("baixar_estoque", {
+      p_produto_id: item.produto_id,
+      p_qtd: item.quantidade,
+      p_app_id: appId
+    });
+  }
+
+  // 4. liberar mesa
+  if(mesaId){
+    await sb
+      .from("mesas")
+      .update({ status: "livre" })
+      .eq("id", mesaId)
+      .eq("app_id", appId);
+  }
+
+  // 5. finalizar pedido
+  await sb
+    .from("pedidos")
+    .update({ status: "finalizado" })
+    .eq("id", pedidoId)
+    .eq("app_id", appId);
+
+  // 6. voltar pro caixa
+  location.href = getBasePath() + "/caixa.html";
+}
+
+carregarPedido();
 </script>
 
 </body>
