@@ -14,7 +14,6 @@
 *{box-sizing:border-box}
 body{margin:0;font-family:Inter,Arial,sans-serif;background:#020617;color:#e5e7eb}
 .topo-app{position:sticky;top:0;z-index:20;background:#020617;padding:14px 16px;border-bottom:1px solid #0f172a}
-.brand{display:flex;align-items:center;gap:12px}
 .brand span{font-size:26px;font-weight:900;color:#38bdf8}
 .mobile-pos{padding:16px;padding-bottom:110px}
 .card{background:#0f172a;border-radius:18px;padding:16px;margin-bottom:14px}
@@ -35,7 +34,7 @@ body{margin:0;font-family:Inter,Arial,sans-serif;background:#020617;color:#e5e7e
 <body>
 
 <div class="topo-app">
-  <div class="brand" onmousedown="segurarLogo()" onmouseup="cancelarSegurar()">
+  <div class="brand">
     <span>CAIXA</span>
   </div>
 </div>
@@ -43,7 +42,7 @@ body{margin:0;font-family:Inter,Arial,sans-serif;background:#020617;color:#e5e7e
 <div class="mobile-pos">
 
   <div class="card">
-    <input id="codigo" placeholder="Código de barras"
+    <input id="codigo" placeholder="Código ou nome do produto"
       onkeydown="if(event.key==='Enter') buscarProduto()"
       oninput="buscarAuto()">
     <button onclick="abrirLeitor()">📷 Ler código</button>
@@ -66,15 +65,6 @@ body{margin:0;font-family:Inter,Arial,sans-serif;background:#020617;color:#e5e7e
     <div id="carrinho"></div>
   </div>
 
-  <div class="card pagamento">
-    <button class="pix" onclick="pagarPix()">PIX</button>
-    <button class="cartao" onclick="pagarCartao()">Cartão</button>
-    <div id="pixBox" style="display:none">
-      <div id="qrcode"></div>
-      <button onclick="confirmarPagamento('PIX')">Confirmar PIX</button>
-    </div>
-  </div>
-
 </div>
 
 <div class="total-fixo">
@@ -95,8 +85,8 @@ let buscaTimer=null;
 
 /* BUSCA AUTOMÁTICA */
 function buscarAuto(){
-  const cod=codigo.value.trim();
-  if(cod.length<4){
+  const v=codigo.value.trim();
+  if(v.length<2){
     previewProduto.style.display="none";
     return;
   }
@@ -120,19 +110,35 @@ function abrirLeitor(){
   });
 }
 
-/* BUSCAR */
+/* BUSCAR PRODUTO (CÓDIGO → NOME) */
 async function buscarProduto(){
-  const cod=codigo.value.trim();
-  if(!cod) return;
+  const valor=codigo.value.trim();
+  if(!valor) return;
 
-  const {data}=await supabaseClient
+  // 1️⃣ tenta por código
+  let { data } = await supabaseClient
     .from("produtos")
     .select("*")
-    .eq("codigo_barra",cod)
-    .eq("app_id",admin.app_id)
-    .single();
+    .eq("codigo_barra", valor)
+    .eq("app_id", admin.app_id)
+    .maybeSingle();
 
-  if(!data) return;
+  // 2️⃣ se não achou, tenta por nome
+  if(!data){
+    const resp=await supabaseClient
+      .from("produtos")
+      .select("*")
+      .ilike("nome", `%${valor}%`)
+      .eq("app_id", admin.app_id)
+      .limit(1);
+
+    data=resp.data?.[0];
+  }
+
+  if(!data){
+    previewProduto.style.display="none";
+    return;
+  }
 
   produtoLido=data;
   prevNome.innerText=data.nome;
@@ -192,8 +198,6 @@ const quantidade=document.getElementById("quantidade");
 const carrinhoDiv=document.getElementById("carrinho");
 const totalSpan=document.getElementById("total");
 const leitor=document.getElementById("leitor");
-const pixBox=document.getElementById("pixBox");
-const qrcode=document.getElementById("qrcode");
 </script>
 
 </body>
