@@ -70,7 +70,7 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-function round2(v){return Math.round(v*100)/100;}
+function round2(v){ return Math.round(v*100)/100; }
 
 let carrinho = JSON.parse(localStorage.getItem("carrinho_caixa")) || [];
 let total = 0;
@@ -80,45 +80,64 @@ const totalSpan = document.getElementById("total");
 const valorPago = document.getElementById("valorPago");
 const info = document.getElementById("info");
 
+/* ===== CARRINHO ===== */
 function atualizarCarrinho(){
   carrinhoDiv.innerHTML="";
   total=0;
   carrinho.forEach(i=>{
-    total+=i.subtotal;
-    carrinhoDiv.innerHTML+=`${i.nome} - R$ ${i.subtotal.toFixed(2)}<br>`;
+    total += i.subtotal;
+    carrinhoDiv.innerHTML += `${i.nome} - R$ ${i.subtotal.toFixed(2)}<br>`;
   });
-  total=round2(total);
-  totalSpan.innerText=total.toFixed(2);
+  total = round2(total);
+  totalSpan.innerText = total.toFixed(2);
 }
 atualizarCarrinho();
 
+/* ===== INFO DE PAGAMENTO ===== */
 function calcularInfo(){
-  const pago = round2(Number(valorPago.value));
   info.innerText="";
-  if(isNaN(pago)||pago<=0)return;
+  info.style.color="#e5e7eb";
 
-  const minimo=round2(total*0.9);
-  if(pago<minimo){
-    info.innerText=`⚠️ Falta R$ ${(total-pago).toFixed(2)}`;
+  if(total <= 0) return;
+
+  const pago = round2(Number(valorPago.value));
+  if(isNaN(pago) || pago<=0) return;
+
+  const minimo = round2(total*0.9);
+  if(pago < minimo){
+    info.innerText = `⚠️ Falta R$ ${(total-pago).toFixed(2)}`;
     info.style.color="#f87171";
     return;
   }
 
   info.style.color="#22c55e";
-  if(pago<total) info.innerText=`Desconto: R$ ${(total-pago).toFixed(2)}`;
-  else if(pago>total) info.innerText=`Troco: R$ ${(pago-total).toFixed(2)}`;
-  else info.innerText="Pagamento exato";
+  if(pago < total) info.innerText = `Desconto: R$ ${(total-pago).toFixed(2)}`;
+  else if(pago > total) info.innerText = `Troco: R$ ${(pago-total).toFixed(2)}`;
+  else info.innerText = "Pagamento exato";
 }
 
+/* ===== FINALIZAR NORMAL ===== */
 async function finalizarVenda(tipo){
-  const pago=round2(Number(valorPago.value));
-  if(pago<=0)return alert("Informe valor");
+  if(carrinho.length===0 || total<=0){
+    alert("Carrinho vazio");
+    return;
+  }
 
-  if(tipo!=="DINHEIRO" && pago>total)
-    return alert("PIX/Cartão não aceita valor maior");
+  const pago = round2(Number(valorPago.value));
+  if(isNaN(pago) || pago<=0){
+    alert("Informe valor válido");
+    return;
+  }
 
-  if(pago<round2(total*0.9))
-    return alert("Desconto máximo 10%");
+  if(tipo!=="DINHEIRO" && pago>total){
+    alert("PIX/Cartão não aceita valor maior");
+    return;
+  }
+
+  if(pago < round2(total*0.9)){
+    alert("Desconto máximo é 10%");
+    return;
+  }
 
   for(const i of carrinho){
     await supabaseClient.from("vendas").insert({
@@ -136,16 +155,16 @@ async function finalizarVenda(tipo){
   limpar();
 }
 
+/* ===== FINALIZAR FIADO (INTELIGENTE) ===== */
 async function finalizarFiado(){
-  if(carrinho.length===0){
+  if(carrinho.length===0 || total<=0){
     alert("Carrinho vazio");
     return;
   }
 
   const pago = round2(Number(valorPago.value)||0);
   const devidoAtual = round2(total - pago);
-
-  if(devidoAtual <= 0){
+  if(devidoAtual<=0){
     alert("Não há valor para fiar");
     return;
   }
@@ -153,13 +172,11 @@ async function finalizarFiado(){
   let cpf = prompt("CPF do cliente (somente números):");
   if(!cpf) return;
   cpf = cpf.replace(/\D/g,"");
-
-  if(cpf.length !== 11){
+  if(cpf.length!==11){
     alert("CPF inválido");
     return;
   }
 
-  // 🔍 BUSCA DÍVIDA EXISTENTE (SEM USAR STATUS)
   const { data: dividas } = await supabaseClient
     .from("vendas")
     .select("valor_devido, cliente_nome")
@@ -170,22 +187,20 @@ async function finalizarFiado(){
   let nomeCliente = "";
 
   dividas?.forEach(d=>{
-    dividaExistente += Number(d.valor_devido || 0);
+    dividaExistente += Number(d.valor_devido||0);
     if(d.cliente_nome) nomeCliente = d.cliente_nome;
   });
 
-  const LIMITE = 10; // 🔒 LIMITE MÁXIMO DE FIADO
-
+  const LIMITE = 10; // 🔒 limite máximo
   if(dividaExistente + devidoAtual > LIMITE){
     alert(
-      `Venda bloqueada!\n` +
-      `Cliente deve R$ ${dividaExistente.toFixed(2)}\n` +
+      `Venda bloqueada!\n`+
+      `Cliente deve R$ ${dividaExistente.toFixed(2)}\n`+
       `Limite máximo: R$ ${LIMITE.toFixed(2)}`
     );
     return;
   }
 
-  // 🧠 SE NÃO TIVER NOME CADASTRADO, PEDE
   if(!nomeCliente){
     nomeCliente = prompt("Nome completo do cliente:");
     if(!nomeCliente) return;
@@ -209,14 +224,14 @@ async function finalizarFiado(){
   }
 
   alert(
-    `FIADO REGISTRADO\n` +
-    `${nomeCliente}\n` +
-    `Dívida atual: R$ ${(dividaExistente + devidoAtual).toFixed(2)}`
+    `FIADO REGISTRADO\n${nomeCliente}\n`+
+    `Dívida atual: R$ ${(dividaExistente+devidoAtual).toFixed(2)}`
   );
 
   limpar();
 }
 
+/* ===== LIMPAR ===== */
 function limpar(){
   carrinho=[];
   localStorage.removeItem("carrinho_caixa");
@@ -225,6 +240,7 @@ function limpar(){
   info.innerText="";
 }
 
+/* ===== PDF ===== */
 function gerarPDF(tipo,pago){
   const doc=new jsPDF();
   doc.text("RECIBO",105,10,{align:"center"});
