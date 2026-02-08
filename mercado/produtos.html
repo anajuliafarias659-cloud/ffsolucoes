@@ -36,20 +36,6 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 
 #leitor video{width:100%;border-radius:12px;margin-top:10px}
 
-/* PREVIEW FOTOS */
-.preview-fotos{
-  display:flex;
-  gap:8px;
-  margin-top:10px;
-}
-.preview-fotos img{
-  width:60px;
-  height:60px;
-  object-fit:cover;
-  border-radius:8px;
-  border:1px solid #334155;
-}
-
 /* LISTA */
 .produto{
   background:#020617;
@@ -97,14 +83,8 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
   <input id="preco" type="number" step="0.01" placeholder="Preço">
   <input id="estoque" type="number" placeholder="Estoque">
 
-  <!-- BOTÃO VISÍVEL -->
-  <button type="button" onclick="document.getElementById('fotos').click()">
-    📸 Adicionar até 3 fotos
-  </button>
-  <input id="fotos" type="file" accept="image/*" multiple style="display:none">
-
-  <!-- PREVIEW -->
-  <div class="preview-fotos" id="previewFotos"></div>
+  <!-- FOTO PRINCIPAL (FORÇA CÂMERA) -->
+  <input id="foto" type="file" accept="image/*" capture="environment">
 
   <button onclick="cadastrar()">Cadastrar</button>
 </div>
@@ -138,18 +118,7 @@ const nomeEl=nome,
 codigoEl=codigo_barra,
 precoEl=preco,
 estoqueEl=estoque,
-fotosEl=fotos,
-previewBox=document.getElementById("previewFotos");
-
-/* PREVIEW DAS FOTOS */
-fotosEl.addEventListener("change",()=>{
-  previewBox.innerHTML="";
-  [...fotosEl.files].slice(0,3).forEach(file=>{
-    const img=document.createElement("img");
-    img.src=URL.createObjectURL(file);
-    previewBox.appendChild(img);
-  });
-});
+fotoEl=foto;
 
 /* TOGGLE */
 function toggleProdutos(){
@@ -189,9 +158,9 @@ async function cadastrar(){
   }
 
   let imagens=[];
-  const files=[...fotosEl.files].slice(0,3);
 
-  for(const file of files){
+  if(fotoEl.files[0]){
+    const file=fotoEl.files[0];
     const nomeSeguro=file.name
       .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
       .replace(/[^a-zA-Z0-9._-]/g,"_");
@@ -199,6 +168,7 @@ async function cadastrar(){
     const path=`${admin.app_id}/${Date.now()}_${nomeSeguro}`;
     await supabaseClient.storage.from("produtos").upload(path,file);
     const url=supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+
     imagens.push(url);
   }
 
@@ -213,8 +183,7 @@ async function cadastrar(){
   });
 
   nomeEl.value=codigoEl.value=precoEl.value=estoqueEl.value="";
-  fotosEl.value="";
-  previewBox.innerHTML="";
+  fotoEl.value="";
   carregar();
 }
 
@@ -228,7 +197,11 @@ async function carregar(){
 
   listaProdutos.innerHTML="";
   data.forEach(p=>{
-    const imgs=(p.imagens||[]).map(u=>`<img src="${u}">`).join("");
+    let imgs="";
+    if(Array.isArray(p.imagens)){
+      imgs=p.imagens.slice(0,3).map(u=>`<img src="${u}">`).join("");
+    }
+
     listaProdutos.innerHTML+=`
       <div class="produto">
         <b>${p.nome}</b><br>
@@ -236,11 +209,79 @@ async function carregar(){
         Estoque: <b>${p.estoque}</b><br>
         R$ ${p.preco.toFixed(2)}<br>
         ${imgs}
-        <button class="editar" onclick="editar('${p.id}','${p.nome}','${p.codigo_barra}','${p.preco}','${p.estoque}')">Editar</button>
+
+        <input type="number" placeholder="Qtd repor" id="qtd-${p.id}">
+        <button class="repor" onclick="repor('${p.id}')">➕ Repor</button>
+
+        <!-- NOVA FOTO (FORÇA CÂMERA) -->
+        <input type="file"
+          accept="image/*"
+          capture="environment"
+          id="foto-${p.id}"
+          style="display:none"
+          onchange="novaFoto(event,'${p.id}')">
+
+        <button class="editar"
+          onclick="document.getElementById('foto-${p.id}').click()">
+          📸 Nova foto
+        </button>
+
+        <button class="editar"
+          onclick="editar('${p.id}','${p.nome}','${p.codigo_barra}','${p.preco}','${p.estoque}')">
+          Editar
+        </button>
+
         <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
       </div>
     `;
   });
+}
+
+/* NOVA FOTO (ADICIONA ATÉ 3) */
+async function novaFoto(e,id){
+  const file=e.target.files[0];
+  if(!file)return;
+
+  const nomeSeguro=file.name
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-zA-Z0-9._-]/g,"_");
+
+  const path=`${admin.app_id}/${Date.now()}_${nomeSeguro}`;
+  await supabaseClient.storage.from("produtos").upload(path,file);
+  const url=supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+
+  const { data } = await supabaseClient
+    .from("produtos")
+    .select("imagens")
+    .eq("id",id)
+    .single();
+
+  const imagens=(data.imagens||[]);
+  if(imagens.length>=3){
+    alert("Máximo de 3 fotos");
+    return;
+  }
+
+  imagens.push(url);
+
+  await supabaseClient.from("produtos")
+    .update({imagens})
+    .eq("id",id);
+
+  carregar();
+}
+
+/* REPOR */
+async function repor(id){
+  const qtd=Number(document.getElementById(`qtd-${id}`).value);
+  if(qtd<=0)return alert("Quantidade inválida");
+
+  await supabaseClient.rpc("repor_estoque",{
+    p_produto_id:id,
+    p_qtd:qtd
+  });
+
+  carregar();
 }
 
 /* EDITAR */
