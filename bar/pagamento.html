@@ -42,9 +42,7 @@ small{opacity:.7}
 <script>
 function getBasePath(){
   const path = window.location.pathname;
-  if(path.includes("/ffsolucoes/")){
-    return "/ffsolucoes/bar";
-  }
+  if(path.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
   return "/bar";
 }
 
@@ -65,7 +63,7 @@ if(!pedidoId || !appId){
 let totalPedido = 0;
 let mesaId = null;
 const DESCONTO_MAXIMO = 10;
-let processando = false; // 🔒 trava contra clique duplo
+let processando = false;
 </script>
 
 <div class="topo">
@@ -103,12 +101,18 @@ let processando = false; // 🔒 trava contra clique duplo
 
 <script>
 async function carregarPedido(){
-  const { data: pedido } = await sb
+  const { data: pedido, error } = await sb
     .from("pedidos")
     .select("mesa_id,status")
     .eq("id", pedidoId)
     .eq("app_id", appId)
     .single();
+
+  if(error || !pedido){
+    alert("Erro ao carregar pedido");
+    location.href = getBasePath() + "/caixa.html";
+    return;
+  }
 
   if(pedido.status === "finalizado"){
     alert("Este pedido já foi finalizado.");
@@ -154,7 +158,13 @@ async function confirmarPagamento(){
 
   const forma = formaPagamento.value;
   const valorPago = Number(valorRecebido.value || 0);
-  const desconto = totalPedido - valorPago;
+
+  const desconto = Math.max(
+    0,
+    Number((totalPedido - valorPago).toFixed(2))
+  );
+
+  const valorPagoFinal = Number(valorPago.toFixed(2));
 
   if(desconto > DESCONTO_MAXIMO){
     alert(
@@ -165,33 +175,26 @@ async function confirmarPagamento(){
     return;
   }
 
-  // 🔒 garante que não finalizou antes
-  const { data: pedidoAtual } = await sb
-    .from("pedidos")
-    .select("status")
-    .eq("id", pedidoId)
-    .single();
-
-  if(pedidoAtual.status === "finalizado"){
-    alert("Pedido já finalizado.");
-    processando = false;
-    return;
-  }
-
-  // 🔹 FINALIZA PEDIDO (ponto único de verdade)
-  await sb
+  const { error: erroPedido } = await sb
     .from("pedidos")
     .update({
       status: "finalizado",
       forma_pagamento: forma,
-      valor_pago: valorPago,
-      desconto: desconto > 0 ? desconto : 0,
+      valor_pago: valorPagoFinal,
+      desconto: desconto,
       pago_em: new Date().toISOString()
     })
     .eq("id", pedidoId)
     .eq("app_id", appId);
 
-  // 🔻 BAIXA DE ESTOQUE (UMA VEZ)
+  if(erroPedido){
+    console.error("ERRO AO FINALIZAR PEDIDO:", erroPedido);
+    alert("Erro ao finalizar pagamento. Verifique os valores.");
+    processando = false;
+    return;
+  }
+
+  // 🔻 BAIXA DE ESTOQUE (UMA ÚNICA VEZ)
   const { data: itens } = await sb
     .from("pedido_itens")
     .select("produto_id, quantidade")
