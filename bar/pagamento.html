@@ -39,6 +39,10 @@ select,input{
 <body>
 
 <script>
+/* 🔍 MARCADOR DE VERSÃO (CONFIRMA QUE ESSE ARQUIVO ESTÁ RODANDO) */
+console.log("PAGAMENTO FINAL 2026 OK");
+
+/* 📁 BASE PATH */
 function getBasePath(){
   const p = location.pathname;
   if(p.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
@@ -51,6 +55,7 @@ const sb = window.supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* 🔎 PARAMS */
 const params = new URLSearchParams(location.search);
 const pedidoId = params.get("pedido");
 const appId = params.get("app") || localStorage.getItem("app_id");
@@ -60,6 +65,7 @@ if(!pedidoId){
   location.href = getBasePath() + "/caixa.html";
 }
 
+/* 📦 ESTADO */
 let totalPedido = 0;
 let mesaId = null;
 let processando = false;
@@ -100,6 +106,7 @@ let processando = false;
 </div>
 
 <script>
+/* 📥 CARREGA PEDIDO */
 async function carregarPedido(){
   const { data: pedido, error } = await sb
     .from("pedidos")
@@ -123,7 +130,7 @@ async function carregarPedido(){
 
   const { data: itens } = await sb
     .from("pedido_itens")
-    .select("preco, quantidade")
+    .select("preco,quantidade")
     .eq("pedido_id", pedidoId);
 
   totalPedido = 0;
@@ -137,6 +144,7 @@ async function carregarPedido(){
     `R$ ${totalPedido.toFixed(2)}`;
 }
 
+/* 🧮 CALCULA TROCO / INFO */
 function calcular(){
   const recebido = Number(document.getElementById("valorRecebido").value || 0);
   const trocoValor = recebido - totalPedido;
@@ -155,70 +163,84 @@ function calcular(){
     trocoValor > 0 ? `R$ ${trocoValor.toFixed(2)}` : "R$ 0,00";
 }
 
+/* 💳 CONFIRMA PAGAMENTO (ÚNICA FUNÇÃO, ASYNC, SEM DUPLICAÇÃO) */
 async function confirmarPagamento(){
+  console.log("confirmarPagamento ASYNC OK");
+
   if(processando) return;
   processando = true;
 
-  const forma = document.getElementById("formaPagamento").value;
-  const valorPago = Number(document.getElementById("valorRecebido").value);
+  try{
+    const forma = document.getElementById("formaPagamento").value;
+    const valorPago = Number(document.getElementById("valorRecebido").value);
 
-  if(!valorPago || valorPago <= 0){
-    alert("Informe o valor pago.");
-    processando = false;
-    return;
-  }
-
-  if(forma !== "dinheiro" && valorPago !== totalPedido){
-    alert("PIX e Cartão exigem pagamento exato.");
-    processando = false;
-    return;
-  }
-
-  /* ✅ FINALIZA PEDIDO */
-  const { error: erroPedido } = await sb
-    .from("pedidos")
-    .update({
-      status: "finalizado",
-      valor_pago: Number(valorPago.toFixed(2)),
-      forma_pagamento: forma,
-      pago_em: new Date().toISOString()
-    })
-    .eq("id", pedidoId);
-
-  if(erroPedido){
-    console.error(erroPedido);
-    alert("Erro ao finalizar pagamento.");
-    processando = false;
-    return;
-  }
-
-  /* 🔻 BAIXA ESTOQUE */
-  const { data: itens } = await sb
-    .from("pedido_itens")
-    .select("produto_id, quantidade")
-    .eq("pedido_id", pedidoId);
-
-  if(itens && itens.length){
-    for(const item of itens){
-      await sb.rpc("baixar_estoque", {
-        p_produto_id: item.produto_id,
-        p_qtd: item.quantidade,
-        p_app_id: appId
-      });
+    if(!valorPago || valorPago <= 0){
+      alert("Informe o valor pago.");
+      return;
     }
-  }
 
-  /* 🪑 LIBERA MESA */
-  if(mesaId){
-    await sb
-      .from("mesas")
-      .update({ status: "livre" })
-      .eq("id", mesaId);
-  }
+    /* 🔓 DESCONTO ATÉ 10% */
+    const descontoMax = totalPedido * 0.10;
+    const minimo = totalPedido - descontoMax;
 
-  location.href = getBasePath() + "/caixa.html";
+    if(valorPago < minimo){
+      alert("Desconto maior que 10% não é permitido.");
+      return;
+    }
+
+    if(valorPago > totalPedido){
+      alert("Valor pago não pode ser maior que o total.");
+      return;
+    }
+
+    /* ✅ FINALIZA PEDIDO */
+    const { error } = await sb
+      .from("pedidos")
+      .update({
+        status: "finalizado",
+        valor_pago: valorPago,
+        forma_pagamento: forma
+      })
+      .eq("id", pedidoId);
+
+    if(error){
+      console.error("ERRO SUPABASE:", error);
+      alert("Erro ao finalizar pagamento.");
+      return;
+    }
+
+    /* 🔻 BAIXA ESTOQUE */
+    const { data: itens } = await sb
+      .from("pedido_itens")
+      .select("produto_id,quantidade")
+      .eq("pedido_id", pedidoId);
+
+    if(itens && itens.length){
+      for(const item of itens){
+        await sb.rpc("baixar_estoque", {
+          p_produto_id: item.produto_id,
+          p_qtd: item.quantidade,
+          p_app_id: appId
+        });
+      }
+    }
+
+    /* 🪑 LIBERA MESA */
+    if(mesaId){
+      await sb
+        .from("mesas")
+        .update({ status: "livre" })
+        .eq("id", mesaId);
+    }
+
+    location.href = getBasePath() + "/caixa.html";
+
+  } finally {
+    processando = false;
+  }
 }
 
+/* ▶️ INIT */
 carregarPedido();
 </script>
 
