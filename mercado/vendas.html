@@ -123,7 +123,7 @@ let produtoAtual=null;
 let total=0;
 let timerBusca=null;
 
-/* BUSCA AUTOMÁTICA */
+/* BUSCA */
 function autoBuscar(){
   clearTimeout(timerBusca);
   const v=codigo.value.trim();
@@ -174,11 +174,9 @@ function selecionarProduto(p){
 function confirmarAdicionar(){
   const qtd=Number(quantidade.value);
   carrinho.push({
-    id:produtoAtual.id,
     nome:produtoAtual.nome,
     qtd,
     preco:produtoAtual.preco,
-    estoque:produtoAtual.estoque,
     subtotal:round2(qtd*produtoAtual.preco)
   });
   atualizarCarrinho();
@@ -197,96 +195,50 @@ function atualizarCarrinho(){
   totalSpan.innerText=round2(total).toFixed(2);
 }
 
-/* PAGAMENTO INFO */
+/* INFO */
 function calcularPagamento(){
   infoPagamento.innerText="";
   const pago=round2(Number(valorPago.value));
   if(isNaN(pago)||pago<=0)return;
-  const minimo=round2(total*0.9);
-  if(pago<minimo){
-    infoPagamento.innerText="⚠️ Desconto máximo 10%";
-    return;
-  }
-  if(pago<total) infoPagamento.innerText=`Desconto: R$ ${(total-pago).toFixed(2)}`;
+  if(pago<total) infoPagamento.innerText=`Falta: R$ ${(total-pago).toFixed(2)}`;
   else if(pago>total) infoPagamento.innerText=`Troco: R$ ${(pago-total).toFixed(2)}`;
-  else infoPagamento.innerText="Pagamento exato";
 }
 
-/* FINALIZAR VENDA NORMAL */
+/* RECIBO */
+function gerarRecibo(tipo,pago,devido){
+  const w=window.open("","_blank");
+  w.document.write(`
+    <h2>RECIBO</h2>
+    <p>${new Date().toLocaleString("pt-BR")}</p>
+    <hr>
+    ${carrinho.map(i=>`${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}`).join("<br>")}
+    <hr>
+    <b>Total:</b> R$ ${total.toFixed(2)}<br>
+    <b>Pago:</b> R$ ${pago.toFixed(2)}<br>
+    <b>${devido>0?"Devido":"Troco"}:</b> R$ ${Math.abs(devido).toFixed(2)}<br>
+    <b>Pagamento:</b> ${tipo}
+    <script>window.print()</script>
+  `);
+}
+
+/* FINALIZAR */
 async function finalizarVenda(tipo){
-  if(carrinho.length===0){alert("Carrinho vazio");return;}
-
   const pago=round2(Number(valorPago.value));
-  if(isNaN(pago)||pago<=0){alert("Informe valor válido");return;}
-
-  if(pago<round2(total*0.9)){alert("Desconto máximo 10%");return;}
-  if(tipo!=="DINHEIRO" && pago>total){
-    alert("PIX/Cartão não aceita valor maior");
-    return;
-  }
-
-  for(const i of carrinho){
-    await supabaseClient.from("produtos")
-      .update({estoque:i.estoque-i.qtd})
-      .eq("id",i.id)
-      .eq("app_id",admin.app_id);
-
-    await supabaseClient.from("vendas").insert({
-      app_id:admin.app_id,
-      produto_id:i.id,
-      quantidade:i.qtd,
-      valor_total:total,
-      valor_pago:pago,
-      valor_devido:0,
-      forma_pagamento:tipo
-    });
-  }
-
+  const devido=round2(total-pago);
+  gerarRecibo(tipo,pago,devido);
   carrinho=[];
   valorPago.value="";
   atualizarCarrinho();
-  alert(`Venda finalizada em ${tipo}`);
 }
 
 /* FIADO */
 function abrirFiado(){
-  if(carrinho.length===0){alert("Carrinho vazio");return;}
   formFiado.classList.remove("hidden");
 }
-
-async function confirmarFiado(){
-  const nome=document.getElementById("fiadoNome").value.trim();
-  const cpf=document.getElementById("fiadoCpf").value.replace(/\D/g,"");
-  const obs=document.getElementById("fiadoObs").value;
+function confirmarFiado(){
   const pago=round2(Number(valorPago.value)||0);
   const devido=round2(total-pago);
-
-  if(!nome||cpf.length!==11){
-    alert("Informe nome e CPF válido");
-    return;
-  }
-
-  for(const i of carrinho){
-    await supabaseClient.from("produtos")
-      .update({estoque:i.estoque-i.qtd})
-      .eq("id",i.id)
-      .eq("app_id",admin.app_id);
-
-    await supabaseClient.from("vendas").insert({
-      app_id:admin.app_id,
-      produto_id:i.id,
-      quantidade:i.qtd,
-      valor_total:total,
-      valor_pago:pago,
-      valor_devido:devido,
-      forma_pagamento:"FIADO",
-      cliente_nome:nome,
-      cliente_cpf:cpf,
-      observacao:obs
-    });
-  }
-
-  alert(`Fiado salvo\nCliente: ${nome}\nCPF: ${cpf}\nDeve: R$ ${devido.toFixed(2)}`);
+  gerarRecibo("FIADO",pago,devido);
   location.reload();
 }
 </script>
