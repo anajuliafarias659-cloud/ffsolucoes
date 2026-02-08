@@ -13,7 +13,7 @@
 body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size:14px}
 .topo-app{padding:10px 14px;border-bottom:1px solid #0f172a}
 .brand{font-size:22px;font-weight:900;color:#38bdf8}
-.mobile-pos{padding:12px;padding-bottom:160px}
+.mobile-pos{padding:12px;padding-bottom:170px}
 .card{background:#0f172a;border-radius:14px;padding:12px;margin-bottom:10px}
 .card input,.card button{width:100%;padding:10px;font-size:14px;border-radius:10px;border:none}
 .card input{background:#020617;color:#fff;margin-bottom:6px}
@@ -22,8 +22,13 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size
 .pagamento .pix{background:#0ea5e9}
 .pagamento .cartao{background:#2563eb}
 .carrinho div{padding:4px 0;border-bottom:1px solid #1e293b}
-.total-fixo{position:fixed;bottom:0;left:0;width:100%;background:#020617;border-top:1px solid #0f172a;color:#38bdf8;text-align:center;padding:12px;font-size:18px;font-weight:900}
-.info{font-weight:bold;text-align:center;margin-top:4px}
+.total-fixo{
+  position:fixed;bottom:0;left:0;width:100%;
+  background:#020617;border-top:1px solid #0f172a;
+  color:#38bdf8;text-align:center;
+  padding:12px;font-size:18px;font-weight:900
+}
+.info{text-align:center;font-weight:bold;margin-top:4px}
 </style>
 </head>
 
@@ -65,109 +70,160 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* DOM */
-const carrinhoDiv=document.getElementById("carrinho");
-const totalSpan=document.getElementById("total");
-const valorPago=document.getElementById("valorPago");
-const infoPagamento=document.getElementById("infoPagamento");
+/* =====================
+   FUNÇÕES SEGURAS
+===================== */
+function round2(v){
+  return Math.round(v * 100) / 100;
+}
 
-/* ESTADO */
-let carrinho = JSON.parse(localStorage.getItem("carrinho_caixa")) || [
-  // exemplo se quiser testar
-  // {id:1,nome:"Produto Teste",preco:50,qtd:2,estoque:10,subtotal:100}
-];
+/* =====================
+   DOM
+===================== */
+const carrinhoDiv = document.getElementById("carrinho");
+const totalSpan   = document.getElementById("total");
+const valorPago   = document.getElementById("valorPago");
+const infoPagamento = document.getElementById("infoPagamento");
+
+/* =====================
+   ESTADO
+===================== */
+let carrinho = JSON.parse(localStorage.getItem("carrinho_caixa")) || [];
 let total = 0;
 
-/* PERSISTÊNCIA */
+/* =====================
+   PERSISTÊNCIA
+===================== */
 function salvarCarrinho(){
   localStorage.setItem("carrinho_caixa", JSON.stringify(carrinho));
 }
 
-/* CARRINHO */
+/* =====================
+   CARRINHO
+===================== */
 function atualizarCarrinho(){
   carrinhoDiv.innerHTML="";
-  total=0;
+  total = 0;
+
   carrinho.forEach(i=>{
-    total+=i.subtotal;
-    carrinhoDiv.innerHTML+=`<div>${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}</div>`;
+    total += i.subtotal;
+    carrinhoDiv.innerHTML +=
+      `<div>${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}</div>`;
   });
-  totalSpan.innerText=total.toFixed(2);
+
+  total = round2(total);
+  totalSpan.innerText = total.toFixed(2);
 }
 atualizarCarrinho();
 
-/* FINALIZAR */
+/* =====================
+   FINALIZAR VENDA
+===================== */
 async function finalizarVenda(tipo){
-  if(carrinho.length===0) return alert("Carrinho vazio");
+  if(carrinho.length === 0){
+    alert("Carrinho vazio");
+    return;
+  }
 
-  const pago = Number(valorPago.value || 0);
-  infoPagamento.innerText="";
+  const pago = round2(Number(valorPago.value));
+  infoPagamento.innerText = "";
 
-  const minimo = total * 0.9; // 10%
+  if(isNaN(pago) || pago <= 0){
+    alert("Informe um valor válido");
+    return;
+  }
 
-  if(pago <= 0) return alert("Informe o valor pago");
+  const totalR = round2(total);
+  const minimo = round2(totalR * 0.9); // 10%
 
+  // ===== DINHEIRO =====
   if(tipo === "DINHEIRO"){
+
     if(pago < minimo){
-      return alert("Desconto máximo permitido é 10%");
+      alert("Desconto máximo permitido é 10%");
+      return;
     }
-    if(pago < total){
-      infoPagamento.innerText = `Desconto: R$ ${(total - pago).toFixed(2)}`;
+
+    if(pago < totalR){
+      infoPagamento.innerText =
+        `Desconto: R$ ${round2(totalR - pago).toFixed(2)}`;
     }
-    if(pago > total){
-      infoPagamento.innerText = `Troco: R$ ${(pago - total).toFixed(2)}`;
+    else if(pago > totalR){
+      infoPagamento.innerText =
+        `Troco: R$ ${round2(pago - totalR).toFixed(2)}`;
     }
-  } else {
-    if(pago > total){
-      return alert("PIX/Cartão não aceita valor maior");
+
+  }
+  // ===== PIX / CARTÃO =====
+  else {
+
+    if(pago > totalR){
+      alert("PIX/Cartão não aceita valor maior");
+      return;
     }
+
     if(pago < minimo){
-      return alert("Desconto máximo permitido é 10%");
+      alert("Desconto máximo permitido é 10%");
+      return;
     }
-    if(pago < total){
-      infoPagamento.innerText = `Desconto: R$ ${(total - pago).toFixed(2)}`;
+
+    if(pago < totalR){
+      infoPagamento.innerText =
+        `Desconto: R$ ${round2(totalR - pago).toFixed(2)}`;
     }
   }
 
   if(!confirm(`Confirmar pagamento em ${tipo}?`)) return;
 
   for(const i of carrinho){
-    await supabaseClient.from("produtos")
+    await supabaseClient
+      .from("produtos")
       .update({ estoque: i.estoque - i.qtd })
       .eq("id", i.id)
       .eq("app_id", admin.app_id);
 
-    await supabaseClient.from("vendas").insert({
-      app_id: admin.app_id,
-      produto_id: i.id,
-      quantidade: i.qtd,
-      valor_total: pago,
-      forma_pagamento: tipo
-    });
+    await supabaseClient
+      .from("vendas")
+      .insert({
+        app_id: admin.app_id,
+        produto_id: i.id,
+        quantidade: i.qtd,
+        valor_total: pago,
+        forma_pagamento: tipo
+      });
   }
 
   gerarPDF(tipo, pago);
-  carrinho=[];
+
+  carrinho = [];
   salvarCarrinho();
   atualizarCarrinho();
-  valorPago.value="";
+  valorPago.value = "";
 }
 
-/* PDF */
-function gerarPDF(tipo,pago){
-  const doc=new jsPDF();
-  let y=10;
-  doc.text("COMPROVANTE",105,y,{align:"center"});
+/* =====================
+   PDF
+===================== */
+function gerarPDF(tipo, pago){
+  const doc = new jsPDF();
+  let y = 10;
+
+  doc.text("COMPROVANTE DE VENDA",105,y,{align:"center"});
   y+=10;
+
   carrinho.forEach(i=>{
     doc.text(`${i.qtd} x ${i.nome} - R$ ${i.subtotal.toFixed(2)}`,10,y);
     y+=8;
   });
+
   doc.text(`Total: R$ ${total.toFixed(2)}`,10,y+4);
   doc.text(`Pago: R$ ${pago.toFixed(2)}`,10,y+10);
   doc.text(`Pagamento: ${tipo}`,10,y+16);
-  if(tipo==="DINHEIRO" && pago>total){
+
+  if(tipo==="DINHEIRO" && pago > total){
     doc.text(`Troco: R$ ${(pago-total).toFixed(2)}`,10,y+22);
   }
+
   doc.save("recibo.pdf");
 }
 </script>
