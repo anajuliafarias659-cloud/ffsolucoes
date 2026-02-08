@@ -45,7 +45,7 @@ function getBasePath(){
   return "/bar";
 }
 
-/* ✅ SUPABASE CORRETO NO BROWSER */
+/* 🔐 SUPABASE */
 const sb = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -127,9 +127,11 @@ async function carregarPedido(){
     .eq("pedido_id", pedidoId);
 
   totalPedido = 0;
-  itens.forEach(i=>{
-    totalPedido += Number(i.preco) * Number(i.quantidade);
-  });
+  if(itens && itens.length){
+    itens.forEach(i=>{
+      totalPedido += Number(i.preco) * Number(i.quantidade);
+    });
+  }
 
   document.getElementById("totalPedido").innerText =
     `R$ ${totalPedido.toFixed(2)}`;
@@ -172,35 +174,38 @@ async function confirmarPagamento(){
     return;
   }
 
-  /* ✅ UPDATE SOMENTE COM CAMPOS EXISTENTES */
+  /* ✅ FINALIZA PEDIDO */
   const { error: erroPedido } = await sb
     .from("pedidos")
     .update({
       status: "finalizado",
       valor_pago: Number(valorPago.toFixed(2)),
+      forma_pagamento: forma,
       pago_em: new Date().toISOString()
     })
     .eq("id", pedidoId);
 
   if(erroPedido){
-    console.error("ERRO SUPABASE:", erroPedido);
+    console.error(erroPedido);
     alert("Erro ao finalizar pagamento.");
     processando = false;
     return;
   }
 
-  /* 🔻 BAIXA DE ESTOQUE */
+  /* 🔻 BAIXA ESTOQUE */
   const { data: itens } = await sb
     .from("pedido_itens")
     .select("produto_id, quantidade")
     .eq("pedido_id", pedidoId);
 
-  for(const item of itens){
-    await sb.rpc("baixar_estoque", {
-      p_produto_id: item.produto_id,
-      p_qtd: item.quantidade,
-      p_app_id: appId
-    });
+  if(itens && itens.length){
+    for(const item of itens){
+      await sb.rpc("baixar_estoque", {
+        p_produto_id: item.produto_id,
+        p_qtd: item.quantidade,
+        p_app_id: appId
+      });
+    }
   }
 
   /* 🪑 LIBERA MESA */
