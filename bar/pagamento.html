@@ -4,230 +4,161 @@
 <meta charset="UTF-8">
 <title>Pagamento</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px}
 .container{max-width:600px;margin:auto;padding:24px}
 .box{background:#0f172a;padding:20px;border-radius:16px}
-
-button{
-  width:100%;
-  padding:14px;
-  border:none;
-  border-radius:10px;
-  background:#22c55e;
-  font-weight:bold;
-  cursor:pointer;
-  margin-top:12px
-}
-
-select,input{
-  width:100%;
-  padding:12px;
-  margin-top:10px;
-  border-radius:10px;
-  border:none
-}
-
+button{width:100%;padding:14px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer;margin-top:12px}
+input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 .alert{color:#facc15;margin-top:8px}
 </style>
 </head>
-
 <body>
 
-<div class="topo">
-  <h2>💳 Pagamento</h2>
-</div>
-
-<div class="container">
-  <div class="box">
-    <p>Total do Pedido</p>
-    <h2 id="totalPedido">R$ 0,00</h2>
-
-    <label>Forma de pagamento</label>
-    <select id="formaPagamento">
-      <option value="dinheiro">Dinheiro</option>
-      <option value="pix">PIX</option>
-      <option value="cartao">Cartão</option>
-    </select>
-
-    <label>Valor pago</label>
-    <input
-      type="number"
-      id="valorRecebido"
-      placeholder="0.00"
-      step="0.01"
-      oninput="calcular()"
-    />
-
-    <p>Troco</p>
-    <h3 id="troco">R$ 0,00</h3>
-
-    <p id="info" class="alert"></p>
-
-    <button onclick="confirmarPagamento()">✅ Confirmar Pagamento</button>
-  </div>
-</div>
-
 <script>
-/* ========= BASE ========= */
 function getBasePath(){
   const p = location.pathname;
   if(p.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
   return "/bar";
 }
 
-/* ========= SUPABASE ========= */
 const sb = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ========= PARAMS ========= */
 const params = new URLSearchParams(location.search);
 const pedidoId = params.get("pedido");
-const appId = params.get("app") || localStorage.getItem("app_id");
 
 if(!pedidoId){
-  alert("Pedido inválido");
   location.href = getBasePath() + "/caixa.html";
 }
 
-/* ========= STATE ========= */
 let totalPedido = 0;
 let mesaId = null;
 let processando = false;
+</script>
 
-/* ========= LOAD ========= */
+<div class="topo"><h2>💳 Pagamento</h2></div>
+
+<div class="container">
+  <div class="box">
+    <p>Total</p>
+    <h2 id="totalPedido">R$ 0,00</h2>
+
+    <label>Valor pago</label>
+    <input type="number" id="valorRecebido" step="0.01">
+
+    <p>Troco</p>
+    <h3 id="troco">R$ 0,00</h3>
+
+    <p id="info" class="alert"></p>
+
+    <button id="btnConfirmar">Confirmar</button>
+  </div>
+</div>
+
+<script>
 async function carregarPedido(){
-  const pedidoRes = await sb
+  const { data: pedido } = await sb
     .from("pedidos")
-    .select("mesa_id,status")
+    .select("mesa_id")
     .eq("id", pedidoId)
     .single();
 
-  if(pedidoRes.error || !pedidoRes.data){
-    alert("Erro ao carregar pedido");
+  if(!pedido){
     location.href = getBasePath() + "/caixa.html";
     return;
   }
 
-  if(pedidoRes.data.status === "finalizado"){
-    alert("Pedido já finalizado");
-    location.href = getBasePath() + "/caixa.html";
-    return;
-  }
+  mesaId = pedido.mesa_id;
 
-  mesaId = pedidoRes.data.mesa_id;
-
-  const itensRes = await sb
+  const { data: itens } = await sb
     .from("pedido_itens")
-    .select("preco, quantidade")
+    .select("preco,quantidade")
     .eq("pedido_id", pedidoId);
 
-  if(itensRes.error){
-    alert("Erro ao carregar itens");
-    return;
-  }
-
   totalPedido = 0;
-  itensRes.data.forEach(i=>{
-    totalPedido += Number(i.preco) * Number(i.quantidade);
-  });
+  if(itens){
+    itens.forEach(i=>{
+      totalPedido += Number(i.preco) * Number(i.quantidade);
+    });
+  }
 
   document.getElementById("totalPedido").innerText =
     `R$ ${totalPedido.toFixed(2)}`;
 }
 
-/* ========= CALC ========= */
 function calcular(){
-  const recebido = Number(valorRecebido.value || 0);
+  const recebido = Number(document.getElementById("valorRecebido").value || 0);
   const troco = recebido - totalPedido;
-
-  if(recebido < totalPedido){
-    info.innerText =
-      `Falta pagar: R$ ${(totalPedido - recebido).toFixed(2)}`;
-  }else{
-    info.innerText = "";
-  }
 
   document.getElementById("troco").innerText =
     troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
+
+  document.getElementById("info").innerText =
+    recebido < totalPedido
+      ? `Falta pagar: R$ ${(totalPedido - recebido).toFixed(2)}`
+      : "";
 }
 
-/* ========= CONFIRMAR ========= */
+document.getElementById("valorRecebido").addEventListener("input", calcular);
+document.getElementById("btnConfirmar").addEventListener("click", confirmarPagamento);
+
 async function confirmarPagamento(){
   if(processando) return;
   processando = true;
 
   try{
-    const forma = formaPagamento.value;
-    const valorPago = Number(valorRecebido.value);
+    const valorPago = Number(document.getElementById("valorRecebido").value);
+    if(!valorPago || valorPago <= 0) return;
 
-    if(!valorPago || valorPago <= 0){
-      alert("Informe o valor pago");
-      processando = false;
-      return;
-    }
+    const descontoMax = totalPedido * 0.10;
+    const minimo = totalPedido - descontoMax;
 
-    if(forma !== "dinheiro" && valorPago !== totalPedido){
-      alert("PIX e Cartão exigem pagamento exato");
-      processando = false;
-      return;
-    }
+    if(valorPago < minimo) return;
+    if(valorPago > totalPedido) return;
 
-    /* 🔥 UPDATE MAIS SIMPLES POSSÍVEL */
-    const updateRes = await sb
+    const { error } = await sb
       .from("pedidos")
-      .update({ status: "finalizado" })
+      .update({ status:"finalizado", valor_pago:valorPago })
       .eq("id", pedidoId);
 
-    if(updateRes.error){
-      console.error(updateRes.error);
-      alert("ERRO UPDATE:\n" + updateRes.error.message);
-      processando = false;
+    if(error){
+      console.error(error);
       return;
     }
 
-    /* 🔻 BAIXA ESTOQUE */
-    const itensRes = await sb
+    const { data: itens } = await sb
       .from("pedido_itens")
-      .select("produto_id, quantidade")
+      .select("produto_id,quantidade")
       .eq("pedido_id", pedidoId);
 
-    for(const item of itensRes.data){
-      const rpcRes = await sb.rpc("baixar_estoque", {
-        p_produto_id: item.produto_id,
-        p_qtd: item.quantidade,
-        p_app_id: appId
-      });
-
-      if(rpcRes.error){
-        alert("Erro estoque:\n" + rpcRes.error.message);
-        processando = false;
-        return;
+    if(itens){
+      for(const item of itens){
+        const { error: e } = await sb.rpc("baixar_estoque", {
+          p_produto_id: item.produto_id,
+          p_quantidade: item.quantidade
+        });
+        if(e){
+          console.error(e);
+          return;
+        }
       }
     }
 
-    /* 🪑 LIBERA MESA */
     if(mesaId){
-      await sb.from("mesas")
-        .update({ status: "livre" })
-        .eq("id", mesaId);
+      await sb.from("mesas").update({status:"livre"}).eq("id", mesaId);
     }
 
     location.href = getBasePath() + "/caixa.html";
-
-  }catch(e){
-    alert("EXCEÇÃO JS:\n" + e.message);
+  } finally {
     processando = false;
   }
 }
 
-/* ========= INIT ========= */
 carregarPedido();
 </script>
 
