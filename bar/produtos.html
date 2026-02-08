@@ -40,19 +40,10 @@ input, select, button{
   border-radius:10px;
   border:none;
 }
-select{
-  background:#fff;
-  color:#000;
-}
-button{
-  background:#22c55e;
-  font-weight:bold;
-  cursor:pointer;
-}
-.btn-camera{
-  background:#2563eb;
-  color:#fff;
-}
+select{background:#fff;color:#000}
+button{background:#22c55e;font-weight:bold;cursor:pointer}
+.btn-camera{background:#2563eb;color:#fff}
+.btn-editar{background:#facc15;color:#000;margin-top:6px}
 .lista{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
@@ -71,9 +62,9 @@ button{
   margin-bottom:10px;
 }
 small{color:#cbd5f5}
-.desativar{background:#ef4444;color:#fff;margin-top:8px;}
-.excluir{background:#7f1d1d;color:#fff;margin-top:6px;}
-.repor{background:#2563eb;color:#fff;margin-top:6px;}
+.desativar{background:#ef4444;color:#fff;margin-top:6px}
+.excluir{background:#7f1d1d;color:#fff;margin-top:6px}
+.repor{background:#2563eb;color:#fff;margin-top:6px}
 </style>
 </head>
 
@@ -86,201 +77,153 @@ small{color:#cbd5f5}
 
 <div class="container">
 
-  <!-- FORM PRODUTO -->
-  <form id="formProduto">
-    <input id="nome" placeholder="Nome do produto" required>
-    <input id="preco" type="number" step="0.01" placeholder="Preço" required>
-    <input id="estoque" type="number" min="0" placeholder="Estoque inicial" required>
+<form id="formProduto">
+  <input type="hidden" id="produtoId">
 
-    <!-- CATEGORIA -->
-    <select id="categoria" required></select>
+  <input id="nome" placeholder="Nome do produto" required>
+  <input id="preco" type="number" step="0.01" placeholder="Preço" required>
+  <input id="estoque" type="number" min="0" placeholder="Estoque" required>
 
-    <!-- DESTINO -->
-    <select id="destino" required>
-      <option value="cozinha">🍳 Cozinha</option>
-      <option value="bar">🍺 Bar</option>
-    </select>
+  <select id="categoria" required></select>
 
-    <!-- IMAGEM COM CÂMERA -->
-    <input id="imagem" type="file" accept="image/*" capture="environment">
-    <button type="button" class="btn-camera" onclick="abrirCamera()">📷 Tirar foto</button>
+  <select id="destino" required>
+    <option value="cozinha">🍳 Cozinha</option>
+    <option value="bar">🍺 Bar</option>
+  </select>
 
-    <button type="submit">Salvar produto</button>
-  </form>
+  <!-- 📷 CAMERA (ADD + EDIT) -->
+  <input id="imagem" type="file" accept="image/*" capture="environment">
+  <button type="button" class="btn-camera" onclick="abrirCamera()">📷 Tirar / Trocar foto</button>
 
-  <!-- LISTA -->
-  <div class="lista" id="lista"></div>
+  <button type="submit">Salvar produto</button>
+</form>
 
+<div class="lista" id="lista"></div>
 </div>
 
 <script>
-// ================= ADMIN =================
+// ===== ADMIN =====
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin || !admin.app_id){
   alert("Sessão expirada");
   location.href="../auth/login.html";
 }
 
-// ================= SUPABASE =================
+// ===== SUPABASE =====
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// ================= CATEGORIAS =================
-async function carregarCategorias(){
-  const select = document.getElementById("categoria");
+// ===== CAMERA =====
+function abrirCamera(){
+  document.getElementById("imagem").click();
+}
 
-  const { data, error } = await sb
+// ===== CATEGORIAS =====
+async function carregarCategorias(){
+  const { data } = await sb
     .from("categorias")
     .select("id,nome")
     .eq("app_id", admin.app_id)
     .eq("ativo", true)
     .order("nome");
 
-  if(error){
-    console.error(error);
-    select.innerHTML = `<option disabled>Erro ao carregar</option>`;
-    return;
-  }
-
-  select.innerHTML =
-    `<option value="" disabled selected>Categoria</option>` +
+  document.getElementById("categoria").innerHTML =
+    `<option disabled selected>Categoria</option>` +
     data.map(c=>`<option value="${c.id}">${c.nome}</option>`).join("");
 }
 
-// ================= IMAGEM =================
-function abrirCamera(){
-  document.getElementById("imagem").click();
-}
-
+// ===== IMAGEM =====
 function limparNomeArquivo(nome){
-  return nome
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, "_")
-    .replace(/[^a-zA-Z0-9._-]/g, "");
+  return nome.normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/\s+/g,"_").replace(/[^a-zA-Z0-9._-]/g,"");
 }
 
 async function uploadImagem(file){
   if(!file) return null;
-
-  const nomeLimpo = limparNomeArquivo(file.name);
-  const path = `${admin.app_id}/${Date.now()}_${nomeLimpo}`;
-
-  const { error } = await sb.storage
-    .from("produtos")
-    .upload(path, file, { upsert:true });
-
-  if(error){
-    console.error(error);
-    alert("Erro ao enviar imagem");
-    return null;
-  }
-
+  const path = `${admin.app_id}/${Date.now()}_${limparNomeArquivo(file.name)}`;
+  await sb.storage.from("produtos").upload(path, file, { upsert:true });
   return sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
 }
 
-// ================= SALVAR PRODUTO =================
-document.getElementById("formProduto").addEventListener("submit", async (e)=>{
+// ===== SALVAR / EDITAR =====
+document.getElementById("formProduto").onsubmit = async e =>{
   e.preventDefault();
 
-  const nome = document.getElementById("nome").value.trim();
-  const preco = Number(document.getElementById("preco").value);
-  const estoque = Number(document.getElementById("estoque").value);
-  const categoria_id = document.getElementById("categoria").value;
-  const destino = document.getElementById("destino").value;
+  const id = document.getElementById("produtoId").value;
   const file = document.getElementById("imagem").files[0];
+  const foto = file ? await uploadImagem(file) : null;
 
-  const foto = await uploadImagem(file);
+  const dados = {
+    nome: nome.value,
+    preco: Number(preco.value),
+    estoque: Number(estoque.value),
+    categoria_id: categoria.value,
+    destino: destino.value
+  };
+  if(foto) dados.foto = foto;
 
-  const { error } = await sb.from("produtos").insert({
-    app_id: admin.app_id,
-    nome,
-    preco,
-    estoque,
-    categoria_id,
-    destino,
-    foto,
-    ativo: true
-  });
-
-  if(error){
-    console.error(error);
-    alert("Erro ao salvar produto");
-    return;
+  if(id){
+    await sb.from("produtos").update(dados).eq("id", id);
+  }else{
+    await sb.from("produtos").insert({
+      ...dados,
+      app_id: admin.app_id,
+      ativo:true
+    });
   }
 
   e.target.reset();
+  produtoId.value="";
   listarProdutos();
-});
+};
 
-// ================= LISTAR =================
+// ===== LISTAR =====
 async function listarProdutos(){
-  const { data, error } = await sb
+  const { data } = await sb
     .from("produtos")
-    .select(`
-      id,nome,preco,estoque,foto,destino,
-      categorias(nome)
-    `)
+    .select("*, categorias(nome)")
     .eq("app_id", admin.app_id)
     .eq("ativo", true)
-    .order("created_at", { ascending:false });
+    .order("created_at",{ascending:false});
 
-  if(error){
-    console.error(error);
-    return;
-  }
-
-  const lista = document.getElementById("lista");
   lista.innerHTML="";
-
   data.forEach(p=>{
-    const div = document.createElement("div");
-    div.className="card";
-    div.innerHTML = `
-      ${p.foto ? `<img src="${p.foto}">` : ""}
-      <b>${p.nome}</b><br>
-      <b>R$ ${Number(p.preco).toFixed(2)}</b><br>
-      <small>Categoria: ${p.categorias?.nome || "—"}</small><br>
-      <small>Destino: ${p.destino === "bar" ? "🍺 Bar" : "🍳 Cozinha"}</small><br>
-      <small>Estoque: ${p.estoque}</small>
+    lista.innerHTML+=`
+      <div class="card">
+        ${p.foto?`<img src="${p.foto}">`:""}
+        <b>${p.nome}</b><br>
+        <b>R$ ${p.preco.toFixed(2)}</b><br>
+        <small>${p.categorias?.nome||""}</small><br>
+        <small>${p.destino}</small><br>
 
-      <button class="repor" onclick="reporEstoque('${p.id}', ${p.estoque})">Repor estoque</button>
-      <button class="desativar" onclick="desativarProduto('${p.id}')">Desativar</button>
-      <button class="excluir" onclick="excluirProduto('${p.id}','${p.nome}')">Excluir</button>
-    `;
-    lista.appendChild(div);
+        <button class="btn-editar" onclick='editar(${JSON.stringify(p)})'>Editar</button>
+        <button class="desativar" onclick="desativarProduto('${p.id}')">Desativar</button>
+      </div>`;
   });
 }
 
-// ================= AÇÕES =================
-async function reporEstoque(id, atual){
-  const qtd = prompt(`Quantidade para REPOR:\nEstoque atual: ${atual}`, "1");
-  if(!qtd) return;
-
-  const n = Number(qtd);
-  if(isNaN(n) || n<=0) return alert("Quantidade inválida");
-
-  await sb.from("produtos")
-    .update({ estoque: atual + n })
-    .eq("id", id);
-
-  listarProdutos();
+// ===== EDITAR =====
+function editar(p){
+  produtoId.value = p.id;
+  nome.value = p.nome;
+  preco.value = p.preco;
+  estoque.value = p.estoque;
+  categoria.value = p.categoria_id;
+  destino.value = p.destino;
+  window.scrollTo({top:0,behavior:"smooth"});
 }
 
+// ===== AÇÕES =====
 async function desativarProduto(id){
-  if(!confirm("Desativar produto?")) return;
-  await sb.from("produtos").update({ ativo:false }).eq("id", id);
-  listarProdutos();
+  if(confirm("Desativar produto?")){
+    await sb.from("produtos").update({ativo:false}).eq("id",id);
+    listarProdutos();
+  }
 }
 
-async function excluirProduto(id, nome){
-  if(!confirm(`Excluir DEFINITIVAMENTE?\n\n${nome}`)) return;
-  await sb.from("produtos").delete().eq("id", id);
-  listarProdutos();
-}
-
-// ================= INIT =================
+// ===== INIT =====
 carregarCategorias();
 listarProdutos();
 </script>
