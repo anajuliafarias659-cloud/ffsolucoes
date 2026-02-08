@@ -32,7 +32,6 @@ select,input{
   border:none
 }
 
-small{opacity:.7}
 .alert{color:#facc15;margin-top:8px}
 </style>
 </head>
@@ -41,8 +40,8 @@ small{opacity:.7}
 
 <script>
 function getBasePath(){
-  const path = window.location.pathname;
-  if(path.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
+  const p = location.pathname;
+  if(p.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
   return "/bar";
 }
 
@@ -87,6 +86,7 @@ let processando = false;
       type="number"
       id="valorRecebido"
       placeholder="0.00"
+      step="0.01"
       oninput="calcular()"
     />
 
@@ -115,7 +115,7 @@ async function carregarPedido(){
   }
 
   if(pedido.status === "finalizado"){
-    alert("Este pedido já foi finalizado.");
+    alert("Pedido já finalizado");
     location.href = getBasePath() + "/caixa.html";
     return;
   }
@@ -148,7 +148,6 @@ function calcular(){
     info.innerText = "";
   }
 
-  trocoEl = document.getElementById("troco");
   trocoEl.innerText = troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
 }
 
@@ -157,20 +156,26 @@ async function confirmarPagamento(){
   processando = true;
 
   const forma = formaPagamento.value;
-  const valorPago = Number(valorRecebido.value || 0);
+  const valorPago = Number(valorRecebido.value);
 
-  const desconto = Math.max(
-    0,
-    Number((totalPedido - valorPago).toFixed(2))
+  if(!valorPago || valorPago <= 0){
+    alert("Informe o valor pago.");
+    processando = false;
+    return;
+  }
+
+  if(forma !== "dinheiro" && valorPago !== totalPedido){
+    alert("PIX e Cartão exigem pagamento exato.");
+    processando = false;
+    return;
+  }
+
+  const desconto = Number(
+    Math.max(0, totalPedido - valorPago).toFixed(2)
   );
 
-  const valorPagoFinal = Number(valorPago.toFixed(2));
-
   if(desconto > DESCONTO_MAXIMO){
-    alert(
-      `Desconto máximo permitido é R$ ${DESCONTO_MAXIMO.toFixed(2)}.\n` +
-      `Valor mínimo: R$ ${(totalPedido - DESCONTO_MAXIMO).toFixed(2)}`
-    );
+    alert(`Desconto máximo permitido é R$ ${DESCONTO_MAXIMO.toFixed(2)}`);
     processando = false;
     return;
   }
@@ -180,7 +185,7 @@ async function confirmarPagamento(){
     .update({
       status: "finalizado",
       forma_pagamento: forma,
-      valor_pago: valorPagoFinal,
+      valor_pago: Number(valorPago.toFixed(2)),
       desconto: desconto,
       pago_em: new Date().toISOString()
     })
@@ -188,13 +193,12 @@ async function confirmarPagamento(){
     .eq("app_id", appId);
 
   if(erroPedido){
-    console.error("ERRO AO FINALIZAR PEDIDO:", erroPedido);
+    console.error("ERRO SUPABASE:", erroPedido);
     alert("Erro ao finalizar pagamento. Verifique os valores.");
     processando = false;
     return;
   }
 
-  // 🔻 BAIXA DE ESTOQUE (UMA ÚNICA VEZ)
   const { data: itens } = await sb
     .from("pedido_itens")
     .select("produto_id, quantidade")
@@ -208,7 +212,6 @@ async function confirmarPagamento(){
     });
   }
 
-  // 🪑 LIBERA MESA
   if(mesaId){
     await sb
       .from("mesas")
