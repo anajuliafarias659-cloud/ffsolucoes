@@ -63,6 +63,13 @@ let totalPedido = 0;
 let mesaId = null;
 const DESCONTO_MAXIMO = 10;
 let processando = false;
+
+// 🔒 MAPEAMENTO SEGURO (BANCO FRIENDLY)
+const MAPA_PAGAMENTO = {
+  dinheiro: "DINHEIRO",
+  pix: "PIX",
+  cartao: "CARTAO"
+};
 </script>
 
 <div class="topo">
@@ -148,14 +155,15 @@ function calcular(){
     info.innerText = "";
   }
 
-  trocoEl.innerText = troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
+  troco.innerText = troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
 }
 
 async function confirmarPagamento(){
   if(processando) return;
   processando = true;
 
-  const forma = formaPagamento.value;
+  const formaUI = formaPagamento.value;
+  const forma = MAPA_PAGAMENTO[formaUI]; // 🔥 AQUI ESTÁ A CORREÇÃO
   const valorPago = Number(valorRecebido.value);
 
   if(!valorPago || valorPago <= 0){
@@ -164,7 +172,7 @@ async function confirmarPagamento(){
     return;
   }
 
-  if(forma !== "dinheiro" && valorPago !== totalPedido){
+  if(forma !== "DINHEIRO" && valorPago !== totalPedido){
     alert("PIX e Cartão exigem pagamento exato.");
     processando = false;
     return;
@@ -180,25 +188,32 @@ async function confirmarPagamento(){
     return;
   }
 
+  const payload = {
+    status: "finalizado",
+    forma_pagamento: forma,
+    valor_pago: Number(valorPago.toFixed(2)),
+    desconto: desconto,
+    pago_em: new Date().toISOString()
+  };
+
   const { error: erroPedido } = await sb
     .from("pedidos")
-    .update({
-      status: "finalizado",
-      forma_pagamento: forma,
-      valor_pago: Number(valorPago.toFixed(2)),
-      desconto: desconto,
-      pago_em: new Date().toISOString()
-    })
+    .update(payload)
     .eq("id", pedidoId)
     .eq("app_id", appId);
 
   if(erroPedido){
-    console.error("ERRO SUPABASE:", erroPedido);
-    alert("Erro ao finalizar pagamento. Verifique os valores.");
+    console.error("ERRO SUPABASE COMPLETO:", erroPedido);
+    alert(
+      "Erro no banco:\n" +
+      (erroPedido.message || "") + "\n" +
+      (erroPedido.details || "")
+    );
     processando = false;
     return;
   }
 
+  // 🔻 BAIXA ESTOQUE
   const { data: itens } = await sb
     .from("pedido_itens")
     .select("produto_id, quantidade")
@@ -212,6 +227,7 @@ async function confirmarPagamento(){
     });
   }
 
+  // 🪑 LIBERA MESA
   if(mesaId){
     await sb
       .from("mesas")
