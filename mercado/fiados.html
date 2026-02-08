@@ -17,13 +17,18 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb}
 .linha{display:flex;justify-content:space-between;margin:4px 0}
 .valor{color:#f87171;font-weight:bold}
 .debito{padding:6px;border-bottom:1px solid #1e293b}
-small{color:#94a3b8}
+.obs{font-size:12px;color:#94a3b8;margin-left:22px}
+input[type=checkbox]{transform:scale(1.2)}
+input[type=text]{
+  width:100%;padding:10px;margin:10px 0;
+  border-radius:10px;border:none;
+  background:#020617;color:#fff
+}
 button{
   width:100%;padding:10px;border:none;border-radius:10px;
   background:#22c55e;color:#020617;font-weight:bold;
   cursor:pointer;margin-top:8px
 }
-input[type=checkbox]{transform:scale(1.2)}
 .totalCliente{
   font-weight:bold;
   margin:6px 0;
@@ -38,8 +43,14 @@ input[type=checkbox]{transform:scale(1.2)}
   <b>📋 FIADOS POR CLIENTE</b>
 </div>
 
-<div class="container" id="listaFiados">
-  Carregando...
+<div class="container">
+
+  <!-- PESQUISA -->
+  <input id="pesquisa" type="text"
+    placeholder="Pesquisar por nome ou CPF..."
+    oninput="filtrarFiados()">
+
+  <div id="listaFiados">Carregando...</div>
 </div>
 
 <script>
@@ -50,6 +61,8 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+let dadosFiados = [];
+
 async function carregarFiados(){
   const { data, error } = await supabaseClient
     .from("vendas")
@@ -59,15 +72,43 @@ async function carregarFiados(){
     .gt("valor_devido", 0)
     .order("created_at", { ascending: true });
 
-  const container = document.getElementById("listaFiados");
-  container.innerHTML = "";
-
-  if(error || !data || data.length === 0){
-    container.innerHTML = "<p>Nenhum fiado em aberto</p>";
+  if(error){
+    document.getElementById("listaFiados").innerHTML =
+      "<p>Erro ao carregar fiados</p>";
     return;
   }
 
-  // AGRUPA POR CLIENTE
+  dadosFiados = data || [];
+  renderizarFiados(dadosFiados);
+}
+
+function filtrarFiados(){
+  const termo = document.getElementById("pesquisa")
+    .value.toLowerCase().trim();
+
+  if(!termo){
+    renderizarFiados(dadosFiados);
+    return;
+  }
+
+  const filtrado = dadosFiados.filter(v =>
+    (v.cliente_nome || "").toLowerCase().includes(termo) ||
+    (v.cliente_cpf || "").includes(termo)
+  );
+
+  renderizarFiados(filtrado);
+}
+
+function renderizarFiados(data){
+  const container = document.getElementById("listaFiados");
+  container.innerHTML = "";
+
+  if(!data || data.length === 0){
+    container.innerHTML = "<p>Nenhum fiado encontrado</p>";
+    return;
+  }
+
+  // agrupa por CPF
   const clientes = {};
   data.forEach(v=>{
     if(!clientes[v.cliente_cpf]){
@@ -82,7 +123,6 @@ async function carregarFiados(){
     clientes[v.cliente_cpf].debitos.push(v);
   });
 
-  // RENDER
   Object.values(clientes).forEach(cliente=>{
     let html = `
       <div class="card">
@@ -98,22 +138,27 @@ async function carregarFiados(){
       html += `
         <div class="debito">
           <label>
-            <input type="checkbox" class="chk"
-              data-id="${d.id}"
-              data-valor="${d.valor_devido}">
+            <input type="checkbox"
+              class="chk"
+              data-id="${d.id}">
             ${new Date(d.created_at).toLocaleDateString("pt-BR")}
             — R$ ${Number(d.valor_devido).toFixed(2)}
           </label>
+          ${
+            d.observacao
+              ? `<div class="obs">📝 ${d.observacao}</div>`
+              : ""
+          }
         </div>
       `;
     });
 
     html += `
       <button onclick="quitarSelecionados('${cliente.cpf}')">
-        Quitar Selecionados
+        Quitar selecionados
       </button>
       <button onclick="quitarTodos('${cliente.cpf}')">
-        Quitar TODOS
+        Quitar todas
       </button>
       </div>
     `;
@@ -122,21 +167,16 @@ async function carregarFiados(){
   });
 }
 
-/* QUITA APENAS MARCADOS */
 async function quitarSelecionados(cpf){
-  const checks = document.querySelectorAll(
-    `.chk[data-id][data-valor]`
-  );
-
-  const selecionados = [...checks].filter(c=>c.checked);
-  if(selecionados.length === 0){
+  const checks = document.querySelectorAll(".chk:checked");
+  if(checks.length === 0){
     alert("Nenhuma dívida selecionada");
     return;
   }
 
   if(!confirm("Confirmar quitação das dívidas selecionadas?")) return;
 
-  for(const c of selecionados){
+  for(const c of checks){
     await supabaseClient
       .from("vendas")
       .update({
@@ -150,7 +190,6 @@ async function quitarSelecionados(cpf){
   carregarFiados();
 }
 
-/* QUITA TODAS DO CLIENTE */
 async function quitarTodos(cpf){
   if(!confirm("Quitar TODAS as dívidas desse cliente?")) return;
 
