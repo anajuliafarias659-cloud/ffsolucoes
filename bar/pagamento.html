@@ -64,7 +64,6 @@ let mesaId = null;
 const DESCONTO_MAXIMO = 10;
 let processando = false;
 
-// 🔒 MAPEAMENTO SEGURO (BANCO FRIENDLY)
 const MAPA_PAGAMENTO = {
   dinheiro: "DINHEIRO",
   pix: "PIX",
@@ -144,27 +143,31 @@ async function carregarPedido(){
 }
 
 function calcular(){
-  const recebido = Number(valorRecebido.value || 0);
-  const troco = recebido - totalPedido;
+  const recebido = Number(document.getElementById("valorRecebido").value || 0);
+  const trocoValor = recebido - totalPedido;
   const desconto = totalPedido - recebido;
 
+  const trocoEl = document.getElementById("troco");
+  const infoEl = document.getElementById("info");
+
   if(desconto > 0){
-    info.innerText =
+    infoEl.innerText =
       `Desconto: R$ ${desconto.toFixed(2)} (máx. R$ ${DESCONTO_MAXIMO.toFixed(2)})`;
   }else{
-    info.innerText = "";
+    infoEl.innerText = "";
   }
 
-  troco.innerText = troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
+  trocoEl.innerText =
+    trocoValor > 0 ? `R$ ${trocoValor.toFixed(2)}` : "R$ 0,00";
 }
 
 async function confirmarPagamento(){
   if(processando) return;
   processando = true;
 
-  const formaUI = formaPagamento.value;
-  const forma = MAPA_PAGAMENTO[formaUI]; // 🔥 AQUI ESTÁ A CORREÇÃO
-  const valorPago = Number(valorRecebido.value);
+  const formaUI = document.getElementById("formaPagamento").value;
+  const forma = MAPA_PAGAMENTO[formaUI];
+  const valorPago = Number(document.getElementById("valorRecebido").value);
 
   if(!valorPago || valorPago <= 0){
     alert("Informe o valor pago.");
@@ -188,32 +191,25 @@ async function confirmarPagamento(){
     return;
   }
 
-  const payload = {
-    status: "finalizado",
-    forma_pagamento: forma,
-    valor_pago: Number(valorPago.toFixed(2)),
-    desconto: desconto,
-    pago_em: new Date().toISOString()
-  };
-
   const { error: erroPedido } = await sb
     .from("pedidos")
-    .update(payload)
+    .update({
+      status: "finalizado",
+      forma_pagamento: forma,
+      valor_pago: Number(valorPago.toFixed(2)),
+      desconto: desconto,
+      pago_em: new Date().toISOString()
+    })
     .eq("id", pedidoId)
     .eq("app_id", appId);
 
   if(erroPedido){
-    console.error("ERRO SUPABASE COMPLETO:", erroPedido);
-    alert(
-      "Erro no banco:\n" +
-      (erroPedido.message || "") + "\n" +
-      (erroPedido.details || "")
-    );
+    console.error("ERRO SUPABASE:", erroPedido);
+    alert("Erro ao finalizar pagamento. Verifique os valores.");
     processando = false;
     return;
   }
 
-  // 🔻 BAIXA ESTOQUE
   const { data: itens } = await sb
     .from("pedido_itens")
     .select("produto_id, quantidade")
@@ -227,7 +223,6 @@ async function confirmarPagamento(){
     });
   }
 
-  // 🪑 LIBERA MESA
   if(mesaId){
     await sb
       .from("mesas")
