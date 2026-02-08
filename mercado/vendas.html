@@ -19,8 +19,6 @@ body{
   background:#020617;
   color:#e5e7eb;
 }
-
-/* HEADER */
 .topo-app{
   position:sticky;
   top:0;
@@ -34,14 +32,10 @@ body{
   font-weight:900;
   color:#38bdf8;
 }
-
-/* LAYOUT */
 .mobile-pos{
   padding:16px;
-  padding-bottom:260px; /* 🔴 espaço GARANTIDO pro pagamento */
+  padding-bottom:260px;
 }
-
-/* CARDS */
 .card{
   background:#0f172a;
   border-radius:18px;
@@ -69,19 +63,13 @@ body{
   color:#fff;
   margin-bottom:10px;
 }
-
-/* PAGAMENTO */
 .pagamento .dinheiro{background:#16a34a}
 .pagamento .pix{background:#0ea5e9}
 .pagamento .cartao{background:#2563eb}
-
-/* CARRINHO */
 .carrinho div{
   padding:10px 0;
   border-bottom:1px solid #1e293b;
 }
-
-/* TOTAL FIXO */
 .total-fixo{
   position:fixed;
   bottom:0;left:0;width:100%;
@@ -100,14 +88,11 @@ body{
 <body>
 
 <div class="topo-app">
-  <div class="brand">
-    <span>CAIXA</span>
-  </div>
+  <div class="brand"><span>CAIXA</span></div>
 </div>
 
 <div class="mobile-pos">
 
-  <!-- BUSCA -->
   <div class="card">
     <input id="codigo" placeholder="Código ou nome do produto"
       onkeydown="if(event.key==='Enter') buscarProduto()"
@@ -116,12 +101,10 @@ body{
     <div id="leitor" style="display:none"></div>
   </div>
 
-  <!-- QUANTIDADE -->
   <div class="card">
     <input id="quantidade" type="number" min="1" value="1">
   </div>
 
-  <!-- PREVIEW -->
   <div class="card" id="previewProduto" style="display:none">
     <h3 id="prevNome"></h3>
     <p>Preço: <b>R$ <span id="prevPreco"></span></b></p>
@@ -129,27 +112,16 @@ body{
     <button onclick="confirmarAdicionar()">Adicionar ao carrinho</button>
   </div>
 
-  <!-- CARRINHO -->
   <div class="card carrinho">
     <h3>🛒 Carrinho</h3>
     <div id="carrinho"></div>
   </div>
 
-  <!-- PAGAMENTO (AGORA APARECE) -->
   <div class="card pagamento">
     <h3>💳 Pagamento</h3>
-
-    <button class="dinheiro" onclick="finalizarVenda('DINHEIRO')">
-      Dinheiro
-    </button>
-
-    <button class="pix" onclick="pagarPix()">
-      PIX
-    </button>
-
-    <button class="cartao" onclick="finalizarVenda('CARTAO')">
-      Cartão
-    </button>
+    <button class="dinheiro" onclick="finalizarVenda('DINHEIRO')">Dinheiro</button>
+    <button class="pix" onclick="pagarPix()">PIX</button>
+    <button class="cartao" onclick="finalizarVenda('CARTAO')">Cartão</button>
 
     <div id="pixBox" style="display:none;text-align:center">
       <div id="qrcode"></div>
@@ -175,7 +147,7 @@ const supabaseClient = supabase.createClient(
 let carrinho=[], total=0, produtoLido=null;
 let buscaTimer=null;
 
-/* BUSCA AUTO */
+/* BUSCA */
 function buscarAuto(){
   const v=codigo.value.trim();
   if(v.length<2){previewProduto.style.display="none";return;}
@@ -183,7 +155,6 @@ function buscarAuto(){
   buscaTimer=setTimeout(buscarProduto,500);
 }
 
-/* LEITOR */
 function abrirLeitor(){
   leitor.style.display="block";
   Quagga.init({
@@ -199,7 +170,6 @@ function abrirLeitor(){
   });
 }
 
-/* BUSCAR */
 async function buscarProduto(){
   const valor=codigo.value.trim();
   if(!valor) return;
@@ -230,7 +200,6 @@ async function buscarProduto(){
   previewProduto.style.display="block";
 }
 
-/* ADD */
 function confirmarAdicionar(){
   const qtd=Number(quantidade.value);
   if(produtoLido.estoque<qtd)return alert("Estoque insuficiente");
@@ -256,47 +225,47 @@ function confirmarAdicionar(){
   quantidade.value=1;
 }
 
-/* CARRINHO */
 function atualizarCarrinho(){
   carrinhoDiv.innerHTML="";
   total=0;
   carrinho.forEach(i=>{
     total+=i.subtotal;
     carrinhoDiv.innerHTML+=`
-      <div>
-        ${i.qtd} x ${i.nome} = <b>R$ ${i.subtotal.toFixed(2)}</b>
-      </div>`;
+      <div>${i.qtd} x ${i.nome} = <b>R$ ${i.subtotal.toFixed(2)}</b></div>`;
   });
   totalSpan.innerText=total.toFixed(2);
 }
 
-/* PIX */
 function pagarPix(){
   if(total<=0)return;
   pixBox.style.display="block";
   qrcode.innerHTML="";
-  new QRCode(qrcode,{
-    text:`PIX|TOTAL:${total.toFixed(2)}`,
-    width:180,height:180
-  });
+  new QRCode(qrcode,{text:`PIX|TOTAL:${total.toFixed(2)}`,width:180,height:180});
 }
 
-/* FINALIZAR */
+/* 🔥 FINALIZAR (AJUSTADO PRO SEU BANCO) */
 async function finalizarVenda(tipo){
   if(carrinho.length===0)return alert("Carrinho vazio");
   if(!confirm(`Confirmar pagamento em ${tipo}?`))return;
 
   for(const i of carrinho){
-    await supabaseClient.from("produtos")
-      .update({estoque:i.estoque-i.qtd})
-      .eq("id",i.id);
+    const { error } = await supabaseClient.rpc("baixar_estoque", {
+      p_produto_id: i.id,
+      p_qtd: i.qtd
+    });
+
+    if(error){
+      alert("Erro ao baixar estoque");
+      console.error(error);
+      return;
+    }
 
     await supabaseClient.from("vendas").insert({
-      app_id:admin.app_id,
-      produto_id:i.id,
-      quantidade:i.qtd,
-      valor_total:i.subtotal,
-      forma_pagamento:tipo
+      app_id: admin.app_id,
+      produto_id: i.id,
+      quantidade: i.qtd,
+      valor_total: i.subtotal,
+      forma_pagamento: tipo
     });
   }
 
@@ -306,7 +275,6 @@ async function finalizarVenda(tipo){
   pixBox.style.display="none";
 }
 
-/* PDF */
 function gerarPDF(tipo){
   const doc=new jsPDF();
   let y=10;
@@ -321,7 +289,6 @@ function gerarPDF(tipo){
   doc.save("recibo.pdf");
 }
 
-/* ELEMENTOS */
 const codigo=document.getElementById("codigo");
 const quantidade=document.getElementById("quantidade");
 const carrinhoDiv=document.getElementById("carrinho");
