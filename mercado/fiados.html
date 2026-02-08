@@ -16,8 +16,11 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb}
 .card{background:#0f172a;border-radius:14px;padding:12px;margin-bottom:10px}
 .linha{display:flex;justify-content:space-between;margin:4px 0}
 .valor{color:#f87171;font-weight:bold}
-button{width:100%;padding:10px;border:none;border-radius:10px;
-background:#22c55e;color:#020617;font-weight:bold;cursor:pointer;margin-top:8px}
+button{
+  width:100%;padding:10px;border:none;border-radius:10px;
+  background:#22c55e;color:#020617;font-weight:bold;
+  cursor:pointer;margin-top:8px
+}
 small{color:#94a3b8}
 </style>
 </head>
@@ -26,6 +29,10 @@ small{color:#94a3b8}
 
 <div class="topo">
   <b>📋 FIADOS EM ABERTO</b>
+</div>
+
+<div id="totalFiados" style="padding:12px;font-weight:bold;color:#f87171">
+  Total em aberto: R$ 0.00
 </div>
 
 <div class="container" id="listaFiados">
@@ -50,27 +57,49 @@ async function carregarFiados(){
     .order("created_at", { ascending: false });
 
   const lista = document.getElementById("listaFiados");
+  const totalDiv = document.getElementById("totalFiados");
   lista.innerHTML = "";
 
   if(error || !data || data.length === 0){
     lista.innerHTML = "<p>Nenhum fiado em aberto</p>";
+    totalDiv.innerText = "Total em aberto: R$ 0.00";
     return;
   }
 
+  let totalAberto = 0;
+
   data.forEach(v=>{
+    // ignora fiado já quitado por status (segurança)
+    if(v.status === "PAGO") return;
+
+    totalAberto += Number(v.valor_devido || 0);
+
     lista.innerHTML += `
       <div class="card">
         <div class="linha"><b>Cliente:</b> ${v.cliente_nome}</div>
-        <div class="linha"><b>Devido:</b> <span class="valor">R$ ${v.valor_devido.toFixed(2)}</span></div>
-        <div class="linha"><b>Pago:</b> R$ ${v.valor_pago?.toFixed(2) || "0.00"}</div>
-        <div class="linha"><b>Data:</b> ${new Date(v.created_at).toLocaleDateString()}</div>
+        <div class="linha">
+          <b>Devido:</b>
+          <span class="valor">R$ ${Number(v.valor_devido).toFixed(2)}</span>
+        </div>
+        <div class="linha">
+          <b>Pago:</b>
+          R$ ${Number(v.valor_pago || 0).toFixed(2)}
+        </div>
+        <div class="linha">
+          <b>Data:</b>
+          ${new Date(v.created_at).toLocaleDateString("pt-BR")}
+        </div>
         <small>${v.observacao || ""}</small>
+
         <button onclick="quitarFiado('${v.id}', ${v.valor_devido})">
           Quitar Dívida
         </button>
       </div>
     `;
   });
+
+  totalDiv.innerText =
+    `Total em aberto: R$ ${totalAberto.toFixed(2)}`;
 }
 
 async function quitarFiado(id, devido){
@@ -90,18 +119,19 @@ async function quitarFiado(id, devido){
   const novoDevido = Math.round((devido - pago) * 100) / 100;
   const status = novoDevido === 0 ? "PAGO" : "PARCIAL";
 
-  await supabaseClient.from("vendas")
+  await supabaseClient
+    .from("vendas")
     .update({
       valor_devido: novoDevido,
       status: status,
-      data_pagamento: new Date(),
+      data_pagamento: new Date()
     })
     .eq("id", id);
 
   alert(
     novoDevido === 0
-    ? "Dívida quitada com sucesso"
-    : `Pagamento parcial. Restam R$ ${novoDevido.toFixed(2)}`
+      ? "Dívida quitada com sucesso"
+      : `Pagamento parcial. Restam R$ ${novoDevido.toFixed(2)}`
   );
 
   carregarFiados();
