@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Fiados | FF Soluções</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb}
+.topo{padding:12px;border-bottom:1px solid #0f172a}
+.topo b{font-size:20px;color:#38bdf8}
+.container{padding:12px}
+.card{background:#0f172a;border-radius:14px;padding:12px;margin-bottom:10px}
+.linha{display:flex;justify-content:space-between;margin:4px 0}
+.valor{color:#f87171;font-weight:bold}
+button{width:100%;padding:10px;border:none;border-radius:10px;
+background:#22c55e;color:#020617;font-weight:bold;cursor:pointer;margin-top:8px}
+small{color:#94a3b8}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <b>📋 FIADOS EM ABERTO</b>
+</div>
+
+<div class="container" id="listaFiados">
+  Carregando...
+</div>
+
+<script>
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+
+const supabaseClient = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+async function carregarFiados(){
+  const { data, error } = await supabaseClient
+    .from("vendas")
+    .select("*")
+    .eq("app_id", admin.app_id)
+    .eq("forma_pagamento", "FIADO")
+    .gt("valor_devido", 0)
+    .order("created_at", { ascending: false });
+
+  const lista = document.getElementById("listaFiados");
+  lista.innerHTML = "";
+
+  if(error || !data || data.length === 0){
+    lista.innerHTML = "<p>Nenhum fiado em aberto</p>";
+    return;
+  }
+
+  data.forEach(v=>{
+    lista.innerHTML += `
+      <div class="card">
+        <div class="linha"><b>Cliente:</b> ${v.cliente_nome}</div>
+        <div class="linha"><b>Devido:</b> <span class="valor">R$ ${v.valor_devido.toFixed(2)}</span></div>
+        <div class="linha"><b>Pago:</b> R$ ${v.valor_pago?.toFixed(2) || "0.00"}</div>
+        <div class="linha"><b>Data:</b> ${new Date(v.created_at).toLocaleDateString()}</div>
+        <small>${v.observacao || ""}</small>
+        <button onclick="quitarFiado('${v.id}', ${v.valor_devido})">
+          Quitar Dívida
+        </button>
+      </div>
+    `;
+  });
+}
+
+async function quitarFiado(id, devido){
+  const valor = prompt(`Valor para quitar (máx R$ ${devido.toFixed(2)})`);
+  const pago = Number(valor);
+
+  if(isNaN(pago) || pago <= 0){
+    alert("Valor inválido");
+    return;
+  }
+
+  if(pago > devido){
+    alert("Valor maior que a dívida");
+    return;
+  }
+
+  const novoDevido = Math.round((devido - pago) * 100) / 100;
+  const status = novoDevido === 0 ? "PAGO" : "PARCIAL";
+
+  await supabaseClient.from("vendas")
+    .update({
+      valor_devido: novoDevido,
+      status: status,
+      data_pagamento: new Date(),
+    })
+    .eq("id", id);
+
+  alert(
+    novoDevido === 0
+    ? "Dívida quitada com sucesso"
+    : `Pagamento parcial. Restam R$ ${novoDevido.toFixed(2)}`
+  );
+
+  carregarFiados();
+}
+
+carregarFiados();
+</script>
+
+</body>
+</html>
