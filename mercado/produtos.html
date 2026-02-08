@@ -91,13 +91,13 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
   <input id="codigo_barra" placeholder="Código de barras">
 
   <!-- LEITOR DE CÓDIGO -->
-  <button onclick="abrirLeitor()">📷 Ler código</button>
+  <button onclick="abrirLeitor()">📷 Ler código de barras</button>
   <div id="leitor" style="display:none"></div>
 
   <input id="preco" type="number" step="0.01" placeholder="Preço">
   <input id="estoque" type="number" placeholder="Estoque">
 
-  <!-- BOTÃO VISÍVEL DE FOTO -->
+  <!-- FOTO PRODUTO -->
   <button type="button"
     onclick="document.getElementById('fotos').click()">
     📸 Tirar fotos do produto (até 3)
@@ -126,6 +126,11 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 
 </div>
 
+<!-- SOM DO BIP -->
+<audio id="beep">
+  <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQgAAAAA" type="audio/wav">
+</audio>
+
 <script>
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin){
@@ -138,7 +143,7 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* PREVIEW DAS FOTOS */
+/* PREVIEW FOTOS */
 fotos.addEventListener("change",()=>{
   preview.innerHTML="";
   [...fotos.files].slice(0,3).forEach(f=>{
@@ -148,69 +153,75 @@ fotos.addEventListener("change",()=>{
   });
 });
 
-/* MOSTRAR / OCULTAR */
+/* TOGGLE */
 function toggleProdutos(){
   boxProdutos.style.display =
     boxProdutos.style.display==="none" ? "block" : "none";
 }
 
 /* =========================
-   LEITOR DE CÓDIGO SENSÍVEL
+   LEITOR DE CÓDIGO + BIP/VIB
    ========================= */
-let ultimoCodigo = "";
-let ultimoTempo = 0;
+let ultimoCodigo="";
+let ultimoTempo=0;
 
 function abrirLeitor(){
-  leitor.style.display = "block";
+  leitor.style.display="block";
 
   Quagga.init({
-    inputStream: {
-      type: "LiveStream",
-      target: leitor,
-      constraints: {
-        facingMode: "environment",
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+    inputStream:{
+      type:"LiveStream",
+      target:leitor,
+      constraints:{
+        facingMode:"environment",
+        width:{ideal:1280},
+        height:{ideal:720}
       }
     },
-    locator: {
-      patchSize: "large",
-      halfSample: false
+    locator:{
+      patchSize:"large",
+      halfSample:false
     },
-    decoder: {
-      readers: [
+    decoder:{
+      readers:[
         "ean_reader",
         "ean_8_reader",
-        "code_128_reader",
         "upc_reader",
-        "upc_e_reader"
+        "code_128_reader"
       ]
     },
-    locate: true,
-    numOfWorkers: navigator.hardwareConcurrency || 4
-  }, err => {
-    if (err) {
+    locate:true
+  },err=>{
+    if(err){
+      alert("Erro ao abrir câmera");
       console.error(err);
-      alert("Erro ao abrir a câmera");
       return;
     }
     Quagga.start();
   });
 
-  Quagga.onDetected(result => {
-    const code = result.codeResult.code;
-    const agora = Date.now();
+  Quagga.onDetected(r=>{
+    const code=r.codeResult.code;
+    const agora=Date.now();
 
-    if (!code) return;
-    if (code === ultimoCodigo && agora - ultimoTempo < 1500) return;
+    if(!code) return;
+    if(code===ultimoCodigo && agora-ultimoTempo<1500) return;
 
-    ultimoCodigo = code;
-    ultimoTempo = agora;
+    ultimoCodigo=code;
+    ultimoTempo=agora;
 
-    codigo_barra.value = code;
+    // SOM
+    document.getElementById("beep").play().catch(()=>{});
+
+    // VIBRAÇÃO
+    if(navigator.vibrate){
+      navigator.vibrate(200);
+    }
+
+    codigo_barra.value=code;
 
     Quagga.stop();
-    leitor.style.display = "none";
+    leitor.style.display="none";
   });
 }
 
@@ -225,17 +236,10 @@ async function cadastrar(){
   const files=[...fotos.files].slice(0,3);
 
   for(const file of files){
-    const nomeSeguro=file.name
-      .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-      .replace(/[^a-zA-Z0-9._-]/g,"_");
-
-    const path=`${admin.app_id}/${Date.now()}_${nomeSeguro}`;
+    const path=`${admin.app_id}/${Date.now()}_${file.name}`;
     await supabaseClient.storage.from("produtos").upload(path,file);
-
     imagens.push(
-      supabaseClient.storage
-        .from("produtos")
-        .getPublicUrl(path).data.publicUrl
+      supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl
     );
   }
 
@@ -259,17 +263,15 @@ async function carregar(){
   const {data}=await supabaseClient
     .from("produtos")
     .select("*")
-    .eq("app_id",admin.app_id)
-    .order("nome");
+    .eq("app_id",admin.app_id);
 
   listaProdutos.innerHTML="";
   data.forEach(p=>{
     let imgs="";
-
     if(Array.isArray(p.imagens)){
-      imgs = p.imagens.slice(0,3).map(u=>`<img src="${u}">`).join("");
-    } else if (typeof p.imagem === "string" && p.imagem) {
-      imgs = `<img src="${p.imagem}">`;
+      imgs=p.imagens.map(u=>`<img src="${u}">`).join("");
+    }else if(p.imagem){
+      imgs=`<img src="${p.imagem}">`;
     }
 
     listaProdutos.innerHTML+=`
@@ -279,85 +281,9 @@ async function carregar(){
         Estoque: ${p.estoque}<br>
         R$ ${p.preco.toFixed(2)}<br>
         ${imgs}
-
-        <input type="number" placeholder="Qtd repor" id="qtd-${p.id}">
-        <button class="repor" onclick="repor('${p.id}')">➕ Repor</button>
-
-        <input type="file" accept="image/*" capture="environment"
-          id="foto-${p.id}" style="display:none"
-          onchange="editarFoto(event,'${p.id}')">
-
-        <button class="editar"
-          onclick="document.getElementById('foto-${p.id}').click()">
-          📸 Editar fotos
-        </button>
-
-        <button class="editar"
-          onclick="editarProduto('${p.id}','${p.nome}','${p.codigo_barra}','${p.preco}','${p.estoque}')">
-          Editar dados
-        </button>
-
-        <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
       </div>
     `;
   });
-}
-
-/* EDITAR FOTO */
-async function editarFoto(e,id){
-  const file=e.target.files[0];
-  if(!file)return;
-
-  const path=`${admin.app_id}/${Date.now()}_${file.name}`;
-  await supabaseClient.storage.from("produtos").upload(path,file);
-  const url=supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
-
-  const {data}=await supabaseClient
-    .from("produtos").select("imagens").eq("id",id).single();
-
-  const imagens = Array.isArray(data.imagens) ? data.imagens : [];
-  if(imagens.length>=3)return alert("Máximo 3 fotos");
-
-  imagens.push(url);
-  await supabaseClient.from("produtos").update({imagens}).eq("id",id);
-  carregar();
-}
-
-/* EDITAR DADOS */
-async function editarProduto(id,n,c,p,e){
-  const nomeN=prompt("Nome",n);
-  if(!nomeN)return;
-
-  await supabaseClient.from("produtos")
-    .update({
-      nome:nomeN,
-      codigo_barra:prompt("Código",c),
-      preco:Number(prompt("Preço",p)),
-      estoque:Number(prompt("Estoque",e))
-    })
-    .eq("id",id);
-
-  carregar();
-}
-
-/* REPOR */
-async function repor(id){
-  const qtd=Number(document.getElementById(`qtd-${id}`).value);
-  if(qtd<=0)return;
-
-  await supabaseClient.rpc("repor_estoque",{
-    p_produto_id:id,
-    p_qtd:qtd
-  });
-
-  carregar();
-}
-
-/* EXCLUIR */
-async function excluir(id){
-  if(!confirm("Excluir produto?"))return;
-  await supabaseClient.from("produtos").delete().eq("id",id);
-  carregar();
 }
 
 carregar();
