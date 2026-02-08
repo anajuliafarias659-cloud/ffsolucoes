@@ -13,79 +13,102 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:18px;text-align:center}
 .container{max-width:1100px;margin:30px auto;padding:0 20px}
-.box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
+
+.box{
+  background:#0f172a;
+  padding:20px;
+  border-radius:16px;
+  margin-bottom:20px;
+}
 
 input,button{
   width:100%;
   padding:12px;
   margin-top:10px;
   border-radius:10px;
-  border:none
+  border:none;
 }
+
 input{background:#020617;color:#fff}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
+
 #btnToggle{background:#334155}
+#leitor video{width:100%;border-radius:12px;margin-top:10px}
 
-/* 🔥 vídeo SEM esticar (CRÍTICO) */
-#leitor video{
-  width:100%;
-  height:auto;
-  object-fit:contain;
-  border-radius:12px;
+/* PREVIEW */
+.preview{
+  display:flex;
+  gap:8px;
+  margin-top:10px;
 }
-
-/* preview fotos */
-.preview{display:flex;gap:8px;margin-top:10px}
 .preview img{
-  width:60px;height:60px;
+  width:60px;
+  height:60px;
   object-fit:cover;
   border-radius:8px;
-  border:1px solid #334155
+  border:1px solid #334155;
 }
 
-/* lista */
+/* LISTA */
 .produto{
   background:#020617;
   padding:10px;
   border-radius:10px;
   margin-top:10px;
-  text-align:center
+  font-size:14px;
+  text-align:center;
 }
 .produto img{
   width:45px;height:45px;
   object-fit:cover;
   border-radius:8px;
-  margin:4px
+  margin:4px;
 }
+.produto button{
+  padding:8px;
+  font-size:13px;
+  margin-top:6px;
+}
+.excluir{background:#e53935}
+.editar{background:#334155}
+.repor{background:#f59e0b}
 </style>
 </head>
 
 <body>
 
 <div class="topo">
-  <h1>📦 Produtos</h1>
+  <h1>📦 Produtos do Mercado</h1>
 </div>
 
 <div class="container">
 
+<!-- CADASTRO -->
 <div class="box">
   <h2>➕ Cadastrar Produto</h2>
 
   <input id="nome" placeholder="Nome do produto">
   <input id="codigo_barra" placeholder="Código de barras">
 
-  <button onclick="abrirLeitor()">📷 Ler código de barras</button>
+  <!-- LEITOR DE CÓDIGO -->
+  <button onclick="abrirLeitor()">📷 Ler código</button>
   <div id="leitor" style="display:none"></div>
 
   <input id="preco" type="number" step="0.01" placeholder="Preço">
   <input id="estoque" type="number" placeholder="Estoque">
 
-  <button onclick="document.getElementById('fotos').click()">
+  <!-- BOTÃO VISÍVEL DE FOTO -->
+  <button type="button"
+    onclick="document.getElementById('fotos').click()">
     📸 Tirar fotos do produto (até 3)
   </button>
 
-  <input id="fotos" type="file" accept="image/*"
-    capture="environment" multiple style="display:none">
+  <input id="fotos"
+    type="file"
+    accept="image/*"
+    capture="environment"
+    multiple
+    style="display:none">
 
   <div class="preview" id="preview"></div>
 
@@ -97,15 +120,11 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 </div>
 
 <div class="box" id="boxProdutos" style="display:none">
+  <h2>📋 Produtos</h2>
   <div id="listaProdutos"></div>
 </div>
 
 </div>
-
-<!-- 🔊 bip -->
-<audio id="beep">
-  <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQgAAAAA">
-</audio>
 
 <script>
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
@@ -119,7 +138,7 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* preview fotos */
+/* PREVIEW DAS FOTOS */
 fotos.addEventListener("change",()=>{
   preview.innerHTML="";
   [...fotos.files].slice(0,3).forEach(f=>{
@@ -129,96 +148,94 @@ fotos.addEventListener("change",()=>{
   });
 });
 
-/* toggle lista */
+/* MOSTRAR / OCULTAR */
 function toggleProdutos(){
   boxProdutos.style.display =
     boxProdutos.style.display==="none" ? "block" : "none";
 }
 
-/* ===== validação EAN ===== */
-function validarEAN(c){
-  if(!/^\d{8}$|^\d{13}$/.test(c)) return false;
-  let soma=0,m=1;
-  for(let i=c.length-2;i>=0;i--){
-    soma+=Number(c[i])*m;
-    m=m===3?1:3;
-  }
-  const dig=(10-(soma%10))%10;
-  return dig===Number(c[c.length-1]);
-}
-
-/* ===== LEITOR CALMO ===== */
-let ultimo="",cont=0,travado=false;
+/* =========================
+   LEITOR DE CÓDIGO SENSÍVEL
+   ========================= */
+let ultimoCodigo = "";
+let ultimoTempo = 0;
 
 function abrirLeitor(){
-  leitor.style.display="block";
+  leitor.style.display = "block";
 
   Quagga.init({
-    inputStream:{
-      type:"LiveStream",
-      target:leitor,
-      constraints:{ facingMode:"environment" }
+    inputStream: {
+      type: "LiveStream",
+      target: leitor,
+      constraints: {
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
     },
-    locator:{
-      patchSize:"medium",   // 🔥 ACALMA
-      halfSample:true
+    locator: {
+      patchSize: "large",
+      halfSample: false
     },
-    decoder:{
-      readers:["ean_reader","ean_8_reader","upc_reader"]
+    decoder: {
+      readers: [
+        "ean_reader",
+        "ean_8_reader",
+        "code_128_reader",
+        "upc_reader",
+        "upc_e_reader"
+      ]
     },
-    locate:true
-  },err=>{
-    if(err){
-      alert("Erro câmera (HTTPS/permissão)");
-      leitor.style.display="none";
+    locate: true,
+    numOfWorkers: navigator.hardwareConcurrency || 4
+  }, err => {
+    if (err) {
+      console.error(err);
+      alert("Erro ao abrir a câmera");
       return;
     }
     Quagga.start();
   });
 
-  Quagga.onDetected(r=>{
-    if(travado) return;
+  Quagga.onDetected(result => {
+    const code = result.codeResult.code;
+    const agora = Date.now();
 
-    const code=r.codeResult.code;
-    if(!validarEAN(code)) return;
+    if (!code) return;
+    if (code === ultimoCodigo && agora - ultimoTempo < 1500) return;
 
-    if(code===ultimo){ cont++; }
-    else{ ultimo=code; cont=1; }
+    ultimoCodigo = code;
+    ultimoTempo = agora;
 
-    if(cont<3) return;   // 🔒 confirma 3x
-
-    travado=true;
-
-    document.getElementById("beep").play().catch(()=>{});
-    if(navigator.vibrate) navigator.vibrate(100);
-
-    codigo_barra.value=code;
+    codigo_barra.value = code;
 
     Quagga.stop();
-    leitor.style.display="none";
-
-    setTimeout(()=>{
-      travado=false;
-      cont=0;
-      ultimo="";
-    },800);
+    leitor.style.display = "none";
   });
 }
 
-/* cadastrar */
+/* CADASTRAR */
 async function cadastrar(){
-  if(!nome.value||!codigo_barra.value){
+  if(!nome.value || !codigo_barra.value){
     alert("Preencha nome e código");
     return;
   }
 
   let imagens=[];
-  for(const f of [...fotos.files].slice(0,3)){
-    const path=`${admin.app_id}/${Date.now()}_${f.name}`;
-    await supabaseClient.storage.from("produtos").upload(path,f);
+  const files=[...fotos.files].slice(0,3);
+
+  for(const file of files){
+    const nomeSeguro=file.name
+      .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+      .replace(/[^a-zA-Z0-9._-]/g,"_");
+
+    const path=`${admin.app_id}/${Date.now()}_${nomeSeguro}`;
+    await supabaseClient.storage.from("produtos").upload(path,file);
+
     imagens.push(
-      supabaseClient.storage.from("produtos")
-      .getPublicUrl(path).data.publicUrl
+      supabaseClient.storage
+        .from("produtos")
+        .getPublicUrl(path).data.publicUrl
     );
   }
 
@@ -237,27 +254,110 @@ async function cadastrar(){
   carregar();
 }
 
-/* listar */
+/* LISTAR */
 async function carregar(){
   const {data}=await supabaseClient
     .from("produtos")
     .select("*")
-    .eq("app_id",admin.app_id);
+    .eq("app_id",admin.app_id)
+    .order("nome");
 
   listaProdutos.innerHTML="";
   data.forEach(p=>{
-    const imgs=Array.isArray(p.imagens)
-      ? p.imagens.map(u=>`<img src="${u}">`).join("")
-      : "";
+    let imgs="";
+
+    if(Array.isArray(p.imagens)){
+      imgs = p.imagens.slice(0,3).map(u=>`<img src="${u}">`).join("");
+    } else if (typeof p.imagem === "string" && p.imagem) {
+      imgs = `<img src="${p.imagem}">`;
+    }
+
     listaProdutos.innerHTML+=`
       <div class="produto">
         <b>${p.nome}</b><br>
         ${p.codigo_barra}<br>
         Estoque: ${p.estoque}<br>
-        R$ ${Number(p.preco).toFixed(2)}<br>
+        R$ ${p.preco.toFixed(2)}<br>
         ${imgs}
-      </div>`;
+
+        <input type="number" placeholder="Qtd repor" id="qtd-${p.id}">
+        <button class="repor" onclick="repor('${p.id}')">➕ Repor</button>
+
+        <input type="file" accept="image/*" capture="environment"
+          id="foto-${p.id}" style="display:none"
+          onchange="editarFoto(event,'${p.id}')">
+
+        <button class="editar"
+          onclick="document.getElementById('foto-${p.id}').click()">
+          📸 Editar fotos
+        </button>
+
+        <button class="editar"
+          onclick="editarProduto('${p.id}','${p.nome}','${p.codigo_barra}','${p.preco}','${p.estoque}')">
+          Editar dados
+        </button>
+
+        <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
+      </div>
+    `;
   });
+}
+
+/* EDITAR FOTO */
+async function editarFoto(e,id){
+  const file=e.target.files[0];
+  if(!file)return;
+
+  const path=`${admin.app_id}/${Date.now()}_${file.name}`;
+  await supabaseClient.storage.from("produtos").upload(path,file);
+  const url=supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+
+  const {data}=await supabaseClient
+    .from("produtos").select("imagens").eq("id",id).single();
+
+  const imagens = Array.isArray(data.imagens) ? data.imagens : [];
+  if(imagens.length>=3)return alert("Máximo 3 fotos");
+
+  imagens.push(url);
+  await supabaseClient.from("produtos").update({imagens}).eq("id",id);
+  carregar();
+}
+
+/* EDITAR DADOS */
+async function editarProduto(id,n,c,p,e){
+  const nomeN=prompt("Nome",n);
+  if(!nomeN)return;
+
+  await supabaseClient.from("produtos")
+    .update({
+      nome:nomeN,
+      codigo_barra:prompt("Código",c),
+      preco:Number(prompt("Preço",p)),
+      estoque:Number(prompt("Estoque",e))
+    })
+    .eq("id",id);
+
+  carregar();
+}
+
+/* REPOR */
+async function repor(id){
+  const qtd=Number(document.getElementById(`qtd-${id}`).value);
+  if(qtd<=0)return;
+
+  await supabaseClient.rpc("repor_estoque",{
+    p_produto_id:id,
+    p_qtd:qtd
+  });
+
+  carregar();
+}
+
+/* EXCLUIR */
+async function excluir(id){
+  if(!confirm("Excluir produto?"))return;
+  await supabaseClient.from("produtos").delete().eq("id",id);
+  carregar();
 }
 
 carregar();
