@@ -12,31 +12,38 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px}
 .container{max-width:600px;margin:auto;padding:24px}
 .box{background:#0f172a;padding:20px;border-radius:16px}
-
-button{
-  width:100%;
-  padding:14px;
-  border:none;
-  border-radius:10px;
-  background:#22c55e;
-  font-weight:bold;
-  cursor:pointer;
-  margin-top:12px
-}
-
-select,input{
-  width:100%;
-  padding:12px;
-  margin-top:10px;
-  border-radius:10px;
-  border:none
-}
-
+button{width:100%;padding:14px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer;margin-top:12px}
+select,input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 .alert{color:#facc15;margin-top:8px}
 </style>
 </head>
 
 <body>
+
+<script>
+function getBasePath(){
+  const p = location.pathname;
+  if(p.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
+  return "/bar";
+}
+
+const sb = window.supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const params = new URLSearchParams(location.search);
+const pedidoId = params.get("pedido");
+const appId = params.get("app") || localStorage.getItem("app_id");
+
+if(!pedidoId){
+  location.href = getBasePath() + "/caixa.html";
+}
+
+let totalPedido = 0;
+let mesaId = null;
+let processando = false;
+</script>
 
 <div class="topo">
   <h2>💳 Pagamento</h2>
@@ -55,203 +62,117 @@ select,input{
     </select>
 
     <label>Valor pago</label>
-    <input
-      type="number"
-      id="valorRecebido"
-      placeholder="0.00"
-      step="0.01"
-      oninput="calcular()"
-    />
+    <input type="number" id="valorRecebido" step="0.01">
 
     <p>Troco</p>
     <h3 id="troco">R$ 0,00</h3>
 
     <p id="info" class="alert"></p>
 
-    <button onclick="confirmarPagamento()">✅ Confirmar Pagamento</button>
+    <button id="btnConfirmar">✅ Confirmar Pagamento</button>
   </div>
 </div>
 
 <script>
-/* ================= BASE PATH ================= */
-function getBasePath(){
-  const p = location.pathname;
-  if(p.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
-  return "/bar";
-}
-
-/* ================= SUPABASE ================= */
-const sb = window.supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-/* ================= PARAMS ================= */
-const params = new URLSearchParams(location.search);
-const pedidoId = params.get("pedido");
-const appId = params.get("app") || localStorage.getItem("app_id");
-
-if(!pedidoId){
-  alert("Pedido inválido");
-  location.href = getBasePath() + "/caixa.html";
-}
-
-/* ================= STATE ================= */
-let totalPedido = 0;
-let mesaId = null;
-let processando = false;
-
-/* ================= LOAD PEDIDO ================= */
 async function carregarPedido(){
-  try{
-    const resPedido = await sb
-      .from("pedidos")
-      .select("mesa_id,status")
-      .eq("id", pedidoId)
-      .single();
+  const { data: pedido } = await sb
+    .from("pedidos")
+    .select("mesa_id,status")
+    .eq("id", pedidoId)
+    .single();
 
-    if(resPedido.error || !resPedido.data){
-      alert("Erro ao carregar pedido");
-      location.href = getBasePath() + "/caixa.html";
-      return;
-    }
+  if(!pedido) {
+    location.href = getBasePath() + "/caixa.html";
+    return;
+  }
 
-    if(resPedido.data.status === "finalizado"){
-      alert("Pedido já finalizado");
-      location.href = getBasePath() + "/caixa.html";
-      return;
-    }
+  mesaId = pedido.mesa_id;
 
-    mesaId = resPedido.data.mesa_id;
+  const { data: itens } = await sb
+    .from("pedido_itens")
+    .select("preco,quantidade")
+    .eq("pedido_id", pedidoId);
 
-    const resItens = await sb
-      .from("pedido_itens")
-      .select("preco, quantidade")
-      .eq("pedido_id", pedidoId);
-
-    if(resItens.error){
-      alert("Erro ao carregar itens");
-      return;
-    }
-
-    totalPedido = 0;
-    resItens.data.forEach(i=>{
+  totalPedido = 0;
+  if(itens){
+    itens.forEach(i=>{
       totalPedido += Number(i.preco) * Number(i.quantidade);
     });
-
-    document.getElementById("totalPedido").innerText =
-      `R$ ${totalPedido.toFixed(2)}`;
-
-  }catch(e){
-    console.error("EXCEÇÃO carregarPedido:", e);
-    alert("Erro inesperado ao carregar pedido");
   }
+
+  document.getElementById("totalPedido").innerText =
+    `R$ ${totalPedido.toFixed(2)}`;
 }
 
-/* ================= CALCULAR ================= */
 function calcular(){
   const recebido = Number(document.getElementById("valorRecebido").value || 0);
   const trocoValor = recebido - totalPedido;
 
-  const trocoEl = document.getElementById("troco");
-  const infoEl = document.getElementById("info");
-
-  if(recebido < totalPedido){
-    infoEl.innerText =
-      `Falta pagar: R$ ${(totalPedido - recebido).toFixed(2)}`;
-  } else {
-    infoEl.innerText = "";
-  }
-
-  trocoEl.innerText =
+  document.getElementById("troco").innerText =
     trocoValor > 0 ? `R$ ${trocoValor.toFixed(2)}` : "R$ 0,00";
+
+  document.getElementById("info").innerText =
+    recebido < totalPedido
+      ? `Falta pagar: R$ ${(totalPedido - recebido).toFixed(2)}`
+      : "";
 }
 
-/* ================= CONFIRMAR PAGAMENTO ================= */
+document.getElementById("valorRecebido").addEventListener("input", calcular);
+document.getElementById("btnConfirmar").addEventListener("click", confirmarPagamento);
+
 async function confirmarPagamento(){
   if(processando) return;
   processando = true;
 
   try{
-    const forma = document.getElementById("formaPagamento").value;
     const valorPago = Number(document.getElementById("valorRecebido").value);
 
-    if(!valorPago || valorPago <= 0){
-      alert("Informe o valor pago.");
-      processando = false;
-      return;
-    }
+    if(!valorPago || valorPago <= 0) return;
 
-    if(forma !== "dinheiro" && valorPago !== totalPedido){
-      alert("PIX e Cartão exigem pagamento exato.");
-      processando = false;
-      return;
-    }
+    const descontoMax = totalPedido * 0.10;
+    const minimo = totalPedido - descontoMax;
 
-    /* 🔥 UPDATE MAIS SIMPLES POSSÍVEL */
-    const resUpdate = await sb
+    if(valorPago < minimo) return;
+    if(valorPago > totalPedido) return;
+
+    const { error } = await sb
       .from("pedidos")
-      .update({ status: "finalizado" })
+      .update({
+        status: "finalizado",
+        valor_pago: valorPago
+      })
       .eq("id", pedidoId);
 
-    if(resUpdate.error){
-      console.error("ERRO UPDATE:", resUpdate.error);
-      alert("Erro ao finalizar pedido:\n" + resUpdate.error.message);
-      processando = false;
-      return;
-    }
+    if(error) return;
 
-    /* 🔻 BAIXA ESTOQUE */
-    const resItens = await sb
+    const { data: itens } = await sb
       .from("pedido_itens")
-      .select("produto_id, quantidade")
+      .select("produto_id,quantidade")
       .eq("pedido_id", pedidoId);
 
-    if(resItens.error){
-      alert("Erro ao buscar itens:\n" + resItens.error.message);
-      processando = false;
-      return;
-    }
-
-    for(const item of resItens.data){
-      const rpcRes = await sb.rpc("baixar_estoque", {
-        p_produto_id: item.produto_id,
-        p_qtd: item.quantidade,
-        p_app_id: appId
-      });
-
-      if(rpcRes.error){
-        console.error("ERRO RPC:", rpcRes.error);
-        alert("Erro ao baixar estoque:\n" + rpcRes.error.message);
-        processando = false;
-        return;
+    if(itens){
+      for(const item of itens){
+        await sb.rpc("baixar_estoque", {
+          p_produto_id: item.produto_id,
+          p_qtd: item.quantidade,
+          p_app_id: appId
+        });
       }
     }
 
-    /* 🪑 LIBERA MESA */
     if(mesaId){
-      const resMesa = await sb
+      await sb
         .from("mesas")
         .update({ status: "livre" })
         .eq("id", mesaId);
-
-      if(resMesa.error){
-        alert("Erro ao liberar mesa:\n" + resMesa.error.message);
-        processando = false;
-        return;
-      }
     }
 
     location.href = getBasePath() + "/caixa.html";
-
-  }catch(e){
-    console.error("EXCEÇÃO JS:", e);
-    alert("Erro inesperado:\n" + e.message);
+  } finally {
     processando = false;
   }
 }
 
-/* ================= INIT ================= */
 carregarPedido();
 </script>
 
