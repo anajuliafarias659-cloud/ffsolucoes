@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Pagamento</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -64,6 +65,7 @@ if(!pedidoId || !appId){
 let totalPedido = 0;
 let mesaId = null;
 const DESCONTO_MAXIMO = 10;
+let processando = false; // 🔒 trava contra clique duplo
 </script>
 
 <div class="topo">
@@ -103,10 +105,16 @@ const DESCONTO_MAXIMO = 10;
 async function carregarPedido(){
   const { data: pedido } = await sb
     .from("pedidos")
-    .select("mesa_id")
+    .select("mesa_id,status")
     .eq("id", pedidoId)
     .eq("app_id", appId)
     .single();
+
+  if(pedido.status === "finalizado"){
+    alert("Este pedido já foi finalizado.");
+    location.href = getBasePath() + "/caixa.html";
+    return;
+  }
 
   mesaId = pedido.mesa_id;
 
@@ -125,39 +133,56 @@ async function carregarPedido(){
 }
 
 function calcular(){
-  const recebido = Number(document.getElementById("valorRecebido").value || 0);
+  const recebido = Number(valorRecebido.value || 0);
   const troco = recebido - totalPedido;
   const desconto = totalPedido - recebido;
-  const info = document.getElementById("info");
 
   if(desconto > 0){
-    info.innerText = `Desconto: R$ ${desconto.toFixed(2)} (máx. permitido R$ 10,00)`;
-  } else {
+    info.innerText =
+      `Desconto: R$ ${desconto.toFixed(2)} (máx. R$ ${DESCONTO_MAXIMO.toFixed(2)})`;
+  }else{
     info.innerText = "";
   }
 
-  document.getElementById("troco").innerText =
-    troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
+  trocoEl = document.getElementById("troco");
+  trocoEl.innerText = troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
 }
 
 async function confirmarPagamento(){
-  const forma = document.getElementById("formaPagamento").value;
-  const valorPago = Number(document.getElementById("valorRecebido").value || 0);
+  if(processando) return;
+  processando = true;
 
+  const forma = formaPagamento.value;
+  const valorPago = Number(valorRecebido.value || 0);
   const desconto = totalPedido - valorPago;
 
   if(desconto > DESCONTO_MAXIMO){
     alert(
       `Desconto máximo permitido é R$ ${DESCONTO_MAXIMO.toFixed(2)}.\n` +
-      `Valor mínimo a pagar: R$ ${(totalPedido - DESCONTO_MAXIMO).toFixed(2)}`
+      `Valor mínimo: R$ ${(totalPedido - DESCONTO_MAXIMO).toFixed(2)}`
     );
+    processando = false;
     return;
   }
 
+  // 🔒 garante que não finalizou antes
+  const { data: pedidoAtual } = await sb
+    .from("pedidos")
+    .select("status")
+    .eq("id", pedidoId)
+    .single();
+
+  if(pedidoAtual.status === "finalizado"){
+    alert("Pedido já finalizado.");
+    processando = false;
+    return;
+  }
+
+  // 🔹 FINALIZA PEDIDO (ponto único de verdade)
   await sb
     .from("pedidos")
     .update({
-      status: "pago",
+      status: "finalizado",
       forma_pagamento: forma,
       valor_pago: valorPago,
       desconto: desconto > 0 ? desconto : 0,
@@ -166,6 +191,7 @@ async function confirmarPagamento(){
     .eq("id", pedidoId)
     .eq("app_id", appId);
 
+  // 🔻 BAIXA DE ESTOQUE (UMA VEZ)
   const { data: itens } = await sb
     .from("pedido_itens")
     .select("produto_id, quantidade")
@@ -179,6 +205,7 @@ async function confirmarPagamento(){
     });
   }
 
+  // 🪑 LIBERA MESA
   if(mesaId){
     await sb
       .from("mesas")
@@ -186,12 +213,6 @@ async function confirmarPagamento(){
       .eq("id", mesaId)
       .eq("app_id", appId);
   }
-
-  await sb
-    .from("pedidos")
-    .update({ status: "finalizado" })
-    .eq("id", pedidoId)
-    .eq("app_id", appId);
 
   location.href = getBasePath() + "/caixa.html";
 }
