@@ -2,11 +2,10 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Caixa | FF Soluções</title>
+<title>Caixa | Sistema</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <style>
 *{box-sizing:border-box}
@@ -18,6 +17,8 @@ body{margin:0;font-family:Arial;background:#020617;color:#e5e7eb}
 input,button{width:100%;padding:10px;border-radius:10px;border:none}
 input{background:#020617;color:#fff;margin-bottom:6px}
 button{background:#0ea5e9;color:#fff;font-weight:bold;cursor:pointer;margin-bottom:6px}
+.lista-item{padding:8px;border-radius:8px;background:#020617;margin-bottom:4px;cursor:pointer}
+.lista-item:hover{background:#1e293b}
 .dinheiro{background:#16a34a}
 .pix{background:#0ea5e9}
 .cartao{background:#2563eb}
@@ -37,11 +38,28 @@ button{background:#0ea5e9;color:#fff;font-weight:bold;cursor:pointer;margin-bott
 
 <div class="container">
 
-  <div class="card carrinho">
+  <!-- BUSCA -->
+  <div class="card">
+    <input id="busca" placeholder="Código ou nome do produto"
+      oninput="buscarProduto()"
+      onkeydown="if(event.key==='Enter') buscarCodigo()">
+    <div id="listaBusca"></div>
+  </div>
+
+  <div class="card" id="preview" style="display:none">
+    <b id="pNome"></b>
+    <p>R$ <span id="pPreco"></span> | Estoque: <span id="pEstoque"></span></p>
+    <input id="qtd" type="number" min="1" value="1">
+    <button onclick="adicionarCarrinho()">Adicionar</button>
+  </div>
+
+  <!-- CARRINHO -->
+  <div class="card">
     <b>🛒 Carrinho</b>
     <div id="carrinho"></div>
   </div>
 
+  <!-- PAGAMENTO -->
   <div class="card">
     <b>💳 Pagamento</b>
     <input id="valorPago" type="number" step="0.01" placeholder="Valor pago"
@@ -62,7 +80,6 @@ button{background:#0ea5e9;color:#fff;font-weight:bold;cursor:pointer;margin-bott
 </div>
 
 <script>
-const { jsPDF } = window.jspdf;
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 
 const supabaseClient = supabase.createClient(
@@ -70,74 +87,119 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-function round2(v){ return Math.round(v*100)/100; }
+function round2(v){return Math.round(v*100)/100;}
 
-let carrinho = JSON.parse(localStorage.getItem("carrinho_caixa")) || [];
-let total = 0;
+let produtoAtual=null;
+let carrinho=[];
+let total=0;
 
-const carrinhoDiv = document.getElementById("carrinho");
-const totalSpan = document.getElementById("total");
-const valorPago = document.getElementById("valorPago");
-const info = document.getElementById("info");
+/* ===== BUSCA ===== */
+async function buscarProduto(){
+  const v = busca.value.trim();
+  if(v.length<2){listaBusca.innerHTML="";return;}
+
+  const {data} = await supabaseClient
+    .from("produtos")
+    .select("*")
+    .eq("app_id", admin.app_id)
+    .ilike("nome", `%${v}%`)
+    .limit(5);
+
+  listaBusca.innerHTML="";
+  data?.forEach(p=>{
+    listaBusca.innerHTML+=`
+      <div class="lista-item" onclick='selecionar(${JSON.stringify(p)})'>
+        ${p.nome} - R$ ${p.preco.toFixed(2)}
+      </div>`;
+  });
+}
+
+async function buscarCodigo(){
+  const v = busca.value.trim();
+  if(!v)return;
+
+  const {data} = await supabaseClient
+    .from("produtos")
+    .select("*")
+    .eq("codigo_barra", v)
+    .eq("app_id", admin.app_id)
+    .maybeSingle();
+
+  if(data) selecionar(data);
+}
+
+function selecionar(p){
+  produtoAtual=p;
+  pNome.innerText=p.nome;
+  pPreco.innerText=p.preco.toFixed(2);
+  pEstoque.innerText=p.estoque;
+  preview.style.display="block";
+  listaBusca.innerHTML="";
+}
+
+function adicionarCarrinho(){
+  const q=Number(qtd.value);
+  if(q>produtoAtual.estoque)return alert("Estoque insuficiente");
+
+  carrinho.push({
+    id:produtoAtual.id,
+    nome:produtoAtual.nome,
+    qtd:q,
+    preco:produtoAtual.preco,
+    subtotal:round2(q*produtoAtual.preco)
+  });
+
+  atualizarCarrinho();
+  preview.style.display="none";
+  busca.value="";
+  qtd.value=1;
+}
 
 /* ===== CARRINHO ===== */
 function atualizarCarrinho(){
   carrinhoDiv.innerHTML="";
   total=0;
   carrinho.forEach(i=>{
-    total += i.subtotal;
-    carrinhoDiv.innerHTML += `${i.nome} - R$ ${i.subtotal.toFixed(2)}<br>`;
+    total+=i.subtotal;
+    carrinhoDiv.innerHTML+=`${i.qtd}x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
   });
-  total = round2(total);
-  totalSpan.innerText = total.toFixed(2);
+  total=round2(total);
+  totalSpan.innerText=total.toFixed(2);
 }
-atualizarCarrinho();
 
-/* ===== INFO DE PAGAMENTO ===== */
+/* ===== INFO ===== */
 function calcularInfo(){
   info.innerText="";
-  info.style.color="#e5e7eb";
+  if(total<=0)return;
 
-  if(total <= 0) return;
+  const pago=round2(Number(valorPago.value));
+  if(isNaN(pago)||pago<=0)return;
 
-  const pago = round2(Number(valorPago.value));
-  if(isNaN(pago) || pago<=0) return;
-
-  const minimo = round2(total*0.9);
-  if(pago < minimo){
-    info.innerText = `⚠️ Falta R$ ${(total-pago).toFixed(2)}`;
+  const minimo=round2(total*0.9);
+  if(pago<minimo){
+    info.innerText=`⚠️ Falta R$ ${(total-pago).toFixed(2)}`;
     info.style.color="#f87171";
     return;
   }
 
   info.style.color="#22c55e";
-  if(pago < total) info.innerText = `Desconto: R$ ${(total-pago).toFixed(2)}`;
-  else if(pago > total) info.innerText = `Troco: R$ ${(pago-total).toFixed(2)}`;
-  else info.innerText = "Pagamento exato";
+  if(pago<total) info.innerText=`Desconto: R$ ${(total-pago).toFixed(2)}`;
+  else if(pago>total) info.innerText=`Troco: R$ ${(pago-total).toFixed(2)}`;
+  else info.innerText="Pagamento exato";
 }
 
 /* ===== FINALIZAR NORMAL ===== */
 async function finalizarVenda(tipo){
-  if(carrinho.length===0 || total<=0){
-    alert("Carrinho vazio");
-    return;
-  }
+  if(carrinho.length===0)return alert("Carrinho vazio");
 
-  const pago = round2(Number(valorPago.value));
-  if(isNaN(pago) || pago<=0){
-    alert("Informe valor válido");
-    return;
-  }
+  const pago=round2(Number(valorPago.value));
+  if(pago<=0)return alert("Informe valor");
 
-  if(tipo!=="DINHEIRO" && pago>total){
-    alert("PIX/Cartão não aceita valor maior");
-    return;
-  }
+  if(tipo!=="DINHEIRO" && pago>total)
+    return alert("PIX/Cartão não aceita valor maior");
 
-  if(pago < round2(total*0.9)){
-    alert("Desconto máximo é 10%");
-    return;
-  }
+  if(pago<round2(total*0.9))
+    return alert("Desconto máximo 10%");
 
   for(const i of carrinho){
     await supabaseClient.from("vendas").insert({
@@ -151,62 +213,42 @@ async function finalizarVenda(tipo){
     });
   }
 
-  gerarPDF(tipo,pago);
   limpar();
 }
 
-/* ===== FINALIZAR FIADO (INTELIGENTE) ===== */
+/* ===== FIADO COM LIMITE ===== */
 async function finalizarFiado(){
-  if(carrinho.length===0 || total<=0){
-    alert("Carrinho vazio");
-    return;
-  }
+  if(carrinho.length===0)return alert("Carrinho vazio");
 
-  const pago = round2(Number(valorPago.value)||0);
-  const devidoAtual = round2(total - pago);
-  if(devidoAtual<=0){
-    alert("Não há valor para fiar");
-    return;
-  }
+  const pago=round2(Number(valorPago.value)||0);
+  const devido=round2(total-pago);
+  if(devido<=0)return alert("Nada a fiar");
 
-  let cpf = prompt("CPF do cliente (somente números):");
-  if(!cpf) return;
-  cpf = cpf.replace(/\D/g,"");
-  if(cpf.length!==11){
-    alert("CPF inválido");
-    return;
-  }
+  let cpf=prompt("CPF do cliente:");
+  if(!cpf)return;
+  cpf=cpf.replace(/\D/g,"");
+  if(cpf.length!==11)return alert("CPF inválido");
 
-  const { data: dividas } = await supabaseClient
+  const {data:dividas}=await supabaseClient
     .from("vendas")
     .select("valor_devido, cliente_nome")
-    .eq("cliente_cpf", cpf)
-    .gt("valor_devido", 0);
+    .eq("cliente_cpf",cpf)
+    .gt("valor_devido",0);
 
-  let dividaExistente = 0;
-  let nomeCliente = "";
-
+  let soma=0, nome="";
   dividas?.forEach(d=>{
-    dividaExistente += Number(d.valor_devido||0);
-    if(d.cliente_nome) nomeCliente = d.cliente_nome;
+    soma+=Number(d.valor_devido||0);
+    if(d.cliente_nome)nome=d.cliente_nome;
   });
 
-  const LIMITE = 10; // 🔒 limite máximo
-  if(dividaExistente + devidoAtual > LIMITE){
-    alert(
-      `Venda bloqueada!\n`+
-      `Cliente deve R$ ${dividaExistente.toFixed(2)}\n`+
-      `Limite máximo: R$ ${LIMITE.toFixed(2)}`
-    );
-    return;
-  }
+  const LIMITE=10;
+  if(soma+devido>LIMITE)
+    return alert("Cliente acima do limite de fiado");
 
-  if(!nomeCliente){
-    nomeCliente = prompt("Nome completo do cliente:");
-    if(!nomeCliente) return;
+  if(!nome){
+    nome=prompt("Nome do cliente:");
+    if(!nome)return;
   }
-
-  const obs = prompt("Observação:") || "";
 
   for(const i of carrinho){
     await supabaseClient.from("vendas").insert({
@@ -215,18 +257,12 @@ async function finalizarFiado(){
       quantidade: i.qtd,
       valor_total: total,
       valor_pago: pago,
-      valor_devido: devidoAtual,
+      valor_devido: devido,
       forma_pagamento: "FIADO",
-      cliente_nome: nomeCliente,
-      cliente_cpf: cpf,
-      observacao: obs
+      cliente_nome: nome,
+      cliente_cpf: cpf
     });
   }
-
-  alert(
-    `FIADO REGISTRADO\n${nomeCliente}\n`+
-    `Dívida atual: R$ ${(dividaExistente+devidoAtual).toFixed(2)}`
-  );
 
   limpar();
 }
@@ -234,22 +270,9 @@ async function finalizarFiado(){
 /* ===== LIMPAR ===== */
 function limpar(){
   carrinho=[];
-  localStorage.removeItem("carrinho_caixa");
   atualizarCarrinho();
   valorPago.value="";
   info.innerText="";
-}
-
-/* ===== PDF ===== */
-function gerarPDF(tipo,pago){
-  const doc=new jsPDF();
-  doc.text("RECIBO",105,10,{align:"center"});
-  doc.text(`Total: R$ ${total.toFixed(2)}`,10,30);
-  doc.text(`Pago: R$ ${pago.toFixed(2)}`,10,40);
-  doc.text(`Pagamento: ${tipo}`,10,50);
-  if(pago>total)
-    doc.text(`Troco: R$ ${(pago-total).toFixed(2)}`,10,60);
-  doc.save("recibo.pdf");
 }
 </script>
 
