@@ -2,158 +2,226 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Produtos | FF Soluções</title>
+<title>Produtos | Mercado</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
 
 <style>
 *{box-sizing:border-box}
-body{
-  margin:0;
-  font-family:Inter,Arial,sans-serif;
-  background:#020617;
-  color:#e5e7eb;
-}
-header{
-  padding:16px;
-  border-bottom:1px solid #0f172a;
-}
-header h1{
-  margin:0;
-  color:#38bdf8;
-}
-.container{
-  padding:16px;
-}
-.card{
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:18px;text-align:center}
+.container{max-width:1100px;margin:30px auto;padding:0 20px}
+
+.box{
   background:#0f172a;
+  padding:20px;
   border-radius:16px;
-  padding:16px;
-  margin-bottom:16px;
+  margin-bottom:20px;
 }
-input, button{
+
+input,button{
   width:100%;
   padding:12px;
-  font-size:16px;
-  border-radius:12px;
-  border:none;
-  margin-bottom:10px;
-}
-input{
-  background:#020617;
-  color:#fff;
-}
-button{
-  background:#0ea5e9;
-  color:#fff;
-  cursor:pointer;
-}
-button.repor{background:#f59e0b}
-img.foto{
-  width:100%;
-  border-radius:12px;
   margin-top:10px;
+  border-radius:10px;
+  border:none;
 }
+
+input{background:#020617;color:#fff}
+button{background:#22c55e;font-weight:bold;cursor:pointer}
+
+#btnToggle{background:#334155}
+
+#leitor video{width:100%;border-radius:12px;margin-top:10px}
+
+/* LISTA COMPACTA */
 .produto{
-  border-bottom:1px solid #1e293b;
-  padding:10px 0;
+  background:#020617;
+  padding:10px;
+  border-radius:10px;
+  margin-top:10px;
+  font-size:14px;
+  text-align:center;
 }
+.produto img{
+  width:45px;
+  height:45px;
+  object-fit:cover;
+  border-radius:8px;
+  margin-top:6px;
+}
+.produto button{
+  padding:8px;
+  font-size:13px;
+  margin-top:6px;
+}
+.excluir{background:#e53935}
+.editar{background:#334155}
+.repor{background:#f59e0b}
 </style>
 </head>
 
 <body>
 
-<header>
-  <h1>📦 Produtos</h1>
-</header>
+<div class="topo">
+  <h1>📦 Produtos do Mercado</h1>
+</div>
 
 <div class="container">
 
-  <!-- BUSCA -->
-  <div class="card">
-    <input id="busca" placeholder="Buscar produto por nome ou código" oninput="buscarProdutos()">
-  </div>
+<!-- CADASTRO -->
+<div class="box">
+  <h2>➕ Cadastrar Produto</h2>
 
-  <!-- LISTA -->
-  <div class="card" id="listaProdutos"></div>
+  <input id="nome" placeholder="Nome do produto">
+  <input id="codigo_barra" placeholder="Código de barras">
+  <button type="button" onclick="abrirLeitor()">📷 Ler código</button>
+  <div id="leitor" style="display:none"></div>
+
+  <input id="preco" type="number" step="0.01" placeholder="Preço">
+  <input id="estoque" type="number" placeholder="Estoque">
+  <input id="foto" type="file" accept="image/*" capture="environment">
+
+  <button onclick="cadastrar()">Cadastrar</button>
+</div>
+
+<!-- BOTÃO MOSTRAR / OCULTAR -->
+<div class="box">
+  <button id="btnToggle" onclick="toggleProdutos()">📋 Mostrar produtos</button>
+</div>
+
+<!-- LISTA -->
+<div class="box" id="boxProdutos" style="display:none">
+  <h2>📋 Produtos</h2>
+  <div id="listaProdutos"></div>
+</div>
 
 </div>
 
 <script>
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin){
+  alert("Sessão inválida");
+  location.href="login.html";
+}
 
 const supabaseClient = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let produtos=[];
+const nomeEl=nome,
+codigoEl=codigo_barra,
+precoEl=preco,
+estoqueEl=estoque,
+fotoEl=foto;
 
-/* BUSCAR PRODUTOS */
-async function buscarProdutos(){
-  const v = busca.value.trim();
-
-  let query = supabaseClient
-    .from("produtos")
-    .select("*")
-    .eq("app_id", admin.app_id)
-    .order("nome");
-
-  if(v){
-    query = query.or(
-      `nome.ilike.%${v}%,codigo_barra.ilike.%${v}%`
-    );
+/* MOSTRAR / OCULTAR */
+function toggleProdutos(){
+  const box=document.getElementById("boxProdutos");
+  const btn=document.getElementById("btnToggle");
+  if(box.style.display==="none"){
+    box.style.display="block";
+    btn.innerText="❌ Ocultar produtos";
+  }else{
+    box.style.display="none";
+    btn.innerText="📋 Mostrar produtos";
   }
-
-  const { data } = await query;
-  produtos = data || [];
-  renderizar();
 }
 
-/* RENDER */
-function renderizar(){
-  listaProdutos.innerHTML="";
+/* LEITOR */
+function abrirLeitor(){
+  const leitor=document.getElementById("leitor");
+  leitor.style.display="block";
 
-  produtos.forEach(p=>{
+  Quagga.init({
+    inputStream:{type:"LiveStream",target:leitor,constraints:{facingMode:"environment"}},
+    decoder:{readers:["ean_reader","code_128_reader"]}
+  },()=>Quagga.start());
+
+  Quagga.onDetected(res=>{
+    codigoEl.value=res.codeResult.code;
+    Quagga.stop();
+    leitor.style.display="none";
+  });
+}
+
+/* CADASTRAR */
+async function cadastrar(){
+  if(!nomeEl.value||!codigoEl.value||precoEl.value<=0||estoqueEl.value<0){
+    alert("Preencha tudo corretamente");
+    return;
+  }
+
+  let imagem=null;
+  if(fotoEl.files[0]){
+    const nomeSeguro=fotoEl.files[0].name
+      .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+      .replace(/[^a-zA-Z0-9._-]/g,"_");
+
+    const path=`${admin.app_id}/${Date.now()}_${nomeSeguro}`;
+    await supabaseClient.storage.from("produtos").upload(path,fotoEl.files[0]);
+    imagem=supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+  }
+
+  await supabaseClient.from("produtos").insert({
+    app_id:admin.app_id,
+    nome:nomeEl.value,
+    codigo_barra:codigoEl.value,
+    preco:Number(precoEl.value),
+    estoque:Number(estoqueEl.value),
+    imagem,
+    ativo:true
+  });
+
+  nomeEl.value=codigoEl.value=precoEl.value=estoqueEl.value="";
+  fotoEl.value="";
+  carregar();
+}
+
+/* LISTAR */
+async function carregar(){
+  const {data}=await supabaseClient
+    .from("produtos")
+    .select("*")
+    .eq("app_id",admin.app_id)
+    .order("nome");
+
+  listaProdutos.innerHTML="";
+  data.forEach(p=>{
     listaProdutos.innerHTML+=`
       <div class="produto">
         <b>${p.nome}</b><br>
-        Código: ${p.codigo_barra || "-"}<br>
-        Estoque: <b>${p.estoque}</b><br><br>
+        <small>${p.codigo_barra}</small><br>
+        Estoque: <b>${p.estoque}</b><br>
+        R$ ${p.preco.toFixed(2)}<br>
+        ${p.imagem?`<img src="${p.imagem}">`:""}
 
-        <input type="number" min="1" placeholder="Qtd para repor" id="qtd-${p.id}">
-        <button class="repor" onclick="reporEstoque('${p.id}')">
-          🔁 Repor estoque
-        </button>
+        <input type="number" placeholder="Qtd repor" id="qtd-${p.id}">
+        <button class="repor" onclick="repor('${p.id}')">➕ Repor</button>
 
-        <input type="file"
-          accept="image/*"
-          capture="environment"
-          style="display:none"
-          id="foto-${p.id}"
-          onchange="previewFoto(event,'${p.id}')">
+        <input type="file" accept="image/*" capture="environment"
+          id="foto-${p.id}" style="display:none"
+          onchange="novaFoto(event,'${p.id}')">
 
-        <button onclick="document.getElementById('foto-${p.id}').click()">
-          📸 Tirar foto
-        </button>
-
-        <img id="img-${p.id}" class="foto" style="display:none">
+        <button class="editar" onclick="document.getElementById('foto-${p.id}').click()">📸 Nova foto</button>
+        <button class="editar" onclick="editar('${p.id}','${p.nome}','${p.codigo_barra}','${p.preco}','${p.estoque}')">Editar</button>
+        <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
       </div>
     `;
   });
 }
 
-/* REPOR ESTOQUE (USA SUA FUNCTION EXISTENTE) */
-async function reporEstoque(produtoId){
-  const qtd = Number(document.getElementById(`qtd-${produtoId}`).value);
-  if(!qtd || qtd <= 0) return alert("Quantidade inválida");
-
-  if(!confirm(`Repor ${qtd} unidades?`)) return;
+/* REPOR ESTOQUE */
+async function repor(id){
+  const qtd=Number(document.getElementById(`qtd-${id}`).value);
+  if(qtd<=0)return alert("Quantidade inválida");
 
   const { error } = await supabaseClient.rpc("repor_estoque",{
-    p_produto_id: produtoId,
-    p_qtd: qtd
+    p_produto_id:id,
+    p_qtd:qtd
   });
 
   if(error){
@@ -163,21 +231,53 @@ async function reporEstoque(produtoId){
   }
 
   alert("✅ Estoque reposto");
-  buscarProdutos();
+  carregar();
 }
 
-/* FOTO (APENAS PREVIEW, NÃO SALVA) */
-function previewFoto(e, id){
-  const img = document.getElementById(`img-${id}`);
-  img.src = URL.createObjectURL(e.target.files[0]);
-  img.style.display = "block";
+/* NOVA FOTO */
+async function novaFoto(e,id){
+  const file=e.target.files[0];
+  if(!file)return;
+
+  const nomeSeguro=file.name
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-zA-Z0-9._-]/g,"_");
+
+  const path=`${admin.app_id}/${Date.now()}_${nomeSeguro}`;
+  await supabaseClient.storage.from("produtos").upload(path,file);
+
+  const imagem=supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+
+  await supabaseClient.from("produtos")
+    .update({imagem})
+    .eq("id",id);
+
+  carregar();
 }
 
-/* INIT */
-buscarProdutos();
+/* EDITAR */
+async function editar(id,n,c,p,e){
+  const nome=prompt("Nome",n);
+  if(!nome)return;
+  const codigo=prompt("Código",c);
+  const preco=prompt("Preço",p);
+  const estoque=prompt("Estoque",e);
 
-const busca = document.getElementById("busca");
-const listaProdutos = document.getElementById("listaProdutos");
+  await supabaseClient.from("produtos")
+    .update({nome,codigo_barra:codigo,preco:Number(preco),estoque:Number(estoque)})
+    .eq("id",id);
+
+  carregar();
+}
+
+/* EXCLUIR */
+async function excluir(id){
+  if(!confirm("Excluir produto?"))return;
+  await supabaseClient.from("produtos").delete().eq("id",id);
+  carregar();
+}
+
+carregar();
 </script>
 
 </body>
