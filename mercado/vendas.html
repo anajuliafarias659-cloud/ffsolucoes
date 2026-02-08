@@ -2,73 +2,82 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Caixa</title>
+<title>Caixa | FF Soluções</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <style>
 *{box-sizing:border-box}
-body{margin:0;font-family:Arial;background:#020617;color:#e5e7eb}
-.topo{padding:12px;border-bottom:1px solid #0f172a}
-.brand{font-size:22px;font-weight:bold;color:#38bdf8}
-.container{padding:12px;padding-bottom:220px}
+body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size:14px}
+.topo-app{padding:10px 14px;border-bottom:1px solid #0f172a}
+.brand{font-size:22px;font-weight:900;color:#38bdf8}
+.mobile-pos{padding:12px;padding-bottom:200px}
 .card{background:#0f172a;border-radius:14px;padding:12px;margin-bottom:10px}
-input,button{width:100%;padding:10px;border-radius:10px;border:none}
-input{background:#020617;color:#fff;margin-bottom:6px}
-button{background:#0ea5e9;color:#fff;font-weight:bold;cursor:pointer;margin-bottom:6px}
+.card input,.card button{width:100%;padding:10px;font-size:14px;border-radius:10px;border:none}
+.card input{background:#020617;color:#fff;margin-bottom:6px}
+.card button{cursor:pointer;background:#0ea5e9;color:#fff;margin-bottom:6px}
 .lista-item{padding:8px;border-radius:8px;background:#020617;margin-bottom:4px;cursor:pointer}
 .lista-item:hover{background:#1e293b}
-.dinheiro{background:#16a34a}
-.pix{background:#0ea5e9}
-.cartao{background:#2563eb}
-.fiado{background:#7c3aed}
-.info{text-align:center;font-weight:bold;margin-top:6px}
+.carrinho div{padding:4px 0;border-bottom:1px solid #1e293b}
+.pagamento .dinheiro{background:#16a34a}
+.pagamento .pix{background:#0ea5e9}
+.pagamento .cartao{background:#2563eb}
+.pagamento .fiado{background:#7c3aed}
 .total-fixo{
   position:fixed;bottom:0;left:0;width:100%;
   background:#020617;border-top:1px solid #0f172a;
-  color:#38bdf8;text-align:center;padding:12px;font-size:18px
+  color:#38bdf8;text-align:center;
+  padding:12px;font-size:18px;font-weight:900
 }
+.info{text-align:center;font-weight:bold;margin-top:4px}
 </style>
 </head>
 
 <body>
 
-<div class="topo"><div class="brand">CAIXA</div></div>
+<div class="topo-app"><div class="brand">CAIXA</div></div>
 
-<div class="container">
+<div class="mobile-pos">
 
-  <!-- BUSCA AUTOMÁTICA -->
+  <!-- BUSCA -->
   <div class="card">
-    <input id="busca" placeholder="Código ou nome do produto" oninput="autoBuscar()">
+    <input id="codigo" placeholder="Código ou nome do produto"
+      oninput="buscarAuto()"
+      onkeydown="if(event.key==='Enter') buscarProdutoCodigo()">
     <div id="listaBusca"></div>
   </div>
 
-  <!-- PREVIEW -->
-  <div class="card" id="preview" style="display:none">
-    <b id="pNome"></b>
-    <p>R$ <span id="pPreco"></span> | Estoque: <span id="pEstoque"></span></p>
-    <input id="qtd" type="number" min="1" value="1">
-    <button onclick="adicionarCarrinho()">Adicionar</button>
+  <div class="card">
+    <input id="quantidade" type="number" min="1" value="1">
+  </div>
+
+  <div class="card" id="previewProduto" style="display:none">
+    <b id="prevNome"></b>
+    <p>R$ <span id="prevPreco"></span> | Estoque: <span id="prevEstoque"></span></p>
+    <button onclick="confirmarAdicionar()">Adicionar ao carrinho</button>
   </div>
 
   <!-- CARRINHO -->
-  <div class="card">
+  <div class="card carrinho">
     <b>🛒 Carrinho</b>
     <div id="carrinho"></div>
   </div>
 
   <!-- PAGAMENTO -->
-  <div class="card">
+  <div class="card pagamento">
     <b>💳 Pagamento</b>
-    <input id="valorPago" type="number" step="0.01" placeholder="Valor pago" oninput="calcularInfo()">
+    <input id="valorPago" type="number" step="0.01"
+      placeholder="Valor pago"
+      oninput="calcularPagamento()">
 
     <button class="dinheiro" onclick="finalizarVenda('DINHEIRO')">Dinheiro</button>
     <button class="pix" onclick="finalizarVenda('PIX')">PIX</button>
     <button class="cartao" onclick="finalizarVenda('CARTAO')">Cartão</button>
     <button class="fiado" onclick="finalizarFiado()">Fiado</button>
 
-    <div id="info" class="info"></div>
+    <div id="infoPagamento" class="info"></div>
   </div>
 
 </div>
@@ -78,213 +87,238 @@ button{background:#0ea5e9;color:#fff;font-weight:bold;cursor:pointer;margin-bott
 </div>
 
 <script>
+const { jsPDF } = window.jspdf;
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
+
 const supabaseClient = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-function round2(v){return Math.round(v*100)/100;}
+function round2(v){ return Math.round(v * 100) / 100; }
 
-let produtoAtual=null;
-let carrinho=[];
-let total=0;
-let timerBusca=null;
+const codigo = document.getElementById("codigo");
+const quantidade = document.getElementById("quantidade");
+const listaBusca = document.getElementById("listaBusca");
+const previewProduto = document.getElementById("previewProduto");
+const prevNome = document.getElementById("prevNome");
+const prevPreco = document.getElementById("prevPreco");
+const prevEstoque = document.getElementById("prevEstoque");
+const carrinhoDiv = document.getElementById("carrinho");
+const totalSpan = document.getElementById("total");
+const valorPago = document.getElementById("valorPago");
+const infoPagamento = document.getElementById("infoPagamento");
 
-/* ===== BUSCA AUTOMÁTICA ===== */
-function autoBuscar(){
+let carrinho = JSON.parse(localStorage.getItem("carrinho_caixa")) || [];
+let produtoAtual = null;
+let total = 0;
+let timerBusca = null;
+
+/* ===== CARRINHO ===== */
+function atualizarCarrinho(){
+  carrinhoDiv.innerHTML="";
+  total = 0;
+  carrinho.forEach(i=>{
+    total += i.subtotal;
+    carrinhoDiv.innerHTML +=
+      `<div>${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}</div>`;
+  });
+  total = round2(total);
+  totalSpan.innerText = total.toFixed(2);
+}
+atualizarCarrinho();
+
+/* ===== BUSCA ===== */
+function buscarAuto(){
   clearTimeout(timerBusca);
-  const v = busca.value.trim();
-
-  if(v.length < 2){
-    listaBusca.innerHTML="";
-    return;
-  }
-
-  timerBusca = setTimeout(()=>{
-    if(/^\d+$/.test(v) && v.length >= 8){
-      buscarCodigo(v);
-    }else{
-      buscarNome(v);
-    }
-  },300);
+  const v = codigo.value.trim();
+  if(v.length < 1){ listaBusca.innerHTML=""; return; }
+  timerBusca = setTimeout(()=>buscarLista(v),300);
 }
 
-async function buscarNome(v){
-  const {data} = await supabaseClient
+async function buscarLista(valor){
+  const { data } = await supabaseClient
     .from("produtos")
     .select("*")
     .eq("app_id", admin.app_id)
-    .ilike("nome", `%${v}%`)
+    .ilike("nome", `%${valor}%`)
     .limit(5);
 
   listaBusca.innerHTML="";
   data?.forEach(p=>{
-    listaBusca.innerHTML+=`
-      <div class="lista-item" onclick='selecionar(${JSON.stringify(p)})'>
+    listaBusca.innerHTML += `
+      <div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
         ${p.nome} — R$ ${p.preco.toFixed(2)}
       </div>`;
   });
 }
 
-async function buscarCodigo(v){
-  const {data} = await supabaseClient
+async function buscarProdutoCodigo(){
+  const v = codigo.value.trim();
+  if(!v) return;
+
+  const { data } = await supabaseClient
     .from("produtos")
     .select("*")
     .eq("codigo_barra", v)
     .eq("app_id", admin.app_id)
     .maybeSingle();
 
-  if(data) selecionar(data);
+  if(data) selecionarProduto(data);
 }
 
 /* ===== PRODUTO ===== */
-function selecionar(p){
-  produtoAtual=p;
-  pNome.innerText=p.nome;
-  pPreco.innerText=p.preco.toFixed(2);
-  pEstoque.innerText=p.estoque;
-  preview.style.display="block";
+function selecionarProduto(p){
+  produtoAtual = p;
+  prevNome.innerText = p.nome;
+  prevPreco.innerText = p.preco.toFixed(2);
+  prevEstoque.innerText = p.estoque;
+  previewProduto.style.display="block";
   listaBusca.innerHTML="";
 }
 
-function adicionarCarrinho(){
-  const q=Number(qtd.value);
-  if(q>produtoAtual.estoque)return alert("Estoque insuficiente");
-
-  carrinho.push({
-    id:produtoAtual.id,
-    nome:produtoAtual.nome,
-    qtd:q,
-    preco:produtoAtual.preco,
-    subtotal:round2(q*produtoAtual.preco)
-  });
-
-  atualizarCarrinho();
-  preview.style.display="none";
-  busca.value="";
-  qtd.value=1;
-}
-
-/* ===== CARRINHO ===== */
-function atualizarCarrinho(){
-  carrinho.innerHTML="";
-  total=0;
-  carrinhoDiv.innerHTML="";
-  carrinho.forEach(i=>{
-    total+=i.subtotal;
-    carrinhoDiv.innerHTML+=`${i.qtd}x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
-  });
-  total=round2(total);
-  totalSpan.innerText=total.toFixed(2);
-}
-
-/* ===== INFO ===== */
-function calcularInfo(){
-  info.innerText="";
-  if(total<=0)return;
-
-  const pago=round2(Number(valorPago.value));
-  if(isNaN(pago)||pago<=0)return;
-
-  const minimo=round2(total*0.9);
-  if(pago<minimo){
-    info.innerText=`⚠️ Falta R$ ${(total-pago).toFixed(2)}`;
-    info.style.color="#f87171";
+function confirmarAdicionar(){
+  const qtd = Number(quantidade.value);
+  if(produtoAtual.estoque < qtd){
+    alert("Estoque insuficiente");
     return;
   }
 
-  info.style.color="#22c55e";
-  if(pago<total) info.innerText=`Desconto: R$ ${(total-pago).toFixed(2)}`;
-  else if(pago>total) info.innerText=`Troco: R$ ${(pago-total).toFixed(2)}`;
-  else info.innerText="Pagamento exato";
+  const item = carrinho.find(i=>i.id === produtoAtual.id);
+  if(item){
+    item.qtd += qtd;
+    item.subtotal = round2(item.qtd * item.preco);
+  }else{
+    carrinho.push({
+      id: produtoAtual.id,
+      nome: produtoAtual.nome,
+      preco: produtoAtual.preco,
+      qtd,
+      estoque: produtoAtual.estoque,
+      subtotal: round2(qtd * produtoAtual.preco)
+    });
+  }
+
+  localStorage.setItem("carrinho_caixa", JSON.stringify(carrinho));
+  atualizarCarrinho();
+  previewProduto.style.display="none";
+  codigo.value="";
+  quantidade.value=1;
 }
 
-/* ===== FINALIZAR ===== */
+/* ===== PAGAMENTO INFO ===== */
+function calcularPagamento(){
+  infoPagamento.innerText="";
+  const pago = round2(Number(valorPago.value));
+  if(isNaN(pago) || pago <= 0) return;
+
+  const minimo = round2(total * 0.9);
+  if(pago < minimo){
+    infoPagamento.innerText = "⚠️ Desconto máximo 10%";
+    return;
+  }
+
+  if(pago < total)
+    infoPagamento.innerText = `Desconto: R$ ${(total-pago).toFixed(2)}`;
+  else if(pago > total)
+    infoPagamento.innerText = `Troco: R$ ${(pago-total).toFixed(2)}`;
+  else
+    infoPagamento.innerText = "Pagamento exato";
+}
+
+/* ===== FINALIZAR NORMAL ===== */
 async function finalizarVenda(tipo){
-  if(carrinho.length===0)return alert("Carrinho vazio");
+  if(carrinho.length === 0){
+    alert("Carrinho vazio");
+    return;
+  }
 
-  const pago=round2(Number(valorPago.value));
-  if(pago<=0)return alert("Informe valor");
+  const pago = round2(Number(valorPago.value));
+  if(isNaN(pago) || pago <= 0){
+    alert("Informe valor válido");
+    return;
+  }
 
-  if(tipo!=="DINHEIRO" && pago>total)
-    return alert("PIX/Cartão não aceita valor maior");
+  if(pago < round2(total * 0.9)){
+    alert("Desconto máximo 10%");
+    return;
+  }
 
-  if(pago<round2(total*0.9))
-    return alert("Desconto máximo 10%");
+  if(tipo !== "DINHEIRO" && pago > total){
+    alert("PIX/Cartão não aceita valor maior");
+    return;
+  }
+
+  if(!confirm(`Confirmar pagamento em ${tipo}?`)) return;
 
   for(const i of carrinho){
+    await supabaseClient.from("produtos")
+      .update({ estoque: i.estoque - i.qtd })
+      .eq("id", i.id)
+      .eq("app_id", admin.app_id);
+
     await supabaseClient.from("vendas").insert({
-      app_id:admin.app_id,
-      produto_id:i.id,
-      quantidade:i.qtd,
-      valor_total:total,
-      valor_pago:pago,
-      valor_devido:0,
-      forma_pagamento:tipo
+      app_id: admin.app_id,
+      produto_id: i.id,
+      quantidade: i.qtd,
+      valor_total: total,
+      valor_pago: pago,
+      valor_devido: 0,
+      forma_pagamento: tipo
     });
   }
 
-  limpar();
-}
-
-/* ===== FIADO ===== */
-async function finalizarFiado(){
-  if(carrinho.length===0)return alert("Carrinho vazio");
-
-  const pago=round2(Number(valorPago.value)||0);
-  const devido=round2(total-pago);
-  if(devido<=0)return alert("Nada a fiar");
-
-  let cpf=prompt("CPF:");
-  if(!cpf)return;
-  cpf=cpf.replace(/\D/g,"");
-  if(cpf.length!==11)return alert("CPF inválido");
-
-  const {data}=await supabaseClient
-    .from("vendas")
-    .select("valor_devido,cliente_nome")
-    .eq("cliente_cpf",cpf)
-    .gt("valor_devido",0);
-
-  let soma=0,nome="";
-  data?.forEach(d=>{
-    soma+=Number(d.valor_devido||0);
-    if(d.cliente_nome)nome=d.cliente_nome;
-  });
-
-  if(soma+devido>10)return alert("Cliente acima do limite");
-
-  if(!nome){
-    nome=prompt("Nome:");
-    if(!nome)return;
-  }
-
-  for(const i of carrinho){
-    await supabaseClient.from("vendas").insert({
-      app_id:admin.app_id,
-      produto_id:i.id,
-      quantidade:i.qtd,
-      valor_total:total,
-      valor_pago:pago,
-      valor_devido:devido,
-      forma_pagamento:"FIADO",
-      cliente_nome:nome,
-      cliente_cpf:cpf
-    });
-  }
-
-  limpar();
-}
-
-/* ===== LIMPAR ===== */
-function limpar(){
   carrinho=[];
-  carrinhoDiv.innerHTML="";
-  total=0;
-  totalSpan.innerText="0.00";
+  localStorage.removeItem("carrinho_caixa");
+  atualizarCarrinho();
   valorPago.value="";
-  info.innerText="";
+}
+
+/* ===== FINALIZAR FIADO ===== */
+async function finalizarFiado(){
+  if(carrinho.length === 0){
+    alert("Carrinho vazio");
+    return;
+  }
+
+  const pago = round2(Number(valorPago.value) || 0);
+  const devido = round2(total - pago);
+
+  if(devido <= 0){
+    alert("Nada para fiar");
+    return;
+  }
+
+  const nome = prompt("Nome do cliente:");
+  if(!nome) return;
+
+  const obs = prompt("Observação (ex: ficou devendo 5 reais):") || "";
+
+  for(const i of carrinho){
+    await supabaseClient.from("produtos")
+      .update({ estoque: i.estoque - i.qtd })
+      .eq("id", i.id)
+      .eq("app_id", admin.app_id);
+
+    await supabaseClient.from("vendas").insert({
+      app_id: admin.app_id,
+      produto_id: i.id,
+      quantidade: i.qtd,
+      valor_total: total,
+      valor_pago: pago,
+      valor_devido: devido,
+      forma_pagamento: "FIADO",
+      cliente_nome: nome,
+      observacao: obs
+    });
+  }
+
+  alert(`Venda fiada registrada\nCliente: ${nome}\nDeve: R$ ${devido.toFixed(2)}`);
+
+  carrinho=[];
+  localStorage.removeItem("carrinho_caixa");
+  atualizarCarrinho();
+  valorPago.value="";
 }
 </script>
 
