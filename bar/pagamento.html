@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>Pagamento</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -56,10 +55,10 @@ let processando = false;
     <label>Valor pago</label>
     <input type="number" id="valorRecebido" step="0.01">
 
+    <p id="info" class="alert"></p>
+
     <p>Troco</p>
     <h3 id="troco">R$ 0,00</h3>
-
-    <p id="info" class="alert"></p>
 
     <button id="btnConfirmar">Confirmar</button>
   </div>
@@ -98,19 +97,29 @@ async function carregarPedido(){
 
 function calcular(){
   const recebido = Number(document.getElementById("valorRecebido").value || 0);
-  const troco = recebido - totalPedido;
+  const descontoMax = totalPedido * 0.10;
+  const minimo = totalPedido - descontoMax;
 
-  document.getElementById("troco").innerText =
-    troco > 0 ? `R$ ${troco.toFixed(2)}` : "R$ 0,00";
+  const info = document.getElementById("info");
+  const trocoEl = document.getElementById("troco");
 
-  document.getElementById("info").innerText =
-    recebido < totalPedido
-      ? `Falta pagar: R$ ${(totalPedido - recebido).toFixed(2)}`
-      : "";
+  if(recebido < minimo){
+    info.innerText = `Desconto máximo permitido: R$ ${descontoMax.toFixed(2)}`;
+  } else if(recebido < totalPedido){
+    info.innerText = `Desconto aplicado: R$ ${(totalPedido - recebido).toFixed(2)}`;
+  } else {
+    info.innerText = "";
+  }
+
+  const troco = recebido > totalPedido ? recebido - totalPedido : 0;
+  trocoEl.innerText = `R$ ${troco.toFixed(2)}`;
 }
 
-document.getElementById("valorRecebido").addEventListener("input", calcular);
-document.getElementById("btnConfirmar").addEventListener("click", confirmarPagamento);
+document.getElementById("valorRecebido")
+  .addEventListener("input", calcular);
+
+document.getElementById("btnConfirmar")
+  .addEventListener("click", confirmarPagamento);
 
 async function confirmarPagamento(){
   if(processando) return;
@@ -124,17 +133,12 @@ async function confirmarPagamento(){
     const minimo = totalPedido - descontoMax;
 
     if(valorPago < minimo) return;
-    if(valorPago > totalPedido) return;
+    if(valorPago > totalPedido * 2) return; // trava erro absurdo
 
-    const { error } = await sb
+    await sb
       .from("pedidos")
       .update({ status: "finalizado" })
       .eq("id", pedidoId);
-
-    if(error){
-      console.error(error);
-      return;
-    }
 
     const { data: itens } = await sb
       .from("pedido_itens")
