@@ -65,6 +65,8 @@ if(!admin?.app_id){
   throw new Error("sem app_id");
 }
 
+let formaPagamentoTemp = null;
+
 function setStatus(valor){
   status.value = valor;
   dias.style.display = valor === "alugado" ? "block" : "none";
@@ -81,34 +83,29 @@ async function uploadFotos(files){
 }
 
 async function cadastrarVeiculo(){
-  const modelo = modeloEl.value.trim();
+  const modeloVal = modelo.value.trim();
   const diariaVal = diaria.value ? Number(diaria.value) : null;
-  const statusVal = status.value;
-  const diasVal = Number(dias.value)||null;
 
-  if(!modelo){
+  if(!modeloVal){
     alert("Informe o modelo");
     return;
   }
 
-  const fotos = await uploadFotos(fotosEl.files);
+  const fotos = await uploadFotos(fotos.files);
   const foto_url = fotos[0] || null;
 
   await db.from("veiculos").insert({
     app_id: admin.app_id,
-    modelo,
+    modelo: modeloVal,
     diaria: diariaVal,
-    status: statusVal,
-    dias_alugado: diasVal,
+    status: "disponivel",
     foto_url,
     fotos
   });
 
-  modeloEl.value="";
+  modelo.value="";
   diaria.value="";
-  dias.value="";
-  fotosEl.value="";
-  setStatus("disponivel");
+  fotos.value="";
 
   carregarVeiculos();
 }
@@ -142,53 +139,48 @@ async function carregarVeiculos(){
 }
 
 async function toggleStatus(id,status,modelo,diaria){
-  if(status==="disponivel"){
-    if(!diaria){
-      alert("Este veículo não possui diária definida.");
-      return;
-    }
-    const dias=Number(prompt("Quantos dias?"));
-    if(!dias||dias<=0)return;
+  if(status === "disponivel"){
 
-    const fim=new Date();
-    fim.setDate(fim.getDate()+dias);
+    const diasVal = Number(prompt("Quantos dias?"));
+    if(!diasVal || diasVal <= 0) return;
+
+    const forma = prompt("Forma de pagamento?\nEx: Pix, Dinheiro, Cartão");
+    if(!forma) return;
+
+    formaPagamentoTemp = forma;
+
+    const fim = new Date();
+    fim.setDate(fim.getDate() + diasVal);
 
     await db.from("veiculos").update({
       status:"alugado",
-      dias_alugado:dias,
+      dias_alugado:diasVal,
       data_fim:fim.toISOString().split("T")[0]
     }).eq("id",id);
+
+    alert(
+      `Locação registrada!\n\n`+
+      `Veículo: ${modelo}\n`+
+      `Dias: ${diasVal}\n`+
+      `Pagamento: ${forma}`
+    );
+
   }else{
+
     await db.from("veiculos").update({
       status:"disponivel",
       dias_alugado:null,
       data_fim:null
     }).eq("id",id);
   }
+
   carregarVeiculos();
 }
 
 async function editarVeiculo(id){
   const {data}=await db.from("veiculos").select("*").eq("id",id).single();
-  modeloEl.value=data.modelo;
+  modelo.value=data.modelo;
   diaria.value=data.diaria||"";
-  status.value=data.status;
-  setStatus(data.status);
-
-  const btn=document.querySelector(".box button");
-  btn.textContent="Atualizar Veículo";
-  btn.onclick=()=>atualizarVeiculo(id);
-}
-
-async function atualizarVeiculo(id){
-  await db.from("veiculos").update({
-    modelo:modeloEl.value,
-    diaria: diaria.value?Number(diaria.value):null,
-    status:status.value,
-    dias_alugado:Number(dias.value)||null
-  }).eq("id",id);
-
-  location.reload();
 }
 
 async function excluir(id){
@@ -197,10 +189,6 @@ async function excluir(id){
     carregarVeiculos();
   }
 }
-
-const modeloEl=modelo;
-const diariaEl=diaria;
-const fotosEl=fotos;
 
 carregarVeiculos();
 </script>
