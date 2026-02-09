@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -30,7 +31,7 @@ hr{opacity:.2}
 }
 #modal .box{
   background:#0b1220;padding:20px;border-radius:16px;
-  max-width:860px;margin:3% auto;max-height:90vh;overflow:auto
+  max-width:900px;margin:3% auto;max-height:90vh;overflow:auto
 }
 .doc{
   max-width:100%;
@@ -63,6 +64,10 @@ hr{opacity:.2}
     <div id="detalhes"></div>
 
     <hr>
+
+    <div style="margin-bottom:12px">
+      <button class="btn ver" onclick="baixarPDF()">⬇ Baixar documentos (PDF)</button>
+    </div>
 
     <div>
       <button class="btn aprovar" onclick="aprovar()">✔ Aprovar</button>
@@ -119,7 +124,7 @@ async function carregar(){
   });
 }
 
-/* VER DETALHES */
+/* VER */
 async function ver(id){
   atual = id;
 
@@ -156,6 +161,63 @@ function renderDoc(label,url){
     <div class="doc-label">${label}</div>
     <img src="${url}" class="doc" onclick="window.open('${url}','_blank')">
   `;
+}
+
+/* PDF DOCUMENTOS */
+async function baixarPDF(){
+  const { jsPDF } = window.jspdf;
+
+  const { data } = await sb
+    .from("locacoes")
+    .select("*")
+    .eq("id",atual)
+    .single();
+
+  const imagens = [
+    data.selfie_url,
+    data.rg_frente_url,
+    data.rg_verso_url,
+    data.cpf_url,
+    data.cnh_url
+  ].filter(Boolean);
+
+  if(!imagens.length){
+    alert("Nenhum documento enviado");
+    return;
+  }
+
+  const pdf = new jsPDF();
+  let first = true;
+
+  for(const url of imagens){
+    if(!first) pdf.addPage();
+    first = false;
+
+    const img = await carregarImagem(url);
+    const w = pdf.internal.pageSize.getWidth() - 20;
+    const h = (img.height * w) / img.width;
+
+    pdf.addImage(
+      img,
+      "JPEG",
+      10,
+      (pdf.internal.pageSize.getHeight() - h) / 2,
+      w,
+      h
+    );
+  }
+
+  pdf.save(`documentos-${data.nome}.pdf`);
+}
+
+function carregarImagem(url){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    img.crossOrigin="anonymous";
+    img.onload=()=>resolve(img);
+    img.onerror=reject;
+    img.src=url;
+  });
 }
 
 /* AÇÕES */
