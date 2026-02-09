@@ -12,30 +12,66 @@ body{
   background:#020617;
   color:#fff;
   font-family:'Segoe UI',system-ui,sans-serif;
+  margin:0;
 }
+
 .container{
   max-width:520px;
-  margin:40px auto;
-  padding:24px;
+  margin:24px auto;
+  padding:20px;
   background:#0f172a;
   border-radius:18px;
 }
-label{margin-top:14px;display:block}
+
+h2{
+  margin-top:0;
+  margin-bottom:10px;
+}
+
+label{
+  margin-top:14px;
+  display:block;
+  font-weight:600;
+}
+
 input,select,button{
   width:100%;
   padding:14px;
   margin-top:6px;
   border-radius:12px;
   border:none;
+  font-size:14px;
 }
-input,select{background:#020617;color:#fff}
-button{background:#22c55e;font-weight:700;margin-top:22px;cursor:pointer}
+
+input,select{
+  background:#020617;
+  color:#fff;
+}
+
+button{
+  background:#22c55e;
+  font-weight:700;
+  margin-top:22px;
+  cursor:pointer;
+}
+
 .preview{
   margin-top:10px;
   width:100%;
-  max-height:180px;
+  max-height:200px;
   object-fit:contain;
   display:none;
+  border-radius:12px;
+  background:#020617;
+  padding:6px;
+}
+
+/* ===== MOBILE ===== */
+@media(max-width:600px){
+  .container{
+    margin:16px;
+    padding:16px;
+  }
 }
 </style>
 </head>
@@ -55,24 +91,25 @@ const app_id = admin.app_id;
   <h2>🚗 Configurar Locadora</h2>
 
   <label>Nome da locadora</label>
-  <input id="nomeSite">
+  <input id="nomeSite" placeholder="Nome da locadora">
 
   <label>Cor primária</label>
   <input type="color" id="corPrimaria">
 
-  <label>Tema</label>
+  <label>Tema do site</label>
   <select id="temaSite">
-    <option value="padrao">Padrão</option>
-    <option value="natal">🎄 Natal</option>
+    <option value="padrao">🎨 Padrão</option>
+    <option value="ano-novo">🎆 Ano Novo</option>
     <option value="sao-joao">🔥 São João</option>
-    <option value="black">🖤 Black</option>
+    <option value="carnaval">🎭 Carnaval</option>
+    <option value="natal">🎄 Natal</option>
   </select>
 
   <label>Banner</label>
   <input type="file" id="bannerInput" accept="image/*">
   <img id="bannerPreview" class="preview">
 
-  <button onclick="salvar()">Salvar</button>
+  <button onclick="salvar()">💾 Salvar configurações</button>
 </div>
 
 <script>
@@ -81,72 +118,76 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const nomeSite=document.getElementById("nomeSite");
-const corPrimaria=document.getElementById("corPrimaria");
-const temaSite=document.getElementById("temaSite");
-const bannerInput=document.getElementById("bannerInput");
-const bannerPreview=document.getElementById("bannerPreview");
+const nomeSite = document.getElementById("nomeSite");
+const corPrimaria = document.getElementById("corPrimaria");
+const temaSite = document.getElementById("temaSite");
+const bannerInput = document.getElementById("bannerInput");
+const bannerPreview = document.getElementById("bannerPreview");
 
-bannerInput.onchange=()=>{
-  const f=bannerInput.files[0];
+/* preview banner */
+bannerInput.onchange = () => {
+  const f = bannerInput.files[0];
   if(f){
-    bannerPreview.src=URL.createObjectURL(f);
-    bannerPreview.style.display="block";
+    bannerPreview.src = URL.createObjectURL(f);
+    bannerPreview.style.display = "block";
   }
 };
 
 async function uploadBanner(file){
   if(!file) return null;
-  const ext=file.name.split(".").pop();
-  const path=`${app_id}/${Date.now()}.${ext}`;
+  const ext = file.name.split(".").pop();
+  const path = `${app_id}/${Date.now()}.${ext}`;
 
-  await sb.storage.from("banners").upload(path,file);
+  await sb.storage.from("banners").upload(path, file, { upsert:true });
   return sb.storage.from("banners").getPublicUrl(path).data.publicUrl;
 }
 
 async function salvar(){
-  let banner_url=null;
+  let banner_url = null;
+
   if(bannerInput.files[0]){
-    banner_url=await uploadBanner(bannerInput.files[0]);
+    banner_url = await uploadBanner(bannerInput.files[0]);
   }
 
-  const payload={
+  const payload = {
     app_id,
-    nome_site:nomeSite.value,
-    cor_primaria:corPrimaria.value,
-    tema_site:temaSite.value
+    nome_site: nomeSite.value,
+    cor_primaria: corPrimaria.value,
+    tema_site: temaSite.value
   };
-  if(banner_url) payload.banner_url=banner_url;
+
+  if(banner_url) payload.banner_url = banner_url;
 
   const { data } = await sb
     .from("config_site")
     .select("id")
-    .eq("app_id",app_id)
+    .eq("app_id", app_id)
     .maybeSingle();
 
   data
-    ? await sb.from("config_site").update(payload).eq("app_id",app_id)
+    ? await sb.from("config_site").update(payload).eq("app_id", app_id)
     : await sb.from("config_site").insert(payload);
 
-  alert("Salvo 🚀");
+  alert("Configurações salvas 🚀");
 }
 
+/* carregar dados */
 (async()=>{
   const { data } = await sb
     .from("config_site")
     .select("nome_site,cor_primaria,tema_site,banner_url")
-    .eq("app_id",app_id)
+    .eq("app_id", app_id)
     .maybeSingle();
 
   if(!data) return;
 
-  nomeSite.value=data.nome_site||"";
-  corPrimaria.value=data.cor_primaria||"#e30613";
-  temaSite.value=data.tema_site||"padrao";
+  nomeSite.value = data.nome_site || "";
+  corPrimaria.value = data.cor_primaria || "#e30613";
+  temaSite.value = data.tema_site || "padrao";
 
   if(data.banner_url){
-    bannerPreview.src=data.banner_url;
-    bannerPreview.style.display="block";
+    bannerPreview.src = data.banner_url;
+    bannerPreview.style.display = "block";
   }
 })();
 </script>
