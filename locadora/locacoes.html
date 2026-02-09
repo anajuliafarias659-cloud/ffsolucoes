@@ -43,7 +43,7 @@ input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top
   <div class="grid" id="lista"></div>
 </div>
 
-<!-- MODAL LOCADORA -->
+<!-- MODAL -->
 <div id="modal">
   <div class="box">
     <h3>🏢 Dados da Locadora (Contrato)</h3>
@@ -66,9 +66,9 @@ input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top
     <label>Cláusulas do Contrato</label>
     <textarea id="mClausulas" rows="8"></textarea>
 
-    <label style="margin-top:10px">
+    <label>
       <input type="checkbox" id="salvarLocal">
-      Salvar dados da locadora neste navegador
+      Salvar dados neste navegador
     </label>
 
     <div style="margin-top:16px;display:flex;gap:10px">
@@ -79,167 +79,127 @@ input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top
 </div>
 
 <script>
-/* ================= AUTH ================= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || admin.tipo!=="locadora"){
-  location.href="../auth/login.html";
-}
+if(!admin || admin.tipo!=="locadora") location.href="../auth/login.html";
 const appId = admin.app_id;
 
-/* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let locacaoAtual = null;
+let locacaoAtual=null;
 
-/* ================= LOAD ================= */
+/* LISTAR */
 async function carregar(){
-  const { data:locacoes } = await sb
-    .from("locacoes")
-    .select("*")
-    .eq("app_id",appId)
-    .order("created_at",{ascending:false});
+  const { data:locacoes } = await sb.from("locacoes").select("*").eq("app_id",appId);
+  const { data:veiculos } = await sb.from("veiculos").select("*").eq("app_id",appId);
 
-  const { data:veiculos } = await sb
-    .from("veiculos")
-    .select("*")
-    .eq("app_id",appId);
-
-  const mapa={};
-  veiculos.forEach(v=>mapa[v.id]=v);
-
+  const mapa={}; veiculos.forEach(v=>mapa[v.id]=v);
   lista.innerHTML="";
-  if(!locacoes || !locacoes.length){
-    lista.innerHTML="<p>Nenhuma locação.</p>";
-    return;
-  }
 
   locacoes.forEach(l=>{
-    const v = mapa[l.veiculo_id] || {};
+    const v=mapa[l.veiculo_id]||{};
     lista.innerHTML+=`
       <div class="card">
-        <h3>${v.modelo || "Veículo"}</h3>
+        <h3>${v.modelo||"Veículo"}</h3>
         <p><b>Cliente:</b> ${l.nome}</p>
         <p><b>Telefone:</b> ${l.telefone}</p>
         <p><b>Dias:</b> ${l.dias}</p>
         <p><b>Total:</b> R$ ${l.total}</p>
-
         <span class="badge ${l.status}">${l.status.toUpperCase()}</span>
         <hr>
-
         ${l.status==="solicitada"?`
           <button class="btn aprovar" onclick="abrir('${l.id}')">✔ Aprovar</button>
           <button class="btn recusar" onclick="recusar('${l.id}')">✖ Recusar</button>
         `:""}
-      </div>
-    `;
+      </div>`;
   });
 }
 
-/* ================= MODAL ================= */
+/* MODAL */
 function abrir(id){
-  locacaoAtual = id;
-
-  const salvo = JSON.parse(localStorage.getItem("dados_locadora"));
-  if(salvo){
-    mNome.value = salvo.nome || "";
-    mEndereco.value = salvo.endereco || "";
-    mCnpj.value = salvo.cnpj || "";
-    mTelefone.value = salvo.telefone || "";
-    mLogo.value = salvo.logo || "";
-    mClausulas.value = salvo.clausulas || "";
-    salvarLocal.checked = true;
-  }else{
-    mNome.value="";
-    mEndereco.value="";
-    mCnpj.value="";
-    mTelefone.value="";
-    mLogo.value="";
-    mClausulas.value="";
-    salvarLocal.checked = false;
-  }
-
+  locacaoAtual=id;
+  const s=JSON.parse(localStorage.getItem("dados_locadora")||"{}");
+  mNome.value=s.nome||""; mEndereco.value=s.endereco||"";
+  mCnpj.value=s.cnpj||""; mTelefone.value=s.telefone||"";
+  mLogo.value=s.logo||""; mClausulas.value=s.clausulas||"";
+  salvarLocal.checked=!!s.nome;
   modal.style.display="block";
 }
-function fechar(){ modal.style.display="none"; }
+function fechar(){modal.style.display="none"}
 
-/* ================= PDF ================= */
+/* PDF */
 async function gerarPDF(id){
   const { jsPDF } = window.jspdf;
-
+  const pdf=new jsPDF();
   const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
   const { data:v } = await sb.from("veiculos").select("*").eq("id",l.veiculo_id).single();
 
-  const pdf = new jsPDF();
-  let y = 20;
+  let y=20;
 
-  /* TOPO */
   if(mLogo.value){
-    pdf.addImage(mLogo.value,"PNG",10,10,40,20);
+    const img = await fetch(mLogo.value).then(r=>r.blob());
+    const reader=new FileReader();
+    await new Promise(res=>{
+      reader.onload=()=>res();
+      reader.readAsDataURL(img);
+    });
+    pdf.addImage(reader.result,"PNG",80,10,50,25);
+    y=40;
   }
 
-  pdf.setFontSize(13);
-  pdf.text(mNome.value || "Locadora",55,15);
+  pdf.setFontSize(14);
+  pdf.text(mNome.value||"Locadora",105,y,{align:"center"}); y+=8;
   pdf.setFontSize(10);
-  pdf.text(mEndereco.value || "",55,21);
-  pdf.text(`Tel: ${mTelefone.value || ""}`,55,27);
+  pdf.text(`CNPJ: ${mCnpj.value||""}  Tel: ${mTelefone.value||""}`,105,y,{align:"center"}); y+=6;
+  pdf.line(10,y,200,y); y+=10;
 
-  y = 40;
-
-  /* LOCATÁRIO */
   pdf.setFontSize(12);
-  pdf.text("1. DADOS DO LOCATÁRIO",10,y); y+=6;
+  pdf.text("1. LOCATÁRIO",10,y); y+=6;
   pdf.setFontSize(11);
   pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
   pdf.text(`Telefone: ${l.telefone}`,10,y); y+=8;
 
-  /* VEÍCULO */
   pdf.setFontSize(12);
-  pdf.text("2. DETALHES DO VEÍCULO",10,y); y+=6;
+  pdf.text("2. VEÍCULO",10,y); y+=6;
   pdf.setFontSize(11);
   pdf.text(`Modelo: ${v.modelo}`,10,y); y+=8;
 
-  /* PERÍODO */
   pdf.setFontSize(12);
-  pdf.text("3. PERÍODO E VALOR",10,y); y+=6;
+  pdf.text("3. VALOR E PERÍODO",10,y); y+=6;
   pdf.setFontSize(11);
   pdf.text(`Dias: ${l.dias}`,10,y); y+=6;
-  pdf.text(`Total: R$ ${l.total}`,10,y); y+=8;
+  pdf.text(`Total: R$ ${l.total}`,10,y); y+=10;
 
-  /* CLÁUSULAS */
   pdf.setFontSize(12);
-  pdf.text("CLÁUSULAS CONTRATUAIS",10,y); y+=6;
+  pdf.text("4. CLÁUSULAS",10,y); y+=6;
   pdf.setFontSize(10);
-  pdf.text(mClausulas.value || "Sem cláusulas.",10,y,{maxWidth:180});
+  pdf.text(mClausulas.value||"Sem cláusulas.",10,y,{maxWidth:180});
+
+  pdf.setFontSize(9);
+  pdf.text(`Assinatura: ______________________    Data: ${new Date().toLocaleDateString()}`,10,280);
 
   return pdf;
 }
 
-/* ================= CONFIRMAR ================= */
+/* CONFIRMAR */
 async function confirmar(){
-
   if(salvarLocal.checked){
-    localStorage.setItem("dados_locadora", JSON.stringify({
-      nome: mNome.value,
-      endereco: mEndereco.value,
-      cnpj: mCnpj.value,
-      telefone: mTelefone.value,
-      logo: mLogo.value,
-      clausulas: mClausulas.value
+    localStorage.setItem("dados_locadora",JSON.stringify({
+      nome:mNome.value,endereco:mEndereco.value,cnpj:mCnpj.value,
+      telefone:mTelefone.value,logo:mLogo.value,clausulas:mClausulas.value
     }));
   }
 
-  const pdf = await gerarPDF(locacaoAtual);
+  const pdf=await gerarPDF(locacaoAtual);
   pdf.save("contrato-locacao.pdf");
 
   const { data:l } = await sb.from("locacoes").select("veiculo_id").eq("id",locacaoAtual).single();
   await sb.from("locacoes").update({status:"ativa"}).eq("id",locacaoAtual);
   await sb.from("veiculos").update({status:"alugado"}).eq("id",l.veiculo_id);
 
-  fechar();
-  carregar();
+  fechar(); carregar();
 }
 
 async function recusar(id){
@@ -247,7 +207,6 @@ async function recusar(id){
   carregar();
 }
 
-/* INIT */
 carregar();
 </script>
 
