@@ -11,67 +11,20 @@
 :root{--primaria:#e30613;--bg:#f4f4f4}
 *{box-sizing:border-box;font-family:Arial,sans-serif}
 body{margin:0;background:var(--bg)}
-
-.topo{
-  background:#fff;
-  border-bottom:3px solid var(--primaria);
-  padding:14px;
-  text-align:center;
-  font-weight:700
-}
+.topo{background:#fff;border-bottom:3px solid var(--primaria);padding:14px;text-align:center;font-weight:700}
 .container{max-width:900px;margin:20px auto;padding:16px}
-.card{
-  background:#fff;
-  border-radius:18px;
-  padding:18px;
-  box-shadow:0 10px 25px rgba(0,0,0,.12)
-}
-.hero img{
-  width:100%;
-  max-height:420px;
-  object-fit:contain;
-  background:#eee;
-  border-radius:14px
-}
+.card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 10px 25px rgba(0,0,0,.12)}
+.hero img{width:100%;max-height:420px;object-fit:contain;background:#eee;border-radius:14px}
 .preco{font-size:20px;font-weight:700;margin:10px 0}
 .status{font-weight:700;margin-bottom:12px}
 .status.disponivel{color:#16a34a}
 .status.alugado{color:#e30613}
-
 label{display:block;margin-top:14px;font-weight:600}
-input{
-  width:100%;
-  padding:12px;
-  margin-top:6px;
-  border-radius:10px;
-  border:1px solid #ccc
-}
-
-.btn{
-  margin-top:14px;
-  background:var(--primaria);
-  color:#fff;
-  padding:12px;
-  border-radius:12px;
-  text-align:center;
-  font-weight:700;
-  cursor:pointer
-}
-.btn-sec{
-  background:#222;
-  color:#fff
-}
-
-.btn-sec.active{
-  outline:3px solid var(--primaria);
-}
-
-video,img.preview,canvas{
-  width:100%;
-  margin-top:8px;
-  border-radius:10px;
-  display:none
-}
+input{width:100%;padding:12px;margin-top:6px;border-radius:10px;border:1px solid #ccc}
+.btn{margin-top:14px;background:var(--primaria);color:#fff;padding:12px;border-radius:12px;text-align:center;font-weight:700;cursor:pointer}
+.btn-sec{background:#222;color:#fff}
+.btn-sec.active{outline:3px solid var(--primaria)}
+video,img.preview,canvas{width:100%;margin-top:8px;border-radius:10px;display:none}
 </style>
 </head>
 
@@ -82,37 +35,21 @@ video,img.preview,canvas{
 <div class="container">
 <div class="card">
 
-<div class="hero">
-  <img id="imgVeiculo">
-</div>
-
+<div class="hero"><img id="imgVeiculo"></div>
 <h2 id="modelo"></h2>
 <div class="preco" id="preco"></div>
 <div id="status" class="status"></div>
 
-<div id="acaoAlugar" class="btn" style="display:none" onclick="abrirFormulario()">
-  Alugar este veículo
-</div>
+<div id="acaoAlugar" class="btn" style="display:none" onclick="abrirFormulario()">Alugar este veículo</div>
 
-<!-- FORMULÁRIO -->
 <div id="formSolicitacao" style="display:none">
 
-<label>Nome</label>
-<input id="fNome">
+<label>Nome</label><input id="fNome">
+<label>Telefone</label><input id="fTelefone">
+<label>CPF</label><input id="fCpf">
+<label>Dias</label><input id="fDias" type="number" min="1" oninput="calcularTotal()">
+<label>Total</label><input id="fTotal" readonly>
 
-<label>Telefone</label>
-<input id="fTelefone">
-
-<label>CPF</label>
-<input id="fCpf">
-
-<label>Dias</label>
-<input id="fDias" type="number" min="1" oninput="calcularTotal()">
-
-<label>Total</label>
-<input id="fTotal" readonly>
-
-<!-- FORMA DE PAGAMENTO -->
 <label>Forma de pagamento</label>
 <div style="display:flex;gap:10px;margin-top:6px">
   <button type="button" class="btn btn-sec" onclick="setPagamento(this,'Pix')">PIX</button>
@@ -124,8 +61,6 @@ video,img.preview,canvas{
 <p id="pagamentoEscolhido" style="margin-top:6px;font-weight:bold"></p>
 
 <hr style="margin:18px 0">
-
-<!-- DOCUMENTOS -->
 <div id="docs"></div>
 
 <div class="btn" onclick="enviarSolicitacao()">Enviar solicitação</div>
@@ -135,148 +70,101 @@ video,img.preview,canvas{
 </div>
 
 <script>
-/* PARAMS */
-const params = new URLSearchParams(window.location.search);
-const appId = params.get("app_id");
-const veiculoId = params.get("id");
+const params=new URLSearchParams(location.search);
+const appId=params.get("app_id");
+const veiculoId=params.get("id");
 
-/* SUPABASE */
-const sb = supabase.createClient(
+const sb=supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let DIARIA = null;
-let arquivos = {};
-let stream = null;
+let DIARIA=null, arquivos={}, stream=null, fluxo="painel", whatsapp="";
 
-/* INIT */
-if(!appId || !veiculoId){
-  document.body.innerHTML =
-    "<h2 style='text-align:center;padding:30px'>Acesso inválido</h2>";
-}else{
-  carregarVeiculo();
-}
+/* CONFIG */
+(async()=>{
+  const { data } = await sb
+    .from("config_site")
+    .select("fluxo_locacao, whatsapp")
+    .eq("app_id", appId)
+    .maybeSingle();
+
+  fluxo = data?.fluxo_locacao || "painel";
+  whatsapp = data?.whatsapp || "";
+})();
 
 /* VEÍCULO */
 async function carregarVeiculo(){
-  const { data:v } = await sb
-    .from("veiculos")
-    .select("*")
-    .eq("id", veiculoId)
-    .eq("app_id", appId)
-    .single();
+  const { data:v } = await sb.from("veiculos").select("*")
+    .eq("id",veiculoId).eq("app_id",appId).single();
 
-  if(!v){
-    document.querySelector(".card").innerHTML =
-      "<p>Veículo não encontrado.</p>";
-    return;
+  if(!v) return;
+  DIARIA=v.diaria!==null?Number(v.diaria):null;
+  imgVeiculo.src=v.foto_url||"https://via.placeholder.com/800x400";
+  modelo.innerText=v.modelo;
+  preco.innerText=DIARIA?`R$ ${DIARIA} / diária`:"Valor sob consulta";
+
+  if(v.status!=="alugado"){
+    status.innerText="✅ Disponível";
+    status.classList.add("disponivel");
+    acaoAlugar.style.display="block";
   }
-
-  DIARIA = v.diaria !== null ? Number(v.diaria) : null;
-
-  imgVeiculo.src = v.foto_url || "https://via.placeholder.com/800x400";
-  modelo.innerText = v.modelo;
-
-  preco.innerText = DIARIA
-    ? `R$ ${DIARIA} / diária`
-    : "Valor sob consulta";
-
-  const statusEl = document.getElementById("status");
-  if(statusEl){
-    if(v.status === "alugado"){
-      statusEl.innerText = "🔒 Alugado";
-      statusEl.classList.add("alugado");
-    }else{
-      statusEl.innerText = "✅ Disponível";
-      statusEl.classList.add("disponivel");
-      acaoAlugar.style.display = "block";
-    }
-  }
-
   criarCameras();
 }
+carregarVeiculo();
 
 /* FORM */
-function abrirFormulario(){
-  formSolicitacao.style.display="block";
-  acaoAlugar.style.display="none";
-}
-
-function calcularTotal(){
-  fTotal.value = DIARIA
-    ? Number(fDias.value||0) * DIARIA
-    : "A combinar";
-}
-
-/* PAGAMENTO */
-function setPagamento(btn, valor){
+function abrirFormulario(){formSolicitacao.style.display="block";acaoAlugar.style.display="none";}
+function calcularTotal(){fTotal.value=DIARIA?Number(fDias.value||0)*DIARIA:"A combinar";}
+function setPagamento(btn,v){
   document.querySelectorAll(".btn-sec").forEach(b=>b.classList.remove("active"));
-  btn.classList.add("active");
-  fPagamento.value = valor;
-  pagamentoEscolhido.innerText = "Pagamento escolhido: " + valor;
+  btn.classList.add("active");fPagamento.value=v;
+  pagamentoEscolhido.innerText="Pagamento escolhido: "+v;
 }
 
 /* CÂMERAS */
 function criarCameras(){
-  const tipos=[
-    ["selfie","user"],
-    ["rg_frente","environment"],
-    ["rg_verso","environment"],
-    ["cpf","environment"],
-    ["cnh","environment"]
-  ];
+  const tipos=[["selfie","user"],["rg_frente","environment"],["rg_verso","environment"],["cpf","environment"],["cnh","environment"]];
   docs.innerHTML="";
   tipos.forEach(([t,f])=>{
     docs.innerHTML+=`
       <label>${t.toUpperCase()}</label>
-      <button type="button" class="btn btn-sec" onclick="abrirCamera('${t}','${f}')">Abrir câmera</button>
+      <button class="btn btn-sec" onclick="abrirCamera('${t}','${f}')">Abrir câmera</button>
       <video id="video-${t}"></video>
-      <button type="button" class="btn btn-sec" id="cap-${t}" onclick="capturar('${t}')" style="display:none">Capturar</button>
+      <button class="btn btn-sec" id="cap-${t}" onclick="capturar('${t}')" style="display:none">Capturar</button>
       <img id="prev-${t}" class="preview">
-      <canvas id="canvas-${t}" hidden></canvas>
-    `;
+      <canvas id="canvas-${t}" hidden></canvas>`;
   });
 }
 
-async function abrirCamera(tipo,facing){
+async function abrirCamera(t,f){
   fecharCamera();
-  const video=document.getElementById("video-"+tipo);
-  const cap=document.getElementById("cap-"+tipo);
-  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing}});
-  video.srcObject=stream;
-  video.style.display="block";
-  cap.style.display="block";
-  await video.play();
+  const v=document.getElementById("video-"+t);
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:f}});
+  v.srcObject=stream;v.style.display="block";
+  document.getElementById("cap-"+t).style.display="block";
+  await v.play();
 }
 
-function capturar(tipo){
-  const video=document.getElementById("video-"+tipo);
-  const canvas=document.getElementById("canvas-"+tipo);
-  const img=document.getElementById("prev-"+tipo);
-  canvas.width=video.videoWidth;
-  canvas.height=video.videoHeight;
-  canvas.getContext("2d").drawImage(video,0,0);
-  canvas.toBlob(b=>{
-    arquivos[tipo]=b;
-    img.src=URL.createObjectURL(b);
-    img.style.display="block";
+function capturar(t){
+  const v=document.getElementById("video-"+t);
+  const c=document.getElementById("canvas-"+t);
+  c.width=v.videoWidth;c.height=v.videoHeight;
+  c.getContext("2d").drawImage(v,0,0);
+  c.toBlob(b=>{
+    arquivos[t]=b;
+    const img=document.getElementById("prev-"+t);
+    img.src=URL.createObjectURL(b);img.style.display="block";
   });
   fecharCamera();
 }
 
 function fecharCamera(){
-  if(stream){
-    stream.getTracks().forEach(t=>t.stop());
-    stream=null;
-  }
-  document.querySelectorAll("video").forEach(v=>{
-    v.pause();v.srcObject=null;v.style.display="none";
-  });
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  document.querySelectorAll("video").forEach(v=>{v.pause();v.srcObject=null;v.style.display="none";});
   document.querySelectorAll("[id^='cap-']").forEach(b=>b.style.display="none");
 }
 
-/* UPLOAD */
 async function uploadDocumento(file,pasta){
   if(!file) return null;
   const path=`${appId}/${pasta}/${Date.now()}.png`;
@@ -284,17 +172,13 @@ async function uploadDocumento(file,pasta){
   return sb.storage.from("documentos").getPublicUrl(path).data.publicUrl;
 }
 
-/* ENVIO */
+/* ENVIO COM FLUXO */
 async function enviarSolicitacao(){
-  const dias=Number(fDias.value||0);
-  const pagamento=fPagamento.value;
-
-  if(!fNome.value || !fTelefone.value || !dias || !pagamento){
-    alert("Preencha todos os campos e escolha a forma de pagamento");
-    return;
+  if(!fNome.value||!fTelefone.value||!fDias.value||!fPagamento.value){
+    alert("Preencha todos os campos");return;
   }
 
-  await sb.from("locacoes").insert({
+  const payload={
     app_id:appId,
     veiculo_id:veiculoId,
     veiculo_modelo:modelo.innerText,
@@ -302,18 +186,27 @@ async function enviarSolicitacao(){
     nome:fNome.value,
     telefone:fTelefone.value,
     cpf:fCpf.value,
-    dias,
-    total: DIARIA ? dias*DIARIA : null,
-    forma_pagamento: pagamento,
+    dias:Number(fDias.value),
+    total:DIARIA?Number(fDias.value)*DIARIA:null,
+    forma_pagamento:fPagamento.value,
     status:"solicitada",
-    selfie_url: await uploadDocumento(arquivos.selfie,"selfie"),
-    rg_frente_url: await uploadDocumento(arquivos.rg_frente,"rg_frente"),
-    rg_verso_url: await uploadDocumento(arquivos.rg_verso,"rg_verso"),
-    cpf_url: await uploadDocumento(arquivos.cpf,"cpf"),
-    cnh_url: await uploadDocumento(arquivos.cnh,"cnh")
-  });
+    selfie_url:await uploadDocumento(arquivos.selfie,"selfie"),
+    rg_frente_url:await uploadDocumento(arquivos.rg_frente,"rg_frente"),
+    rg_verso_url:await uploadDocumento(arquivos.rg_verso,"rg_verso"),
+    cpf_url:await uploadDocumento(arquivos.cpf,"cpf"),
+    cnh_url:await uploadDocumento(arquivos.cnh,"cnh")
+  };
 
-  alert("Solicitação enviada com sucesso!");
+  if(fluxo==="painel"){
+    await sb.from("locacoes").insert(payload);
+    alert("Solicitação enviada! Aguarde aprovação.");
+  }else{
+    const msg=`Olá! Gostaria de alugar o veículo ${payload.veiculo_modelo}.
+Nome: ${payload.nome}
+Dias: ${payload.dias}
+Pagamento: ${payload.forma_pagamento}`;
+    window.open(`https://wa.me/55${whatsapp}?text=${encodeURIComponent(msg)}`,"_blank");
+  }
 }
 </script>
 
