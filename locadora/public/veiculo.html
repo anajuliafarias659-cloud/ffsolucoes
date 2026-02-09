@@ -19,16 +19,13 @@ body{margin:0;background:var(--bg)}
   text-align:center;
   font-weight:700
 }
-
 .container{max-width:900px;margin:20px auto;padding:16px}
-
 .card{
   background:#fff;
   border-radius:18px;
   padding:18px;
   box-shadow:0 10px 25px rgba(0,0,0,.12)
 }
-
 .hero img{
   width:100%;
   max-height:420px;
@@ -36,7 +33,6 @@ body{margin:0;background:var(--bg)}
   background:#eee;
   border-radius:14px
 }
-
 .preco{font-size:20px;font-weight:700;margin:10px 0}
 .status{font-weight:700;margin-bottom:12px}
 .status.disponivel{color:#16a34a}
@@ -61,9 +57,12 @@ input{
   font-weight:700;
   cursor:pointer
 }
-.btn-sec{background:#222}
+.btn-sec{
+  background:#222;
+  color:#fff
+}
 
-video, img.preview, canvas{
+video,img.preview,canvas{
   width:100%;
   margin-top:8px;
   border-radius:10px;
@@ -89,7 +88,7 @@ video, img.preview, canvas{
 Alugar este veículo
 </div>
 
-<!-- FORM -->
+<!-- FORMULÁRIO -->
 <div id="formSolicitacao" style="display:none">
 
 <label>Nome</label>
@@ -106,6 +105,20 @@ Alugar este veículo
 
 <label>Total</label>
 <input id="fTotal" readonly>
+
+<!-- 🔥 FORMA DE PAGAMENTO (VISÍVEL E OBRIGATÓRIA) -->
+<label>Forma de pagamento</label>
+
+<div style="display:flex;gap:10px;margin-top:6px">
+  <button type="button" class="btn btn-sec" onclick="setPagamento('Pix')">PIX</button>
+  <button type="button" class="btn btn-sec" onclick="setPagamento('Dinheiro')">Dinheiro</button>
+  <button type="button" class="btn btn-sec" onclick="setPagamento('Cartão')">Cartão</button>
+</div>
+
+<input type="hidden" id="fPagamento">
+<p id="pagamentoEscolhido" style="margin-top:6px;font-weight:bold"></p>
+
+<hr style="margin:18px 0">
 
 <!-- DOCUMENTOS -->
 <div id="docs"></div>
@@ -128,9 +141,7 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* 🔥 VARIÁVEIS IMPORTANTES */
 let DIARIA = 0;
-let VEICULO_MODELO = "";
 let arquivos = {};
 let stream = null;
 
@@ -142,7 +153,7 @@ if(!appId || !veiculoId){
   carregarVeiculo();
 }
 
-/* LOAD VEÍCULO */
+/* VEÍCULO */
 async function carregarVeiculo(){
   const { data:v } = await sb
     .from("veiculos")
@@ -157,21 +168,17 @@ async function carregarVeiculo(){
     return;
   }
 
-  const statusEl = document.getElementById("status");
-
-  DIARIA = Number(v.diaria || 0);
-  VEICULO_MODELO = v.modelo; // ✅ AGORA SALVA
-
+  DIARIA = v.diaria || 0;
   imgVeiculo.src = v.foto_url || "https://via.placeholder.com/800x400";
   modelo.innerText = v.modelo;
-  preco.innerText = `R$ ${DIARIA} / diária`;
+  preco.innerText = DIARIA ? `R$ ${DIARIA} / diária` : "Valor sob consulta";
 
   if(v.status === "alugado"){
-    statusEl.innerText = "🔒 Alugado";
-    statusEl.classList.add("alugado");
+    status.innerText = "🔒 Alugado";
+    status.classList.add("alugado");
   }else{
-    statusEl.innerText = "✅ Disponível";
-    statusEl.classList.add("disponivel");
+    status.innerText = "✅ Disponível";
+    status.classList.add("disponivel");
     acaoAlugar.style.display = "block";
   }
 
@@ -180,38 +187,37 @@ async function carregarVeiculo(){
 
 /* FORM */
 function abrirFormulario(){
-  formSolicitacao.style.display = "block";
-  acaoAlugar.style.display = "none";
+  formSolicitacao.style.display="block";
+  acaoAlugar.style.display="none";
 }
-
 function calcularTotal(){
-  fTotal.value = Number(fDias.value || 0) * DIARIA;
+  fTotal.value = DIARIA
+    ? Number(fDias.value||0)*DIARIA
+    : "A combinar";
 }
 
-/* CAMERAS + DOCS */
+/* PAGAMENTO */
+function setPagamento(valor){
+  fPagamento.value = valor;
+  pagamentoEscolhido.innerText = "Pagamento escolhido: " + valor;
+}
+
+/* CÂMERAS */
 function criarCameras(){
-  const tipos = [
+  const tipos=[
     ["selfie","user"],
     ["rg_frente","environment"],
     ["rg_verso","environment"],
     ["cpf","environment"],
     ["cnh","environment"]
   ];
-
-  const docs = document.getElementById("docs");
-  docs.innerHTML = "";
-
+  docs.innerHTML="";
   tipos.forEach(([t,f])=>{
-    docs.innerHTML += `
+    docs.innerHTML+=`
       <label>${t.toUpperCase()}</label>
-      <button class="btn btn-sec" onclick="abrirCamera('${t}','${f}')">
-        Abrir câmera
-      </button>
+      <button class="btn btn-sec" onclick="abrirCamera('${t}','${f}')">Abrir câmera</button>
       <video id="video-${t}"></video>
-      <button class="btn btn-sec" id="cap-${t}"
-        onclick="capturar('${t}')" style="display:none">
-        Capturar
-      </button>
+      <button class="btn btn-sec" id="cap-${t}" onclick="capturar('${t}')" style="display:none">Capturar</button>
       <img id="prev-${t}" class="preview">
       <canvas id="canvas-${t}" hidden></canvas>
     `;
@@ -220,33 +226,27 @@ function criarCameras(){
 
 async function abrirCamera(tipo,facing){
   fecharCamera();
-  const video = document.getElementById("video-"+tipo);
-  const cap = document.getElementById("cap-"+tipo);
-
-  stream = await navigator.mediaDevices.getUserMedia({
-    video:{facingMode:facing}
-  });
-  video.srcObject = stream;
-  video.style.display = "block";
-  cap.style.display = "block";
+  const video=document.getElementById("video-"+tipo);
+  const cap=document.getElementById("cap-"+tipo);
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing}});
+  video.srcObject=stream;
+  video.style.display="block";
+  cap.style.display="block";
   await video.play();
 }
 
 function capturar(tipo){
-  const video = document.getElementById("video-"+tipo);
-  const canvas = document.getElementById("canvas-"+tipo);
-  const img = document.getElementById("prev-"+tipo);
-
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  const video=document.getElementById("video-"+tipo);
+  const canvas=document.getElementById("canvas-"+tipo);
+  const img=document.getElementById("prev-"+tipo);
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
   canvas.getContext("2d").drawImage(video,0,0);
-
   canvas.toBlob(b=>{
-    arquivos[tipo] = b;
-    img.src = URL.createObjectURL(b);
-    img.style.display = "block";
+    arquivos[tipo]=b;
+    img.src=URL.createObjectURL(b);
+    img.style.display="block";
   });
-
   fecharCamera();
 }
 
@@ -258,43 +258,39 @@ function fecharCamera(){
   document.querySelectorAll("video").forEach(v=>{
     v.pause();v.srcObject=null;v.style.display="none";
   });
-  document.querySelectorAll("[id^='cap-']")
-    .forEach(b=>b.style.display="none");
+  document.querySelectorAll("[id^='cap-']").forEach(b=>b.style.display="none");
 }
 
 /* UPLOAD */
 async function uploadDocumento(file,pasta){
   if(!file) return null;
-  const path = `${appId}/${pasta}/${Date.now()}.png`;
-  await sb.storage.from("documentos")
-    .upload(path,file,{upsert:true});
-  return sb.storage.from("documentos")
-    .getPublicUrl(path).data.publicUrl;
+  const path=`${appId}/${pasta}/${Date.now()}.png`;
+  await sb.storage.from("documentos").upload(path,file,{upsert:true});
+  return sb.storage.from("documentos").getPublicUrl(path).data.publicUrl;
 }
 
 /* ENVIO */
 async function enviarSolicitacao(){
-  const dias = Number(fDias.value || 0);
-  if(!fNome.value || !fTelefone.value || !dias){
-    alert("Preencha os campos");
+  const dias=Number(fDias.value||0);
+  const pagamento=fPagamento.value;
+
+  if(!fNome.value || !fTelefone.value || !dias || !pagamento){
+    alert("Preencha todos os campos e escolha a forma de pagamento");
     return;
   }
 
   await sb.from("locacoes").insert({
-    app_id: appId,
-    veiculo_id: veiculoId,
-
-    /* 🔥 CAMPOS QUE FALTAVAM */
-    veiculo_modelo: VEICULO_MODELO,
-    veiculo_diaria: DIARIA,
-
-    nome: fNome.value,
-    telefone: fTelefone.value,
-    cpf: fCpf.value,
+    app_id:appId,
+    veiculo_id:veiculoId,
+    veiculo_modelo:modelo.innerText,
+    veiculo_diaria:DIARIA,
+    nome:fNome.value,
+    telefone:fTelefone.value,
+    cpf:fCpf.value,
     dias,
-    total: dias * DIARIA,
-    status: "solicitada",
-
+    total: DIARIA ? dias*DIARIA : null,
+    forma_pagamento: pagamento,
+    status:"solicitada",
     selfie_url: await uploadDocumento(arquivos.selfie,"selfie"),
     rg_frente_url: await uploadDocumento(arquivos.rg_frente,"rg_frente"),
     rg_verso_url: await uploadDocumento(arquivos.rg_verso,"rg_verso"),
