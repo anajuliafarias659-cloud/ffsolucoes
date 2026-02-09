@@ -129,6 +129,7 @@ const sb = supabase.createClient(
 );
 
 let DIARIA = 0;
+let VEICULO_MODELO = "";
 let arquivos = {};
 let stream = null;
 
@@ -155,10 +156,12 @@ async function carregarVeiculo(){
 
   const statusEl = document.getElementById("status");
 
-  DIARIA = v.diaria;
+  DIARIA = Number(v.diaria || 0);
+  VEICULO_MODELO = v.modelo; // 🔥 GUARDA O NOME
+
   imgVeiculo.src = v.foto_url || "https://via.placeholder.com/800x400";
   modelo.innerText = v.modelo;
-  preco.innerText = `R$ ${DIARIA} / diária`;
+  preco.innerText = DIARIA ? `R$ ${DIARIA} / diária` : "Consultar valor";
 
   if(v.status === "alugado"){
     statusEl.innerText = "🔒 Alugado";
@@ -179,7 +182,9 @@ function abrirFormulario(){
 }
 
 function calcularTotal(){
-  fTotal.value = Number(fDias.value || 0) * DIARIA;
+  fTotal.value = DIARIA
+    ? Number(fDias.value || 0) * DIARIA
+    : "";
 }
 
 /* CAMERAS + DOCS */
@@ -248,14 +253,11 @@ function fecharCamera(){
   document.querySelectorAll("[id^='cap-']").forEach(b=>b.style.display="none");
 }
 
-/* UPLOAD REAL */
+/* UPLOAD */
 async function uploadDocumento(file,pasta){
   if(!file) return null;
-
   const path = `${appId}/${pasta}/${Date.now()}.png`;
-
   await sb.storage.from("documentos").upload(path,file,{upsert:true});
-
   return sb.storage.from("documentos").getPublicUrl(path).data.publicUrl;
 }
 
@@ -269,12 +271,18 @@ async function enviarSolicitacao(){
 
   await sb.from("locacoes").insert({
     app_id: appId,
+
+    /* 🔥 SNAPSHOT DO VEÍCULO */
     veiculo_id: veiculoId,
+    veiculo_modelo: VEICULO_MODELO,
+    veiculo_diaria: DIARIA,
+
     nome: fNome.value,
     telefone: fTelefone.value,
     cpf: fCpf.value,
+
     dias,
-    total: dias * DIARIA,
+    total: DIARIA ? dias * DIARIA : null,
     status: "solicitada",
 
     selfie_url: await uploadDocumento(arquivos.selfie,"selfie"),
