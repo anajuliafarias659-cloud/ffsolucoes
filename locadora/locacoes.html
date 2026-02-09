@@ -24,22 +24,23 @@ header{background:#0f172a;padding:18px 24px;font-size:22px;font-weight:700}
 .recusar{background:#ef4444;color:#fff}
 hr{opacity:.2}
 
-/* MODAL */
-#modal{
+/* MODAIS */
+#modal,#modalAceite{
   display:none;position:fixed;inset:0;background:#0009;z-index:999
 }
-#modal .box{
+.box{
   background:#0b1220;padding:20px;border-radius:16px;
   max-width:900px;margin:3% auto;max-height:90vh;overflow:auto
 }
+.box-sm{
+  background:#0b1220;padding:20px;border-radius:16px;
+  max-width:420px;margin:10% auto
+}
 .doc{
-  max-width:100%;
-  max-height:260px;
-  border-radius:12px;
-  margin-top:10px;
-  cursor:pointer;
+  max-width:100%;max-height:260px;border-radius:12px;margin-top:10px;cursor:pointer
 }
 .doc-label{margin-top:14px;font-weight:700;opacity:.85}
+input{width:100%;padding:10px;border-radius:10px;border:none;margin-top:6px}
 </style>
 </head>
 
@@ -51,7 +52,7 @@ hr{opacity:.2}
   <div class="grid" id="lista"></div>
 </div>
 
-<!-- MODAL -->
+<!-- MODAL DETALHES -->
 <div id="modal">
   <div class="box">
     <h3>📄 Detalhes da Solicitação</h3>
@@ -59,15 +60,32 @@ hr{opacity:.2}
 
     <hr>
 
-    <div style="margin-bottom:12px">
-      <button class="btn ver" onclick="baixarPDF()">⬇ Baixar documentos (PDF)</button>
-    </div>
+    <button class="btn ver" onclick="baixarPDF()">⬇ Baixar documentos (PDF)</button>
+    <br><br>
 
-    <div>
-      <button class="btn aprovar" onclick="aceitar()">✔ Aceitar</button>
-      <button class="btn recusar" onclick="recusar()">❌ Recusar</button>
-      <button class="btn ver" onclick="fechar()">Fechar</button>
-    </div>
+    <button class="btn aprovar" onclick="aceitar()">✔ Aceitar</button>
+    <button class="btn recusar" onclick="recusar()">❌ Recusar</button>
+    <button class="btn ver" onclick="fechar()">Fechar</button>
+  </div>
+</div>
+
+<!-- MODAL ACEITAR -->
+<div id="modalAceite">
+  <div class="box-sm">
+    <h3>✔ Confirmar Locação</h3>
+
+    <label>Dias</label>
+    <input id="aDias" readonly>
+
+    <label>Diária (R$)</label>
+    <input id="aDiaria" type="number" min="0" oninput="recalcularTotal()">
+
+    <label>Total (R$)</label>
+    <input id="aTotal" readonly>
+
+    <br>
+    <button class="btn aprovar" onclick="confirmarAceite()">Confirmar</button>
+    <button class="btn ver" onclick="fecharAceite()">Cancelar</button>
   </div>
 </div>
 
@@ -85,8 +103,8 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let atual = null;
-let dadosAtuais = null;
+let atual=null;
+let dadosAtuais=null;
 
 /* LISTAR */
 async function carregar(){
@@ -107,7 +125,7 @@ async function carregar(){
       <div class="card">
         <b>${l.nome}</b><br>
         Veículo: <b>${l.veiculo_modelo || "—"}</b><br>
-        Dias: ${l.dias} — Total: R$ ${l.total}<br><br>
+        Dias: ${l.dias} — Total: R$ ${l.total || "—"}<br><br>
 
         <span class="badge ${l.status}">${l.status.toUpperCase()}</span>
         <hr>
@@ -120,131 +138,91 @@ async function carregar(){
 
 /* VER */
 async function ver(id){
-  atual = id;
+  atual=id;
+  const { data } = await sb.from("locacoes").select("*").eq("id",id).single();
+  dadosAtuais=data;
 
-  const { data } = await sb
-    .from("locacoes")
-    .select("*")
-    .eq("id",id)
-    .single();
-
-  dadosAtuais = data;
-
-  detalhes.innerHTML = `
+  detalhes.innerHTML=`
     <p><b>Cliente:</b> ${data.nome}</p>
     <p><b>Telefone:</b> ${data.telefone}</p>
-    <p><b>CPF:</b> ${data.cpf || "-"}</p>
-
-    <p><b>Veículo:</b> ${data.veiculo_modelo || "-"}</p>
-    <p><b>Diária:</b> R$ ${data.veiculo_diaria || "-"}</p>
+    <p><b>Pagamento:</b> ${data.forma_pagamento || "-"}</p>
+    <p><b>Veículo:</b> ${data.veiculo_modelo}</p>
     <p><b>Dias:</b> ${data.dias}</p>
-    <p><b>Total:</b> R$ ${data.total}</p>
+    <p><b>Total:</b> R$ ${data.total || "-"}</p>
 
-    <hr>
-
-    ${renderDoc("📸 Selfie", data.selfie_url)}
-    ${renderDoc("🪪 RG (Frente)", data.rg_frente_url)}
-    ${renderDoc("🪪 RG (Verso)", data.rg_verso_url)}
-    ${renderDoc("📄 CPF", data.cpf_url)}
-    ${renderDoc("🚗 CNH", data.cnh_url)}
+    ${renderDoc("📸 Selfie",data.selfie_url)}
+    ${renderDoc("🪪 RG Frente",data.rg_frente_url)}
+    ${renderDoc("🪪 RG Verso",data.rg_verso_url)}
+    ${renderDoc("📄 CPF",data.cpf_url)}
+    ${renderDoc("🚗 CNH",data.cnh_url)}
   `;
-
   modal.style.display="block";
 }
 
 function renderDoc(label,url){
-  if(!url){
-    return `<div class="doc-label">${label}</div><p style="opacity:.6">Não enviado</p>`;
-  }
-  return `
-    <div class="doc-label">${label}</div>
-    <img src="${url}" class="doc" onclick="window.open('${url}','_blank')">
-  `;
+  if(!url) return `<div class="doc-label">${label}</div><p>Não enviado</p>`;
+  return `<div class="doc-label">${label}</div>
+          <img src="${url}" class="doc" onclick="window.open('${url}','_blank')">`;
 }
 
-/* AÇÕES */
-function fechar(){ modal.style.display="none"; }
+/* ACEITE */
+function aceitar(){
+  aDias.value=dadosAtuais.dias;
+  const d=Number(dadosAtuais.veiculo_diaria||0);
+  aDiaria.value=d>0?d:"";
+  aTotal.value=d>0?(d*dadosAtuais.dias).toFixed(2):"0.00";
+  modalAceite.style.display="block";
+}
 
-/* ✔ ACEITAR */
-async function aceitar(){
-  if(!confirm("Aceitar esta locação e avisar o cliente no WhatsApp?")) return;
+function recalcularTotal(){
+  aTotal.value=(Number(aDias.value)*Number(aDiaria.value||0)).toFixed(2);
+}
 
-  await sb.from("locacoes")
-    .update({status:"ativa"})
-    .eq("id",atual);
+async function confirmarAceite(){
+  const diaria=Number(aDiaria.value||0);
+  const total=Number(aTotal.value||0);
+  if(diaria<=0){alert("Informe a diária");return;}
 
-  const tel = dadosAtuais.telefone.replace(/\D/g,"");
+  await sb.from("locacoes").update({
+    status:"ativa",
+    veiculo_diaria:diaria,
+    total:total
+  }).eq("id",atual);
 
-  const msg = `
-Olá ${dadosAtuais.nome}! 👋
+  const tel=dadosAtuais.telefone.replace(/\D/g,"");
+  const msg=`Olá ${dadosAtuais.nome}! 👋
 Sua locação foi *APROVADA* ✅
 
 🚗 Veículo: ${dadosAtuais.veiculo_modelo}
 📅 Dias: ${dadosAtuais.dias}
-💰 Total: R$ ${dadosAtuais.total}
+💵 Diária: R$ ${diaria}
+💰 Total: R$ ${total}
 
-Qual forma de pagamento você prefere?
-• Pix
-• Dinheiro
-• Cartão
-  `.trim();
+Forma de pagamento:
+👉 ${dadosAtuais.forma_pagamento}
+`;
 
-  window.open(
-    `https://wa.me/55${tel}?text=${encodeURIComponent(msg)}`,
-    "_blank"
-  );
-
-  fechar(); carregar();
+  window.open(`https://wa.me/55${tel}?text=${encodeURIComponent(msg)}`,"_blank");
+  fecharAceite();fechar();carregar();
 }
 
-/* ❌ RECUSAR */
 async function recusar(){
-  if(!confirm("Recusar esta solicitação?")) return;
-  await sb.from("locacoes")
-    .update({status:"recusada"})
-    .eq("id",atual);
-  fechar(); carregar();
+  if(!confirm("Recusar solicitação?"))return;
+  await sb.from("locacoes").update({status:"recusada"}).eq("id",atual);
+  fechar();carregar();
 }
 
-/* PDF (mantido igual) */
+function fechar(){modal.style.display="none";}
+function fecharAceite(){modalAceite.style.display="none";}
+
+/* PDF */
 async function baixarPDF(){
   const { jsPDF } = window.jspdf;
-  const data = dadosAtuais;
-  const pdf = new jsPDF();
-
-  pdf.setFontSize(14);
-  pdf.text("DOCUMENTOS DA LOCAÇÃO",10,15);
-
-  pdf.setFontSize(11);
-  pdf.text(`Cliente: ${data.nome}`,10,25);
-  pdf.text(`Telefone: ${data.telefone}`,10,32);
-  pdf.text(`Veículo: ${data.veiculo_modelo}`,10,39);
-  pdf.text(`Total: R$ ${data.total}`,10,46);
-
-  const imgs=[
-    data.selfie_url,
-    data.rg_frente_url,
-    data.rg_verso_url,
-    data.cpf_url,
-    data.cnh_url
-  ].filter(Boolean);
-
-  for(const url of imgs){
-    pdf.addPage();
-    const img=await carregarImagem(url);
-    const w=pdf.internal.pageSize.getWidth()-20;
-    const h=(img.height*w)/img.width;
-    pdf.addImage(img,"JPEG",10,(pdf.internal.pageSize.getHeight()-h)/2,w,h);
-  }
-
-  pdf.save(`locacao-${data.nome}.pdf`);
-}
-
-function carregarImagem(url){
-  return new Promise((res,rej)=>{
-    const i=new Image();i.crossOrigin="anonymous";
-    i.onload=()=>res(i);i.onerror=rej;i.src=url;
-  });
+  const pdf=new jsPDF();
+  pdf.text(`Cliente: ${dadosAtuais.nome}`,10,20);
+  pdf.text(`Veículo: ${dadosAtuais.veiculo_modelo}`,10,30);
+  pdf.text(`Total: R$ ${dadosAtuais.total}`,10,40);
+  pdf.save(`locacao-${dadosAtuais.nome}.pdf`);
 }
 
 /* INIT */
