@@ -21,8 +21,7 @@ header{background:#0f172a;padding:18px 24px;font-size:22px;font-weight:700}
 .btn{padding:10px 14px;border-radius:12px;border:none;font-weight:700;cursor:pointer;margin-right:6px}
 .ver{background:#334155}
 .aprovar{background:#22c55e}
-.edit{background:#fbbf24;color:#000}
-.del{background:#ef4444;color:#fff}
+.recusar{background:#ef4444;color:#fff}
 hr{opacity:.2}
 
 /* MODAL */
@@ -39,13 +38,8 @@ hr{opacity:.2}
   border-radius:12px;
   margin-top:10px;
   cursor:pointer;
-  box-shadow:0 6px 18px rgba(0,0,0,.35);
 }
-.doc-label{
-  margin-top:14px;
-  font-weight:700;
-  opacity:.85
-}
+.doc-label{margin-top:14px;font-weight:700;opacity:.85}
 </style>
 </head>
 
@@ -70,9 +64,8 @@ hr{opacity:.2}
     </div>
 
     <div>
-      <button class="btn aprovar" onclick="aprovar()">✔ Aprovar</button>
-      <button class="btn edit" onclick="editar()">✏️ Editar</button>
-      <button class="btn del" onclick="excluir()">🗑️ Excluir</button>
+      <button class="btn aprovar" onclick="aceitar()">✔ Aceitar</button>
+      <button class="btn recusar" onclick="recusar()">❌ Recusar</button>
       <button class="btn ver" onclick="fechar()">Fechar</button>
     </div>
   </div>
@@ -93,6 +86,7 @@ const sb = supabase.createClient(
 );
 
 let atual = null;
+let dadosAtuais = null;
 
 /* LISTAR */
 async function carregar(){
@@ -134,6 +128,8 @@ async function ver(id){
     .eq("id",id)
     .single();
 
+  dadosAtuais = data;
+
   detalhes.innerHTML = `
     <p><b>Cliente:</b> ${data.nome}</p>
     <p><b>Telefone:</b> ${data.telefone}</p>
@@ -158,7 +154,7 @@ async function ver(id){
 
 function renderDoc(label,url){
   if(!url){
-    return `<div class="doc-label">${label}</div><p style="opacity:.6'>Não enviado</p>`;
+    return `<div class="doc-label">${label}</div><p style="opacity:.6">Não enviado</p>`;
   }
   return `
     <div class="doc-label">${label}</div>
@@ -166,33 +162,66 @@ function renderDoc(label,url){
   `;
 }
 
-/* PDF */
+/* AÇÕES */
+function fechar(){ modal.style.display="none"; }
+
+/* ✔ ACEITAR */
+async function aceitar(){
+  if(!confirm("Aceitar esta locação e avisar o cliente no WhatsApp?")) return;
+
+  await sb.from("locacoes")
+    .update({status:"ativa"})
+    .eq("id",atual);
+
+  const tel = dadosAtuais.telefone.replace(/\D/g,"");
+
+  const msg = `
+Olá ${dadosAtuais.nome}! 👋
+Sua locação foi *APROVADA* ✅
+
+🚗 Veículo: ${dadosAtuais.veiculo_modelo}
+📅 Dias: ${dadosAtuais.dias}
+💰 Total: R$ ${dadosAtuais.total}
+
+Qual forma de pagamento você prefere?
+• Pix
+• Dinheiro
+• Cartão
+  `.trim();
+
+  window.open(
+    `https://wa.me/55${tel}?text=${encodeURIComponent(msg)}`,
+    "_blank"
+  );
+
+  fechar(); carregar();
+}
+
+/* ❌ RECUSAR */
+async function recusar(){
+  if(!confirm("Recusar esta solicitação?")) return;
+  await sb.from("locacoes")
+    .update({status:"recusada"})
+    .eq("id",atual);
+  fechar(); carregar();
+}
+
+/* PDF (mantido igual) */
 async function baixarPDF(){
   const { jsPDF } = window.jspdf;
-
-  const { data } = await sb
-    .from("locacoes")
-    .select("*")
-    .eq("id",atual)
-    .single();
-
+  const data = dadosAtuais;
   const pdf = new jsPDF();
 
-  /* CAPA */
   pdf.setFontSize(14);
-  pdf.text("DADOS DA LOCAÇÃO",10,15);
+  pdf.text("DOCUMENTOS DA LOCAÇÃO",10,15);
 
   pdf.setFontSize(11);
   pdf.text(`Cliente: ${data.nome}`,10,25);
   pdf.text(`Telefone: ${data.telefone}`,10,32);
-  pdf.text(`CPF: ${data.cpf || "-"}`,10,39);
+  pdf.text(`Veículo: ${data.veiculo_modelo}`,10,39);
+  pdf.text(`Total: R$ ${data.total}`,10,46);
 
-  pdf.text(`Veículo: ${data.veiculo_modelo || "-"}`,10,50);
-  pdf.text(`Diária: R$ ${data.veiculo_diaria || "-"}`,10,57);
-  pdf.text(`Dias: ${data.dias}`,10,64);
-  pdf.text(`Total: R$ ${data.total}`,10,71);
-
-  const imagens = [
+  const imgs=[
     data.selfie_url,
     data.rg_frente_url,
     data.rg_verso_url,
@@ -200,12 +229,11 @@ async function baixarPDF(){
     data.cnh_url
   ].filter(Boolean);
 
-  for(const url of imagens){
+  for(const url of imgs){
     pdf.addPage();
-    const img = await carregarImagem(url);
-    const w = pdf.internal.pageSize.getWidth() - 20;
-    const h = (img.height * w) / img.width;
-
+    const img=await carregarImagem(url);
+    const w=pdf.internal.pageSize.getWidth()-20;
+    const h=(img.height*w)/img.width;
     pdf.addImage(img,"JPEG",10,(pdf.internal.pageSize.getHeight()-h)/2,w,h);
   }
 
@@ -213,32 +241,10 @@ async function baixarPDF(){
 }
 
 function carregarImagem(url){
-  return new Promise((resolve,reject)=>{
-    const img = new Image();
-    img.crossOrigin="anonymous";
-    img.onload=()=>resolve(img);
-    img.onerror=reject;
-    img.src=url;
+  return new Promise((res,rej)=>{
+    const i=new Image();i.crossOrigin="anonymous";
+    i.onload=()=>res(i);i.onerror=rej;i.src=url;
   });
-}
-
-/* AÇÕES */
-function fechar(){ modal.style.display="none"; }
-
-async function aprovar(){
-  if(!confirm("Aprovar esta locação?")) return;
-  await sb.from("locacoes").update({status:"ativa"}).eq("id",atual);
-  fechar(); carregar();
-}
-
-function editar(){
-  location.href = `editar-locacao.html?id=${atual}`;
-}
-
-async function excluir(){
-  if(!confirm("Excluir definitivamente esta solicitação?")) return;
-  await sb.from("locacoes").delete().eq("id",atual);
-  fechar(); carregar();
 }
 
 /* INIT */
