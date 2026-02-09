@@ -1,319 +1,209 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Veículos | Locadora</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<title>Veículos | Locadora</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <style>
-    body { margin: 0; font-family: Arial; background: #020617; color: #fff; }
-    .container { max-width: 900px; margin: 40px auto; padding: 20px; }
-    .box { background: #0f172a; padding: 20px; border-radius: 16px; margin-bottom: 20px; }
-    input, button { width: 100%; padding: 14px; margin-top: 10px; border-radius: 10px; border: none; }
-    input { background: #020617; color: #fff; }
-    button { background: #22c55e; font-weight: bold; cursor: pointer; }
-    .statusBtns { display: flex; gap: 10px; margin-top: 10px; }
-    .statusBtns button { flex: 1; }
-    .veiculo { background: #020617; padding: 14px; border-radius: 12px; margin-top: 12px; display: flex; gap: 12px; }
-    .veiculo img { width: 120px; height: 80px; object-fit: cover; border-radius: 8px; }
-    .actions button { margin-top: 6px; background: #334155; }
-    .actions .del { background: #ef4444; }
-    .actions .edit { background: #fbbf24; }
-  </style>
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.container{max-width:900px;margin:40px auto;padding:20px}
+.box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
+input,button{width:100%;padding:14px;margin-top:10px;border-radius:10px;border:none}
+input{background:#020617;color:#fff}
+button{background:#22c55e;font-weight:bold;cursor:pointer}
+.statusBtns{display:flex;gap:10px;margin-top:10px}
+.statusBtns button{flex:1}
+.veiculo{background:#020617;padding:14px;border-radius:12px;margin-top:12px;display:flex;gap:12px}
+.veiculo img{width:120px;height:80px;object-fit:cover;border-radius:8px}
+.actions button{margin-top:6px;background:#334155}
+.actions .del{background:#ef4444}
+.actions .edit{background:#fbbf24;color:#000}
+</style>
 </head>
 
 <body>
 
 <div class="container">
 
-  <div class="box">
-    <h2>🚗 Cadastrar Veículo</h2>
+<div class="box">
+<h2>🚗 Cadastrar Veículo</h2>
 
-    <input id="modelo" placeholder="Modelo">
-    <input id="diaria" type="number" placeholder="Diária">
+<input id="modelo" placeholder="Modelo">
+<input id="diaria" type="number" placeholder="Diária (opcional)">
 
-    <div class="statusBtns">
-      <button type="button" onclick="setStatus('disponivel')" style="background:#22c55e">Disponível</button>
-      <button type="button" onclick="setStatus('alugado')" style="background:#ef4444">Alugado</button>
-    </div>
+<div class="statusBtns">
+<button type="button" onclick="setStatus('disponivel')" style="background:#22c55e">Disponível</button>
+<button type="button" onclick="setStatus('alugado')" style="background:#ef4444">Alugado</button>
+</div>
 
-    <input id="status" type="hidden" value="disponivel">
-    <input id="dias" type="number" placeholder="Dias alugado" style="display:none">
+<input id="status" type="hidden" value="disponivel">
+<input id="dias" type="number" placeholder="Dias alugado" style="display:none">
+<input id="fotos" type="file" accept="image/*" multiple>
 
-    <input id="fotos" type="file" accept="image/*" multiple>
+<button onclick="cadastrarVeiculo()">Cadastrar Veículo</button>
+</div>
 
-    <button onclick="cadastrarVeiculo()">Cadastrar Veículo</button>
-  </div>
-
-  <div class="box">
-    <h2>📋 Veículos cadastrados</h2>
-    <div id="lista"></div>
-  </div>
+<div class="box">
+<h2>📋 Veículos cadastrados</h2>
+<div id="lista"></div>
+</div>
 
 </div>
 
 <script>
-  /* 🔌 SUPABASE */
-  const db = window._supabase ??= supabase.createClient(
-    "https://pdajixsoowcyhnjwhgpc.supabase.co",
-    "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-  );
+const db = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
 
-  /* 🔐 ADMIN */
-  const admin = JSON.parse(localStorage.getItem("admin_logado"));
-  if (!admin || !admin.app_id) {
-    alert("Locadora não selecionada");
-    throw new Error("sem app_id");
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
+if(!admin?.app_id){
+  alert("Locadora não selecionada");
+  throw new Error("sem app_id");
+}
+
+function setStatus(valor){
+  status.value = valor;
+  dias.style.display = valor === "alugado" ? "block" : "none";
+}
+
+async function uploadFotos(files){
+  const urls=[];
+  for(const f of files){
+    const nome=`${Date.now()}_${f.name}`;
+    await db.storage.from("veiculos").upload(nome,f);
+    urls.push(db.storage.from("veiculos").getPublicUrl(nome).data.publicUrl);
+  }
+  return urls;
+}
+
+async function cadastrarVeiculo(){
+  const modelo = modeloEl.value.trim();
+  const diariaVal = diaria.value ? Number(diaria.value) : null;
+  const statusVal = status.value;
+  const diasVal = Number(dias.value)||null;
+
+  if(!modelo){
+    alert("Informe o modelo");
+    return;
   }
 
-  /* 🚦 STATUS */
-  function setStatus(valor) {
-    document.getElementById("status").value = valor;
-    document.getElementById("dias").style.display = valor === "alugado" ? "block" : "none";
-  }
+  const fotos = await uploadFotos(fotosEl.files);
+  const foto_url = fotos[0] || null;
 
-  /* 📸 UPLOAD MULTIPLO */
-  async function uploadFotos(files) {
-    const urls = [];
-    for (const file of files) {
-      const nome = `${Date.now()}_${file.name}`;
-      await db.storage.from("veiculos").upload(nome, file);
-      const url = db.storage.from("veiculos").getPublicUrl(nome).data.publicUrl;
-      urls.push(url);
-    }
-    return urls;
-  }
+  await db.from("veiculos").insert({
+    app_id: admin.app_id,
+    modelo,
+    diaria: diariaVal,
+    status: statusVal,
+    dias_alugado: diasVal,
+    foto_url,
+    fotos
+  });
 
-  /* ➕ CADASTRAR */
-  async function cadastrarVeiculo() {
-    const modelo = document.getElementById("modelo").value.trim();
-    const diaria = Number(document.getElementById("diaria").value);
-    const status = document.getElementById("status").value;
-    const dias = Number(document.getElementById("dias").value) || null;
-    const files = document.getElementById("fotos").files;
+  modeloEl.value="";
+  diaria.value="";
+  dias.value="";
+  fotosEl.value="";
+  setStatus("disponivel");
 
-    if (!modelo || !diaria) {
-      alert("Preencha tudo");
-      return;
-    }
+  carregarVeiculos();
+}
 
-    const fotos = await uploadFotos(files);
-    const foto_url = fotos[0] || null;
+async function carregarVeiculos(){
+  const {data} = await db
+    .from("veiculos")
+    .select("*")
+    .eq("app_id",admin.app_id)
+    .order("created_at",{ascending:false});
 
-    const data_fim = status === "alugado" && dias
-      ? new Date(Date.now() + dias * 86400000).toISOString().split("T")[0]
-      : null;
-
-    await db.from("veiculos").insert({
-      app_id: admin.app_id,
-      modelo,
-      diaria,
-      status,
-      dias_alugado: dias,
-      data_fim,
-      foto_url,
-      fotos
-    });
-
-    document.getElementById("modelo").value = "";
-    document.getElementById("diaria").value = "";
-    document.getElementById("dias").value = "";
-    document.getElementById("fotos").value = "";
-    setStatus("disponivel");
-
-    carregarVeiculos();
-  }
-
-  /* 📋 LISTAR */
-  async function carregarVeiculos() {
-    const { data } = await db
-      .from("veiculos")
-      .select("*")
-      .eq("app_id", admin.app_id)
-      .order("created_at", { ascending: false });
-
-    const lista = document.getElementById("lista");
-    lista.innerHTML = "";
-
-    data.forEach(v => {
-      const capa = v.foto_url || v.fotos?.[0] || "";
-      lista.innerHTML += `
-        <div class="veiculo">
-          ${capa ? `<img src="${capa}">` : ""}
-          <div>
-            <b>${v.modelo}</b><br>
-            Diária: R$ ${v.diaria}<br>
-            Status: ${v.status}<br>
-            ${v.status === "alugado" && v.data_fim ? `Até: ${new Date(v.data_fim + "T00:00:00").toLocaleDateString()}` : ""}
-            <div class="actions">
-              <button onclick="toggleStatus('${v.id}', '${v.status}', '${v.modelo}', ${v.diaria})">
-                ${v.status === "disponivel" ? "Marcar alugado" : "Marcar disponível"}
-              </button>
-              <button class="del" onclick="excluir('${v.id}')">Excluir</button>
-              <button class="edit" onclick="editarVeiculo('${v.id}')">Editar</button> <!-- Botão de Editar -->
-            </div>
-          </div>
+  lista.innerHTML="";
+  data.forEach(v=>{
+    lista.innerHTML+=`
+    <div class="veiculo">
+      ${v.foto_url?`<img src="${v.foto_url}">`:""}
+      <div>
+        <b>${v.modelo}</b><br>
+        Diária: ${v.diaria ? `R$ ${v.diaria}` : "—"}<br>
+        Status: ${v.status}
+        <div class="actions">
+          <button onclick="toggleStatus('${v.id}','${v.status}','${v.modelo}',${v.diaria||0})">
+            ${v.status==="disponivel"?"Marcar alugado":"Marcar disponível"}
+          </button>
+          <button class="edit" onclick="editarVeiculo('${v.id}')">Editar</button>
+          <button class="del" onclick="excluir('${v.id}')">Excluir</button>
         </div>
-      `;
-    });
-  }
+      </div>
+    </div>`;
+  });
+}
 
-  /* 🔁 STATUS + LOCAÇÃO */
-  async function toggleStatus(id, status, modelo, diaria) {
-    if (status === "disponivel") {
-      const nome = prompt("Nome do cliente:");
-      if (!nome) return;
-
-      const telefone = prompt("Telefone:");
-      if (!telefone) return;
-
-      const dias = Number(prompt("Quantos dias?"));
-      if (!dias || dias <= 0) return;
-
-      const total = dias * diaria;
-      const fim = new Date();
-      fim.setDate(fim.getDate() + dias);
-
-      await db.from("locacoes").insert({
-        app_id: admin.app_id,
-        nome,
-        telefone,
-        veiculo: modelo,
-        diaria,
-        dias,
-        total,
-        status: "ativa"
-      });
-
-      await db.from("veiculos").update({
-        status: "alugado",
-        dias_alugado: dias,
-        data_fim: fim.toISOString().split("T")[0]
-      }).eq("id", id);
-
-    } else {
-      if (!confirm("Finalizar locação?")) return;
-
-      await db.from("locacoes")
-        .update({ status: "finalizada" })
-        .eq("veiculo", modelo)
-        .eq("status", "ativa");
-
-      await db.from("veiculos").update({
-        status: "disponivel",
-        dias_alugado: null,
-        data_fim: null
-      }).eq("id", id);
+async function toggleStatus(id,status,modelo,diaria){
+  if(status==="disponivel"){
+    if(!diaria){
+      alert("Este veículo não possui diária definida.");
+      return;
     }
+    const dias=Number(prompt("Quantos dias?"));
+    if(!dias||dias<=0)return;
 
+    const fim=new Date();
+    fim.setDate(fim.getDate()+dias);
+
+    await db.from("veiculos").update({
+      status:"alugado",
+      dias_alugado:dias,
+      data_fim:fim.toISOString().split("T")[0]
+    }).eq("id",id);
+  }else{
+    await db.from("veiculos").update({
+      status:"disponivel",
+      dias_alugado:null,
+      data_fim:null
+    }).eq("id",id);
+  }
+  carregarVeiculos();
+}
+
+async function editarVeiculo(id){
+  const {data}=await db.from("veiculos").select("*").eq("id",id).single();
+  modeloEl.value=data.modelo;
+  diaria.value=data.diaria||"";
+  status.value=data.status;
+  setStatus(data.status);
+
+  const btn=document.querySelector(".box button");
+  btn.textContent="Atualizar Veículo";
+  btn.onclick=()=>atualizarVeiculo(id);
+}
+
+async function atualizarVeiculo(id){
+  await db.from("veiculos").update({
+    modelo:modeloEl.value,
+    diaria: diaria.value?Number(diaria.value):null,
+    status:status.value,
+    dias_alugado:Number(dias.value)||null
+  }).eq("id",id);
+
+  location.reload();
+}
+
+async function excluir(id){
+  if(confirm("Excluir veículo?")){
+    await db.from("veiculos").delete().eq("id",id);
     carregarVeiculos();
-  }
-
-  /* 🗑️ EXCLUIR VEÍCULO */
-async function excluir(id) {
-  const confirmacao = confirm(
-    "Tem certeza que deseja excluir o veículo?\nTodas as locações vinculadas também serão removidas."
-  );
-
-  if (!confirmacao) return;
-
-  try {
-    // 1️⃣ Excluir locações vinculadas ao veículo
-    const { error: erroLocacoes } = await db
-      .from("locacoes")
-      .delete()
-      .eq("veiculo", id);
-
-    if (erroLocacoes) {
-      console.error("Erro ao excluir locações:", erroLocacoes);
-      alert("Erro ao excluir locações do veículo.");
-      return;
-    }
-
-    // 2️⃣ Excluir o veículo
-    const { error: erroVeiculo } = await db
-      .from("veiculos")
-      .delete()
-      .eq("id", id);
-
-    if (erroVeiculo) {
-      console.error("Erro ao excluir veículo:", erroVeiculo);
-      alert("Erro ao excluir o veículo.");
-      return;
-    }
-
-    alert("Veículo excluído com sucesso!");
-    carregarVeiculos(); // Atualiza a lista
-
-  } catch (error) {
-    console.error("Erro inesperado:", error);
-    alert("Erro inesperado ao excluir o veículo.");
   }
 }
 
+const modeloEl=modelo;
+const diariaEl=diaria;
+const fotosEl=fotos;
 
-  /* 🖋️ EDITAR */
-  async function editarVeiculo(id) {
-    const { data } = await db
-      .from("veiculos")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    // Preencher os campos com os dados do veículo
-    document.getElementById("modelo").value = data.modelo;
-    document.getElementById("diaria").value = data.diaria;
-    document.getElementById("status").value = data.status;
-    setStatus(data.status);
-
-    if (data.status === "alugado") {
-      document.getElementById("dias").style.display = "block";
-      document.getElementById("dias").value = data.dias_alugado || "";
-    }
-
-    // Atualizar o botão de cadastrar para atualizar o veículo
-    const button = document.querySelector("button");
-    button.textContent = "Atualizar Veículo";
-    button.setAttribute("onclick", `atualizarVeiculo('${id}')`);
-  }
-
-  /* ✏️ ATUALIZAR */
-  async function atualizarVeiculo(id) {
-    const modelo = document.getElementById("modelo").value.trim();
-    const diaria = Number(document.getElementById("diaria").value);
-    const status = document.getElementById("status").value;
-    const dias = Number(document.getElementById("dias").value) || null;
-
-    if (!modelo || !diaria) {
-      alert("Preencha tudo");
-      return;
-    }
-
-    await db.from("veiculos").update({
-      modelo,
-      diaria,
-      status,
-      dias_alugado: dias,
-    }).eq("id", id);
-
-    carregarVeiculos();
-
-    // Resetar formulário
-    document.getElementById("modelo").value = "";
-    document.getElementById("diaria").value = "";
-    document.getElementById("dias").value = "";
-    setStatus("disponivel");
-
-    const button = document.querySelector("button");
-    button.textContent = "Cadastrar Veículo";
-    button.setAttribute("onclick", "cadastrarVeiculo()");
-  }
-
-  carregarVeiculos();
+carregarVeiculos();
 </script>
 
 </body>
 </html>
-
