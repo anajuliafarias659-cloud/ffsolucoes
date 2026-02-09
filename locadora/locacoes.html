@@ -2,78 +2,61 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Locações – Painel Admin</title>
+<title>Locações – Admin</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
-body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
 header{background:#0f172a;padding:18px 24px;font-size:22px;font-weight:700}
 .container{max-width:1200px;margin:auto;padding:24px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:18px}
 .card{background:#0b1220;border-radius:18px;padding:18px}
 .badge{padding:6px 14px;border-radius:999px;font-weight:700;font-size:13px}
-.solicitada{background:#facc15;color:#000}
+.pendente{background:#facc15;color:#000}
 .ativa{background:#22c55e;color:#022c22}
 .recusada{background:#ef4444}
-.btn{padding:10px 14px;border-radius:12px;border:none;font-weight:700;cursor:pointer}
+.btn{padding:10px 14px;border-radius:12px;border:none;font-weight:700;cursor:pointer;margin-right:6px}
+.ver{background:#334155}
 .aprovar{background:#22c55e}
-.recusar{background:#ef4444;color:#fff}
+.edit{background:#fbbf24;color:#000}
+.del{background:#ef4444;color:#fff}
 hr{opacity:.2}
 
+/* MODAL */
 #modal{
   display:none;position:fixed;inset:0;background:#0009;z-index:999
 }
 #modal .box{
   background:#0b1220;padding:20px;border-radius:16px;
-  max-width:720px;margin:4% auto
+  max-width:760px;margin:4% auto
 }
-label{font-weight:700;margin-top:10px;display:block}
-input,textarea{width:100%;padding:10px;border-radius:10px;border:none;margin-top:6px}
+img.doc{
+  max-width:100%;border-radius:10px;margin-top:10px
+}
 </style>
 </head>
 
 <body>
 
-<header>📋 Locações – Painel Administrativo</header>
+<header>📋 Locações – Administração</header>
 
 <div class="container">
   <div class="grid" id="lista"></div>
 </div>
 
-<!-- MODAL -->
+<!-- MODAL DETALHES -->
 <div id="modal">
   <div class="box">
-    <h3>🏢 Dados da Locadora (Contrato)</h3>
+    <h3>📄 Detalhes da Solicitação</h3>
+    <div id="detalhes"></div>
 
-    <label>Nome da Locadora</label>
-    <input id="mNome">
-
-    <label>Endereço</label>
-    <input id="mEndereco">
-
-    <label>CNPJ</label>
-    <input id="mCnpj">
-
-    <label>Telefone</label>
-    <input id="mTelefone">
-
-    <label>URL do Logo (PNG/JPG)</label>
-    <input id="mLogo" placeholder="https://.../logo.png">
-
-    <label>Cláusulas do Contrato</label>
-    <textarea id="mClausulas" rows="8"></textarea>
-
-    <label>
-      <input type="checkbox" id="salvarLocal">
-      Salvar dados neste navegador
-    </label>
-
-    <div style="margin-top:16px;display:flex;gap:10px">
-      <button class="btn aprovar" onclick="confirmar()">✔ Aprovar & Gerar PDF</button>
-      <button class="btn recusar" onclick="fechar()">Cancelar</button>
+    <div style="margin-top:16px">
+      <button class="btn aprovar" onclick="aprovar()">✔ Aprovar</button>
+      <button class="btn edit" onclick="editar()">✏️ Editar</button>
+      <button class="btn del" onclick="excluir()">🗑️ Excluir</button>
+      <button class="btn ver" onclick="fechar()">Fechar</button>
     </div>
   </div>
 </div>
@@ -88,123 +71,72 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let locacaoAtual=null;
+let atual = null;
 
 /* LISTAR */
 async function carregar(){
-  const { data:locacoes } = await sb.from("locacoes").select("*").eq("app_id",appId);
-  const { data:veiculos } = await sb.from("veiculos").select("*").eq("app_id",appId);
+  const { data } = await sb
+    .from("locacoes")
+    .select("*")
+    .eq("app_id",appId)
+    .order("created_at",{ascending:false});
 
-  const mapa={}; veiculos.forEach(v=>mapa[v.id]=v);
   lista.innerHTML="";
-
-  locacoes.forEach(l=>{
-    const v=mapa[l.veiculo_id]||{};
+  data.forEach(l=>{
     lista.innerHTML+=`
       <div class="card">
-        <h3>${v.modelo||"Veículo"}</h3>
-        <p><b>Cliente:</b> ${l.nome}</p>
-        <p><b>Telefone:</b> ${l.telefone}</p>
-        <p><b>Dias:</b> ${l.dias}</p>
-        <p><b>Total:</b> R$ ${l.total}</p>
+        <b>${l.nome}</b><br>
+        ${l.veiculo}<br>
+        Dias: ${l.dias} — Total: R$ ${l.total}<br><br>
+
         <span class="badge ${l.status}">${l.status.toUpperCase()}</span>
         <hr>
-        ${l.status==="solicitada"?`
-          <button class="btn aprovar" onclick="abrir('${l.id}')">✔ Aprovar</button>
-          <button class="btn recusar" onclick="recusar('${l.id}')">✖ Recusar</button>
-        `:""}
+
+        <button class="btn ver" onclick="ver('${l.id}')">👁️ Ver</button>
       </div>`;
   });
 }
 
-/* MODAL */
-function abrir(id){
-  locacaoAtual=id;
-  const s=JSON.parse(localStorage.getItem("dados_locadora")||"{}");
-  mNome.value=s.nome||""; mEndereco.value=s.endereco||"";
-  mCnpj.value=s.cnpj||""; mTelefone.value=s.telefone||"";
-  mLogo.value=s.logo||""; mClausulas.value=s.clausulas||"";
-  salvarLocal.checked=!!s.nome;
+/* VER */
+async function ver(id){
+  atual = id;
+  const { data } = await sb.from("locacoes").select("*").eq("id",id).single();
+
+  detalhes.innerHTML = `
+    <p><b>Cliente:</b> ${data.nome}</p>
+    <p><b>Telefone:</b> ${data.telefone}</p>
+    <p><b>Veículo:</b> ${data.veiculo}</p>
+    <p><b>Dias:</b> ${data.dias}</p>
+    <p><b>Total:</b> R$ ${data.total}</p>
+
+    <hr>
+    <b>Documentos</b>
+    ${data.docs?.map(d=>`<img class="doc" src="${d}">`).join("") || "<p>Sem documentos</p>"}
+  `;
+
   modal.style.display="block";
 }
+
 function fechar(){modal.style.display="none"}
 
-/* PDF */
-async function gerarPDF(id){
-  const { jsPDF } = window.jspdf;
-  const pdf=new jsPDF();
-  const { data:l } = await sb.from("locacoes").select("*").eq("id",id).single();
-  const { data:v } = await sb.from("veiculos").select("*").eq("id",l.veiculo_id).single();
+/* APROVAR */
+async function aprovar(){
+  if(!confirm("Confirmar aprovação e gerar contrato?")) return;
 
-  let y=20;
-
-  if(mLogo.value){
-    const img = await fetch(mLogo.value).then(r=>r.blob());
-    const reader=new FileReader();
-    await new Promise(res=>{
-      reader.onload=()=>res();
-      reader.readAsDataURL(img);
-    });
-    pdf.addImage(reader.result,"PNG",80,10,50,25);
-    y=40;
-  }
-
-  pdf.setFontSize(14);
-  pdf.text(mNome.value||"Locadora",105,y,{align:"center"}); y+=8;
-  pdf.setFontSize(10);
-  pdf.text(`CNPJ: ${mCnpj.value||""}  Tel: ${mTelefone.value||""}`,105,y,{align:"center"}); y+=6;
-  pdf.line(10,y,200,y); y+=10;
-
-  pdf.setFontSize(12);
-  pdf.text("1. LOCATÁRIO",10,y); y+=6;
-  pdf.setFontSize(11);
-  pdf.text(`Nome: ${l.nome}`,10,y); y+=6;
-  pdf.text(`Telefone: ${l.telefone}`,10,y); y+=8;
-
-  pdf.setFontSize(12);
-  pdf.text("2. VEÍCULO",10,y); y+=6;
-  pdf.setFontSize(11);
-  pdf.text(`Modelo: ${v.modelo}`,10,y); y+=8;
-
-  pdf.setFontSize(12);
-  pdf.text("3. VALOR E PERÍODO",10,y); y+=6;
-  pdf.setFontSize(11);
-  pdf.text(`Dias: ${l.dias}`,10,y); y+=6;
-  pdf.text(`Total: R$ ${l.total}`,10,y); y+=10;
-
-  pdf.setFontSize(12);
-  pdf.text("4. CLÁUSULAS",10,y); y+=6;
-  pdf.setFontSize(10);
-  pdf.text(mClausulas.value||"Sem cláusulas.",10,y,{maxWidth:180});
-
-  pdf.setFontSize(9);
-  pdf.text(`Assinatura: ______________________    Data: ${new Date().toLocaleDateString()}`,10,280);
-
-  return pdf;
-}
-
-/* CONFIRMAR */
-async function confirmar(){
-  if(salvarLocal.checked){
-    localStorage.setItem("dados_locadora",JSON.stringify({
-      nome:mNome.value,endereco:mEndereco.value,cnpj:mCnpj.value,
-      telefone:mTelefone.value,logo:mLogo.value,clausulas:mClausulas.value
-    }));
-  }
-
-  const pdf=await gerarPDF(locacaoAtual);
-  pdf.save("contrato-locacao.pdf");
-
-  const { data:l } = await sb.from("locacoes").select("veiculo_id").eq("id",locacaoAtual).single();
-  await sb.from("locacoes").update({status:"ativa"}).eq("id",locacaoAtual);
-  await sb.from("veiculos").update({status:"alugado"}).eq("id",l.veiculo_id);
-
+  await sb.from("locacoes").update({status:"ativa"}).eq("id",atual);
   fechar(); carregar();
 }
 
-async function recusar(id){
-  await sb.from("locacoes").update({status:"recusada"}).eq("id",id);
-  carregar();
+/* EDITAR */
+function editar(){
+  location.href = `editar-locacao.html?id=${atual}`;
+}
+
+/* EXCLUIR */
+async function excluir(){
+  if(!confirm("Excluir definitivamente esta solicitação?")) return;
+  await sb.from("locacoes").delete().eq("id",atual);
+  fechar(); carregar();
 }
 
 carregar();
