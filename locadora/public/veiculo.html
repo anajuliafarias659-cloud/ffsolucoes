@@ -70,18 +70,24 @@ video,img.preview,canvas{width:100%;margin-top:8px;border-radius:10px;display:no
 </div>
 
 <script>
-const params=new URLSearchParams(location.search);
-const appId=params.get("app_id");
-const veiculoId=params.get("id");
+/* PARAMS */
+const params = new URLSearchParams(location.search);
+const appId = params.get("app_id");
+const veiculoId = params.get("id");
 
-const sb=supabase.createClient(
+/* SUPABASE */
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let DIARIA=null, arquivos={}, stream=null, fluxo="painel", whatsapp="";
+let DIARIA = null;
+let arquivos = {};
+let stream = null;
+let fluxo = "painel";
+let whatsapp = "";
 
-/* CONFIG */
+/* CARREGAR CONFIG */
 (async()=>{
   const { data } = await sb
     .from("config_site")
@@ -95,36 +101,67 @@ let DIARIA=null, arquivos={}, stream=null, fluxo="painel", whatsapp="";
 
 /* VEÍCULO */
 async function carregarVeiculo(){
-  const { data:v } = await sb.from("veiculos").select("*")
-    .eq("id",veiculoId).eq("app_id",appId).single();
+  const { data:v } = await sb
+    .from("veiculos")
+    .select("*")
+    .eq("id", veiculoId)
+    .eq("app_id", appId)
+    .single();
 
-  if(!v) return;
-  DIARIA=v.diaria!==null?Number(v.diaria):null;
-  imgVeiculo.src=v.foto_url||"https://via.placeholder.com/800x400";
-  modelo.innerText=v.modelo;
-  preco.innerText=DIARIA?`R$ ${DIARIA} / diária`:"Valor sob consulta";
-
-  if(v.status!=="alugado"){
-    status.innerText="✅ Disponível";
-    status.classList.add("disponivel");
-    acaoAlugar.style.display="block";
+  if(!v){
+    document.querySelector(".card").innerHTML = "<p>Veículo não encontrado.</p>";
+    return;
   }
+
+  DIARIA = v.diaria !== null ? Number(v.diaria) : null;
+
+  document.getElementById("imgVeiculo").src =
+    v.foto_url || "https://via.placeholder.com/800x400";
+
+  document.getElementById("modelo").innerText = v.modelo;
+  document.getElementById("preco").innerText =
+    DIARIA ? `R$ ${DIARIA} / diária` : "Valor sob consulta";
+
+  const statusEl = document.getElementById("status");
+
+  if(v.status === "alugado"){
+    statusEl.innerText = "🔒 Alugado";
+    statusEl.classList.add("alugado");
+  }else{
+    statusEl.innerText = "✅ Disponível";
+    statusEl.classList.add("disponivel");
+    document.getElementById("acaoAlugar").style.display = "block";
+  }
+
   criarCameras();
 }
+
 carregarVeiculo();
 
 /* FORM */
-function abrirFormulario(){formSolicitacao.style.display="block";acaoAlugar.style.display="none";}
-function calcularTotal(){fTotal.value=DIARIA?Number(fDias.value||0)*DIARIA:"A combinar";}
-function setPagamento(btn,v){
-  document.querySelectorAll(".btn-sec").forEach(b=>b.classList.remove("active"));
-  btn.classList.add("active");fPagamento.value=v;
-  pagamentoEscolhido.innerText="Pagamento escolhido: "+v;
+function abrirFormulario(){
+  document.getElementById("formSolicitacao").style.display = "block";
+  document.getElementById("acaoAlugar").style.display = "none";
 }
 
-/* CÂMERAS */
+function calcularTotal(){
+  document.getElementById("fTotal").value =
+    DIARIA ? Number(document.getElementById("fDias").value||0) * DIARIA : "A combinar";
+}
+
+/* PAGAMENTO */
+function setPagamento(btn, valor){
+  document.querySelectorAll(".btn-sec").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("fPagamento").value = valor;
+  document.getElementById("pagamentoEscolhido").innerText =
+    "Pagamento escolhido: " + valor;
+}
+
+/* CAMERAS */
 function criarCameras(){
   const tipos=[["selfie","user"],["rg_frente","environment"],["rg_verso","environment"],["cpf","environment"],["cnh","environment"]];
+  const docs=document.getElementById("docs");
   docs.innerHTML="";
   tipos.forEach(([t,f])=>{
     docs.innerHTML+=`
@@ -137,24 +174,27 @@ function criarCameras(){
   });
 }
 
-async function abrirCamera(t,f){
+async function abrirCamera(tipo,facing){
   fecharCamera();
-  const v=document.getElementById("video-"+t);
-  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:f}});
-  v.srcObject=stream;v.style.display="block";
-  document.getElementById("cap-"+t).style.display="block";
-  await v.play();
+  const video=document.getElementById("video-"+tipo);
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing}});
+  video.srcObject=stream;
+  video.style.display="block";
+  document.getElementById("cap-"+tipo).style.display="block";
+  await video.play();
 }
 
-function capturar(t){
-  const v=document.getElementById("video-"+t);
-  const c=document.getElementById("canvas-"+t);
-  c.width=v.videoWidth;c.height=v.videoHeight;
-  c.getContext("2d").drawImage(v,0,0);
-  c.toBlob(b=>{
-    arquivos[t]=b;
-    const img=document.getElementById("prev-"+t);
-    img.src=URL.createObjectURL(b);img.style.display="block";
+function capturar(tipo){
+  const video=document.getElementById("video-"+tipo);
+  const canvas=document.getElementById("canvas-"+tipo);
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+  canvas.getContext("2d").drawImage(video,0,0);
+  canvas.toBlob(b=>{
+    arquivos[tipo]=b;
+    const img=document.getElementById("prev-"+tipo);
+    img.src=URL.createObjectURL(b);
+    img.style.display="block";
   });
   fecharCamera();
 }
@@ -165,6 +205,7 @@ function fecharCamera(){
   document.querySelectorAll("[id^='cap-']").forEach(b=>b.style.display="none");
 }
 
+/* UPLOAD */
 async function uploadDocumento(file,pasta){
   if(!file) return null;
   const path=`${appId}/${pasta}/${Date.now()}.png`;
@@ -172,10 +213,11 @@ async function uploadDocumento(file,pasta){
   return sb.storage.from("documentos").getPublicUrl(path).data.publicUrl;
 }
 
-/* ENVIO COM FLUXO */
+/* ENVIO */
 async function enviarSolicitacao(){
-  if(!fNome.value||!fTelefone.value||!fDias.value||!fPagamento.value){
-    alert("Preencha todos os campos");return;
+  if(!fNome.value || !fTelefone.value || !fDias.value || !fPagamento.value){
+    alert("Preencha todos os campos");
+    return;
   }
 
   const payload={
