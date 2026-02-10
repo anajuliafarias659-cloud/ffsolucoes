@@ -103,6 +103,28 @@ body{
   display:none;
 }
 
+.carrinho{
+  position:fixed;
+  inset:0;
+  background:#020617;
+  display:none;
+  z-index:20;
+}
+.carrinho .box{padding:16px}
+.item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:8px;
+}
+.item button{
+  background:#334155;
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  padding:4px 8px;
+}
+
 /* MODAL IMAGEM */
 .modal-imagem{
   position:fixed;
@@ -148,6 +170,14 @@ body{
   <span class="badge" id="badgeCarrinho">0</span>
 </div>
 
+<div class="carrinho" id="carrinhoModal">
+  <div class="box">
+    <h2>Seu pedido</h2>
+    <div id="itens"></div>
+    <button onclick="fecharCarrinho()">Fechar</button>
+  </div>
+</div>
+
 <div class="modal-imagem" id="modalImagem" onclick="fecharImagem()">
   <span>&times;</span>
   <img id="imgZoom">
@@ -166,7 +196,7 @@ const carrinhoKey="carrinho_"+app;
 let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
 let whatsapp="";
 
-// ===== AJUSTE MÍNIMO =====
+// ===== FOTOS =====
 const fotosProduto = {};
 let fotosAtuais = [];
 let indiceFoto = 0;
@@ -175,12 +205,10 @@ let indiceFoto = 0;
 (async()=>{
   const {data}=await sb.from("config_site").select("*").eq("app_id",app).maybeSingle();
   if(!data)return;
-
   nome.innerText=data.nome_site||"";
   descricao.innerText=data.descricao_site||"";
   if(data.banner_url) banner.style.backgroundImage=`url(${data.banner_url})`;
   whatsapp=data.whatsapp||"";
-
   if(data.tema_site && data.tema_site!=="padrao"){
     document.body.classList.add("tema-"+data.tema_site);
   }
@@ -189,15 +217,11 @@ let indiceFoto = 0;
 // PRODUTOS
 async function carregarProdutos(){
   const {data}=await sb.from("produtos").select("*").eq("app_id",app).eq("ativo",true);
-
   listaProdutos.innerHTML=data.map(p=>{
     let fotos=[];
-    try{ fotos = JSON.parse(p.imagem); }
-    catch{ fotos = p.imagem ? [p.imagem] : []; }
-
+    try{ fotos=JSON.parse(p.imagem); }catch{ fotos=p.imagem?[p.imagem]:[]; }
     fotosProduto[p.id]=fotos;
     const capa=fotos[0]||"";
-
     return `
       <div class="produto">
         ${capa?`<img src="${capa}" onclick="abrirImagem('${p.id}')">`:""}
@@ -211,28 +235,22 @@ async function carregarProdutos(){
   }).join("");
 }
 
-// MODAL IMAGEM (clicar passa a foto)
+// IMAGENS
 function abrirImagem(id){
-  fotosAtuais = fotosProduto[id] || [];
+  fotosAtuais=fotosProduto[id]||[];
   if(!fotosAtuais.length) return;
-
-  indiceFoto = 0;
-  imgZoom.src = fotosAtuais[indiceFoto];
+  indiceFoto=0;
+  imgZoom.src=fotosAtuais[indiceFoto];
   modalImagem.style.display="flex";
 }
-
 imgZoom.onclick=function(e){
   e.stopPropagation();
-  if(!fotosAtuais.length) return;
   indiceFoto=(indiceFoto+1)%fotosAtuais.length;
   imgZoom.src=fotosAtuais[indiceFoto];
-};
-
-function fecharImagem(){
-  modalImagem.style.display="none";
 }
+function fecharImagem(){ modalImagem.style.display="none"; }
 
-// CARRINHO (igual ao seu)
+// CARRINHO
 function atualizarBadge(){
   const total=carrinho.reduce((s,p)=>s+p.qtd,0);
   badgeCarrinho.innerText=total;
@@ -241,8 +259,26 @@ function atualizarBadge(){
 function addCarrinho(p){
   const i=carrinho.find(x=>x.id===p.id);
   i?i.qtd++:carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1});
+  salvar();
+}
+function salvar(){
   localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
   atualizarBadge();
+}
+function abrirCarrinho(){ renderCarrinho(); carrinhoModal.style.display="block"; }
+function fecharCarrinho(){ carrinhoModal.style.display="none"; }
+function renderCarrinho(){
+  itens.innerHTML="";
+  let total=0;
+  carrinho.forEach((p,i)=>{
+    total+=p.preco*p.qtd;
+    itens.innerHTML+=`
+      <div class="item">
+        <div>${p.nome} x${p.qtd}</div>
+        <div>R$ ${(p.preco*p.qtd).toFixed(2)}</div>
+      </div>`;
+  });
+  itens.innerHTML+=`<b>Total: R$ ${total.toFixed(2)}</b>`;
 }
 
 atualizarBadge();
