@@ -60,22 +60,12 @@ body{
   border-radius:10px;
   overflow:hidden;
 }
-
-/* GALERIA */
-.galeria{
-  display:flex;
-  overflow-x:auto;
-  scroll-snap-type:x mandatory;
-}
-.galeria img{
-  min-width:100%;
+.produto img{
+  width:100%;
   height:90px;
   object-fit:cover;
   cursor:pointer;
-  scroll-snap-align:start;
 }
-
-/* INFO */
 .info{padding:6px;text-align:center}
 .info h4{font-size:12px;margin:2px 0}
 .preco{color:var(--primaria);font-weight:700;font-size:13px}
@@ -127,8 +117,18 @@ body{
 .item{
   display:flex;
   justify-content:space-between;
+  align-items:center;
   margin-bottom:8px;
 }
+.item button{
+  background:#334155;
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  padding:4px 8px;
+  cursor:pointer;
+}
+
 input,select,textarea{
   width:100%;
   margin-top:8px;
@@ -215,6 +215,7 @@ input,select,textarea{
   </div>
 </div>
 
+<!-- MODAL IMAGEM -->
 <div class="modal-imagem" id="modalImagem" onclick="fecharImagem()">
   <span>&times;</span>
   <img id="imgZoom">
@@ -233,13 +234,6 @@ const carrinhoKey="carrinho_"+app;
 let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
 let whatsapp="";
 
-/* URL PUBLICA DA FOTO */
-function urlFoto(path){
-  if(!path) return null;
-  if(path.startsWith("http")) return path;
-  return sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
-}
-
 /* CONFIG */
 (async()=>{
   const {data}=await sb.from("config_site").select("*").eq("app_id",app).maybeSingle();
@@ -257,40 +251,26 @@ function urlFoto(path){
 
 /* PRODUTOS */
 async function carregarProdutos(){
-  const {data}=await sb.from("produtos")
-    .select("*")
-    .eq("app_id",app)
-    .eq("ativo",true);
-
-  listaProdutos.innerHTML = data.map(p=>{
-    const imagens = Array.isArray(p.fotos)
-      ? p.fotos.map(urlFoto).filter(Boolean)
-      : [];
-
-    return `
-      <div class="produto">
-        <div class="galeria">
-          ${imagens.map(img =>
-            `<img src="${img}" onclick="abrirImagem('${img}')">`
-          ).join("")}
-        </div>
-        <div class="info">
-          <h4>${p.nome}</h4>
-          <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-          <button onclick='addCarrinho(${JSON.stringify(p)})'>+</button>
-        </div>
+  const {data}=await sb.from("produtos").select("*").eq("app_id",app).eq("ativo",true);
+  listaProdutos.innerHTML=data.map(p=>`
+    <div class="produto">
+      ${p.imagem?`<img src="${p.imagem}" onclick="abrirImagem('${p.imagem}')">`:""}
+      <div class="info">
+        <h4>${p.nome}</h4>
+        <div class="preco">R$ ${p.preco.toFixed(2)}</div>
+        <button onclick='addCarrinho(${JSON.stringify(p)})'>+</button>
       </div>
-    `;
-  }).join("");
+    </div>
+  `).join("");
 }
 
 /* IMAGEM ZOOM */
 function abrirImagem(src){
   imgZoom.src = src;
-  modalImagem.style.display="flex";
+  modalImagem.style.display = "flex";
 }
 function fecharImagem(){
-  modalImagem.style.display="none";
+  modalImagem.style.display = "none";
 }
 
 /* CARRINHO */
@@ -299,15 +279,29 @@ function atualizarBadge(){
   badgeCarrinho.innerText=total;
   badgeCarrinho.style.display=total?"block":"none";
 }
+
 function addCarrinho(p){
   const i=carrinho.find(x=>x.id===p.id);
   i?i.qtd++:carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1});
   salvar();
 }
+
+function diminuirIndex(i){
+  if(!carrinho[i]) return;
+
+  carrinho[i].qtd--;
+  if(carrinho[i].qtd<=0){
+    carrinho.splice(i,1);
+  }
+  salvar();
+  renderCarrinho();
+}
+
 function salvar(){
   localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
   atualizarBadge();
 }
+
 function abrirCarrinho(){
   renderCarrinho();
   carrinhoModal.style.display="block";
@@ -315,18 +309,25 @@ function abrirCarrinho(){
 function fecharCarrinho(){
   carrinhoModal.style.display="none";
 }
+
 function renderCarrinho(){
   itens.innerHTML="";
   let total=0;
-  carrinho.forEach(p=>{
+
+  carrinho.forEach((p,i)=>{
     const sub=p.preco*p.qtd;
     total+=sub;
+
     itens.innerHTML+=`
       <div class="item">
-        ${p.nome} x${p.qtd}
-        <span>R$ ${sub.toFixed(2)}</span>
+        <div>${p.nome} x${p.qtd}</div>
+        <div>
+          <button onclick="diminuirIndex(${i})">−</button>
+          <span>R$ ${sub.toFixed(2)}</span>
+        </div>
       </div>`;
   });
+
   itens.innerHTML+=`<b>Total: R$ ${total.toFixed(2)}</b>`;
 }
 
