@@ -108,9 +108,13 @@ fotoInput.onchange = () => {
 
   fotosTemp.push(file);
 
-  const img = document.createElement("img");
-  img.src = URL.createObjectURL(file);
-  preview.appendChild(img);
+  // atualizar preview
+  preview.innerHTML = "";
+  fotosTemp.forEach(f => {
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
+    preview.appendChild(img);
+  });
 
   fotoInput.value = "";
 };
@@ -132,27 +136,19 @@ function toggle(){
 async function cadastrar(){
   if(!nome.value) return alert("Nome obrigatório");
 
-  let fotos = [];
+  let fotosURLs = [];
 
   for(const file of fotosTemp){
     const ext = file.name.split(".").pop();
     const path = `${admin.app_id}/${crypto.randomUUID()}.${ext}`;
 
-    await supabaseClient.storage
-      .from("produtos")
-      .upload(path, file);
-
-    fotos.push(
-      supabaseClient.storage
-        .from("produtos")
-        .getPublicUrl(path).data.publicUrl
-    );
+    await supabaseClient.storage.from("produtos").upload(path, file);
+    const publicUrl = supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
+    fotosURLs.push(publicUrl);
   }
 
-  const imagem =
-    fotos.length === 1 ? fotos[0] :
-    fotos.length > 1 ? JSON.stringify(fotos) :
-    null;
+  // sempre salvar como array, mesmo 1 foto
+  const imagem = fotosURLs.length ? JSON.stringify(fotosURLs) : null;
 
   await supabaseClient.from("produtos").insert({
     app_id: admin.app_id,
@@ -173,18 +169,17 @@ async function cadastrar(){
 
 // ===== LISTAR =====
 async function carregar(){
-  const { data } = await supabaseClient
-    .from("produtos")
+  const { data } = await supabaseClient.from("produtos")
     .select("*")
     .eq("app_id", admin.app_id)
     .order("nome");
 
   lista.innerHTML = "";
 
-  data.forEach(p=>{
+  data.forEach(p => {
     let fotos = [];
     if(p.imagem){
-      try{ fotos = p.imagem.startsWith("[") ? JSON.parse(p.imagem) : [p.imagem]; }catch{ fotos = [p.imagem]; }
+      try{ fotos = JSON.parse(p.imagem); } catch{ fotos = [p.imagem]; }
     }
 
     lista.innerHTML += `
@@ -192,7 +187,7 @@ async function carregar(){
         <b>${p.nome}</b><br>
         Estoque: <b>${p.estoque}</b><br>
         R$ ${Number(p.preco).toFixed(2)}<br>
-        ${fotos.map(f=>`<img src="${f}">`).join("")}
+        ${fotos.map(f => `<img src="${f}">`).join("")}
 
         <input type="number" id="rep-${p.id}" placeholder="Qtd repor">
         <button class="repor" onclick="repor('${p.id}',${p.estoque})">➕ Repor</button>
