@@ -46,18 +46,23 @@ button{font-weight:bold;cursor:pointer}
 
 <div class="container">
 
+<!-- CADASTRO -->
 <div class="box">
   <h3>➕ Cadastrar Produto</h3>
 
   <input id="nome" placeholder="Nome">
   <input id="codigo" placeholder="Código de barras">
   <input id="preco" type="number" step="0.01" placeholder="Preço">
-  <input id="estoque" type="number" placeholder="Estoque">
+  <input id="estoque" type="number" placeholder="Estoque inicial">
 
   <div class="preview" id="preview"></div>
 
-  <button class="btn" onclick="abrirCamera()">📷 Tirar foto (câmera)</button>
-  <button class="btn editar" onclick="abrirGaleria()">🖼️ Galeria (opcional)</button>
+  <!-- INPUTS REAIS (IMPORTANTE) -->
+  <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+  <input type="file" id="galeriaInput" accept="image/jpeg,image/png" multiple hidden>
+
+  <button class="btn" onclick="abrirCamera()">📷 Tirar foto</button>
+  <button class="btn editar" onclick="abrirGaleria()">🖼️ Galeria</button>
   <button class="btn" onclick="cadastrar()">Cadastrar</button>
 </div>
 
@@ -72,21 +77,11 @@ button{font-weight:bold;cursor:pointer}
 </div>
 
 <script>
-// ===== SESSÃO SEGURA (ANTI BUG CÂMERA MOBILE) =====
-let admin = null;
-try {
-  admin = JSON.parse(localStorage.getItem("admin_logado"));
-} catch(e){ admin = null; }
-
-// delay evita falso "sessão inválida" após câmera
+// ===== SESSÃO =====
+const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin || !admin.app_id){
-  setTimeout(()=>{
-    const retry = JSON.parse(localStorage.getItem("admin_logado"));
-    if(!retry || !retry.app_id){
-      alert("Sessão inválida, faça login novamente");
-      location.href = "login.html";
-    }
-  }, 300);
+  alert("Sessão inválida");
+  location.href="login.html";
 }
 
 // ===== SUPABASE =====
@@ -96,138 +91,132 @@ const sb = supabase.createClient(
 );
 
 // ===== FOTOS =====
-let fotosTemp = [];
+let fotosTemp=[];
 
-// input câmera (SEM capture = sem reload)
-const inputCamera = document.createElement("input");
-inputCamera.type = "file";
-inputCamera.accept = "image/*";
-inputCamera.style.display = "none";
+const cameraInput = document.getElementById("cameraInput");
+const galeriaInput = document.getElementById("galeriaInput");
 
-// input galeria
-const inputGaleria = document.createElement("input");
-inputGaleria.type = "file";
-inputGaleria.accept = "image/jpeg,image/png";
-inputGaleria.multiple = true;
-inputGaleria.style.display = "none";
-
-document.body.appendChild(inputCamera);
-document.body.appendChild(inputGaleria);
-
-// ===== PREVIEW =====
 function atualizarPreview(){
-  preview.innerHTML = "";
+  preview.innerHTML="";
   fotosTemp.forEach(f=>{
-    const img = document.createElement("img");
-    img.src = URL.createObjectURL(f);
+    const img=document.createElement("img");
+    img.src=URL.createObjectURL(f);
     preview.appendChild(img);
   });
 }
 
-// ===== ABRIR CÂMERA =====
 function abrirCamera(){
-  if(fotosTemp.length >= 5){
-    alert("Máximo de 5 fotos");
-    return;
-  }
-  inputCamera.click();
+  if(fotosTemp.length>=5) return alert("Máx. 5 fotos");
+  cameraInput.click();
 }
 
-// ===== ABRIR GALERIA =====
 function abrirGaleria(){
-  if(fotosTemp.length >= 5){
-    alert("Máximo de 5 fotos");
-    return;
-  }
-  inputGaleria.click();
+  if(fotosTemp.length>=5) return alert("Máx. 5 fotos");
+  galeriaInput.click();
 }
 
-// ===== CAPTURA =====
-inputCamera.onchange = ()=>{
-  const file = inputCamera.files[0];
-  if(!file) return;
-  fotosTemp.push(file);
-  atualizarPreview();
-  inputCamera.value = "";
+cameraInput.onchange=()=>{
+  if(cameraInput.files[0]){
+    fotosTemp.push(cameraInput.files[0]);
+    atualizarPreview();
+    cameraInput.value="";
+  }
 };
 
-inputGaleria.onchange = ()=>{
-  [...inputGaleria.files].forEach(file=>{
-    if(fotosTemp.length >= 5) return;
-    if(!["image/jpeg","image/png"].includes(file.type)){
-      alert("Formato não compatível");
-      return;
-    }
-    fotosTemp.push(file);
+galeriaInput.onchange=()=>{
+  [...galeriaInput.files].forEach(f=>{
+    if(fotosTemp.length<5) fotosTemp.push(f);
   });
   atualizarPreview();
-  inputGaleria.value = "";
+  galeriaInput.value="";
 };
 
 // ===== TOGGLE =====
 function toggle(){
-  box.style.display = box.style.display === "none" ? "block" : "none";
+  box.style.display = box.style.display==="none"?"block":"none";
 }
 
 // ===== CADASTRAR =====
 async function cadastrar(){
   if(!nome.value) return alert("Nome obrigatório");
 
-  let fotosURLs = [];
+  let fotosURLs=[];
 
   for(const file of fotosTemp){
-    const ext = file.name.split(".").pop();
-    const path = `${admin.app_id}/${crypto.randomUUID()}.${ext}`;
+    const ext=file.name.split(".").pop();
+    const path=`${admin.app_id}/${crypto.randomUUID()}.${ext}`;
 
-    await sb.storage.from("produtos").upload(path, file, { upsert:false });
-    const { data } = sb.storage.from("produtos").getPublicUrl(path);
+    await sb.storage.from("produtos").upload(path,file);
+    const {data}=sb.storage.from("produtos").getPublicUrl(path);
     fotosURLs.push(data.publicUrl);
   }
 
   await sb.from("produtos").insert({
-    app_id: admin.app_id,
-    nome: nome.value,
-    codigo_barra: codigo.value,
-    preco: Number(preco.value),
-    estoque: Number(estoque.value),
-    imagem: JSON.stringify(fotosURLs)
+    app_id:admin.app_id,
+    nome:nome.value,
+    codigo_barra:codigo.value,
+    preco:Number(preco.value),
+    estoque:Number(estoque.value),
+    imagem:JSON.stringify(fotosURLs)
   });
 
-  nome.value = codigo.value = preco.value = estoque.value = "";
-  fotosTemp = [];
-  preview.innerHTML = "";
+  nome.value=codigo.value=preco.value=estoque.value="";
+  fotosTemp=[];
+  preview.innerHTML="";
   carregar();
 }
 
-// ===== LISTAR =====
+// ===== LISTAR / EDITAR / REPOR =====
 async function carregar(){
-  const { data } = await sb.from("produtos")
+  const {data}=await sb.from("produtos")
     .select("*")
-    .eq("app_id", admin.app_id)
+    .eq("app_id",admin.app_id)
     .order("nome");
 
-  lista.innerHTML = "";
+  lista.innerHTML="";
 
   data.forEach(p=>{
-    let fotos = [];
-    try { fotos = JSON.parse(p.imagem || "[]"); } catch {}
+    let fotos=[];
+    try{fotos=JSON.parse(p.imagem||"[]")}catch{}
 
-    lista.innerHTML += `
+    lista.innerHTML+=`
       <div class="produto">
         <b>${p.nome}</b><br>
         Estoque: ${p.estoque}<br>
         R$ ${Number(p.preco).toFixed(2)}<br>
         ${fotos.map(f=>`<img src="${f}">`).join("")}
+
+        <button class="repor" onclick="repor('${p.id}',${p.estoque})">➕ Repor</button>
+        <button class="editar" onclick="editar('${p.id}',${p.estoque},${p.preco})">✏️ Editar</button>
         <button class="excluir" onclick="excluir('${p.id}')">❌ Excluir</button>
       </div>
     `;
   });
 }
 
-// ===== EXCLUIR =====
+async function repor(id, atual){
+  const qtd = Number(prompt("Quantidade a adicionar:",0));
+  if(!qtd) return;
+  await sb.from("produtos")
+    .update({estoque:atual+qtd})
+    .eq("id",id);
+  carregar();
+}
+
+async function editar(id, estoqueAtual, precoAtual){
+  const novoEstoque = Number(prompt("Novo estoque:",estoqueAtual));
+  const novoPreco = Number(prompt("Novo preço:",precoAtual));
+  if(isNaN(novoEstoque)||isNaN(novoPreco)) return;
+
+  await sb.from("produtos")
+    .update({estoque:novoEstoque,preco:novoPreco})
+    .eq("id",id);
+  carregar();
+}
+
 async function excluir(id){
   if(!confirm("Excluir produto?")) return;
-  await sb.from("produtos").delete().eq("id", id);
+  await sb.from("produtos").delete().eq("id",id);
   carregar();
 }
 
