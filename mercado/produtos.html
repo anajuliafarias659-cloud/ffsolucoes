@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>Produtos</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -47,7 +46,6 @@ button{font-weight:bold;cursor:pointer}
 
 <div class="container">
 
-<!-- CADASTRO -->
 <div class="box">
   <h3>➕ Cadastrar Produto</h3>
 
@@ -73,61 +71,59 @@ button{font-weight:bold;cursor:pointer}
 </div>
 
 <script>
-// ===== SESSÃO ESTÁVEL =====
-const admin = JSON.parse(localStorage.getItem("admin_logado")) || JSON.parse(sessionStorage.getItem("admin_logado"));
+// ===== SESSÃO SEGURA =====
+let admin = null;
+try{
+  admin = JSON.parse(localStorage.getItem("admin_logado")) 
+       || JSON.parse(sessionStorage.getItem("admin_logado"));
+}catch(e){ admin=null; }
+
 if(!admin || !admin.app_id){
-  alert("Sessão inválida");
+  alert("Sessão inválida, faça login novamente");
   location.href="login.html";
 }
 
 // ===== SUPABASE =====
-const supabaseClient = supabase.createClient(
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// ===== FOTOS ESTÁVEL =====
+// ===== FOTOS =====
 let fotosTemp = [];
 
-// input único invisível
 const fotoInput = document.createElement("input");
-fotoInput.type = "file";
-fotoInput.accept = "image/*";
-fotoInput.capture = "environment";
-fotoInput.style.display = "none";
+fotoInput.type="file";
+fotoInput.accept="image/*";
+fotoInput.multiple=true;
+fotoInput.style.display="none";
 document.body.appendChild(fotoInput);
 
 fotoInput.onchange = () => {
-  const file = fotoInput.files[0];
-  if (!file) return;
-  if (fotosTemp.length >= 5) {
-    alert("Máximo de 5 fotos");
-    fotoInput.value = "";
-    return;
-  }
+  [...fotoInput.files].forEach(file=>{
+    if(fotosTemp.length>=5) return;
+    fotosTemp.push(file);
+  });
 
-  fotosTemp.push(file);
-
-  // atualizar preview
-  preview.innerHTML = "";
-  fotosTemp.forEach(f => {
-    const img = document.createElement("img");
-    img.src = URL.createObjectURL(f);
+  preview.innerHTML="";
+  fotosTemp.forEach(f=>{
+    const img=document.createElement("img");
+    img.src=URL.createObjectURL(f);
     preview.appendChild(img);
   });
 
-  fotoInput.value = "";
+  fotoInput.value="";
 };
 
-function abrirCamera() {
-  if (fotosTemp.length >= 5) {
+function abrirCamera(){
+  if(fotosTemp.length>=5){
     alert("Máximo de 5 fotos");
     return;
   }
   fotoInput.click();
 }
 
-// ===== TOGGLE LISTA =====
+// ===== TOGGLE =====
 function toggle(){
   box.style.display = box.style.display==="none"?"block":"none";
 }
@@ -136,91 +132,60 @@ function toggle(){
 async function cadastrar(){
   if(!nome.value) return alert("Nome obrigatório");
 
-  let fotosURLs = [];
+  let fotosURLs=[];
 
   for(const file of fotosTemp){
-    const ext = file.name.split(".").pop();
-    const path = `${admin.app_id}/${crypto.randomUUID()}.${ext}`;
+    const ext=file.name.split(".").pop();
+    const path=`${admin.app_id}/${crypto.randomUUID()}.${ext}`;
 
-    await supabaseClient.storage.from("produtos").upload(path, file);
-    const publicUrl = supabaseClient.storage.from("produtos").getPublicUrl(path).data.publicUrl;
-    fotosURLs.push(publicUrl);
+    await sb.storage.from("produtos").upload(path,file,{upsert:false});
+    const {data}=sb.storage.from("produtos").getPublicUrl(path);
+    fotosURLs.push(data.publicUrl);
   }
 
-  // sempre salvar como array, mesmo 1 foto
-  const imagem = fotosURLs.length ? JSON.stringify(fotosURLs) : null;
-
-  await supabaseClient.from("produtos").insert({
-    app_id: admin.app_id,
-    nome: nome.value,
-    codigo_barra: codigo.value,
-    preco: Number(preco.value),
-    estoque: Number(estoque.value),
-    imagem
+  await sb.from("produtos").insert({
+    app_id:admin.app_id,
+    nome:nome.value,
+    codigo_barra:codigo.value,
+    preco:Number(preco.value),
+    estoque:Number(estoque.value),
+    imagem:JSON.stringify(fotosURLs)
   });
 
-  // reset
-  nome.value = codigo.value = preco.value = estoque.value = "";
-  fotosTemp = [];
-  preview.innerHTML = "";
-
+  nome.value=codigo.value=preco.value=estoque.value="";
+  fotosTemp=[]; preview.innerHTML="";
   carregar();
 }
 
 // ===== LISTAR =====
 async function carregar(){
-  const { data } = await supabaseClient.from("produtos")
+  const {data}=await sb.from("produtos")
     .select("*")
-    .eq("app_id", admin.app_id)
+    .eq("app_id",admin.app_id)
     .order("nome");
 
-  lista.innerHTML = "";
+  lista.innerHTML="";
 
-  data.forEach(p => {
-    let fotos = [];
-    if(p.imagem){
-      try{ fotos = JSON.parse(p.imagem); } catch{ fotos = [p.imagem]; }
-    }
+  data.forEach(p=>{
+    let fotos=[];
+    try{ fotos=JSON.parse(p.imagem||"[]"); }catch{}
 
-    lista.innerHTML += `
+    lista.innerHTML+=`
       <div class="produto">
         <b>${p.nome}</b><br>
-        Estoque: <b>${p.estoque}</b><br>
+        Estoque: ${p.estoque}<br>
         R$ ${Number(p.preco).toFixed(2)}<br>
-        ${fotos.map(f => `<img src="${f}">`).join("")}
-
-        <input type="number" id="rep-${p.id}" placeholder="Qtd repor">
-        <button class="repor" onclick="repor('${p.id}',${p.estoque})">➕ Repor</button>
-
-        <button class="editar" onclick="editar('${p.id}','${p.nome}','${p.codigo_barra}','${p.preco}')">✏️ Editar</button>
+        ${fotos.map(f=>`<img src="${f}">`).join("")}
         <button class="excluir" onclick="excluir('${p.id}')">❌ Excluir</button>
       </div>
     `;
   });
 }
 
-// ===== REPOR =====
-async function repor(id, atual){
-  const qtd = Number(document.getElementById(`rep-${id}`).value);
-  if(qtd<=0) return alert("Qtd inválida");
-
-  await supabaseClient.from("produtos").update({estoque: atual+qtd}).eq("id",id);
-  carregar();
-}
-
-// ===== EDITAR =====
-async function editar(id,n,c,p){
-  const nomeN = prompt("Nome",n); if(!nomeN) return;
-  const codN = prompt("Código",c);
-  const precoN = prompt("Preço",p);
-  await supabaseClient.from("produtos").update({nome:nomeN,codigo_barra:codN,preco:Number(precoN)}).eq("id",id);
-  carregar();
-}
-
 // ===== EXCLUIR =====
 async function excluir(id){
-  if(!confirm("Deseja realmente excluir?")) return;
-  await supabaseClient.from("produtos").delete().eq("id",id);
+  if(!confirm("Excluir produto?")) return;
+  await sb.from("produtos").delete().eq("id",id);
   carregar();
 }
 
