@@ -46,7 +46,6 @@ button{font-weight:bold;cursor:pointer}
 
 <div class="container">
 
-<!-- CADASTRO -->
 <div class="box">
   <h3>➕ Cadastrar Produto</h3>
 
@@ -73,15 +72,21 @@ button{font-weight:bold;cursor:pointer}
 </div>
 
 <script>
-// ===== SESSÃO SEGURA (FIX MOBILE) =====
-let admin=null;
-try{
+// ===== SESSÃO SEGURA (ANTI BUG CÂMERA MOBILE) =====
+let admin = null;
+try {
   admin = JSON.parse(localStorage.getItem("admin_logado"));
-}catch(e){admin=null;}
+} catch(e){ admin = null; }
 
+// delay evita falso "sessão inválida" após câmera
 if(!admin || !admin.app_id){
-  alert("Sessão inválida, faça login novamente");
-  location.href="login.html";
+  setTimeout(()=>{
+    const retry = JSON.parse(localStorage.getItem("admin_logado"));
+    if(!retry || !retry.app_id){
+      alert("Sessão inválida, faça login novamente");
+      location.href = "login.html";
+    }
+  }, 300);
 }
 
 // ===== SUPABASE =====
@@ -91,38 +96,37 @@ const sb = supabase.createClient(
 );
 
 // ===== FOTOS =====
-let fotosTemp=[];
+let fotosTemp = [];
 
-// input câmera
-const inputCamera=document.createElement("input");
-inputCamera.type="file";
-inputCamera.accept="image/*";
-inputCamera.capture="environment";
-inputCamera.style.display="none";
+// input câmera (SEM capture = sem reload)
+const inputCamera = document.createElement("input");
+inputCamera.type = "file";
+inputCamera.accept = "image/*";
+inputCamera.style.display = "none";
 
 // input galeria
-const inputGaleria=document.createElement("input");
-inputGaleria.type="file";
-inputGaleria.accept="image/jpeg,image/png";
-inputGaleria.multiple=true;
-inputGaleria.style.display="none";
+const inputGaleria = document.createElement("input");
+inputGaleria.type = "file";
+inputGaleria.accept = "image/jpeg,image/png";
+inputGaleria.multiple = true;
+inputGaleria.style.display = "none";
 
 document.body.appendChild(inputCamera);
 document.body.appendChild(inputGaleria);
 
 // ===== PREVIEW =====
 function atualizarPreview(){
-  preview.innerHTML="";
+  preview.innerHTML = "";
   fotosTemp.forEach(f=>{
-    const img=document.createElement("img");
-    img.src=URL.createObjectURL(f);
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
     preview.appendChild(img);
   });
 }
 
 // ===== ABRIR CÂMERA =====
 function abrirCamera(){
-  if(fotosTemp.length>=5){
+  if(fotosTemp.length >= 5){
     alert("Máximo de 5 fotos");
     return;
   }
@@ -131,85 +135,84 @@ function abrirCamera(){
 
 // ===== ABRIR GALERIA =====
 function abrirGaleria(){
-  if(fotosTemp.length>=5){
+  if(fotosTemp.length >= 5){
     alert("Máximo de 5 fotos");
     return;
   }
   inputGaleria.click();
 }
 
-// ===== CAPTURA CÂMERA =====
-inputCamera.onchange=()=>{
-  const file=inputCamera.files[0];
+// ===== CAPTURA =====
+inputCamera.onchange = ()=>{
+  const file = inputCamera.files[0];
   if(!file) return;
   fotosTemp.push(file);
   atualizarPreview();
-  inputCamera.value="";
+  inputCamera.value = "";
 };
 
-// ===== GALERIA =====
-inputGaleria.onchange=()=>{
+inputGaleria.onchange = ()=>{
   [...inputGaleria.files].forEach(file=>{
-    if(fotosTemp.length>=5) return;
+    if(fotosTemp.length >= 5) return;
     if(!["image/jpeg","image/png"].includes(file.type)){
-      alert("Formato não compatível. Use JPEG ou PNG.");
+      alert("Formato não compatível");
       return;
     }
     fotosTemp.push(file);
   });
   atualizarPreview();
-  inputGaleria.value="";
+  inputGaleria.value = "";
 };
 
 // ===== TOGGLE =====
 function toggle(){
-  box.style.display = box.style.display==="none"?"block":"none";
+  box.style.display = box.style.display === "none" ? "block" : "none";
 }
 
 // ===== CADASTRAR =====
 async function cadastrar(){
   if(!nome.value) return alert("Nome obrigatório");
 
-  let fotosURLs=[];
+  let fotosURLs = [];
 
   for(const file of fotosTemp){
-    const ext=file.name.split(".").pop();
-    const path=`${admin.app_id}/${crypto.randomUUID()}.${ext}`;
+    const ext = file.name.split(".").pop();
+    const path = `${admin.app_id}/${crypto.randomUUID()}.${ext}`;
 
-    await sb.storage.from("produtos").upload(path,file,{upsert:false});
-    const {data}=sb.storage.from("produtos").getPublicUrl(path);
+    await sb.storage.from("produtos").upload(path, file, { upsert:false });
+    const { data } = sb.storage.from("produtos").getPublicUrl(path);
     fotosURLs.push(data.publicUrl);
   }
 
   await sb.from("produtos").insert({
-    app_id:admin.app_id,
-    nome:nome.value,
-    codigo_barra:codigo.value,
-    preco:Number(preco.value),
-    estoque:Number(estoque.value),
-    imagem:JSON.stringify(fotosURLs)
+    app_id: admin.app_id,
+    nome: nome.value,
+    codigo_barra: codigo.value,
+    preco: Number(preco.value),
+    estoque: Number(estoque.value),
+    imagem: JSON.stringify(fotosURLs)
   });
 
-  nome.value=codigo.value=preco.value=estoque.value="";
-  fotosTemp=[];
-  preview.innerHTML="";
+  nome.value = codigo.value = preco.value = estoque.value = "";
+  fotosTemp = [];
+  preview.innerHTML = "";
   carregar();
 }
 
 // ===== LISTAR =====
 async function carregar(){
-  const {data}=await sb.from("produtos")
+  const { data } = await sb.from("produtos")
     .select("*")
-    .eq("app_id",admin.app_id)
+    .eq("app_id", admin.app_id)
     .order("nome");
 
-  lista.innerHTML="";
+  lista.innerHTML = "";
 
   data.forEach(p=>{
-    let fotos=[];
-    try{fotos=JSON.parse(p.imagem||"[]")}catch{}
+    let fotos = [];
+    try { fotos = JSON.parse(p.imagem || "[]"); } catch {}
 
-    lista.innerHTML+=`
+    lista.innerHTML += `
       <div class="produto">
         <b>${p.nome}</b><br>
         Estoque: ${p.estoque}<br>
@@ -224,7 +227,7 @@ async function carregar(){
 // ===== EXCLUIR =====
 async function excluir(id){
   if(!confirm("Excluir produto?")) return;
-  await sb.from("produtos").delete().eq("id",id);
+  await sb.from("produtos").delete().eq("id", id);
   carregar();
 }
 
