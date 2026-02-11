@@ -88,9 +88,7 @@ small{opacity:.7}
   flex-wrap:wrap;
 }
 
-.preview-item{
-  position:relative;
-}
+.preview-item{position:relative}
 
 .preview-item img{
   width:90px;
@@ -125,8 +123,6 @@ small{opacity:.7}
 <div class="box">
   <h2>➕ Cadastrar / Editar Roupa</h2>
 
-  <input type="hidden" id="produto_id">
-
   <input id="nome" placeholder="Nome da peça">
   <input id="preco" type="number" step="0.01" placeholder="Preço">
   <input id="estoque" type="number" placeholder="Estoque">
@@ -140,7 +136,6 @@ small{opacity:.7}
     <option>Outros</option>
   </select>
 
-  <!-- CAMERA -->
   <input id="camera" type="file" accept="image/*" capture="environment" hidden>
   <button type="button" onclick="tirarFoto()">📷 Tirar foto (até 3)</button>
 
@@ -157,20 +152,27 @@ small{opacity:.7}
 </div>
 
 <script>
+/* ===== SESSÃO ===== */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if(!admin){location.replace("../auth/login.html");throw""}
 
+/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* ===== VARIÁVEIS ===== */
 const camera = document.getElementById("camera");
 const btnSalvar = document.getElementById("btnSalvar");
 
 let fotosTemp = [];
 let fotosExistentes = [];
 const LIMITE = 3;
+
+/* CONTROLE DE EDIÇÃO (ANTI DUPLICAÇÃO) */
+let editando = false;
+let produtoEditandoId = null;
 
 /* ===== CAMERA ===== */
 function tirarFoto(){
@@ -234,14 +236,14 @@ async function salvar(){
     imagens.push(sb.storage.from("produtos").getPublicUrl(path).data.publicUrl);
   }
 
-  if(produto_id.value){
+  if(editando && produtoEditandoId){
     await sb.from("produtos").update({
       nome:nome.value,
       preco:Number(preco.value),
       estoque:Number(estoque.value||0),
       categoria:categoria.value,
       imagens:JSON.stringify(imagens)
-    }).eq("id",produto_id.value);
+    }).eq("id",produtoEditandoId);
   }else{
     await sb.from("produtos").insert({
       app_id:admin.app_id,
@@ -261,12 +263,17 @@ async function salvar(){
 
 /* ===== EDITAR ===== */
 function editar(p){
-  produto_id.value=p.id;
+  editando = true;
+  produtoEditandoId = p.id;
+
   nome.value=p.nome;
   preco.value=p.preco;
   estoque.value=p.estoque;
   categoria.value=p.categoria;
-  fotosExistentes=JSON.parse(p.imagens||"[]");
+
+  try{ fotosExistentes=JSON.parse(p.imagens||"[]"); }
+  catch{ fotosExistentes=[]; }
+
   fotosTemp=[];
   atualizarPreview();
   btnSalvar.innerText="💾 Salvar alterações";
@@ -297,8 +304,10 @@ async function excluir(id){
   }
 }
 
+/* ===== LIMPAR ===== */
 function limpar(){
-  produto_id.value="";
+  editando=false;
+  produtoEditandoId=null;
   nome.value=preco.value=estoque.value="";
   fotosTemp=[];fotosExistentes=[];
   preview.innerHTML="";
