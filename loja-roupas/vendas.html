@@ -10,14 +10,34 @@
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 :root{--p:#22c55e;--b:#0f172a;--c:#0f172a}
+
 .banner{height:260px;background:var(--b)}
 .banner img{width:100%;height:100%;object-fit:cover}
+
 .topo{text-align:center;padding:24px;background:var(--b)}
+
 .container{padding:20px;max-width:1200px;margin:auto}
 .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
-.card{background:var(--c);padding:12px;border-radius:14px;text-align:center}
-.card img{width:100%;height:160px;object-fit:cover;border-radius:10px}
-.botao{margin-top:8px;width:100%;padding:10px;border:none;border-radius:10px;background:var(--p);font-weight:bold}
+
+.card{
+  background:var(--c);
+  padding:12px;
+  border-radius:14px;
+  text-align:center
+}
+.card img{
+  width:100%;
+  height:160px;
+  object-fit:cover;
+  border-radius:10px;
+  cursor:pointer
+}
+
+.botao{
+  margin-top:8px;width:100%;padding:10px;
+  border:none;border-radius:10px;
+  background:var(--p);font-weight:bold
+}
 
 #carrinhoBtn{
   position:fixed;bottom:20px;right:20px;
@@ -34,6 +54,31 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .modal-content{background:#020617;padding:20px;border-radius:16px;width:420px;max-width:95%}
 .item{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .item button{background:#ef4444;color:#fff;border:none;border-radius:6px;padding:2px 8px}
+
+/* ===== MODAL IMAGEM ===== */
+.modal-imagem{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.9);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:2000
+}
+.modal-imagem img{
+  max-width:95%;
+  max-height:95%;
+  border-radius:14px;
+  cursor:pointer
+}
+.modal-imagem span{
+  position:absolute;
+  top:16px;
+  right:16px;
+  font-size:28px;
+  cursor:pointer;
+  color:#fff
+}
 
 .form-finalizacao{
   background:linear-gradient(180deg,#dcfce7,#bbf7d0);
@@ -63,42 +108,20 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 
 <button id="carrinhoBtn" onclick="abrirCarrinho()">🛒 <span id="badge">0</span></button>
 
+<!-- ===== MODAL CARRINHO ===== -->
 <div id="modal" class="modal">
   <div class="modal-content">
     <h3>Carrinho</h3>
     <div id="listaCarrinho"></div>
     <p><b>Total:</b> R$ <span id="total">0.00</span></p>
-
-    <div class="form-finalizacao">
-      <input id="cliNome" placeholder="Nome completo">
-      <input id="cliCpf" placeholder="CPF">
-      <input id="cliEndereco" placeholder="Endereço">
-      <input id="cliReferencia" placeholder="Referência">
-
-      <button class="botao" type="button" onclick="enviarLocalizacao()">
-        📍 Usar minha localização
-      </button>
-
-      <select id="pagamento" onchange="troco()">
-        <option>PIX</option>
-        <option>Cartão</option>
-        <option>Dinheiro</option>
-      </select>
-
-      <div id="trocoDiv" style="display:none">
-        <select id="precisaTroco" onchange="mostrarCampoTroco()">
-          <option value="">Vai precisar de troco?</option>
-          <option value="nao">Não</option>
-          <option value="sim">Sim</option>
-        </select>
-        <input id="trocoValor" placeholder="Troco para quanto" style="display:none">
-      </div>
-
-      <button class="botao" onclick="finalizar()">💬 Enviar pedido no WhatsApp</button>
-    </div>
-
     <button class="botao" style="background:red" onclick="fecharCarrinho()">Fechar</button>
   </div>
+</div>
+
+<!-- ===== MODAL IMAGEM ===== -->
+<div class="modal-imagem" id="modalImagem" onclick="fecharImagem()">
+  <span>&times;</span>
+  <img id="imgZoom">
 </div>
 
 <script>
@@ -109,13 +132,14 @@ const sb=supabase.createClient(
 
 const params=new URLSearchParams(location.search);
 const APP_ID=params.get("app")||localStorage.getItem("APP_ID");
-if(!APP_ID){document.body.innerHTML="Link inválido";throw new Error();}
+if(!APP_ID){document.body.innerHTML="Link inválido";throw""}
 localStorage.setItem("APP_ID",APP_ID);
 
 let carrinho=JSON.parse(localStorage.getItem("carrinho_"+APP_ID))||[];
-let CLIENTE=JSON.parse(localStorage.getItem("cliente_"+APP_ID))||{};
 
 let WHATS="",NOME="";
+const fotosProduto={};
+let fotosAtuais=[],indice=0;
 
 async function init(){
   const {data:cfg}=await sb.from("config_site").select("*").eq("app_id",APP_ID).single();
@@ -127,48 +151,64 @@ async function init(){
 
   const {data}=await sb.from("produtos").select("*").eq("ativo",true).eq("app_id",APP_ID);
 
-  produtos.innerHTML=data.map(p=>`
-    <div class="card">
-      ${p.imagem?`<img src="${p.imagem}">`:""}
-      <b>${p.nome}</b><br>
-      R$ ${p.preco.toFixed(2)}
-      <button class="botao" onclick='add(${JSON.stringify(p)})'>Adicionar</button>
-    </div>
-  `).join("");
+  produtos.innerHTML=data.map(p=>{
+    let fotos=[];
+    try{fotos=JSON.parse(p.imagem)}catch{fotos=p.imagem?[p.imagem]:[]}
+    fotosProduto[p.id]=fotos;
+
+    return `
+      <div class="card">
+        ${fotos[0]?`<img src="${fotos[0]}" onclick="abrirImagem('${p.id}')">`:""}
+        <b>${p.nome}</b><br>
+        R$ ${p.preco.toFixed(2)}
+        <button class="botao" onclick='add(${JSON.stringify(p)})'>Adicionar</button>
+      </div>`;
+  }).join("");
 
   atualizarBadge();
 }
 
+/* ===== GALERIA ===== */
+function abrirImagem(id){
+  fotosAtuais=fotosProduto[id];
+  indice=0;
+  imgZoom.src=fotosAtuais[0];
+  modalImagem.style.display="flex";
+}
+imgZoom.onclick=e=>{
+  e.stopPropagation();
+  indice=(indice+1)%fotosAtuais.length;
+  imgZoom.src=fotosAtuais[indice];
+}
+function fecharImagem(){
+  modalImagem.style.display="none";
+  imgZoom.src="";
+}
+
+/* ===== CARRINHO ===== */
 function add(p){
   const it=carrinho.find(i=>i.id==p.id);
   it?it.qtd++:carrinho.push({...p,qtd:1});
   salvar(); atualizarBadge();
 }
-
 function diminuir(i){
   carrinho[i].qtd--;
   if(carrinho[i].qtd<=0) carrinho.splice(i,1);
   salvar(); atualizarBadge(); renderCarrinho();
 }
-
 function salvar(){
   localStorage.setItem("carrinho_"+APP_ID,JSON.stringify(carrinho));
 }
-
 function atualizarBadge(){
   const t=carrinho.reduce((s,i)=>s+i.qtd,0);
   badge.innerText=t;
   badge.style.display=t?"block":"none";
 }
-
 function abrirCarrinho(){
   modal.style.display="flex";
-  carregarCliente();
   renderCarrinho();
 }
-
 function fecharCarrinho(){modal.style.display="none"}
-
 function renderCarrinho(){
   let s=0;
   listaCarrinho.innerHTML=carrinho.map((i,idx)=>{
@@ -176,64 +216,6 @@ function renderCarrinho(){
     return `<div class="item">${i.nome} x${i.qtd} <button onclick="diminuir(${idx})">−</button></div>`;
   }).join("");
   total.innerText=s.toFixed(2);
-}
-
-function carregarCliente(){
-  if(!CLIENTE) return;
-  cliNome.value=CLIENTE.nome||"";
-  cliCpf.value=CLIENTE.cpf||"";
-  cliEndereco.value=CLIENTE.endereco||"";
-  cliReferencia.value=CLIENTE.referencia||"";
-}
-
-function troco(){
-  trocoDiv.style.display=pagamento.value==="Dinheiro"?"block":"none";
-  precisaTroco.value=""; trocoValor.value=""; trocoValor.style.display="none";
-}
-
-function mostrarCampoTroco(){
-  trocoValor.style.display=precisaTroco.value==="sim"?"block":"none";
-}
-
-function enviarLocalizacao(){
-  navigator.geolocation.getCurrentPosition(pos=>{
-    CLIENTE.localizacao=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-    localStorage.setItem("cliente_"+APP_ID,JSON.stringify(CLIENTE));
-    alert("Localização capturada");
-  });
-}
-
-function finalizar(){
-  if(!carrinho.length){alert("Carrinho vazio");return;}
-
-  CLIENTE={
-    nome:cliNome.value,
-    cpf:cliCpf.value,
-    endereco:cliEndereco.value,
-    referencia:cliReferencia.value,
-    localizacao:CLIENTE.localizacao||""
-  };
-
-  localStorage.setItem("cliente_"+APP_ID,JSON.stringify(CLIENTE));
-
-  let msg=`🛍️ *${NOME}*\n\n👤 ${CLIENTE.nome}\n📄 ${CLIENTE.cpf}\n🏠 ${CLIENTE.endereco}\n`;
-  if(CLIENTE.referencia) msg+=`📌 ${CLIENTE.referencia}\n`;
-  msg+=`📍 ${CLIENTE.localizacao}\n\n`;
-
-  carrinho.forEach(i=>msg+=`• ${i.nome} x${i.qtd}\n`);
-  msg+=`\n💰 Total: R$ ${total.innerText}\n💳 ${pagamento.value}`;
-
-  if(pagamento.value==="Dinheiro"){
-    msg+=precisaTroco.value==="sim"
-      ? `\n💵 Troco para: R$ ${trocoValor.value}`
-      : `\n💵 Sem troco`;
-  }
-
-  window.open(`https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`);
-
-  carrinho=[]; salvar(); atualizarBadge();
-  listaCarrinho.innerHTML=""; total.innerText="0.00";
-  fecharCarrinho();
 }
 
 init();
