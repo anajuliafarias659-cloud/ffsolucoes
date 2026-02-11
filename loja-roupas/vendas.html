@@ -224,15 +224,135 @@ Enviar pedido no WhatsApp
 </div>
 
 <script>
-const sb=supabase.createClient("https://pdajixsoowcyhnjwhgpc.supabase.co","sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw");
-const app=new URLSearchParams(location.search).get("app");
-if(!app){document.body.innerHTML="Link inválido";throw""}
+const sb = supabase.createClient(
+"https://pdajixsoowcyhnjwhgpc.supabase.co",
+"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const app = new URLSearchParams(location.search).get("app");
+if(!app){
+document.body.innerHTML="Link inválido";
+throw new Error("App não encontrado");
+}
 
 const carrinhoKey="carrinho_"+app;
 let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
 let fotosProduto={},fotosAtuais=[],indice=0,autoPlay=null,WHATS="";
 
+/* ================= INIT ================= */
+async function init(){
+try{
+
+const {data:cfg,error} = await sb
+.from("config_site")
+.select("*")
+.eq("app_id",app)
+.maybeSingle();
+
+if(error || !cfg){
+document.body.innerHTML="Loja não encontrada";
+return;
+}
+
+WHATS = cfg.whatsapp || "";
+document.getElementById("nomeLoja").innerText = cfg.nome_site || "Loja";
+document.getElementById("descLoja").innerText = cfg.descricao_site || "";
+
+if(cfg.banner_url){
+document.getElementById("banner").innerHTML =
+`<img src="${cfg.banner_url}">`;
+}
+
+/* aplica tema */
+if(cfg.tema_site && cfg.tema_site!=="padrao"){
+document.body.classList.add("tema-"+cfg.tema_site);
+}
+
+/* produtos */
+const {data:produtosData} = await sb
+.from("produtos")
+.select("*")
+.eq("ativo",true)
+.eq("app_id",app);
+
+const grid = document.getElementById("produtos");
+
+grid.innerHTML = (produtosData||[]).map(p=>`
+<div class="card">
+<img src="${p.imagem || ''}">
+<b>${p.nome}</b><br>
+R$ ${Number(p.preco).toFixed(2)}
+<button class="botao" onclick='add(${JSON.stringify(p)})'>
+Adicionar
+</button>
+</div>
+`).join("");
+
+atualizarBadge();
+
+}catch(e){
+console.error(e);
+document.body.innerHTML="Erro ao carregar loja";
+}
+}
+
+init();
+
+/* ================= CARRINHO ================= */
+function add(p){
+const i=carrinho.find(x=>x.id===p.id);
+i?i.qtd++:carrinho.push({...p,qtd:1});
+salvar();
+}
+
+function salvar(){
+localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
+atualizarBadge();
+}
+
+function atualizarBadge(){
+const t=carrinho.reduce((s,i)=>s+i.qtd,0);
+const badge=document.getElementById("badge");
+badge.innerText=t;
+badge.style.display=t?"block":"none";
+}
+
+function abrirCarrinho(){
+renderCarrinho();
+document.getElementById("modalCarrinho").style.display="flex";
+}
+
+function fecharCarrinho(){
+document.getElementById("modalCarrinho").style.display="none";
+}
+
+function renderCarrinho(){
+let s=0;
+document.getElementById("listaCarrinho").innerHTML=
+carrinho.map((i,idx)=>{
+s+=i.preco*i.qtd;
+return `<div class="item">
+${i.nome} x${i.qtd}
+<button onclick="diminuir(${idx})">−</button>
+</div>`;
+}).join("");
+
+document.getElementById("total").innerText=s.toFixed(2);
+}
+
+function diminuir(i){
+carrinho[i].qtd--;
+if(carrinho[i].qtd<=0)carrinho.splice(i,1);
+salvar();
+renderCarrinho();
+}
+
+/* ================= PAGAMENTO ================= */
 function verificarPagamento(){
+const pagamento=document.getElementById("pagamento");
+const trocoArea=document.getElementById("trocoArea");
+const trocoValor=document.getElementById("trocoValor");
+
 if(pagamento.value==="Dinheiro"){
 trocoArea.style.display="block";
 }else{
@@ -241,7 +361,43 @@ trocoValor.value="";
 }
 }
 
-/* restante do seu JS continua igual ao anterior */
+/* ================= FINALIZAR ================= */
+function finalizar(){
+if(!carrinho.length){
+alert("Carrinho vazio");
+return;
+}
+
+const nome=document.getElementById("cliNome").value;
+const endereco=document.getElementById("cliEndereco").value;
+const numero=document.getElementById("cliNumero").value;
+const referencia=document.getElementById("cliReferencia").value;
+const pagamento=document.getElementById("pagamento").value;
+const trocoValor=document.getElementById("trocoValor").value;
+const total=document.getElementById("total").innerText;
+
+let enderecoFinal=endereco;
+if(numero) enderecoFinal+=", Nº "+numero;
+
+let msg=`🛍️ *${document.getElementById("nomeLoja").innerText}*\n\n`;
+msg+=`👤 ${nome}\n`;
+msg+=`🏠 ${enderecoFinal}\n`;
+if(referencia) msg+=`📍 ${referencia}\n\n`;
+
+carrinho.forEach(i=>msg+=`• ${i.nome} x${i.qtd}\n`);
+msg+=`\n💰 Total: R$ ${total}\n💳 ${pagamento}`;
+
+if(pagamento==="Dinheiro" && trocoValor){
+msg+=`\n💵 Troco para: R$ ${trocoValor}`;
+}
+
+window.open(`https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`);
+
+carrinho=[];
+salvar();
+renderCarrinho();
+fecharCarrinho();
+}
 </script>
 
 </body>
