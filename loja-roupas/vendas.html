@@ -29,7 +29,7 @@ body.tema-preto{--p:#000;background:#000}
 .container{padding:20px;max-width:1200px;margin:auto}
 .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
 .card{background:#0f172a;padding:12px;border-radius:14px;text-align:center}
-.card img{width:100%;height:160px;object-fit:cover;border-radius:10px;cursor:pointer}
+.card img{width:100%;height:160px;object-fit:cover;border-radius:10px}
 .botao{margin-top:8px;width:100%;padding:10px;border:none;border-radius:10px;background:var(--p);font-weight:bold}
 
 /* ===== BOTÃO CARRINHO ===== */
@@ -58,13 +58,17 @@ width:420px;max-width:95%;max-height:90vh;overflow-y:auto
 
 /* ===== FORM ===== */
 .form{
-background:#0f172a;padding:20px;border-radius:18px;margin-top:16px;
+background:#0f172a;
+padding:20px;
+border-radius:18px;
+margin-top:16px;
 }
 .campo{display:flex;flex-direction:column;margin-bottom:16px}
 .campo label{font-size:13px;margin-bottom:6px;color:#94a3b8;font-weight:600}
 .form input,.form select{
 width:100%;padding:14px;border-radius:14px;
-border:1px solid #1e293b;background:#0b1220;color:#fff
+border:1px solid #1e293b;background:#0b1220;
+color:#fff;font-size:16px;outline:none
 }
 .linha{display:flex;gap:12px}
 .linha .campo{flex:1}
@@ -76,42 +80,7 @@ color:#fff;font-weight:600;margin-bottom:18px;cursor:pointer
 .form .botao{
 width:100%;padding:16px;border-radius:16px;
 background:var(--p);color:#000;font-weight:800;
-border:none;cursor:pointer
-}
-
-/* ===== MODAL IMAGEM ===== */
-.modalImagem{
-position:fixed;inset:0;background:rgba(0,0,0,.95);
-display:none;align-items:center;justify-content:center;z-index:2000
-}
-.galeria{
-position:relative;width:100%;height:100%;
-display:flex;align-items:center;justify-content:center
-}
-.galeria img{
-max-width:90%;max-height:80%;border-radius:14px
-}
-.fechar{
-position:absolute;top:16px;right:16px;
-font-size:28px;cursor:pointer
-}
-.contador{
-position:absolute;bottom:70px;
-background:rgba(0,0,0,.6);
-padding:6px 12px;border-radius:20px
-}
-.indicadores{
-position:absolute;bottom:30px;
-display:flex;gap:10px;
-background:rgba(0,0,0,.4);
-padding:8px 14px;border-radius:30px
-}
-.indicadores span{
-width:10px;height:10px;border-radius:50%;
-background:#64748b;cursor:pointer
-}
-.indicadores span.ativo{
-background:var(--p)
+font-size:17px;border:none;cursor:pointer
 }
 </style>
 </head>
@@ -156,6 +125,7 @@ background:var(--p)
 <label>🔢 Número</label>
 <input id="cliNumero">
 </div>
+
 <div class="campo">
 <label>📍 Referência</label>
 <input id="cliReferencia">
@@ -192,15 +162,6 @@ Enviar pedido no WhatsApp
 </div>
 </div>
 
-<div class="modalImagem" id="modalImagem">
-<div class="galeria">
-<span class="fechar" onclick="fecharImagem()">×</span>
-<img id="imgZoom">
-<div class="contador" id="contador"></div>
-<div class="indicadores" id="indicadores"></div>
-</div>
-</div>
-
 <script>
 const sb = supabase.createClient(
 "https://pdajixsoowcyhnjwhgpc.supabase.co",
@@ -213,66 +174,66 @@ if(!app){ document.body.innerHTML="Link inválido"; throw new Error("Sem app"); 
 const carrinhoKey="carrinho_"+app;
 let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
 let WHATS="";
-let fotosProduto={},fotosAtuais=[],indice=0,autoPlay=null;
 
-function extrairFotos(p){
-let f=[];
-try{
-if(p.imagens) f=Array.isArray(p.imagens)?p.imagens:JSON.parse(p.imagens);
-else if(p.imagem) f=[p.imagem];
-}catch{}
-return f.filter(Boolean);
+/* INIT */
+async function init(){
+
+const {data:cfg} = await sb
+.from("config_site")
+.select("*")
+.eq("app_id",app)
+.maybeSingle();
+
+if(!cfg){
+document.body.innerHTML="Loja não encontrada";
+return;
 }
 
-async function init(){
-const {data:cfg}=await sb.from("config_site").select("*").eq("app_id",app).maybeSingle();
-if(!cfg)return;
+WHATS = cfg.whatsapp || "";
+nomeLoja.innerText = cfg.nome_site || "Loja";
+descLoja.innerText = cfg.descricao_site || "";
 
-WHATS=cfg.whatsapp||"";
-nomeLoja.innerText=cfg.nome_site||"Loja";
-descLoja.innerText=cfg.descricao_site||"";
-if(cfg.banner_url) banner.innerHTML=`<img src="${cfg.banner_url}">`;
+if(cfg.banner_url){
+banner.innerHTML = `<img src="${cfg.banner_url}">`;
+}
+
 if(cfg.tema_site && cfg.tema_site!=="padrao"){
 document.body.classList.add("tema-"+cfg.tema_site);
 }
 
-const {data}=await sb.from("produtos").select("*").eq("ativo",true).eq("app_id",app);
+const {data:produtosData} = await sb
+.from("produtos")
+.select("*")
+.eq("ativo",true)
+.eq("app_id",app);
 
-produtos.innerHTML=(data||[]).map(p=>{
-const fotos=extrairFotos(p);
-fotosProduto[p.id]=fotos;
+produtos.innerHTML = (produtosData||[]).map(p=>{
+
+let foto="";
+try{
+if(p.imagem) foto=p.imagem;
+else if(p.imagens){
+const arr=Array.isArray(p.imagens)?p.imagens:JSON.parse(p.imagens);
+if(arr.length) foto=arr[0];
+}
+}catch{}
+
 return `
 <div class="card">
-${fotos[0]?`<img src="${fotos[0]}" onclick="abrirImagem('${p.id}')">`:""}
+${foto?`<img src="${foto}">`:""}
 <b>${p.nome}</b><br>
 R$ ${Number(p.preco).toFixed(2)}
-<button class="botao" onclick='add(${JSON.stringify(p)})'>Adicionar</button>
-</div>`;
+<button class="botao" onclick='add(${JSON.stringify(p)})'>
+Adicionar
+</button>
+</div>
+`;
 }).join("");
 
 atualizarBadge();
 }
-init();
 
-/* GALERIA */
-function abrirImagem(id){
-fotosAtuais=fotosProduto[id]||[];
-if(!fotosAtuais.length)return;
-indice=0; atualizarImagem();
-modalImagem.style.display="flex";
-clearInterval(autoPlay);
-autoPlay=setInterval(proxima,4000);
-}
-function atualizarImagem(){
-imgZoom.src=fotosAtuais[indice];
-contador.innerText=`${indice+1} / ${fotosAtuais.length}`;
-indicadores.innerHTML=fotosAtuais.map((_,i)=>
-`<span class="${i===indice?'ativo':''}" onclick="irPara(${i},event)"></span>`
-).join("");
-}
-function proxima(){indice=(indice+1)%fotosAtuais.length;atualizarImagem();}
-function irPara(i,e){e.stopPropagation();indice=i;atualizarImagem();}
-function fecharImagem(){modalImagem.style.display="none";clearInterval(autoPlay);}
+init();
 
 /* CARRINHO */
 function add(p){
@@ -280,13 +241,22 @@ const i=carrinho.find(x=>x.id===p.id);
 i?i.qtd++:carrinho.push({...p,qtd:1});
 salvar();
 }
-function salvar(){localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));atualizarBadge();}
+function salvar(){
+localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
+atualizarBadge();
+}
 function atualizarBadge(){
 const t=carrinho.reduce((s,i)=>s+i.qtd,0);
-badge.innerText=t;badge.style.display=t?"block":"none";
+badge.innerText=t;
+badge.style.display=t?"block":"none";
 }
-function abrirCarrinho(){renderCarrinho();modalCarrinho.style.display="flex";}
-function fecharCarrinho(){modalCarrinho.style.display="none";}
+function abrirCarrinho(){
+renderCarrinho();
+modalCarrinho.style.display="flex";
+}
+function fecharCarrinho(){
+modalCarrinho.style.display="none";
+}
 function renderCarrinho(){
 let s=0;
 listaCarrinho.innerHTML=carrinho.map((i,idx)=>{
@@ -304,12 +274,29 @@ salvar();renderCarrinho();
 
 /* PAGAMENTO */
 function verificarPagamento(){
-trocoArea.style.display=pagamento.value==="Dinheiro"?"block":"none";
+trocoArea.style.display =
+pagamento.value==="Dinheiro"?"block":"none";
+}
+
+/* LOCALIZAÇÃO */
+function usarLocalizacao(){
+if(!navigator.geolocation){
+alert("Navegador não suporta localização");
+return;
+}
+navigator.geolocation.getCurrentPosition(
+pos=>{
+cliReferencia.value=
+`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+alert("Localização capturada");
+},
+()=>alert("Permissão de localização negada")
+);
 }
 
 /* FINALIZAR */
 function finalizar(){
-if(!carrinho.length)return alert("Carrinho vazio");
+if(!carrinho.length) return alert("Carrinho vazio");
 
 let endereco=cliEndereco.value;
 if(cliNumero.value) endereco+=", Nº "+cliNumero.value;
@@ -327,6 +314,7 @@ msg+=`\n💵 Troco para: R$ ${trocoValor.value}`;
 }
 
 window.open(`https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`);
+
 carrinho=[];salvar();renderCarrinho();fecharCarrinho();
 }
 </script>
