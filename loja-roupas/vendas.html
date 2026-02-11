@@ -9,17 +9,7 @@
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-
-:root{
---p:#22c55e;
-}
-
-/* ===== TEMAS ===== */
-body.tema-natal{ --p:#ef4444; background:#1a0b0b; }
-body.tema-anonovo{ --p:#22c55e; background:#052e16; }
-body.tema-saojoao{ --p:#f59e0b; background:#2a1505; }
-body.tema-carnaval{ --p:#a855f7; background:#1e0b2e; }
-body.tema-preto{ --p:#000; background:#000; }
+:root{--p:#22c55e}
 
 /* ===== BANNER ===== */
 .banner{height:260px;background:#0f172a}
@@ -33,13 +23,13 @@ body.tema-preto{ --p:#000; background:#000; }
 .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
 .card{background:#0f172a;padding:12px;border-radius:14px;text-align:center}
 .card img{width:100%;height:160px;object-fit:cover;border-radius:10px;cursor:pointer}
-.botao{margin-top:8px;width:100%;padding:10px;border:none;border-radius:10px;background:var(--p);font-weight:bold}
+.botao{margin-top:8px;width:100%;padding:10px;border:none;border-radius:10px;background:#22c55e;font-weight:bold}
 
 /* ===== CARRINHO BTN ===== */
 #btnCarrinho{
 position:fixed;bottom:20px;right:20px;
 width:60px;height:60px;border-radius:50%;
-background:var(--p);font-size:22px;border:none
+background:#22c55e;font-size:22px;border:none
 }
 #badge{
 position:absolute;top:-5px;right:-5px;
@@ -60,12 +50,12 @@ width:420px;max-width:95%
 .item button{background:red;color:#fff;border:none;border-radius:6px;padding:2px 8px}
 
 /* ===== FORM ===== */
-.form input,.form select{
+.form input, .form select{
 width:100%;padding:10px;margin-bottom:10px;
 border-radius:8px;border:none
 }
 
-/* ===== GALERIA ===== */
+/* ===== MODAL IMAGEM ===== */
 .modalImagem{
 position:fixed;inset:0;background:rgba(0,0,0,.95);
 display:none;align-items:center;justify-content:center;z-index:2000
@@ -76,20 +66,7 @@ display:none;align-items:center;justify-content:center;z-index:2000
 .contador{position:absolute;bottom:70px;background:rgba(0,0,0,.6);padding:6px 12px;border-radius:20px}
 .indicadores{position:absolute;bottom:30px;display:flex;gap:10px;background:rgba(0,0,0,.4);padding:8px 14px;border-radius:30px}
 .indicadores span{width:10px;height:10px;border-radius:50%;background:#64748b;cursor:pointer}
-.indicadores span.ativo{background:var(--p)}
-
-/* ===== EFEITO CARNAVAL ===== */
-@keyframes piscarCarnaval{
-0%{opacity:1;transform:scale(1)}
-50%{opacity:.5;transform:scale(1.2)}
-100%{opacity:1;transform:scale(1)}
-}
-body.tema-carnaval .indicadores span{
-animation:piscarCarnaval 1.2s infinite ease-in-out;
-}
-body.tema-carnaval .indicadores span.ativo{
-animation:piscarCarnaval .6s infinite ease-in-out;
-}
+.indicadores span.ativo{background:#22c55e}
 </style>
 </head>
 
@@ -110,7 +87,7 @@ animation:piscarCarnaval .6s infinite ease-in-out;
 🛒 <span id="badge">0</span>
 </button>
 
-<!-- MODAL CARRINHO -->
+<!-- ===== MODAL CARRINHO ===== -->
 <div class="modalCarrinho" id="modalCarrinho">
 <div class="carrinhoBox">
 <h3>Carrinho</h3>
@@ -120,6 +97,8 @@ animation:piscarCarnaval .6s infinite ease-in-out;
 <div class="form">
 <input id="cliNome" placeholder="Nome">
 <input id="cliEndereco" placeholder="Endereço">
+<input id="cliReferencia" placeholder="Referência">
+<button onclick="usarLocalizacao()">📍 Usar localização</button>
 <select id="pagamento">
 <option>PIX</option>
 <option>Cartão</option>
@@ -132,7 +111,7 @@ animation:piscarCarnaval .6s infinite ease-in-out;
 </div>
 </div>
 
-<!-- MODAL IMAGEM -->
+<!-- ===== MODAL IMAGEM ===== -->
 <div class="modalImagem" id="modalImagem">
 <div class="galeria">
 <span class="fechar" onclick="fecharImagem()">×</span>
@@ -151,28 +130,28 @@ const carrinhoKey="carrinho_"+app;
 let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
 let fotosProduto={},fotosAtuais=[],indice=0,autoPlay=null,WHATS="";
 
-/* INIT */
+/* ===== EXTRAIR FOTOS ===== */
+function extrairFotos(p){
+let f=[];
+try{
+if(p.imagens) f=Array.isArray(p.imagens)?p.imagens:JSON.parse(p.imagens);
+else if(p.imagem) f=[p.imagem];
+}catch{}
+return f.filter(Boolean);
+}
+
+/* ===== INIT ===== */
 async function init(){
 const {data:cfg}=await sb.from("config_site").select("*").eq("app_id",app).single();
-
-WHATS=cfg.whatsapp||"";
-nomeLoja.innerText=cfg.nome_site||"";
+WHATS=cfg.whatsapp;
+nomeLoja.innerText=cfg.nome_site;
 descLoja.innerText=cfg.descricao_site||"";
 banner.innerHTML=cfg.banner_url?`<img src="${cfg.banner_url}">`:"";
-
-document.body.className="";
-if(cfg.tema_site && cfg.tema_site!=="padrao"){
-document.body.classList.add("tema-"+cfg.tema_site);
-}
 
 const {data}=await sb.from("produtos").select("*").eq("ativo",true).eq("app_id",app);
 
 produtos.innerHTML=(data||[]).map(p=>{
-let fotos=[];
-try{
-if(p.imagens) fotos=Array.isArray(p.imagens)?p.imagens:JSON.parse(p.imagens);
-else if(p.imagem) fotos=[p.imagem];
-}catch{}
+const fotos=extrairFotos(p);
 fotosProduto[p.id]=fotos;
 
 return `
@@ -188,14 +167,14 @@ atualizarBadge();
 }
 init();
 
-/* GALERIA */
+/* ===== GALERIA ===== */
 function abrirImagem(id){
 fotosAtuais=fotosProduto[id]||[];
 if(!fotosAtuais.length)return;
 indice=0; atualizarImagem();
 modalImagem.style.display="flex";
 clearInterval(autoPlay);
-autoPlay=setInterval(()=>{indice=(indice+1)%fotosAtuais.length;atualizarImagem()},4000);
+autoPlay=setInterval(proxima,4000);
 }
 function atualizarImagem(){
 imgZoom.src=fotosAtuais[indice];
@@ -204,10 +183,11 @@ indicadores.innerHTML=fotosAtuais.map((_,i)=>
 `<span class="${i===indice?'ativo':''}" onclick="irPara(${i},event)"></span>`
 ).join("");
 }
+function proxima(){indice=(indice+1)%fotosAtuais.length;atualizarImagem();}
 function irPara(i,e){e.stopPropagation();indice=i;atualizarImagem();}
 function fecharImagem(){modalImagem.style.display="none";clearInterval(autoPlay);}
 
-/* CARRINHO */
+/* ===== CARRINHO ===== */
 function add(p){
 const i=carrinho.find(x=>x.id===p.id);
 i?i.qtd++:carrinho.push({...p,qtd:1});
@@ -218,7 +198,10 @@ function atualizarBadge(){
 const t=carrinho.reduce((s,i)=>s+i.qtd,0);
 badge.innerText=t;badge.style.display=t?"block":"none";
 }
-function abrirCarrinho(){renderCarrinho();modalCarrinho.style.display="flex";}
+function abrirCarrinho(){
+renderCarrinho();
+modalCarrinho.style.display="flex";
+}
 function fecharCarrinho(){modalCarrinho.style.display="none";}
 function renderCarrinho(){
 let s=0;
@@ -234,11 +217,19 @@ if(carrinho[i].qtd<=0)carrinho.splice(i,1);
 salvar();renderCarrinho();
 }
 
-/* FINALIZAR */
+/* ===== LOCALIZAÇÃO ===== */
+function usarLocalizacao(){
+navigator.geolocation.getCurrentPosition(pos=>{
+cliReferencia.value=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+alert("Localização capturada");
+});
+}
+
+/* ===== FINALIZAR ===== */
 function finalizar(){
 if(!carrinho.length)return alert("Carrinho vazio");
 let msg=`🛍️ *${nomeLoja.innerText}*\n\n`;
-msg+=`👤 ${cliNome.value}\n🏠 ${cliEndereco.value}\n\n`;
+msg+=`👤 ${cliNome.value}\n🏠 ${cliEndereco.value}\n📍 ${cliReferencia.value}\n\n`;
 carrinho.forEach(i=>msg+=`• ${i.nome} x${i.qtd}\n`);
 msg+=`\n💰 Total: R$ ${total.innerText}\n💳 ${pagamento.value}`;
 window.open(`https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`);
