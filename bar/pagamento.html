@@ -51,13 +51,13 @@ let totalPedido = 0;
 let mesaId = null;
 let processando = false;
 
-/* =================== ESPERA SESSÃO =================== */
+/* ========================= */
+/* 🔐 AGUARDA AUTH DEFINIR APP_ID */
+/* ========================= */
 
 async function aguardarSessao(){
-
-  // espera auth.js definir APP_ID
   while(!window.APP_ID){
-    await new Promise(r => setTimeout(r,100));
+    await new Promise(r=>setTimeout(r,100));
   }
 
   if(!pedidoId){
@@ -70,7 +70,9 @@ async function aguardarSessao(){
 
 aguardarSessao();
 
-/* =================== CARREGAR PEDIDO =================== */
+/* ========================= */
+/* CARREGAR PEDIDO */
+/* ========================= */
 
 async function carregarPedido(){
 
@@ -82,6 +84,7 @@ async function carregarPedido(){
     .single();
 
   if(error || !pedido){
+    alert("Pedido não encontrado");
     location.href="caixa.html";
     return;
   }
@@ -103,13 +106,14 @@ async function carregarPedido(){
     `R$ ${totalPedido.toFixed(2)}`;
 }
 
-/* =================== CALCULAR TROCO =================== */
+/* ========================= */
+/* CALCULAR TROCO */
+/* ========================= */
 
 function calcular(){
 
-  const recebido = Number(
-    document.getElementById("valorRecebido").value || 0
-  );
+  const recebido =
+    Number(document.getElementById("valorRecebido").value || 0);
 
   const descontoMax = totalPedido * 0.10;
   const minimo = totalPedido - descontoMax;
@@ -120,16 +124,17 @@ function calcular(){
   if(recebido < minimo){
     info.innerText =
       `Desconto máximo permitido: R$ ${descontoMax.toFixed(2)}`;
-  } else if(recebido < totalPedido){
+  }
+  else if(recebido < totalPedido){
     info.innerText =
       `Desconto aplicado: R$ ${(totalPedido - recebido).toFixed(2)}`;
-  } else {
-    info.innerText = "";
+  }
+  else{
+    info.innerText="";
   }
 
-  const troco = recebido > totalPedido
-    ? recebido - totalPedido
-    : 0;
+  const troco =
+    recebido > totalPedido ? recebido - totalPedido : 0;
 
   trocoEl.innerText = `R$ ${troco.toFixed(2)}`;
 }
@@ -138,7 +143,9 @@ document
   .getElementById("valorRecebido")
   .addEventListener("input", calcular);
 
-/* =================== CONFIRMAR PAGAMENTO =================== */
+/* ========================= */
+/* CONFIRMAR PAGAMENTO */
+/* ========================= */
 
 document
   .getElementById("btnConfirmar")
@@ -163,20 +170,30 @@ async function confirmarPagamento(){
     const minimo = totalPedido - descontoMax;
 
     if(valorPago < minimo){
+      alert("Desconto acima do permitido");
       processando = false;
       return;
     }
 
-    /* 1️⃣ FINALIZA PEDIDO */
-    await supabase
+    /* 1️⃣ FINALIZA PEDIDO (MULTI-NEGÓCIO SEGURO) */
+
+    const { error: erroUpdate } = await supabase
       .from("pedidos")
       .update({
-        status: "finalizado",
-        valor_pago: valorPago
+        status: "finalizado"
       })
-      .eq("id", pedidoId);
+      .eq("id", pedidoId)
+      .eq("app_id", window.APP_ID);
+
+    if(erroUpdate){
+      console.error("Erro finalizar:", erroUpdate);
+      alert("Erro ao finalizar pedido");
+      processando = false;
+      return;
+    }
 
     /* 2️⃣ BAIXA ESTOQUE */
+
     const { data: itens } = await supabase
       .from("pedido_itens")
       .select("produto_id,quantidade")
@@ -192,17 +209,20 @@ async function confirmarPagamento(){
     }
 
     /* 3️⃣ LIBERA MESA */
+
     if(mesaId){
       await supabase
         .from("mesas")
         .update({ status: "livre" })
-        .eq("id", mesaId);
+        .eq("id", mesaId)
+        .eq("app_id", window.APP_ID);
     }
 
     location.href="caixa.html";
 
   } catch(e){
     console.error(e);
+    alert("Erro inesperado");
   }
 
   processando = false;
