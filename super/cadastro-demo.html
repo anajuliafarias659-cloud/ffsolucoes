@@ -9,7 +9,7 @@
 *{box-sizing:border-box}
 body{
   margin:0;
-  font-family:Arial;
+  font-family:Arial, Helvetica, sans-serif;
   background:#020617;
   color:#fff;
   display:flex;
@@ -92,29 +92,11 @@ window.criarDemo = async ()=>{
   expiracao.setDate(hoje.getDate() + 15);
   const dataISO = expiracao.toISOString();
 
+  let negocioCriado = null;
+
   try {
 
-    /* 1️⃣ CRIA USUÁRIO NO AUTH */
-    const { data: authData, error: authError } =
-      await supabase.auth.signUp({
-        email: email,
-        password: senha,
-        options: {
-          emailRedirectTo: "https://www.ffsolucoes.com.br/auth/login.html"
-        }
-      });
-
-    if(authError){
-      throw authError;
-    }
-
-    if(!authData.user){
-      throw new Error("Erro ao criar usuário no Auth.");
-    }
-
-    const userId = authData.user.id;
-
-    /* 2️⃣ CRIA APP */
+    /* 1️⃣ CRIA O NEGÓCIO PRIMEIRO */
     const { data: negocio, error: erroApp } = await supabase
       .from("apps")
       .insert({
@@ -127,15 +109,33 @@ window.criarDemo = async ()=>{
       .select()
       .single();
 
-    if(erroApp){
-      throw erroApp;
+    if(erroApp) throw erroApp;
+
+    negocioCriado = negocio;
+
+    /* 2️⃣ CRIA USUÁRIO NO AUTH */
+    const { data: authData, error: authError } =
+      await supabase.auth.signUp({
+        email: email,
+        password: senha,
+        options: {
+          emailRedirectTo: "https://www.ffsolucoes.com.br/auth/login.html"
+        }
+      });
+
+    if(authError) throw authError;
+
+    if(!authData.user){
+      throw new Error("Erro ao criar usuário no Auth.");
     }
 
-    /* 3️⃣ INSERE NA TABELA USUARIOS */
+    const userId = authData.user.id;
+
+    /* 3️⃣ VINCULA USUÁRIO AO NEGÓCIO */
     const { error: erroUsuario } = await supabase
       .from("usuarios")
       .insert({
-        id: userId, // UUID do Auth
+        id: userId,
         nome: email,
         email: email,
         tipo: "admin",
@@ -145,17 +145,24 @@ window.criarDemo = async ()=>{
         ativo: true
       });
 
-    if(erroUsuario){
-      throw erroUsuario;
-    }
+    if(erroUsuario) throw erroUsuario;
 
-    /* 4️⃣ MOSTRA MENSAGEM */
     document.getElementById("mensagem").innerHTML =
-      "Conta criada com sucesso! ✅<br>Verifique seu e-mail para confirmar antes de acessar o sistema.";
+      "Conta criada com sucesso! ✅<br>Verifique seu e-mail para confirmar antes de acessar.";
 
   } catch(err){
+
     console.log("ERRO COMPLETO:", err);
-    alert(err.message || "Erro inesperado.");
+
+    /* 🔥 ROLLBACK SE DER ERRO */
+    if(negocioCriado?.id){
+      await supabase
+        .from("apps")
+        .delete()
+        .eq("id", negocioCriado.id);
+    }
+
+    alert(err.message || "Erro ao criar conta.");
   }
 };
 </script>
