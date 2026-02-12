@@ -1,15 +1,18 @@
 import { supabase } from "./supabase.js";
 
-if (window.location.pathname.startsWith("/auth/")) {
-  console.log("Página pública");
-} else {
+(async () => {
+
+  if (window.location.pathname.startsWith("/auth/")) {
+    console.log("Página pública");
+    return;
+  }
 
   const { data: { session }, error: sessionError } =
     await supabase.auth.getSession();
 
   if (sessionError || !session) {
     window.location.href = "/auth/login.html";
-    throw new Error("Sem sessão ativa");
+    return;
   }
 
   const { data: usuarioSistema, error: userError } =
@@ -17,19 +20,20 @@ if (window.location.pathname.startsWith("/auth/")) {
       .from("usuarios")
       .select("app_id, nome")
       .eq("id", session.user.id)
-      .maybeSingle(); // 👈 mudou aqui
+      .maybeSingle();
 
   if (userError) {
     console.error("Erro ao buscar usuário:", userError);
-    return; // não desloga automaticamente
+    return;
   }
 
   if (!usuarioSistema) {
     console.warn("Usuário não encontrado na tabela usuarios");
-    return; // evita logout desnecessário
+    return;
   }
 
   window.SUPABASE = supabase;
   window.APP_ID = usuarioSistema.app_id;
   window.USUARIO_NOME = usuarioSistema.nome;
-}
+
+})();
