@@ -77,35 +77,64 @@ button{
 </div>
 
 <script>
-/* 🔐 admin logado */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin){
-  alert("Sessão expirada");
-  location.href = "../auth/login.html";
-}
-
-/* ✅ Supabase REAL */
 const supabaseClient = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ➕ criar categoria */
+let app_id = null;
+
+/* 🔐 Verificar sessão real Supabase */
+async function verificarSessao(){
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
+
+  if(!user){
+    alert("Sessão expirada");
+    location.href = "../auth/login.html";
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", user.id)
+    .single();
+
+  if(error || !data){
+    alert("Usuário não vinculado ao sistema.");
+    location.href = "../auth/login.html";
+    return;
+  }
+
+  app_id = String(data.app_id);
+  console.log("APP_ID:", app_id);
+
+  listar();
+}
+
+/* ➕ Criar categoria */
 async function criar(){
+
+  if(!app_id){
+    alert("Sessão inválida");
+    return;
+  }
+
   const nome = document.getElementById("nome").value.trim();
   if(!nome) return alert("Informe o nome da categoria");
 
   const { error } = await supabaseClient
     .from("categorias")
-    .insert({
-      app_id: admin.app_id,
+    .insert([{
+      app_id: app_id,
       nome,
       ativo: true
-    });
+    }]);
 
   if(error){
-    console.error(error);
-    alert("Erro ao salvar categoria");
+    console.error("Erro insert:", error);
+    alert(error.message);
     return;
   }
 
@@ -113,24 +142,25 @@ async function criar(){
   listar();
 }
 
-/* 📋 listar categorias */
+/* 📋 Listar categorias */
 async function listar(){
+
   const { data, error } = await supabaseClient
     .from("categorias")
     .select("*")
-    .eq("app_id", admin.app_id)
+    .eq("app_id", app_id)
     .eq("ativo", true)
     .order("created_at", { ascending: true });
 
   if(error){
-    console.error(error);
+    console.error("Erro listar:", error);
     return;
   }
 
   const lista = document.getElementById("lista");
   lista.innerHTML = "";
 
-  if(data.length === 0){
+  if(!data || data.length === 0){
     lista.innerHTML = "<p>Nenhuma categoria cadastrada</p>";
     return;
   }
@@ -146,20 +176,26 @@ async function listar(){
   });
 }
 
-/* ❌ desativar */
+/* ❌ Desativar */
 async function desativar(id){
+
   if(!confirm("Desativar categoria?")) return;
 
-  await supabaseClient
+  const { error } = await supabaseClient
     .from("categorias")
     .update({ ativo:false })
     .eq("id", id);
 
+  if(error){
+    console.error("Erro update:", error);
+    alert(error.message);
+  }
+
   listar();
 }
 
-/* init */
-listar();
+/* 🚀 Inicialização */
+verificarSessao();
 </script>
 
 </body>
