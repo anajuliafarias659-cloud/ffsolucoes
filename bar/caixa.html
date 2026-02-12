@@ -5,7 +5,8 @@
 <title>Caixa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="../js/auth.js"></script>
+<script type="module" src="../js/supabase.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -53,50 +54,17 @@ th{color:#94a3b8}
 
 <body>
 
-<script>
-/* ========= BASE PATH DINÂMICO ========= */
-function getBasePath(){
-  const path = window.location.pathname;
-  if(path.includes("/ffsolucoes/")){
-    return "/ffsolucoes/bar";
-  }
-  return "/bar";
-}
-
-function irPara(pagina){
-  location.href = getBasePath() + pagina;
-}
-
-/* ========= SUPABASE ========= */
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-/* ========= SESSÃO ========= */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-
-if(!admin || !admin.app_id){
-  alert("Sessão expirada");
-  location.replace("../auth/login.html");
-  throw new Error("Sessão inválida");
-}
-
-// garante app_id para o pagamento
-localStorage.setItem("app_id", admin.app_id);
-</script>
-
 <div class="topo">
   <h2>💰 Caixa</h2>
   <div>
-    <button onclick="irPara('/venda-avulsa.html')">➕ Venda Avulsa</button>
+    <button onclick="irPara('venda-avulsa.html')">➕ Venda Avulsa</button>
 
     <button class="alerta" id="btnContas" style="display:none" onclick="scrollContas()">
       🔔 Contas <span class="badge" id="qtdContas">0</span>
     </button>
 
-    <button class="sec" onclick="irPara('/historico.html')">📊 Histórico</button>
-    <button class="sec" onclick="irPara('/admin.html')">Voltar</button>
+    <button class="sec" onclick="irPara('historico.html')">📊 Histórico</button>
+    <button class="sec" onclick="irPara('admin.html')">Voltar</button>
   </div>
 </div>
 
@@ -109,7 +77,7 @@ localStorage.setItem("app_id", admin.app_id);
       <tr>
         <th>Mesa</th>
         <th>Total</th>
-        <th>Solicitado por</th>
+        <th>Origem</th>
         <th>Forma sugerida</th>
         <th>Ação</th>
       </tr>
@@ -120,9 +88,28 @@ localStorage.setItem("app_id", admin.app_id);
 
 </div>
 
-<script>
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+/* 🔐 GARANTE QUE AUTH.JS JÁ DEFINIU APP_ID */
+setTimeout(() => {
+  if(!window.APP_ID){
+    alert("Sessão inválida");
+    location.href="/auth/login.html";
+  } else {
+    verificarContas();
+    setInterval(verificarContas,3000);
+  }
+}, 400);
+
+function irPara(pagina){
+  location.href = pagina;
+}
+
+/* ========= BUSCAR CONTAS ========= */
 async function verificarContas(){
-  const { data, error } = await sb
+
+  const { data, error } = await supabase
     .from("pedidos")
     .select(`
       id,
@@ -131,11 +118,11 @@ async function verificarContas(){
       mesas(numero_mesa),
       pedido_itens(preco,quantidade)
     `)
-    .eq("app_id", admin.app_id)
+    .eq("app_id", window.APP_ID)
     .in("status", ["conta_solicitada","aguardando_pagamento"]);
 
   if(error){
-    console.error(error);
+    console.error("Erro buscar contas:", error);
     return;
   }
 
@@ -147,20 +134,22 @@ async function verificarContas(){
   lista.innerHTML = "";
 
   if(data?.length){
+
     btn.style.display = "inline-block";
     btn.classList.add("piscar");
     qtd.innerText = data.length;
     box.style.display = "block";
 
     data.forEach(p=>{
+
       let total = 0;
-      p.pedido_itens.forEach(i=>{
+      (p.pedido_itens || []).forEach(i=>{
         total += i.preco * i.quantidade;
       });
 
       lista.innerHTML += `
         <tr>
-          <td>Mesa ${p.mesas.numero_mesa}</td>
+          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
           <td>R$ ${total.toFixed(2)}</td>
           <td>${p.origem === "garcom" ? "🧑‍🍺 Garçom" : "📱 Cliente"}</td>
           <td>${p.forma_pagamento_sugerida?.toUpperCase() || "-"}</td>
@@ -170,6 +159,7 @@ async function verificarContas(){
         </tr>
       `;
     });
+
   } else {
     btn.style.display = "none";
     btn.classList.remove("piscar");
@@ -177,26 +167,15 @@ async function verificarContas(){
   }
 }
 
-/* ========= PAGAMENTO ========= */
-function irPagamento(pedidoId){
-  if(!pedidoId || !admin.app_id){
-    alert("Pedido inválido");
-    return;
-  }
-
-  // NÃO abre fora do contexto (evita quebra da baixa)
-  location.href =
-    getBasePath() +
-    `/pagamento.html?pedido=${pedidoId}&app=${admin.app_id}`;
+/* ========= IR PAGAMENTO ========= */
+window.irPagamento = function(pedidoId){
+  location.href = `pagamento.html?pedido=${pedidoId}`;
 }
 
-function scrollContas(){
+window.scrollContas = function(){
   document.getElementById("boxContas")
     .scrollIntoView({behavior:"smooth"});
 }
-
-verificarContas();
-setInterval(verificarContas,3000);
 </script>
 
 </body>
