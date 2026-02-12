@@ -6,7 +6,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module" src="../js/auth.js"></script>
-<script type="module" src="../js/supabase.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -52,31 +51,37 @@ let totalPedido = 0;
 let mesaId = null;
 let processando = false;
 
-/* 🔐 GARANTE SESSÃO */
-setTimeout(() => {
-  if(!window.APP_ID){
-    alert("Sessão inválida");
-    location.href="/auth/login.html";
-  } else {
-    if(!pedidoId){
-      location.href="caixa.html";
-    } else {
-      carregarPedido();
-    }
-  }
-}, 400);
+/* =================== ESPERA SESSÃO =================== */
 
-/* ========= CARREGAR PEDIDO ========= */
+async function aguardarSessao(){
+
+  // espera auth.js definir APP_ID
+  while(!window.APP_ID){
+    await new Promise(r => setTimeout(r,100));
+  }
+
+  if(!pedidoId){
+    location.href="caixa.html";
+    return;
+  }
+
+  carregarPedido();
+}
+
+aguardarSessao();
+
+/* =================== CARREGAR PEDIDO =================== */
+
 async function carregarPedido(){
 
-  const { data: pedido } = await supabase
+  const { data: pedido, error } = await supabase
     .from("pedidos")
     .select("mesa_id")
     .eq("id", pedidoId)
     .eq("app_id", window.APP_ID)
     .single();
 
-  if(!pedido){
+  if(error || !pedido){
     location.href="caixa.html";
     return;
   }
@@ -98,10 +103,13 @@ async function carregarPedido(){
     `R$ ${totalPedido.toFixed(2)}`;
 }
 
-/* ========= CALCULAR TROCO ========= */
+/* =================== CALCULAR TROCO =================== */
+
 function calcular(){
 
-  const recebido = Number(document.getElementById("valorRecebido").value || 0);
+  const recebido = Number(
+    document.getElementById("valorRecebido").value || 0
+  );
 
   const descontoMax = totalPedido * 0.10;
   const minimo = totalPedido - descontoMax;
@@ -119,15 +127,21 @@ function calcular(){
     info.innerText = "";
   }
 
-  const troco = recebido > totalPedido ? recebido - totalPedido : 0;
+  const troco = recebido > totalPedido
+    ? recebido - totalPedido
+    : 0;
+
   trocoEl.innerText = `R$ ${troco.toFixed(2)}`;
 }
 
-document.getElementById("valorRecebido")
+document
+  .getElementById("valorRecebido")
   .addEventListener("input", calcular);
 
-/* ========= CONFIRMAR PAGAMENTO ========= */
-document.getElementById("btnConfirmar")
+/* =================== CONFIRMAR PAGAMENTO =================== */
+
+document
+  .getElementById("btnConfirmar")
   .addEventListener("click", confirmarPagamento);
 
 async function confirmarPagamento(){
