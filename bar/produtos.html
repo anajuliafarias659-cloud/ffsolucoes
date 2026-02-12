@@ -67,10 +67,11 @@ const sb = supabase.createClient(
 
 let app_id = null;
 
-/* 🔐 ESPERA AUTH */
+/* 🔐 Espera autenticação carregar */
 function esperarSessao(){
   if(window.APP_ID){
-    app_id = window.APP_ID;
+    app_id = String(window.APP_ID);
+    console.log("APP_ID carregado:", app_id);
     iniciarSistema();
   } else {
     setTimeout(esperarSessao,100);
@@ -87,12 +88,17 @@ function abrirCamera(){
 }
 
 async function carregarCategorias(){
-  const { data } = await sb
+  const { data, error } = await sb
     .from("categorias")
     .select("id,nome")
     .eq("app_id", app_id)
     .eq("ativo", true)
     .order("nome");
+
+  if(error){
+    console.log("Erro categorias:", error);
+    return;
+  }
 
   categoria.innerHTML =
     `<option disabled selected>Categoria</option>` +
@@ -108,13 +114,28 @@ function limparNomeArquivo(nome){
 
 async function uploadImagem(file){
   if(!file) return null;
+
   const path = `${app_id}/${Date.now()}_${limparNomeArquivo(file.name)}`;
-  await sb.storage.from("produtos").upload(path, file, { upsert:true });
+
+  const { error } = await sb.storage
+    .from("produtos")
+    .upload(path, file, { upsert:true });
+
+  if(error){
+    console.log("Erro upload:", error);
+    return null;
+  }
+
   return sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
 }
 
 formProduto.onsubmit = async e =>{
   e.preventDefault();
+
+  if(!app_id){
+    alert("Erro: app_id não carregado.");
+    return;
+  }
 
   const id = produtoId.value;
   const file = imagem.files[0];
@@ -131,13 +152,32 @@ formProduto.onsubmit = async e =>{
   if(foto) dados.foto = foto;
 
   if(id){
-    await sb.from("produtos").update(dados).eq("id", id);
+    const { error } = await sb
+      .from("produtos")
+      .update(dados)
+      .eq("id", id);
+
+    if(error){
+      console.log("Erro update:", error);
+      alert(error.message);
+      return;
+    }
+
   }else{
-    await sb.from("produtos").insert({
-      ...dados,
-      app_id,
-      ativo:true
-    });
+
+    const { error } = await sb
+      .from("produtos")
+      .insert([{
+        ...dados,
+        app_id: app_id,
+        ativo: true
+      }]);
+
+    if(error){
+      console.log("Erro insert:", error);
+      alert(error.message);
+      return;
+    }
   }
 
   formProduto.reset();
@@ -146,12 +186,17 @@ formProduto.onsubmit = async e =>{
 };
 
 async function listarProdutos(){
-  const { data } = await sb
+  const { data, error } = await sb
     .from("produtos")
     .select("*, categorias(nome)")
     .eq("app_id", app_id)
     .eq("ativo", true)
     .order("created_at",{ascending:false});
+
+  if(error){
+    console.log("Erro listar:", error);
+    return;
+  }
 
   lista.innerHTML="";
   (data || []).forEach(p=>{
@@ -191,16 +236,31 @@ async function reporEstoque(id, atual){
     return;
   }
 
-  await sb.from("produtos")
+  const { error } = await sb
+    .from("produtos")
     .update({ estoque: atual + n })
     .eq("id", id);
+
+  if(error){
+    console.log("Erro repor:", error);
+    alert(error.message);
+  }
 
   listarProdutos();
 }
 
 async function desativarProduto(id){
   if(confirm("Desativar produto?")){
-    await sb.from("produtos").update({ativo:false}).eq("id",id);
+    const { error } = await sb
+      .from("produtos")
+      .update({ativo:false})
+      .eq("id",id);
+
+    if(error){
+      console.log("Erro desativar:", error);
+      alert(error.message);
+    }
+
     listarProdutos();
   }
 }
