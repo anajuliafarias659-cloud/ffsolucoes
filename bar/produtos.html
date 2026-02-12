@@ -6,63 +6,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="../js/auth.js"></script>
 
 <style>
-body{
-  margin:0;
-  font-family:Arial,sans-serif;
-  background:#020617;
-  color:#fff;
-}
-.topo{
-  background:#0f172a;
-  padding:16px 24px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-.container{
-  padding:32px;
-  max-width:1100px;
-  margin:auto;
-}
-form{
-  background:#0f172a;
-  padding:24px;
-  border-radius:18px;
-  margin-bottom:32px;
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:14px;
-}
-input, select, button{
-  padding:12px;
-  border-radius:10px;
-  border:none;
-}
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.container{padding:32px;max-width:1100px;margin:auto}
+form{background:#0f172a;padding:24px;border-radius:18px;margin-bottom:32px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+input,select,button{padding:12px;border-radius:10px;border:none}
 select{background:#fff;color:#000}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
 .btn-camera{background:#2563eb;color:#fff}
 .btn-editar{background:#facc15;color:#000;margin-top:6px}
 .repor{background:#2563eb;color:#fff;margin-top:6px}
 .desativar{background:#ef4444;color:#fff;margin-top:6px}
-.lista{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
-  gap:16px;
-}
-.card{
-  background:#0f172a;
-  border-radius:18px;
-  padding:16px;
-}
-.card img{
-  width:100%;
-  height:160px;
-  object-fit:cover;
-  border-radius:12px;
-  margin-bottom:10px;
-}
+.lista{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.card{background:#0f172a;border-radius:18px;padding:16px}
+.card img{width:100%;height:160px;object-fit:cover;border-radius:12px;margin-bottom:10px}
 small{color:#cbd5f5}
 </style>
 </head>
@@ -90,7 +50,6 @@ small{color:#cbd5f5}
     <option value="bar">🍺 Bar</option>
   </select>
 
-  <!-- 📷 CÂMERA -->
   <input id="imagem" type="file" accept="image/*" capture="environment">
   <button type="button" class="btn-camera" onclick="abrirCamera()">📷 Tirar / Trocar foto</button>
 
@@ -101,52 +60,59 @@ small{color:#cbd5f5}
 </div>
 
 <script>
-// ===== ADMIN =====
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || !admin.app_id){
-  alert("Sessão expirada");
-  location.href="../auth/login.html";
-}
-
-// ===== SUPABASE =====
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// ===== CAMERA =====
+let app_id = null;
+
+/* 🔐 ESPERA AUTH */
+function esperarSessao(){
+  if(window.APP_ID){
+    app_id = window.APP_ID;
+    iniciarSistema();
+  } else {
+    setTimeout(esperarSessao,100);
+  }
+}
+
+function iniciarSistema(){
+  carregarCategorias();
+  listarProdutos();
+}
+
 function abrirCamera(){
   document.getElementById("imagem").click();
 }
 
-// ===== CATEGORIAS =====
 async function carregarCategorias(){
   const { data } = await sb
     .from("categorias")
     .select("id,nome")
-    .eq("app_id", admin.app_id)
+    .eq("app_id", app_id)
     .eq("ativo", true)
     .order("nome");
 
   categoria.innerHTML =
     `<option disabled selected>Categoria</option>` +
-    data.map(c=>`<option value="${c.id}">${c.nome}</option>`).join("");
+    (data || []).map(c=>`<option value="${c.id}">${c.nome}</option>`).join("");
 }
 
-// ===== IMAGEM =====
 function limparNomeArquivo(nome){
-  return nome.normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .replace(/\s+/g,"_").replace(/[^a-zA-Z0-9._-]/g,"");
+  return nome.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/\s+/g,"_")
+    .replace(/[^a-zA-Z0-9._-]/g,"");
 }
 
 async function uploadImagem(file){
   if(!file) return null;
-  const path = `${admin.app_id}/${Date.now()}_${limparNomeArquivo(file.name)}`;
+  const path = `${app_id}/${Date.now()}_${limparNomeArquivo(file.name)}`;
   await sb.storage.from("produtos").upload(path, file, { upsert:true });
   return sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
 }
 
-// ===== SALVAR / EDITAR =====
 formProduto.onsubmit = async e =>{
   e.preventDefault();
 
@@ -161,6 +127,7 @@ formProduto.onsubmit = async e =>{
     categoria_id: categoria.value,
     destino: destino.value
   };
+
   if(foto) dados.foto = foto;
 
   if(id){
@@ -168,7 +135,7 @@ formProduto.onsubmit = async e =>{
   }else{
     await sb.from("produtos").insert({
       ...dados,
-      app_id: admin.app_id,
+      app_id,
       ativo:true
     });
   }
@@ -178,17 +145,16 @@ formProduto.onsubmit = async e =>{
   listarProdutos();
 };
 
-// ===== LISTAR =====
 async function listarProdutos(){
   const { data } = await sb
     .from("produtos")
     .select("*, categorias(nome)")
-    .eq("app_id", admin.app_id)
+    .eq("app_id", app_id)
     .eq("ativo", true)
     .order("created_at",{ascending:false});
 
   lista.innerHTML="";
-  data.forEach(p=>{
+  (data || []).forEach(p=>{
     lista.innerHTML+=`
       <div class="card">
         ${p.foto?`<img src="${p.foto}">`:""}
@@ -205,7 +171,6 @@ async function listarProdutos(){
   });
 }
 
-// ===== EDITAR =====
 function editar(p){
   produtoId.value = p.id;
   nome.value = p.nome;
@@ -216,7 +181,6 @@ function editar(p){
   window.scrollTo({top:0,behavior:"smooth"});
 }
 
-// ===== REPOR ESTOQUE =====
 async function reporEstoque(id, atual){
   const qtd = prompt(`Quantidade para REPOR:\nEstoque atual: ${atual}`, "1");
   if(!qtd) return;
@@ -234,7 +198,6 @@ async function reporEstoque(id, atual){
   listarProdutos();
 }
 
-// ===== DESATIVAR =====
 async function desativarProduto(id){
   if(confirm("Desativar produto?")){
     await sb.from("produtos").update({ativo:false}).eq("id",id);
@@ -242,9 +205,7 @@ async function desativarProduto(id){
   }
 }
 
-// ===== INIT =====
-carregarCategorias();
-listarProdutos();
+esperarSessao();
 </script>
 
 </body>
