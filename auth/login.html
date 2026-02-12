@@ -37,6 +37,7 @@ button{
   font-weight:bold;
   cursor:pointer;
 }
+button:hover{opacity:0.9}
 </style>
 </head>
 
@@ -44,49 +45,63 @@ button{
 
 <div class="card">
   <h2>🔐 Login Administrativo</h2>
-  <input id="usuario" placeholder="Usuário">
+  <input id="usuario" placeholder="E-mail">
   <input id="senha" type="password" placeholder="Senha">
   <button onclick="login()">Entrar</button>
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
 const sb = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
 async function login(){
-  const usuario = document.getElementById("usuario").value.trim().toLowerCase();
-  const senha   = document.getElementById("senha").value.trim();
 
-  if(!usuario || !senha){
-    alert("Preencha usuário e senha");
+  const email = document.getElementById("usuario").value.trim().toLowerCase();
+  const senha = document.getElementById("senha").value.trim();
+
+  if(!email || !senha){
+    alert("Preencha e-mail e senha");
     return;
   }
 
-  /* 1️⃣ AUTENTICA NO admins (LEGADO) */
-  const { data: admin } = await sb
-    .from("admins")
-    .select("id, senha, ativo, app_id")
-    .eq("usuario", usuario)
-    .maybeSingle();
+  /* 1️⃣ LOGIN SEGURO */
+  const { data: authData, error: authError } =
+    await sb.auth.signInWithPassword({
+      email: email,
+      password: senha
+    });
 
-  if(!admin || admin.senha !== senha){
+  if(authError){
     alert("Usuário ou senha inválidos");
     return;
   }
 
-  if(!admin.ativo){
+  const userId = authData.user.id;
+
+  /* 2️⃣ BUSCA DADOS NA SUA TABELA */
+  const { data: usuario } = await sb
+    .from("usuarios")
+    .select("id, app_id, ativo")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if(!usuario){
+    alert("Usuário não encontrado no sistema");
+    return;
+  }
+
+  if(!usuario.ativo){
     alert("Usuário desativado");
     return;
   }
 
-  /* 2️⃣ BUSCA O TIPO DO NEGÓCIO */
+  /* 3️⃣ BUSCA TIPO DO NEGÓCIO */
   const { data: app } = await sb
     .from("apps")
     .select("tipo")
-    .eq("id", admin.app_id)
+    .eq("id", usuario.app_id)
     .maybeSingle();
 
   if(!app){
@@ -94,29 +109,25 @@ async function login(){
     return;
   }
 
-  /* =====================================================
-     🔥 REGRA LEGADA CRÍTICA DA LOJA DE ROUPAS
-     ===================================================== */
-
   let tipoSessao = app.tipo;
 
-  // 👕 LOJA DE ROUPAS EXIGE "loja"
-  if(app.tipo === "roupas"){
+  // 👕 regra loja
+  if(app.tipo === "loja-roupas"){
     tipoSessao = "loja";
   }
 
-  /* 3️⃣ SALVA EXATAMENTE COMO O PAINEL ESPERA */
+  /* 4️⃣ SALVA SESSÃO */
   const adminLogado = {
-    id: admin.id,
-    usuario: usuario,
-    app_id: admin.app_id,
-    tipo: tipoSessao        // ← AQUI ESTÁ A PROVA
+    id: usuario.id,
+    email: email,
+    app_id: usuario.app_id,
+    tipo: tipoSessao
   };
 
   localStorage.setItem("admin_logado", JSON.stringify(adminLogado));
-  console.log("LOGIN SALVO 👉", adminLogado);
+  console.log("LOGIN SEGURO 👉", adminLogado);
 
-  /* 4️⃣ REDIRECIONA (SEM INVENTAR REGRA NOVA) */
+  /* 5️⃣ REDIRECIONA */
   if(tipoSessao === "loja"){
     location.href = "../loja-roupas/admin.html";
 
