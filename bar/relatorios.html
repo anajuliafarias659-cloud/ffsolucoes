@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatórios</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script type="module" src="../js/auth.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{
+  background:#0f172a;
+  padding:16px 24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center
+}
+.container{max-width:1100px;margin:auto;padding:24px}
+
+.box{
+  background:#0f172a;
+  padding:20px;
+  border-radius:16px;
+  margin-bottom:20px
+}
+
+input,button{
+  padding:10px;
+  border-radius:8px;
+  border:none;
+  margin-right:8px
+}
+
+button{
+  background:#22c55e;
+  font-weight:bold;
+  cursor:pointer
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:16px
+}
+
+.card{
+  background:#1e293b;
+  padding:16px;
+  border-radius:14px;
+  text-align:center
+}
+
+.valor{
+  font-size:22px;
+  font-weight:bold;
+  margin-top:8px
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:12px
+}
+th,td{
+  padding:8px;
+  border-bottom:1px solid #334155;
+  font-size:14px
+}
+th{color:#94a3b8}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <h2>📊 Relatórios</h2>
+  <button onclick="voltar()">Voltar</button>
+</div>
+
+<div class="container">
+
+<div class="box">
+  <label>Data inicial</label>
+  <input type="date" id="dataInicio">
+
+  <label>Data final</label>
+  <input type="date" id="dataFim">
+
+  <button onclick="gerarRelatorio()">Gerar</button>
+</div>
+
+<div class="grid">
+
+  <div class="card">
+    Total vendido
+    <div class="valor" id="totalVendido">R$ 0,00</div>
+  </div>
+
+  <div class="card">
+    Pedidos
+    <div class="valor" id="totalPedidos">0</div>
+  </div>
+
+  <div class="card">
+    Ticket médio
+    <div class="valor" id="ticketMedio">R$ 0,00</div>
+  </div>
+
+</div>
+
+<div class="box">
+  <h3>Formas de pagamento</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Forma</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody id="listaFormas"></tbody>
+  </table>
+</div>
+
+</div>
+
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+if(!window.APP_ID){
+  alert("Sessão inválida");
+  location.href="/auth/login.html";
+}
+
+/* ===== GERAR RELATÓRIO ===== */
+window.gerarRelatorio = async function(){
+
+  const inicio = document.getElementById("dataInicio").value;
+  const fim = document.getElementById("dataFim").value;
+
+  if(!inicio || !fim){
+    alert("Selecione o período");
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id, valor_pago, forma_pagamento")
+    .eq("app_id", window.APP_ID)
+    .eq("status", "finalizado")
+    .gte("created_at", inicio + "T00:00:00")
+    .lte("created_at", fim + "T23:59:59");
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  let total = 0;
+  let formas = {};
+
+  (data || []).forEach(p=>{
+    total += Number(p.valor_pago || 0);
+
+    const forma = p.forma_pagamento || "Não informado";
+
+    if(!formas[forma]) formas[forma] = 0;
+    formas[forma] += Number(p.valor_pago || 0);
+  });
+
+  const totalPedidos = data.length;
+  const ticket = totalPedidos > 0 ? total / totalPedidos : 0;
+
+  document.getElementById("totalVendido").innerText =
+    `R$ ${total.toFixed(2)}`;
+
+  document.getElementById("totalPedidos").innerText =
+    totalPedidos;
+
+  document.getElementById("ticketMedio").innerText =
+    `R$ ${ticket.toFixed(2)}`;
+
+  const lista = document.getElementById("listaFormas");
+  lista.innerHTML = "";
+
+  Object.keys(formas).forEach(f=>{
+    lista.innerHTML += `
+      <tr>
+        <td>${f}</td>
+        <td>R$ ${formas[f].toFixed(2)}</td>
+      </tr>
+    `;
+  });
+};
+
+/* ===== VOLTAR ===== */
+window.voltar = function(){
+  location.href="admin.html";
+};
+</script>
+
+</body>
+</html>
