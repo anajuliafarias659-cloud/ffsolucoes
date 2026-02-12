@@ -5,24 +5,48 @@
 <title>Produtos</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- 🔐 AUTH GLOBAL -->
 <script type="module" src="../js/auth.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.topo{
+  background:#0f172a;
+  padding:16px 24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
 .container{padding:32px;max-width:1100px;margin:auto}
-form{background:#0f172a;padding:24px;border-radius:18px;margin-bottom:32px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
-input,select,button{padding:12px;border-radius:10px;border:none}
+form{
+  background:#0f172a;
+  padding:24px;
+  border-radius:18px;
+  margin-bottom:32px;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:14px;
+}
+input,select,button{
+  padding:12px;
+  border-radius:10px;
+  border:none;
+}
 select{background:#fff;color:#000}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
-.btn-camera{background:#2563eb;color:#fff}
 .btn-editar{background:#facc15;color:#000;margin-top:6px}
 .repor{background:#2563eb;color:#fff;margin-top:6px}
 .desativar{background:#ef4444;color:#fff;margin-top:6px}
-.lista{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
-.card{background:#0f172a;border-radius:18px;padding:16px}
-.card img{width:100%;height:160px;object-fit:cover;border-radius:12px;margin-bottom:10px}
+.lista{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:16px;
+}
+.card{
+  background:#0f172a;
+  border-radius:18px;
+  padding:16px;
+}
 small{color:#cbd5f5}
 </style>
 </head>
@@ -50,103 +74,51 @@ small{color:#cbd5f5}
     <option value="bar">🍺 Bar</option>
   </select>
 
-  <input id="imagem" type="file" accept="image/*" capture="environment">
-  <button type="button" class="btn-camera" onclick="abrirCamera()">📷 Tirar / Trocar foto</button>
-
   <button type="submit">Salvar produto</button>
 </form>
 
 <div class="lista" id="lista"></div>
 </div>
 
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-let app_id = null;
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
 /* 🔐 ESPERA AUTH DEFINIR APP_ID */
-function esperarSessao(){
-
-  if(window.APP_ID){
-    app_id = window.APP_ID;
-    console.log("APP_ID carregado:", app_id);
-    iniciarSistema();
-  } else {
-    setTimeout(esperarSessao,100);
+async function aguardarSessao(){
+  while(!window.APP_ID){
+    await new Promise(r=>setTimeout(r,100));
   }
+  console.log("APP_ID carregado:", window.APP_ID);
+  iniciar();
 }
 
-function iniciarSistema(){
-  if(!app_id){
-    alert("Sessão inválida");
-    location.href="../auth/login.html";
-    return;
-  }
-
-  carregarCategorias();
-  listarProdutos();
+async function iniciar(){
+  await carregarCategorias();
+  await listarProdutos();
 }
 
-function abrirCamera(){
-  document.getElementById("imagem").click();
-}
+/* ================= CATEGORIAS ================= */
 
 async function carregarCategorias(){
-  const { data, error } = await sb
+  const { data } = await supabase
     .from("categorias")
     .select("id,nome")
-    .eq("app_id", app_id)
+    .eq("app_id", window.APP_ID)
     .eq("ativo", true)
     .order("nome");
 
-  if(error){
-    console.error("Erro categorias:", error);
-    return;
-  }
-
-  categoria.innerHTML =
-    `<option disabled selected>Categoria</option>` +
-    (data || []).map(c=>`<option value="${c.id}">${c.nome}</option>`).join("");
+  const select = document.getElementById("categoria");
+  select.innerHTML =
+    `<option value="">Categoria</option>` +
+    (data||[]).map(c=>`<option value="${c.id}">${c.nome}</option>`).join("");
 }
 
-function limparNomeArquivo(nome){
-  return nome.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g,"")
-    .replace(/\s+/g,"_")
-    .replace(/[^a-zA-Z0-9._-]/g,"");
-}
+/* ================= SALVAR ================= */
 
-async function uploadImagem(file){
-  if(!file) return null;
-
-  const path = `${app_id}/${Date.now()}_${limparNomeArquivo(file.name)}`;
-
-  const { error } = await sb.storage
-    .from("produtos")
-    .upload(path, file, { upsert:true });
-
-  if(error){
-    console.error("Erro upload:", error);
-    return null;
-  }
-
-  return sb.storage.from("produtos").getPublicUrl(path).data.publicUrl;
-}
-
-formProduto.onsubmit = async e =>{
+document.getElementById("formProduto").onsubmit = async e=>{
   e.preventDefault();
 
-  if(!app_id){
-    alert("APP_ID não definido");
-    return;
-  }
-
   const id = produtoId.value;
-  const file = imagem.files[0];
-  const foto = file ? await uploadImagem(file) : null;
 
   const dados = {
     nome: nome.value,
@@ -156,69 +128,113 @@ formProduto.onsubmit = async e =>{
     destino: destino.value
   };
 
-  if(foto) dados.foto = foto;
-
-  let error;
-
   if(id){
-    ({ error } = await sb.from("produtos").update(dados).eq("id", id));
+    await supabase.from("produtos")
+      .update(dados)
+      .eq("id", id);
   } else {
-    ({ error } = await sb.from("produtos").insert({
-      ...dados,
-      app_id,
-      ativo:true
-    }));
-  }
-
-  if(error){
-    console.error("Erro salvar produto:", error);
-    alert("Erro ao salvar produto");
-    return;
+    await supabase.from("produtos")
+      .insert({
+        ...dados,
+        app_id: window.APP_ID,
+        ativo: true
+      });
   }
 
   formProduto.reset();
-  produtoId.value="";
+  produtoId.value = "";
   listarProdutos();
 };
 
+/* ================= LISTAR ================= */
+
 async function listarProdutos(){
 
-  if(!app_id){
-    console.error("APP_ID undefined ao listar");
-    return;
-  }
-
-  const { data, error } = await sb
+  const { data } = await supabase
     .from("produtos")
     .select("*, categorias(nome)")
-    .eq("app_id", app_id)
+    .eq("app_id", window.APP_ID)
     .eq("ativo", true)
     .order("created_at",{ascending:false});
 
-  if(error){
-    console.error("Erro listar:", error);
-    return;
-  }
-
+  const lista = document.getElementById("lista");
   lista.innerHTML="";
-  (data || []).forEach(p=>{
-    lista.innerHTML+=`
+
+  (data||[]).forEach(p=>{
+    lista.innerHTML += `
       <div class="card">
-        ${p.foto?`<img src="${p.foto}">`:""}
         <b>${p.nome}</b><br>
-        <b>R$ ${p.preco.toFixed(2)}</b><br>
-        <small>Categoria: ${p.categorias?.nome||""}</small><br>
+        <b>R$ ${Number(p.preco).toFixed(2)}</b><br>
+        <small>Categoria: ${p.categorias?.nome || "-"}</small><br>
         <small>Destino: ${p.destino}</small><br>
         <small>Estoque: ${p.estoque}</small><br>
 
-        <button class="repor" onclick="reporEstoque('${p.id}', ${p.estoque})">Repor estoque</button>
-        <button class="btn-editar" onclick='editar(${JSON.stringify(p)})'>Editar</button>
-        <button class="desativar" onclick="desativarProduto('${p.id}')">Desativar</button>
-      </div>`;
+        <button class="repor" onclick="reporEstoque('${p.id}', ${p.estoque})">
+          Repor estoque
+        </button>
+
+        <button class="btn-editar" onclick='editar(${JSON.stringify(p)})'>
+          Editar
+        </button>
+
+        <button class="desativar" onclick="desativarProduto('${p.id}')">
+          Desativar
+        </button>
+      </div>
+    `;
   });
 }
 
-esperarSessao();
+/* ================= EDITAR ================= */
+
+function editar(p){
+  produtoId.value = p.id;
+  nome.value = p.nome;
+  preco.value = p.preco;
+  estoque.value = p.estoque;
+  categoria.value = p.categoria_id;
+  destino.value = p.destino;
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+/* ================= REPOR ================= */
+
+async function reporEstoque(id, atual){
+
+  const qtd = prompt(`Quantidade para REPOR:\nEstoque atual: ${atual}`, "1");
+  if(!qtd) return;
+
+  const n = Number(qtd);
+  if(isNaN(n) || n <= 0){
+    alert("Quantidade inválida");
+    return;
+  }
+
+  await supabase.from("produtos")
+    .update({ estoque: atual + n })
+    .eq("id", id);
+
+  listarProdutos();
+}
+
+/* ================= DESATIVAR ================= */
+
+async function desativarProduto(id){
+  if(confirm("Desativar produto?")){
+    await supabase.from("produtos")
+      .update({ ativo:false })
+      .eq("id", id);
+    listarProdutos();
+  }
+}
+
+/* 🔥 EXPÕE FUNÇÕES PARA ONCLICK */
+window.reporEstoque = reporEstoque;
+window.editar = editar;
+window.desativarProduto = desativarProduto;
+
+/* START */
+aguardarSessao();
 </script>
 
 </body>
