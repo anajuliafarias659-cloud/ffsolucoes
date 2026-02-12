@@ -12,10 +12,10 @@ body{
   margin:0;
   height:100vh;
   display:flex;
-  align-items:center;
   justify-content:center;
-  font-family:Arial;
+  align-items:center;
   background:#020617;
+  font-family:Arial;
   color:#fff;
 }
 .card{
@@ -31,23 +31,15 @@ input,button{
   border-radius:10px;
   border:none;
 }
-input{background:#e5f0ff}
 button{
   background:#22c55e;
   font-weight:bold;
   cursor:pointer;
 }
-button:hover{opacity:0.9}
 .link{
-  margin-top:10px;
-  font-size:14px;
-  cursor:pointer;
-  color:#38bdf8;
+  margin-top:12px;
   text-align:center;
-}
-.msg{
-  margin-top:10px;
-  font-size:14px;
+  cursor:pointer;
   color:#22c55e;
 }
 </style>
@@ -57,15 +49,12 @@ button:hover{opacity:0.9}
 
 <div class="card">
   <h2>🔐 Login Administrativo</h2>
+
   <input id="usuario" placeholder="E-mail">
   <input id="senha" type="password" placeholder="Senha">
   <button onclick="login()">Entrar</button>
 
-  <div class="link" onclick="recuperarSenha()">
-    Esqueci minha senha
-  </div>
-
-  <div id="mensagem" class="msg"></div>
+  <div class="link" onclick="resetSenha()">Esqueci minha senha</div>
 </div>
 
 <script>
@@ -74,7 +63,6 @@ const sb = window.supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* 🔐 LOGIN */
 async function login(){
 
   const email = document.getElementById("usuario").value.trim().toLowerCase();
@@ -85,94 +73,56 @@ async function login(){
     return;
   }
 
-  const { data: authData, error: authError } =
+  const { data, error } =
     await sb.auth.signInWithPassword({
-      email: email,
+      email,
       password: senha
     });
 
-  if(authError){
-    alert(authError.message);
+  if(error){
+    alert("Credenciais inválidas");
     return;
   }
 
-  const userId = authData.user.id;
+  const userId = data.user.id;
 
-  const { data: usuario } = await sb
+  const { data: usuarioSistema } = await sb
     .from("usuarios")
-    .select("id, app_id, ativo")
+    .select("app_id")
     .eq("id", userId)
     .maybeSingle();
 
-  if(!usuario || !usuario.app_id){
+  if(!usuarioSistema){
     alert("Usuário não vinculado ao sistema.");
-    return;
-  }
-
-  if(!usuario.ativo){
-    alert("Usuário desativado.");
     return;
   }
 
   const { data: app } = await sb
     .from("apps")
     .select("tipo")
-    .eq("id", usuario.app_id)
-    .maybeSingle();
+    .eq("id", usuarioSistema.app_id)
+    .single();
 
-  if(!app){
-    alert("Negócio não encontrado.");
-    return;
-  }
-
-  let tipoSessao = app.tipo;
-  if(app.tipo === "loja-roupas"){
-    tipoSessao = "loja";
-  }
-
-  const adminLogado = {
-    id: usuario.id,
-    email: email,
-    app_id: usuario.app_id,
-    tipo: tipoSessao
-  };
-
-  localStorage.setItem("admin_logado", JSON.stringify(adminLogado));
-
-  if(tipoSessao === "loja"){
-    location.href = "../loja-roupas/admin.html";
-  }else if(tipoSessao === "bar"){
-    location.href = "../bar/admin.html";
-  }else if(tipoSessao === "mercado"){
-    location.href = "../mercado/admin.html";
-  }else if(tipoSessao === "locadora"){
-    location.href = "../locadora/admin.html";
-  }else if(tipoSessao === "hotel"){
+  if(app.tipo === "hotel"){
     location.href = "../hotel/painel.html";
+  } else {
+    location.href = "../" + app.tipo + "/admin.html";
   }
 }
 
-/* 📧 RECUPERAÇÃO DE SENHA */
-async function recuperarSenha(){
-
-  const email = document.getElementById("usuario").value.trim().toLowerCase();
+async function resetSenha(){
+  const email = document.getElementById("usuario").value.trim();
 
   if(!email){
-    alert("Digite seu e-mail primeiro.");
+    alert("Digite seu e-mail primeiro");
     return;
   }
 
-  const { error } = await sb.auth.resetPasswordForEmail(email, {
-    redirectTo: "https://www.ffsolucoes.com.br/auth/nova-senha.html"
+  await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: "https://www.ffsolucoes.com.br/auth/update-password.html"
   });
 
-  if(error){
-    alert(error.message);
-    return;
-  }
-
-  document.getElementById("mensagem").innerHTML =
-    "Link de recuperação enviado para seu e-mail ✅";
+  alert("E-mail de recuperação enviado.");
 }
 </script>
 
