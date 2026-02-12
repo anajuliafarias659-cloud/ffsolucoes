@@ -18,102 +18,26 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
 .container{padding:32px;max-width:1200px;margin:auto}
-
-.btn{
-  border:none;padding:10px 16px;border-radius:10px;
-  font-weight:bold;cursor:pointer
-}
+.btn{border:none;padding:10px 16px;border-radius:10px;font-weight:bold;cursor:pointer}
 .btn-add{background:#22c55e}
 .btn-avulsa{background:#38bdf8}
 .btn-voltar{background:#1e293b;color:#fff}
-
-.grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-  gap:20px
-}
-
-.card{
-  background:#0f172a;
-  padding:16px;
-  border-radius:18px;
-  text-align:center;
-  border:2px solid transparent;
-  cursor:pointer;
-  transition:.15s
-}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px}
+.card{background:#0f172a;padding:16px;border-radius:18px;text-align:center;border:2px solid transparent;cursor:pointer;transition:.15s}
 .card:hover{transform:scale(1.03)}
-
 .card.livre{border-color:#22c55e}
 .card.preparando{border-color:#eab308}
-.card.conta{
-  border-color:#fde047;
-  box-shadow:0 0 14px rgba(253,224,71,.8);
-}
-
-.status{
-  margin:6px 0 10px;
-  padding:4px 10px;
-  border-radius:8px;
-  font-weight:bold;
-  font-size:13px
-}
+.card.conta{border-color:#fde047;box-shadow:0 0 14px rgba(253,224,71,.8)}
+.status{margin:6px 0 10px;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:13px}
 .status.livre{background:#22c55e;color:#022c22}
 .status.preparando{background:#eab308;color:#000}
 .status.conta{background:#fde047;color:#000}
-
-.qr{
-  background:#020617;
-  border-radius:14px;
-  padding:10px;
-  margin:12px 0;
-  display:flex;
-  justify-content:center
-}
-
-.btn-remover{
-  margin-top:8px;width:100%;
-  background:#1e293b;color:#94a3b8;
-  border:1px solid #334155;
-  padding:8px;border-radius:8px;
-  font-weight:600;cursor:pointer;font-size:13px
-}
+.qr{background:#020617;border-radius:14px;padding:10px;margin:12px 0;display:flex;justify-content:center}
+.btn-remover{margin-top:8px;width:100%;background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
 </style>
 </head>
 
 <body>
-
-<script>
-/* 🔐 SESSÃO HÍBRIDA (ADMIN + FUNCIONÁRIO) */
-
-const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
-let app_id = null;
-
-/* Se for funcionário */
-if (funcionario && funcionario.app_id) {
-  app_id = funcionario.app_id;
-}
-
-/* Se não for funcionário, tenta admin */
-if (!app_id && window.APP_ID) {
-  app_id = window.APP_ID;
-}
-
-/* Se nenhum dos dois */
-if (!app_id) {
-  alert("Sessão inválida");
-  location.href = "/auth/login.html";
-}
-
-/* ===== SUPABASE ===== */
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const SEGREDO_REMOVER_MESA = "4321";
-let criandoMesa = false;
-</script>
 
 <div class="topo">
   <h2>🪑 Mesas</h2>
@@ -129,6 +53,47 @@ let criandoMesa = false;
 </div>
 
 <script>
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let app_id = null;
+const SEGREDO_REMOVER_MESA = "4321";
+let criandoMesa = false;
+
+/* 🔐 ESPERA ADMIN OU FUNCIONÁRIO */
+function esperarSessao(){
+
+  const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
+
+  if(funcionario && funcionario.app_id){
+    app_id = funcionario.app_id;
+    iniciarSistema();
+    return;
+  }
+
+  if(window.APP_ID){
+    app_id = window.APP_ID;
+    iniciarSistema();
+    return;
+  }
+
+  setTimeout(esperarSessao,100);
+}
+
+function iniciarSistema(){
+  if(!app_id){
+    alert("Sessão inválida");
+    location.href="/auth/login.html";
+    return;
+  }
+
+  carregarMesas();
+  setInterval(carregarMesas,4000);
+}
+
+/* ===== CARREGAR MESAS ===== */
 async function carregarMesas(){
 
   const { data: mesas } = await sb
@@ -176,23 +141,21 @@ async function carregarMesas(){
     div.innerHTML=`
       <h3>Mesa ${m.numero_mesa}</h3>
       <span class="status ${classe}">${texto}</span>
-
       <div class="qr">
         <canvas id="qr-${m.id}"></canvas>
       </div>
-
       ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ``}
     `;
 
     div.onclick=()=>{
-      location.href=`mesa.html?mesa=${m.id}&app_id=${app_id}`;
+      location.href=`mesa.html?mesa=${m.id}`;
     };
 
     grid.appendChild(div);
 
     QRCode.toCanvas(
       document.getElementById(`qr-${m.id}`),
-      location.origin + `/bar/mesa.html?mesa=${m.id}&app_id=${app_id}`,
+      location.origin + `/bar/mesa.html?mesa=${m.id}`,
       { width:120 }
     );
 
@@ -209,6 +172,7 @@ async function carregarMesas(){
   });
 }
 
+/* ===== ADICIONAR MESA ===== */
 async function adicionarMesa(){
   if(criandoMesa) return;
   criandoMesa=true;
@@ -234,17 +198,17 @@ async function adicionarMesa(){
 }
 
 function vendaAvulsa(){
-  location.href=`venda-avulsa.html?app_id=${app_id}`;
+  location.href=`venda-avulsa.html`;
 }
 
 function logout(){
   localStorage.removeItem("funcionario_logado");
-  window.location.href = "/auth/login.html";
+  location.href="/auth/login.html";
 }
 
-carregarMesas();
-setInterval(carregarMesas,4000);
+esperarSessao();
 
+/* PWA */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
