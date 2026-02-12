@@ -77,7 +77,12 @@ const supabase = createClient(
 
 window.criarDemo = async ()=>{
 
-  if(!nomeNegocio.value || !usuarioAdmin.value || !senhaAdmin.value){
+  const nome = document.getElementById("nomeNegocio").value.trim();
+  const tipo = document.getElementById("tipoNegocio").value;
+  const email = document.getElementById("usuarioAdmin").value.trim().toLowerCase();
+  const senha = document.getElementById("senhaAdmin").value.trim();
+
+  if(!nome || !email || !senha){
     alert("Preencha todos os campos");
     return;
   }
@@ -87,64 +92,71 @@ window.criarDemo = async ()=>{
   expiracao.setDate(hoje.getDate() + 15);
   const dataISO = expiracao.toISOString();
 
-  /* 1️⃣ CRIAR USUÁRIO NO AUTH COM CONFIRMAÇÃO */
-  const { data: authData, error: authError } =
-    await supabase.auth.signUp({
-      email: usuarioAdmin.value.trim(),
-      password: senhaAdmin.value.trim(),
-      options: {
-        emailRedirectTo: "https://www.ffsolucoes.com.br/auth/login.html"
-      }
-    });
+  try {
 
-  if(authError){
-    alert(authError.message);
-    return;
+    /* 1️⃣ CRIA USUÁRIO NO AUTH */
+    const { data: authData, error: authError } =
+      await supabase.auth.signUp({
+        email: email,
+        password: senha,
+        options: {
+          emailRedirectTo: "https://www.ffsolucoes.com.br/auth/login.html"
+        }
+      });
+
+    if(authError){
+      throw authError;
+    }
+
+    if(!authData.user){
+      throw new Error("Erro ao criar usuário no Auth.");
+    }
+
+    const userId = authData.user.id;
+
+    /* 2️⃣ CRIA APP */
+    const { data: negocio, error: erroApp } = await supabase
+      .from("apps")
+      .insert({
+        nome: nome,
+        tipo: tipo,
+        ativo: true,
+        plano: "demo",
+        data_expiracao: dataISO
+      })
+      .select()
+      .single();
+
+    if(erroApp){
+      throw erroApp;
+    }
+
+    /* 3️⃣ INSERE NA TABELA USUARIOS */
+    const { error: erroUsuario } = await supabase
+      .from("usuarios")
+      .insert({
+        id: userId, // UUID do Auth
+        nome: email,
+        email: email,
+        tipo: "admin",
+        app_id: negocio.id,
+        plano: "demo",
+        data_expiracao: dataISO,
+        ativo: true
+      });
+
+    if(erroUsuario){
+      throw erroUsuario;
+    }
+
+    /* 4️⃣ MOSTRA MENSAGEM */
+    document.getElementById("mensagem").innerHTML =
+      "Conta criada com sucesso! ✅<br>Verifique seu e-mail para confirmar antes de acessar o sistema.";
+
+  } catch(err){
+    console.log("ERRO COMPLETO:", err);
+    alert(err.message || "Erro inesperado.");
   }
-
-  const userId = authData.user.id;
-
-  /* 2️⃣ CRIAR APP */
-  const { data: negocio, error: erroApp } = await supabase
-    .from("apps")
-    .insert({
-      nome: nomeNegocio.value.trim(),
-      tipo: tipoNegocio.value,
-      ativo: true,
-      plano: "demo",
-      data_expiracao: dataISO
-    })
-    .select()
-    .single();
-
-  if(erroApp){
-    alert(erroApp.message);
-    return;
-  }
-
-  /* 3️⃣ SALVAR USUÁRIO NA TABELA */
-  const { error: erroUsuario } = await supabase
-    .from("usuarios")
-    .insert({
-      id: userId,
-      nome: usuarioAdmin.value.trim(),
-      email: usuarioAdmin.value.trim(),
-      tipo: "admin",
-      app_id: negocio.id,
-      plano: "demo",
-      data_expiracao: dataISO,
-      ativo: true
-    });
-
-  if(erroUsuario){
-    alert(erroUsuario.message);
-    return;
-  }
-
-  /* 4️⃣ MOSTRAR MENSAGEM */
-  document.getElementById("mensagem").innerHTML =
-    "Conta criada com sucesso! ✅<br>Verifique seu e-mail para confirmar antes de acessar o sistema.";
-
 };
 </script>
 
