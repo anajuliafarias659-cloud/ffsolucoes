@@ -65,7 +65,7 @@ let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
 
-/* 🔐 SESSÃO HÍBRIDA */
+/* 🔐 SESSÃO */
 async function obterSessao(){
 
   const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
@@ -196,16 +196,30 @@ async function addProduto(produtoId){
   const produto = produtosCache.find(p=>p.id===produtoId);
   if(!produto) return;
 
-  await supabase.from("pedido_itens").insert({
-    app_id: appId,
-    pedido_id: pedidoAtual.id,
-    produto_id: produto.id,
-    nome_produto: produto.nome,
-    preco: produto.preco,
-    quantidade: 1,
-    destino: produto.destino,
-    status:"novo"
-  });
+  const { data } = await supabase
+    .from("pedido_itens")
+    .select("id,quantidade")
+    .eq("pedido_id", pedidoAtual.id)
+    .eq("produto_id", produto.id)
+    .maybeSingle();
+
+  if(data){
+    await supabase
+      .from("pedido_itens")
+      .update({ quantidade: data.quantidade + 1 })
+      .eq("id", data.id);
+  } else {
+    await supabase.from("pedido_itens").insert({
+      app_id: appId,
+      pedido_id: pedidoAtual.id,
+      produto_id: produto.id,
+      nome_produto: produto.nome,
+      preco: produto.preco,
+      quantidade: 1,
+      destino: produto.destino,
+      status:"novo"
+    });
+  }
 
   await carregarPedido();
 }
@@ -229,7 +243,20 @@ async function carregarPedido(){
 
     div.innerHTML+=`
       <div class="item">
-        ${i.nome_produto} x ${i.quantidade}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            ${i.nome_produto}
+            <div style="font-size:13px;opacity:.6">
+              R$ ${i.preco.toFixed(2)}
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:6px">
+            <button onclick="diminuirItem('${i.id}', ${i.quantidade})">➖</button>
+            <strong>${i.quantidade}</strong>
+            <button onclick="aumentarItem('${i.id}', ${i.quantidade})">➕</button>
+          </div>
+        </div>
       </div>
     `;
   });
@@ -238,6 +265,32 @@ async function carregarPedido(){
     `Total: R$ ${total.toFixed(2)}`;
 
   atualizarBotaoLiberar(data);
+}
+
+async function aumentarItem(id, quantidade){
+  await supabase
+    .from("pedido_itens")
+    .update({ quantidade: quantidade + 1 })
+    .eq("id", id);
+
+  await carregarPedido();
+}
+
+async function diminuirItem(id, quantidade){
+
+  if(quantidade > 1){
+    await supabase
+      .from("pedido_itens")
+      .update({ quantidade: quantidade - 1 })
+      .eq("id", id);
+  } else {
+    await supabase
+      .from("pedido_itens")
+      .delete()
+      .eq("id", id);
+  }
+
+  await carregarPedido();
 }
 
 function atualizarBotaoLiberar(itens){
@@ -251,26 +304,14 @@ function atualizarBotaoLiberar(itens){
 }
 
 async function enviarPedido(){
-  await supabase
-    .from("pedido_itens")
-    .update({status:"confirmado"})
-    .eq("pedido_id", pedidoAtual.id)
-    .eq("status","novo");
-
   alert("Pedido enviado!");
 }
 
 async function pedirConta(){
-  await supabase
-    .from("pedidos")
-    .update({status:"conta_solicitada"})
-    .eq("id", pedidoAtual.id);
-
   alert("Conta solicitada!");
 }
 
 async function liberarMesa(){
-
   const { count } = await supabase
     .from("pedido_itens")
     .select("*",{count:"exact",head:true})
@@ -299,6 +340,8 @@ function iniciarSistema(){
 window.filtrarDestino = filtrarDestino;
 window.filtrarProdutos = filtrarProdutos;
 window.addProduto = addProduto;
+window.aumentarItem = aumentarItem;
+window.diminuirItem = diminuirItem;
 window.enviarPedido = enviarPedido;
 window.pedirConta = pedirConta;
 window.liberarMesa = liberarMesa;
