@@ -96,6 +96,8 @@ async function obterSessao(){
   location.href="/auth/login.html";
 }
 
+/* ===== SISTEMA ===== */
+
 async function carregarMesa(){
   const { data } = await supabase
     .from("mesas")
@@ -121,7 +123,7 @@ async function garantirPedidoAberto(){
 
   if(data){
     pedidoAtual = data;
-    carregarPedido();
+    await carregarPedido();
     return;
   }
 
@@ -137,7 +139,7 @@ async function garantirPedidoAberto(){
     .single();
 
   pedidoAtual = novo;
-  carregarPedido();
+  await carregarPedido();
 }
 
 async function carregarProdutos(){
@@ -189,19 +191,77 @@ function filtrarProdutos(){
   aplicarFiltros();
 }
 
-async function addProduto(id){
-  alert("Produto adicionado (fluxo funcionando)");
+async function addProduto(produtoId){
+
+  const produto = produtosCache.find(p=>p.id===produtoId);
+  if(!produto) return;
+
+  await supabase.from("pedido_itens").insert({
+    app_id: appId,
+    pedido_id: pedidoAtual.id,
+    produto_id: produto.id,
+    nome_produto: produto.nome,
+    preco: produto.preco,
+    quantidade: 1,
+    destino: produto.destino,
+    status:"novo"
+  });
+
+  await carregarPedido();
+}
+
+async function carregarPedido(){
+
+  if(!pedidoAtual) return;
+
+  const { data } = await supabase
+    .from("pedido_itens")
+    .select("*")
+    .eq("pedido_id", pedidoAtual.id);
+
+  const div = document.getElementById("pedido");
+  div.innerHTML="";
+
+  let total = 0;
+
+  (data || []).forEach(i=>{
+    total += i.preco * i.quantidade;
+
+    div.innerHTML+=`
+      <div class="item">
+        ${i.nome_produto} x ${i.quantidade}
+      </div>
+    `;
+  });
+
+  document.getElementById("totalPedido").innerText =
+    `Total: R$ ${total.toFixed(2)}`;
 }
 
 async function enviarPedido(){
-  alert("Pedido enviado");
+  await supabase
+    .from("pedido_itens")
+    .update({status:"confirmado"})
+    .eq("pedido_id", pedidoAtual.id);
+
+  alert("Pedido enviado!");
 }
 
 async function pedirConta(){
-  alert("Conta solicitada");
+  await supabase
+    .from("pedidos")
+    .update({status:"conta_solicitada"})
+    .eq("id", pedidoAtual.id);
+
+  alert("Conta solicitada!");
 }
 
 async function liberarMesa(){
+  await supabase
+    .from("pedidos")
+    .update({status:"finalizado"})
+    .eq("id", pedidoAtual.id);
+
   location.href="mesas.html";
 }
 
