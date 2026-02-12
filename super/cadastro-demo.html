@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Teste Grátis 15 Dias</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <style>
 *{box-sizing:border-box}
 body{
@@ -35,6 +36,9 @@ button{
   font-weight:bold;
   cursor:pointer;
 }
+button:hover{
+  opacity:0.9;
+}
 </style>
 </head>
 <body>
@@ -47,8 +51,8 @@ button{
 <select id="tipoNegocio">
   <option value="bares e restaurantes">Bares e Restaurantes</option>
   <option value="mercado">Mercado</option>
-  <option value="hoteis">Hoteis</option>
   <option value="locadora">Locadora</option>
+  <option value="hotel">Hotel</option>
   <option value="loja de roupas">Loja de Roupas</option>
 </select>
 
@@ -68,81 +72,128 @@ const supabase = createClient(
 
 window.criarDemo = async ()=>{
 
-  if(!nomeNegocio.value || !usuarioAdmin.value || !senhaAdmin.value){
-    alert("Preencha todos os campos");
-    return;
+  try {
+
+    if(!nomeNegocio.value || !usuarioAdmin.value || !senhaAdmin.value){
+      alert("Preencha todos os campos");
+      return;
+    }
+
+    const hoje = new Date();
+    const expiracao = new Date();
+    expiracao.setDate(hoje.getDate() + 15);
+    const dataISO = expiracao.toISOString();
+
+    /* 🔎 VERIFICA SE USUÁRIO JÁ EXISTE */
+    const { data: usuarioExistente } = await supabase
+      .from("usuarios")
+      .select("id")
+      .eq("email", usuarioAdmin.value.trim())
+      .maybeSingle();
+
+    if(usuarioExistente){
+      alert("Este usuário já existe.");
+      return;
+    }
+
+    /* 1️⃣ CRIA APP */
+    const { data: negocio, error: erroApp } = await supabase
+      .from("apps")
+      .insert({
+        nome: nomeNegocio.value.trim(),
+        tipo: tipoNegocio.value,
+        ativo: true,
+        plano: "demo",
+        data_expiracao: dataISO
+      })
+      .select()
+      .single();
+
+    if(erroApp){
+      console.log("Erro ao criar app:", erroApp);
+      alert(erroApp.message);
+      return;
+    }
+
+    /* 2️⃣ CRIA ADMIN */
+    const { error: erroAdmin } = await supabase
+      .from("admins")
+      .insert({
+        usuario: usuarioAdmin.value.trim(),
+        senha: senhaAdmin.value.trim(),
+        permissao: "admin",
+        app_id: negocio.id,
+        ativo: true
+      });
+
+    if(erroAdmin){
+      console.log("Erro admin:", erroAdmin);
+      alert("Erro ao criar admin");
+      return;
+    }
+
+    /* 3️⃣ CRIA USUÁRIO */
+    const { data: usuario, error: erroUsuario } = await supabase
+      .from("usuarios")
+      .insert({
+        nome: usuarioAdmin.value.trim(),
+        email: usuarioAdmin.value.trim(),
+        senha: senhaAdmin.value.trim(),
+        tipo: "admin",
+        app_id: negocio.id,
+        plano: "demo",
+        data_expiracao: dataISO,
+        ativo: true
+      })
+      .select()
+      .single();
+
+    if(erroUsuario){
+      console.log("Erro usuario:", erroUsuario);
+      alert("Erro ao criar usuário");
+      return;
+    }
+
+    /* 🔐 LOGIN AUTOMÁTICO */
+    localStorage.setItem("usuarioLogado", JSON.stringify(usuario));
+
+    /* 🚀 REDIRECIONAMENTO DINÂMICO */
+    let urlFinal = "";
+
+    switch(tipoNegocio.value){
+
+      case "bares e restaurantes":
+        urlFinal = "https://www.ffsolucoes.com.br/bar/admin.html?app=";
+        break;
+
+      case "mercado":
+        urlFinal = "https://www.ffsolucoes.com.br/mercado/admin.html?app=";
+        break;
+
+      case "locadora":
+        urlFinal = "https://www.ffsolucoes.com.br/locadora/admin.html?app=";
+        break;
+
+      case "hotel":
+        urlFinal = "https://www.ffsolucoes.com.br/hotel/painel.html?app=";
+        break;
+
+      case "loja de roupas":
+        urlFinal = "https://www.ffsolucoes.com.br/loja-roupas/admin.html?app=";
+        break;
+
+      default:
+        alert("Tipo inválido");
+        return;
+    }
+
+    window.location.href = urlFinal + negocio.id;
+
+  } catch (err) {
+    console.log("Erro geral:", err);
+    alert("Erro inesperado");
   }
 
-  const hoje = new Date();
-  const expiracao = new Date();
-  expiracao.setDate(hoje.getDate() + 15);
-
-  const dataISO = expiracao.toISOString();
-
-  /* CRIA APP */
-  const { data: negocio, error } = await supabase
-    .from("apps")
-    .insert({
-      nome: nomeNegocio.value.trim(),
-      tipo: tipoNegocio.value,
-      ativo: true,
-      plano: "demo",
-      data_expiracao: dataISO
-    })
-    .select()
-    .single();
-
-  if(error){
-    console.log("Erro ao criar app:", error);
-    alert(error.message);
-    return;
-  }
-
-  /* CRIA ADMIN */
-  const { error: erroAdmin } = await supabase
-    .from("admins")
-    .insert({
-      usuario: usuarioAdmin.value.trim(),
-      senha: senhaAdmin.value.trim(),
-      permissao: "admin",
-      app_id: negocio.id,
-      ativo: true
-    });
-
-  if(erroAdmin){
-    console.log("Erro admin:", erroAdmin);
-    alert(erroAdmin.message);
-    return;
-  }
-
-  /* CRIA USUÁRIO */
-  const { data: usuario, error: erroUsuario } = await supabase
-    .from("usuarios")
-    .insert({
-      nome: usuarioAdmin.value.trim(),
-      email: usuarioAdmin.value.trim(),
-      senha: senhaAdmin.value.trim(),
-      tipo: "admin",
-      app_id: negocio.id,
-      plano: "demo",
-      data_expiracao: dataISO,
-      ativo: true
-    })
-    .select()
-    .single();
-
-  if(erroUsuario){
-    console.log("Erro usuario:", erroUsuario);
-    alert(erroUsuario.message);
-    return;
-  }
-
-  /* LOGIN AUTOMÁTICO */
-  localStorage.setItem("usuarioLogado", JSON.stringify(usuario));
-
-  window.location.href =
-  "https://www.ffsolucoes.com.br/admin/index.html?app=" +
-  negocio.id;
 };
 </script>
 
