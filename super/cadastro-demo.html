@@ -36,9 +36,7 @@ button{
   font-weight:bold;
   cursor:pointer;
 }
-button:hover{
-  opacity:0.9;
-}
+button:hover{opacity:0.9}
 </style>
 </head>
 <body>
@@ -48,7 +46,6 @@ button:hover{
 
 <input id="nomeNegocio" placeholder="Nome do negócio">
 
-<!-- 🔥 VALORES PADRONIZADOS IGUAL AO SISTEMA -->
 <select id="tipoNegocio">
   <option value="bar">Bar</option>
   <option value="mercado">Mercado</option>
@@ -57,7 +54,7 @@ button:hover{
   <option value="loja-roupas">Loja de Roupas</option>
 </select>
 
-<input id="usuarioAdmin" placeholder="Usuário">
+<input id="usuarioAdmin" placeholder="E-mail">
 <input id="senhaAdmin" type="password" placeholder="Senha">
 
 <button onclick="criarDemo()">Criar Conta</button>
@@ -68,7 +65,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+  "SUA_PUBLIC_ANON_KEY_AQUI"
 );
 
 window.criarDemo = async ()=>{
@@ -83,24 +80,26 @@ window.criarDemo = async ()=>{
   expiracao.setDate(hoje.getDate() + 15);
   const dataISO = expiracao.toISOString();
 
-  /* 🔎 VERIFICA SE USUÁRIO JÁ EXISTE */
-  const { data: usuarioExistente } = await supabase
-    .from("usuarios")
-    .select("id")
-    .eq("email", usuarioAdmin.value.trim())
-    .maybeSingle();
+  /* 1️⃣ CRIAR USUÁRIO NO AUTH (SEGURO) */
+  const { data: authData, error: authError } =
+    await supabase.auth.signUp({
+      email: usuarioAdmin.value.trim(),
+      password: senhaAdmin.value.trim()
+    });
 
-  if(usuarioExistente){
-    alert("Este usuário já existe.");
+  if(authError){
+    alert(authError.message);
     return;
   }
 
-  /* 1️⃣ CRIA APP */
+  const userId = authData.user.id;
+
+  /* 2️⃣ CRIAR APP */
   const { data: negocio, error: erroApp } = await supabase
     .from("apps")
     .insert({
       nome: nomeNegocio.value.trim(),
-      tipo: tipoNegocio.value, // 🔥 PADRÃO CORRETO
+      tipo: tipoNegocio.value,
       ativo: true,
       plano: "demo",
       data_expiracao: dataISO
@@ -109,47 +108,36 @@ window.criarDemo = async ()=>{
     .single();
 
   if(erroApp){
-    console.log(erroApp);
     alert(erroApp.message);
     return;
   }
 
-  /* 2️⃣ CRIA ADMIN */
-  await supabase.from("admins").insert({
-    usuario: usuarioAdmin.value.trim(),
-    senha: senhaAdmin.value.trim(),
-    permissao: "admin",
+  /* 3️⃣ SALVAR DADOS DO USUÁRIO (SEM SENHA) */
+  await supabase.from("usuarios").insert({
+    id: userId, // 🔥 mesmo ID do auth
+    nome: usuarioAdmin.value.trim(),
+    email: usuarioAdmin.value.trim(),
+    tipo: "admin",
     app_id: negocio.id,
+    plano: "demo",
+    data_expiracao: dataISO,
     ativo: true
   });
 
-  /* 3️⃣ CRIA USUÁRIO */
-  const { data: usuario } = await supabase
-    .from("usuarios")
-    .insert({
-      nome: usuarioAdmin.value.trim(),
-      email: usuarioAdmin.value.trim(),
-      senha: senhaAdmin.value.trim(),
-      tipo: "admin",
-      app_id: negocio.id,
-      plano: "demo",
-      data_expiracao: dataISO,
-      ativo: true
-    })
-    .select()
-    .single();
+  /* 4️⃣ LOGIN AUTOMÁTICO */
+  await supabase.auth.signInWithPassword({
+    email: usuarioAdmin.value.trim(),
+    password: senhaAdmin.value.trim()
+  });
 
-  /* 🔐 LOGIN AUTOMÁTICO */
-  localStorage.setItem("usuarioLogado", JSON.stringify(usuario));
-
-  /* 🚀 REDIRECIONAMENTO CORRETO */
+  /* 5️⃣ REDIRECIONAMENTO */
   let urlFinal = "";
 
   if(tipoNegocio.value === "hotel"){
     urlFinal = "https://www.ffsolucoes.com.br/hotel/painel.html?app=";
   } else {
-    urlFinal = "https://www.ffsolucoes.com.br/" + 
-               tipoNegocio.value + 
+    urlFinal = "https://www.ffsolucoes.com.br/" +
+               tipoNegocio.value +
                "/admin.html?app=";
   }
 
