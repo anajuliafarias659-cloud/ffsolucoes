@@ -34,7 +34,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 <div class="topo" id="tituloMesa">🍽️ Mesa</div>
 
 <div class="container">
-  <input placeholder="🔍 Buscar produto..." oninput="filtrarProdutos()">
+  <input id="busca" placeholder="🔍 Buscar produto..." oninput="filtrarProdutos()">
 
   <div class="filtros">
     <button id="fBar" class="ativo" onclick="filtrarDestino('bar')">🍹 Bar</button>
@@ -65,38 +65,144 @@ let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
 
-/* 🔐 SESSÃO INTELIGENTE */
+/* 🔐 SESSÃO HÍBRIDA */
 async function obterSessao(){
 
-  // 1️⃣ Primeiro tenta funcionário
   const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
 
-  if(funcionario && funcionario.app_id){
+  if(funcionario?.app_id){
     appId = funcionario.app_id;
     iniciarSistema();
     return;
   }
 
-  // 2️⃣ Se não for funcionário, tenta admin via Supabase
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data:{ session } } = await supabase.auth.getSession();
 
   if(session){
-    const { data: usuario } = await supabase
+    const { data } = await supabase
       .from("usuarios")
       .select("app_id")
       .eq("id", session.user.id)
       .single();
 
-    if(usuario){
-      appId = usuario.app_id;
+    if(data){
+      appId = data.app_id;
       iniciarSistema();
       return;
     }
   }
 
-  // 3️⃣ Se não for nenhum dos dois
   alert("Sessão inválida");
-  window.location.href = "/auth/login.html";
+  location.href="/auth/login.html";
+}
+
+async function carregarMesa(){
+  const { data } = await supabase
+    .from("mesas")
+    .select("numero_mesa")
+    .eq("id", mesaId)
+    .single();
+
+  if(data){
+    document.getElementById("tituloMesa").innerText =
+      `🍽️ Mesa ${data.numero_mesa}`;
+  }
+}
+
+async function garantirPedidoAberto(){
+
+  const { data } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("mesa_id", mesaId)
+    .eq("app_id", appId)
+    .not("status","in",'("finalizado","pago")')
+    .maybeSingle();
+
+  if(data){
+    pedidoAtual = data;
+    carregarPedido();
+    return;
+  }
+
+  const { data: novo } = await supabase
+    .from("pedidos")
+    .insert({
+      app_id: appId,
+      mesa_id: mesaId,
+      status:"aberto",
+      origem:"mesa"
+    })
+    .select()
+    .single();
+
+  pedidoAtual = novo;
+  carregarPedido();
+}
+
+async function carregarProdutos(){
+  const { data } = await supabase
+    .from("produtos")
+    .select("id,nome,preco,destino")
+    .eq("app_id", appId)
+    .eq("ativo", true)
+    .order("nome");
+
+  produtosCache = data || [];
+  aplicarFiltros();
+}
+
+function aplicarFiltros(){
+  const texto = document.getElementById("busca").value.toLowerCase();
+
+  const lista = produtosCache.filter(p =>
+    p.nome.toLowerCase().includes(texto) &&
+    p.destino === destinoSelecionado
+  );
+
+  const div = document.getElementById("listaProdutos");
+  div.innerHTML="";
+
+  lista.forEach(p=>{
+    div.innerHTML+=`
+      <div class="produto">
+        <span>
+          ${p.nome} - R$ ${p.preco.toFixed(2)}
+          <span class="tag ${p.destino}">${p.destino}</span>
+        </span>
+        <button onclick="addProduto('${p.id}')">➕</button>
+      </div>
+    `;
+  });
+}
+
+function filtrarDestino(dest){
+  destinoSelecionado = dest;
+  document.querySelectorAll(".filtros button")
+    .forEach(b=>b.classList.remove("ativo"));
+  document.getElementById(dest==="bar"?"fBar":"fCozinha")
+    .classList.add("ativo");
+  aplicarFiltros();
+}
+
+function filtrarProdutos(){
+  aplicarFiltros();
+}
+
+async function addProduto(id){
+  alert("Produto adicionado (fluxo funcionando)");
+}
+
+async function enviarPedido(){
+  alert("Pedido enviado");
+}
+
+async function pedirConta(){
+  alert("Conta solicitada");
+}
+
+async function liberarMesa(){
+  location.href="mesas.html";
 }
 
 function iniciarSistema(){
@@ -105,10 +211,17 @@ function iniciarSistema(){
   carregarProdutos();
 }
 
+/* EXPÕE FUNÇÕES */
+window.filtrarDestino = filtrarDestino;
+window.filtrarProdutos = filtrarProdutos;
+window.addProduto = addProduto;
+window.enviarPedido = enviarPedido;
+window.pedirConta = pedirConta;
+window.liberarMesa = liberarMesa;
+
+/* START */
 obterSessao();
 </script>
 
-
 </body>
 </html>
-
