@@ -1,6 +1,5 @@
 import { supabase } from "./supabase.js";
 
-// Não proteger páginas do login
 if (window.location.pathname.startsWith("/auth/")) {
   console.log("Página pública");
 } else {
@@ -12,18 +11,16 @@ if (window.location.pathname.startsWith("/auth/")) {
     throw new Error("Sem sessão ativa");
   }
 
-  const userId = session.user.id;
-
   const { data: usuarioSistema } = await supabase
     .from("usuarios")
     .select("app_id, nome")
-    .eq("id", userId)
+    .eq("id", session.user.id)
     .single();
 
   if (!usuarioSistema) {
     await supabase.auth.signOut();
     window.location.href = "/auth/login.html";
-    throw new Error("Usuário não vinculado");
+    throw new Error("Usuário inválido");
   }
 
   window.SUPABASE = supabase;
