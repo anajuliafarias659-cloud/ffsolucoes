@@ -86,94 +86,98 @@ th{color:#94a3b8}
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-/* ===== ESPERA AUTH DEFINIR APP_ID ===== */
-async function aguardarSessao(){
+/* ===== VERIFICA SESSÃO DIRETO ===== */
+async function iniciar(){
 
-  // espera até auth.js definir APP_ID
-  while(!window.APP_ID){
-    await new Promise(r => setTimeout(r,100));
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if(!session){
+    location.href="/auth/login.html";
+    return;
   }
 
-  iniciarCaixa();
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  if(!usuario){
+    location.href="/auth/login.html";
+    return;
+  }
+
+  const appId = usuario.app_id;
+
+  verificarContas(appId);
+  setInterval(()=>verificarContas(appId),3000);
 }
 
-function irPara(p){
+window.irPara = function(p){
   location.href = p;
-}
-window.irPara = irPara;
+};
 
-async function iniciarCaixa(){
+window.scrollContas = function(){
+  document.getElementById("boxContas")
+    .scrollIntoView({behavior:"smooth"});
+};
 
-  async function verificarContas(){
+window.irPagamento = function(id){
+  location.href = `pagamento.html?pedido=${id}`;
+};
 
-    const { data, error } = await supabase
-      .from("pedidos")
-      .select(`
-        id,
-        mesas(numero_mesa),
-        pedido_itens(preco,quantidade)
-      `)
-      .eq("app_id", window.APP_ID)
-      .eq("status", "conta_solicitada");
+async function verificarContas(appId){
 
-    if(error){
-      console.error(error);
-      return;
-    }
+  const { data } = await supabase
+    .from("pedidos")
+    .select(`
+      id,
+      mesas(numero_mesa),
+      pedido_itens(preco,quantidade)
+    `)
+    .eq("app_id", appId)
+    .eq("status", "conta_solicitada");
 
-    const btn = document.getElementById("btnContas");
-    const qtd = document.getElementById("qtdContas");
-    const box = document.getElementById("boxContas");
-    const lista = document.getElementById("listaContas");
+  const btn = document.getElementById("btnContas");
+  const qtd = document.getElementById("qtdContas");
+  const box = document.getElementById("boxContas");
+  const lista = document.getElementById("listaContas");
 
-    lista.innerHTML = "";
+  lista.innerHTML = "";
 
-    if(data && data.length > 0){
+  if(data && data.length > 0){
 
-      btn.style.display = "inline-block";
-      btn.classList.add("piscar");
-      qtd.innerText = data.length;
-      box.style.display = "block";
+    btn.style.display = "inline-block";
+    btn.classList.add("piscar");
+    qtd.innerText = data.length;
+    box.style.display = "block";
 
-      data.forEach(p=>{
+    data.forEach(p=>{
 
-        let total = 0;
-        (p.pedido_itens || []).forEach(i=>{
-          total += Number(i.preco) * Number(i.quantidade);
-        });
-
-        lista.innerHTML += `
-          <tr>
-            <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
-            <td>R$ ${total.toFixed(2)}</td>
-            <td>
-              <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
-            </td>
-          </tr>
-        `;
+      let total = 0;
+      (p.pedido_itens || []).forEach(i=>{
+        total += Number(i.preco) * Number(i.quantidade);
       });
 
-    } else {
-      btn.style.display = "none";
-      btn.classList.remove("piscar");
-      box.style.display = "none";
-    }
-  }
+      lista.innerHTML += `
+        <tr>
+          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
+          <td>R$ ${total.toFixed(2)}</td>
+          <td>
+            <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
+          </td>
+        </tr>
+      `;
+    });
 
-  window.irPagamento = function(id){
-    location.href = `pagamento.html?pedido=${id}`;
+  } else {
+    btn.style.display = "none";
+    btn.classList.remove("piscar");
+    box.style.display = "none";
   }
-
-  window.scrollContas = function(){
-    document.getElementById("boxContas")
-      .scrollIntoView({behavior:"smooth"});
-  }
-
-  verificarContas();
-  setInterval(verificarContas,3000);
 }
 
-aguardarSessao();
+iniciar();
 </script>
 
 </body>
