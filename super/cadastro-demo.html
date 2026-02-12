@@ -2,14 +2,13 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Login Administrativo</title>
+<title>Teste Grátis 15 Dias</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <style>
 *{box-sizing:border-box}
 body{
   margin:0;
-  font-family:Arial,Helvetica,sans-serif;
+  font-family:Arial;
   background:#020617;
   color:#fff;
   display:flex;
@@ -19,15 +18,15 @@ body{
 }
 .box{
   background:#0f172a;
-  padding:40px;
+  padding:30px;
   border-radius:20px;
   width:100%;
-  max-width:400px;
+  max-width:500px;
 }
-input,button{
+input,select,button{
   width:100%;
   padding:14px;
-  margin-top:12px;
+  margin-top:10px;
   border-radius:12px;
   border:none;
 }
@@ -36,95 +35,96 @@ button{
   font-weight:bold;
   cursor:pointer;
 }
-button:hover{
-  opacity:0.9;
-}
-.msg{
-  margin-top:15px;
-  font-size:14px;
-}
 </style>
 </head>
-
 <body>
 
 <div class="box">
-  <h2>🔐 Login</h2>
+<h2>🚀 Teste Grátis 15 Dias</h2>
 
-  <input id="loginEmail" placeholder="E-mail ou usuário">
-  <input id="loginSenha" type="password" placeholder="Senha">
+<input id="nomeNegocio" placeholder="Nome do negócio">
+<select id="tipoNegocio">
+  <option value="bar">Bar</option>
+  <option value="restaurante">Restaurante</option>
+  <option value="mercado">Mercado</option>
+  <option value="hotel">Hotel</option>
+  <option value="locadora">Locadora</option>
+</select>
 
-  <button onclick="login()">Entrar</button>
+<input id="usuarioAdmin" placeholder="Usuário">
+<input id="senhaAdmin" type="password" placeholder="Senha">
 
-  <div class="msg" id="mensagem"></div>
+<button onclick="criarDemo()">Criar Conta</button>
 </div>
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm"
 
-/* ===== SUPABASE ===== */
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "SUA_PUBLIC_KEY_AQUI"
 );
 
-window.login = async ()=>{
+window.criarDemo = async ()=>{
 
-  mensagem.innerHTML = "Verificando...";
+  if(!nomeNegocio.value || !usuarioAdmin.value || !senhaAdmin.value){
+    alert("Preencha todos os campos");
+    return;
+  }
 
-  const { data, error } = await supabase
+  const hoje = new Date();
+  const expiracao = new Date();
+  expiracao.setDate(hoje.getDate() + 15);
+
+  /* CRIA APP */
+  const { data: negocio, error } = await supabase
+    .from("apps")
+    .insert({
+      nome: nomeNegocio.value,
+      tipo: tipoNegocio.value,
+      ativo: true,
+      plano: "demo",
+      data_expiracao: expiracao
+    })
+    .select()
+    .single();
+
+  if(error){
+    alert("Erro ao criar negócio");
+    return;
+  }
+
+  /* CRIA ADMIN */
+  await supabase.from("admins").insert({
+    usuario: usuarioAdmin.value,
+    senha: senhaAdmin.value,
+    permissao: "admin",
+    app_id: negocio.id,
+    ativo: true
+  });
+
+  /* CRIA USUÁRIO */
+  const { data: usuario } = await supabase
     .from("usuarios")
-    .select("*")
-    .eq("email", loginEmail.value.trim())
-    .eq("senha", loginSenha.value.trim())
-    .eq("ativo", true)
-    .maybeSingle();
+    .insert({
+      nome: usuarioAdmin.value,
+      email: usuarioAdmin.value,
+      senha: senhaAdmin.value,
+      tipo: "admin",
+      app_id: negocio.id,
+      plano: "demo",
+      data_expiracao: expiracao,
+      ativo: true
+    })
+    .select()
+    .single();
 
-  if(error || !data){
-    mensagem.innerHTML = "❌ Login inválido";
-    return;
-  }
+  /* LOGIN AUTOMÁTICO */
+  localStorage.setItem("usuarioLogado", JSON.stringify(usuario));
 
-  /* ===== VERIFICA DEMO ===== */
-  if(data.plano === "demo" && data.data_expiracao){
-
-    const hoje = new Date();
-    const expiracao = new Date(data.data_expiracao);
-
-    if(hoje > expiracao){
-      mensagem.innerHTML = "⚠️ Seu período de teste expirou.";
-      
-      setTimeout(()=>{
-        window.location.href = "/pagamento.html";
-      },2000);
-
-      return;
-    }
-
-    const diasRestantes = Math.ceil(
-      (expiracao - hoje) / (1000 * 60 * 60 * 24)
-    );
-
-    mensagem.innerHTML =
-      "✅ Teste ativo. Restam " + diasRestantes + " dias.";
-  }
-
-  /* ===== REDIRECIONAMENTO ===== */
-
-  if(data.tipo === "admin"){
-    window.location.href =
-      "https://www.ffsolucoes.com.br/admin/index.html?app=" +
-      data.app_id;
-    return;
-  }
-
-  if(data.tipo === "vendedor"){
-    window.location.href =
-      "https://www.ffsolucoes.com.br/vendedor/index.html";
-    return;
-  }
-
-  mensagem.innerHTML = "Tipo de usuário inválido.";
+  window.location.href =
+  "https://www.ffsolucoes.com.br/admin/index.html?app=" +
+  negocio.id;
 };
 </script>
 
