@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <title>Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="../js/auth.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -59,9 +61,25 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* 🔐 SESSÃO HÍBRIDA */
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
-const appId  = params.get("app_id");
+
+const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
+let appId = null;
+
+if (funcionario && funcionario.app_id) {
+  appId = funcionario.app_id;
+}
+
+if (!appId && window.APP_ID) {
+  appId = window.APP_ID;
+}
+
+if (!appId) {
+  alert("Sessão inválida");
+  location.href = "/auth/login.html";
+}
 
 let pedidoAtual = null;
 let produtosCache = [];
@@ -140,7 +158,6 @@ function renderProdutos(lista){
   });
 }
 
-/* ===== FILTROS ===== */
 function filtrarDestino(dest){
   destinoSelecionado = dest;
   document.querySelectorAll(".filtros button")
@@ -162,169 +179,11 @@ function aplicarFiltros(){
   );
 }
 
-/* ===== ITENS ===== */
-async function carregarPedido(){
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("*")
-    .eq("pedido_id",pedidoAtual.id);
-
-  const div = document.getElementById("pedido");
-  div.innerHTML="";
-  let total = 0;
-
-  data.forEach(i=>{
-    total += i.preco * i.quantidade;
-
-    div.innerHTML += `
-      <div class="item">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
-            ${i.nome_produto} x ${i.quantidade}
-            <span class="tag ${i.destino}">${i.destino.toUpperCase()}</span>
-          </div>
-
-          ${i.status === "novo" ? `
-            <div>
-              <button onclick="diminuirItem('${i.id}',${i.quantidade})">➖</button>
-              <button onclick="removerItem('${i.id}')">❌</button>
-            </div>
-          ` : `<span>✔ enviado</span>`}
-        </div>
-      </div>
-    `;
-  });
-
-  document.getElementById("totalPedido").innerText =
-    `Total: R$ ${total.toFixed(2)}`;
-
-  atualizarLiberacao();
-}
-
-/* ===== ADD / REMOVER / DIMINUIR ===== */
-async function addProduto(produtoId){
-  if(pedidoAtual.status === "conta_solicitada") return;
-
-  const p = produtosCache.find(x => x.id === produtoId);
-  if(!p) return;
-
-  const { data } = await sb
-    .from("pedido_itens")
-    .select("id,quantidade")
-    .eq("pedido_id",pedidoAtual.id)
-    .eq("produto_id",p.id)
-    .eq("status","novo")
-    .maybeSingle();
-
-  if(data){
-    await sb.from("pedido_itens")
-      .update({quantidade:data.quantidade+1})
-      .eq("id",data.id);
-  }else{
-    await sb.from("pedido_itens").insert({
-      app_id:appId,
-      pedido_id:pedidoAtual.id,
-      produto_id:p.id,
-      nome_produto:p.nome,
-      preco:p.preco,
-      quantidade:1,
-      destino:p.destino,
-      status:"novo"
-    });
-  }
-
-  carregarPedido();
-}
-
-async function diminuirItem(id,q){
-  if(q > 1){
-    await sb.from("pedido_itens")
-      .update({quantidade:q-1})
-      .eq("id",id)
-      .eq("status","novo");
-  }else{
-    await sb.from("pedido_itens")
-      .delete()
-      .eq("id",id)
-      .eq("status","novo");
-  }
-  carregarPedido();
-}
-
-async function removerItem(id){
-  await sb.from("pedido_itens")
-    .delete()
-    .eq("id",id)
-    .eq("status","novo");
-  carregarPedido();
-}
-
-/* ===== ENVIAR / CONTA / LIBERAR ===== */
-async function enviarPedido(){
-  await sb.from("pedido_itens")
-    .update({status:"confirmado"})
-    .eq("pedido_id",pedidoAtual.id)
-    .eq("status","novo");
-
-  await sb.from("pedidos")
-    .update({status:"enviado"})
-    .eq("id",pedidoAtual.id);
-
-  pedidoAtual.status = "enviado";
-  alert("📨 Pedido enviado!");
-}
-
-async function pedirConta(){
-  const { count } = await sb
-    .from("pedido_itens")
-    .select("*",{count:"exact",head:true})
-    .eq("pedido_id",pedidoAtual.id);
-
-  if(count === 0){
-    alert("⚠️ Não é possível pedir conta sem pedido.");
-    return;
-  }
-
-  await sb.from("pedidos")
-    .update({status:"conta_solicitada"})
-    .eq("id",pedidoAtual.id);
-
-  pedidoAtual.status = "conta_solicitada";
-  alert("🧾 Conta solicitada!");
-}
-
-async function atualizarLiberacao(){
-  const btn = document.getElementById("btnLiberar");
-
-  const { count } = await sb
-    .from("pedido_itens")
-    .select("*",{count:"exact",head:true})
-    .eq("pedido_id",pedidoAtual.id);
-
-  btn.classList.toggle("bloqueado", count > 0);
-}
-
-async function liberarMesa(){
-  const { count } = await sb
-    .from("pedido_itens")
-    .select("*",{count:"exact",head:true})
-    .eq("pedido_id",pedidoAtual.id);
-
-  if(count > 0) return;
-
-  await sb.from("pedidos")
-    .update({status:"finalizado"})
-    .eq("id",pedidoAtual.id);
-
-  location.href="mesas.html";
-}
-
-/* ===== START ===== */
+/* ===== INICIALIZAÇÃO ===== */
 (async()=>{
   await carregarMesa();
   await garantirPedidoAberto();
   await carregarProdutos();
-  await carregarPedido();
 })();
 </script>
 
