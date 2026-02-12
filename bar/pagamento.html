@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <title>Pagamento</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script type="module" src="../js/auth.js"></script>
+<script type="module" src="../js/supabase.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -18,30 +20,6 @@ input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 </head>
 
 <body>
-
-<script>
-function getBasePath(){
-  const p = location.pathname;
-  if(p.includes("/ffsolucoes/")) return "/ffsolucoes/bar";
-  return "/bar";
-}
-
-const sb = window.supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const params = new URLSearchParams(location.search);
-const pedidoId = params.get("pedido");
-
-if(!pedidoId){
-  location.href = getBasePath() + "/caixa.html";
-}
-
-let totalPedido = 0;
-let mesaId = null;
-let processando = false;
-</script>
 
 <div class="topo">
   <h2>💳 Pagamento</h2>
@@ -64,39 +42,67 @@ let processando = false;
   </div>
 </div>
 
-<script>
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+const params = new URLSearchParams(location.search);
+const pedidoId = params.get("pedido");
+
+let totalPedido = 0;
+let mesaId = null;
+let processando = false;
+
+/* 🔐 GARANTE SESSÃO */
+setTimeout(() => {
+  if(!window.APP_ID){
+    alert("Sessão inválida");
+    location.href="/auth/login.html";
+  } else {
+    if(!pedidoId){
+      location.href="caixa.html";
+    } else {
+      carregarPedido();
+    }
+  }
+}, 400);
+
+/* ========= CARREGAR PEDIDO ========= */
 async function carregarPedido(){
-  const { data: pedido } = await sb
+
+  const { data: pedido } = await supabase
     .from("pedidos")
     .select("mesa_id")
     .eq("id", pedidoId)
+    .eq("app_id", window.APP_ID)
     .single();
 
   if(!pedido){
-    location.href = getBasePath() + "/caixa.html";
+    location.href="caixa.html";
     return;
   }
 
   mesaId = pedido.mesa_id;
 
-  const { data: itens } = await sb
+  const { data: itens } = await supabase
     .from("pedido_itens")
     .select("preco,quantidade")
     .eq("pedido_id", pedidoId);
 
   totalPedido = 0;
-  if(itens){
-    itens.forEach(i=>{
-      totalPedido += Number(i.preco) * Number(i.quantidade);
-    });
-  }
+
+  (itens || []).forEach(i=>{
+    totalPedido += Number(i.preco) * Number(i.quantidade);
+  });
 
   document.getElementById("totalPedido").innerText =
     `R$ ${totalPedido.toFixed(2)}`;
 }
 
+/* ========= CALCULAR TROCO ========= */
 function calcular(){
+
   const recebido = Number(document.getElementById("valorRecebido").value || 0);
+
   const descontoMax = totalPedido * 0.10;
   const minimo = totalPedido - descontoMax;
 
@@ -104,9 +110,11 @@ function calcular(){
   const trocoEl = document.getElementById("troco");
 
   if(recebido < minimo){
-    info.innerText = `Desconto máximo permitido: R$ ${descontoMax.toFixed(2)}`;
+    info.innerText =
+      `Desconto máximo permitido: R$ ${descontoMax.toFixed(2)}`;
   } else if(recebido < totalPedido){
-    info.innerText = `Desconto aplicado: R$ ${(totalPedido - recebido).toFixed(2)}`;
+    info.innerText =
+      `Desconto aplicado: R$ ${(totalPedido - recebido).toFixed(2)}`;
   } else {
     info.innerText = "";
   }
@@ -118,57 +126,73 @@ function calcular(){
 document.getElementById("valorRecebido")
   .addEventListener("input", calcular);
 
+/* ========= CONFIRMAR PAGAMENTO ========= */
 document.getElementById("btnConfirmar")
   .addEventListener("click", confirmarPagamento);
 
 async function confirmarPagamento(){
+
   if(processando) return;
   processando = true;
 
   try{
-    const valorPago = Number(document.getElementById("valorRecebido").value);
-    if(!valorPago || valorPago <= 0) return;
+
+    const valorPago =
+      Number(document.getElementById("valorRecebido").value);
+
+    if(!valorPago || valorPago <= 0){
+      processando = false;
+      return;
+    }
 
     const descontoMax = totalPedido * 0.10;
     const minimo = totalPedido - descontoMax;
 
-    if(valorPago < minimo) return;
-    if(valorPago > totalPedido * 2) return; // trava erro absurdo
+    if(valorPago < minimo){
+      processando = false;
+      return;
+    }
 
-    await sb
+    /* 1️⃣ FINALIZA PEDIDO */
+    await supabase
       .from("pedidos")
-      .update({ status: "finalizado" })
+      .update({
+        status: "finalizado",
+        valor_pago: valorPago
+      })
       .eq("id", pedidoId);
 
-    const { data: itens } = await sb
+    /* 2️⃣ BAIXA ESTOQUE */
+    const { data: itens } = await supabase
       .from("pedido_itens")
       .select("produto_id,quantidade")
       .eq("pedido_id", pedidoId);
 
     if(itens){
       for(const item of itens){
-        await sb.rpc("baixar_estoque", {
+        await supabase.rpc("baixar_estoque", {
           p_produto_id: item.produto_id,
           p_quantidade: item.quantidade
         });
       }
     }
 
+    /* 3️⃣ LIBERA MESA */
     if(mesaId){
-      await sb
+      await supabase
         .from("mesas")
         .update({ status: "livre" })
         .eq("id", mesaId);
     }
 
-    location.href = getBasePath() + "/caixa.html";
+    location.href="caixa.html";
 
-  } finally {
-    processando = false;
+  } catch(e){
+    console.error(e);
   }
-}
 
-carregarPedido();
+  processando = false;
+}
 </script>
 
 </body>
