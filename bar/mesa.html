@@ -54,140 +54,61 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
   <button class="liberar bloqueado" id="btnLiberar" onclick="liberarMesa()">🔓 Liberar mesa</button>
 </div>
 
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-/* ===== SESSÃO HÍBRIDA (SEM auth.js) ===== */
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 
-const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
 let appId = null;
-
-if (funcionario && funcionario.app_id) {
-  appId = funcionario.app_id;
-}
-
-/* Se admin veio do painel */
-if (!appId && localStorage.getItem("admin_logado")) {
-  const admin = JSON.parse(localStorage.getItem("admin_logado"));
-  appId = admin?.app_id;
-}
-
-if (!appId) {
-  alert("Sessão inválida");
-  location.href = "/auth/login.html";
-}
-
 let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
 
-/* ===== MESA ===== */
-async function carregarMesa(){
-  const { data } = await sb
-    .from("mesas")
-    .select("numero_mesa")
-    .eq("id",mesaId)
-    .single();
+/* 🔐 SESSÃO INTELIGENTE */
+async function obterSessao(){
 
-  document.getElementById("tituloMesa").innerText =
-    `🍽️ Mesa ${data.numero_mesa}`;
-}
+  // 1️⃣ Primeiro tenta funcionário
+  const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
 
-/* ===== PEDIDO ===== */
-async function garantirPedidoAberto(){
-  const { data } = await sb
-    .from("pedidos")
-    .select("*")
-    .eq("mesa_id",mesaId)
-    .eq("app_id",appId)
-    .not("status","in",'("finalizado","pago")')
-    .maybeSingle();
-
-  if(data){
-    pedidoAtual = data;
-    carregarPedido();
+  if(funcionario && funcionario.app_id){
+    appId = funcionario.app_id;
+    iniciarSistema();
     return;
   }
 
-  const { data: novo } = await sb
-    .from("pedidos")
-    .insert({
-      app_id:appId,
-      mesa_id:mesaId,
-      status:"aberto",
-      origem:"mesa"
-    })
-    .select()
-    .single();
+  // 2️⃣ Se não for funcionário, tenta admin via Supabase
+  const { data: { session } } = await supabase.auth.getSession();
 
-  pedidoAtual = novo;
-  carregarPedido();
+  if(session){
+    const { data: usuario } = await supabase
+      .from("usuarios")
+      .select("app_id")
+      .eq("id", session.user.id)
+      .single();
+
+    if(usuario){
+      appId = usuario.app_id;
+      iniciarSistema();
+      return;
+    }
+  }
+
+  // 3️⃣ Se não for nenhum dos dois
+  alert("Sessão inválida");
+  window.location.href = "/auth/login.html";
 }
 
-/* ===== PRODUTOS ===== */
-async function carregarProdutos(){
-  const { data } = await sb
-    .from("produtos")
-    .select("id,nome,preco,destino")
-    .eq("app_id",appId)
-    .eq("ativo",true)
-    .order("nome");
-
-  produtosCache = data || [];
-  aplicarFiltros();
+function iniciarSistema(){
+  carregarMesa();
+  garantirPedidoAberto();
+  carregarProdutos();
 }
 
-function renderProdutos(lista){
-  const div = document.getElementById("listaProdutos");
-  div.innerHTML="";
-  lista.forEach(p=>{
-    div.innerHTML += `
-      <div class="produto">
-        <span>
-          ${p.nome} - R$ ${p.preco.toFixed(2)}
-          <span class="tag ${p.destino}">${p.destino.toUpperCase()}</span>
-        </span>
-        <button onclick="addProduto('${p.id}')">➕</button>
-      </div>
-    `;
-  });
-}
-
-/* ===== FILTROS ===== */
-function filtrarDestino(dest){
-  destinoSelecionado = dest;
-  document.querySelectorAll(".filtros button")
-    .forEach(b=>b.classList.remove("ativo"));
-  document.getElementById(dest==="bar"?"fBar":"fCozinha")
-    .classList.add("ativo");
-  aplicarFiltros();
-}
-
-function filtrarProdutos(){ aplicarFiltros(); }
-
-function aplicarFiltros(){
-  const txt = document.querySelector("input").value.toLowerCase();
-  renderProdutos(
-    produtosCache.filter(p =>
-      p.nome.toLowerCase().includes(txt) &&
-      p.destino === destinoSelecionado
-    )
-  );
-}
-
-/* ===== START ===== */
-(async()=>{
-  await carregarMesa();
-  await garantirPedidoAberto();
-  await carregarProdutos();
-})();
+obterSessao();
 </script>
+
 
 </body>
 </html>
+
