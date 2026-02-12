@@ -7,6 +7,9 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+<!-- 🔐 AUTH GLOBAL -->
+<script type="module" src="../js/auth.js"></script>
+
 <style>
 body{
   margin:0;
@@ -31,18 +34,14 @@ input, button{
   border-radius:10px;
   border:none;
 }
-input{
-  width:260px;
-}
+input{ width:260px; }
 button{
   background:#22c55e;
   color:#000;
   font-weight:bold;
   cursor:pointer;
 }
-.lista{
-  margin-top:24px;
-}
+.lista{ margin-top:24px; }
 .item{
   background:#0f172a;
   padding:14px 18px;
@@ -77,43 +76,34 @@ button{
 </div>
 
 <script>
-const supabaseClient = window.supabase.createClient(
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
 let app_id = null;
 
-/* 🔐 Verificar sessão real Supabase */
-async function verificarSessao(){
+/* 🔐 Aguarda auth.js carregar APP_ID */
+async function iniciar(){
 
-  const { data: { user } } = await supabaseClient.auth.getUser();
+  // espera até auth.js definir APP_ID
+  let tentativas = 0;
+  while(!window.APP_ID && tentativas < 20){
+    await new Promise(r=>setTimeout(r,100));
+    tentativas++;
+  }
 
-  if(!user){
-    alert("Sessão expirada");
-    location.href = "../auth/login.html";
+  if(!window.APP_ID){
+    alert("Sessão inválida");
+    location.href="/auth/login.html";
     return;
   }
 
-  const { data, error } = await supabaseClient
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", user.id)
-    .single();
-
-  if(error || !data){
-    alert("Usuário não vinculado ao sistema.");
-    location.href = "../auth/login.html";
-    return;
-  }
-
-  app_id = String(data.app_id);
-  console.log("APP_ID:", app_id);
-
+  app_id = window.APP_ID;
   listar();
 }
 
-/* ➕ Criar categoria */
+/* ➕ Criar */
 async function criar(){
 
   if(!app_id){
@@ -122,53 +112,55 @@ async function criar(){
   }
 
   const nome = document.getElementById("nome").value.trim();
-  if(!nome) return alert("Informe o nome da categoria");
+  if(!nome){
+    alert("Informe o nome da categoria");
+    return;
+  }
 
-  const { error } = await supabaseClient
+  const { error } = await sb
     .from("categorias")
-    .insert([{
-      app_id: app_id,
+    .insert({
+      app_id,
       nome,
-      ativo: true
-    }]);
+      ativo:true
+    });
 
   if(error){
-    console.error("Erro insert:", error);
     alert(error.message);
     return;
   }
 
-  document.getElementById("nome").value = "";
+  document.getElementById("nome").value="";
   listar();
 }
 
-/* 📋 Listar categorias */
+/* 📋 Listar */
 async function listar(){
 
-  const { data, error } = await supabaseClient
+  const { data, error } = await sb
     .from("categorias")
     .select("*")
     .eq("app_id", app_id)
     .eq("ativo", true)
-    .order("created_at", { ascending: true });
+    .order("created_at");
 
   if(error){
-    console.error("Erro listar:", error);
+    console.error(error);
     return;
   }
 
   const lista = document.getElementById("lista");
-  lista.innerHTML = "";
+  lista.innerHTML="";
 
-  if(!data || data.length === 0){
-    lista.innerHTML = "<p>Nenhuma categoria cadastrada</p>";
+  if(!data || data.length===0){
+    lista.innerHTML="<p>Nenhuma categoria cadastrada</p>";
     return;
   }
 
   data.forEach(cat=>{
     const div = document.createElement("div");
     div.className="item";
-    div.innerHTML = `
+    div.innerHTML=`
       <b>${cat.nome}</b>
       <button class="desativar" onclick="desativar('${cat.id}')">Desativar</button>
     `;
@@ -181,21 +173,15 @@ async function desativar(id){
 
   if(!confirm("Desativar categoria?")) return;
 
-  const { error } = await supabaseClient
+  await sb
     .from("categorias")
-    .update({ ativo:false })
+    .update({ativo:false})
     .eq("id", id);
-
-  if(error){
-    console.error("Erro update:", error);
-    alert(error.message);
-  }
 
   listar();
 }
 
-/* 🚀 Inicialização */
-verificarSessao();
+iniciar();
 </script>
 
 </body>
