@@ -33,9 +33,16 @@ input,select,button{
 }
 select{background:#fff;color:#000}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
-.btn-editar{background:#facc15;color:#000;margin-top:6px}
-.repor{background:#2563eb;color:#fff;margin-top:6px}
-.desativar{background:#ef4444;color:#fff;margin-top:6px}
+.preview{
+  grid-column:1/-1;
+  text-align:center;
+}
+.preview img{
+  max-width:200px;
+  max-height:200px;
+  border-radius:12px;
+  margin-top:10px;
+}
 .lista{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
@@ -53,7 +60,6 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
   border-radius:12px;
   margin-bottom:10px;
 }
-small{color:#cbd5f5}
 </style>
 </head>
 
@@ -67,21 +73,26 @@ small{color:#cbd5f5}
 <div class="container">
 
 <form id="formProduto">
+
   <input type="hidden" id="produtoId">
 
   <input id="nome" placeholder="Nome do produto" required>
   <input id="preco" type="number" step="0.01" placeholder="Preço" required>
   <input id="estoque" type="number" min="0" placeholder="Estoque" required>
 
-  <select id="categoria" required></select>
-
   <select id="destino" required>
     <option value="cozinha">🍳 Cozinha</option>
     <option value="bar">🍺 Bar</option>
   </select>
 
-  <!-- 📸 FOTO -->
-  <input id="imagem" type="file" accept="image/*">
+  <!-- 📷 CÂMERA DIRETA -->
+  <input id="imagem" type="file" accept="image/*" capture="environment">
+
+  <!-- 🖼 PREVIEW -->
+  <div class="preview">
+    <strong>Preview:</strong><br>
+    <img id="previewImg" style="display:none;">
+  </div>
 
   <button type="submit">Salvar produto</button>
 </form>
@@ -92,35 +103,80 @@ small{color:#cbd5f5}
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
+const MAX_MB = 3;
+let imagemComprimida = null;
+
+/* ========= ESPERA SESSÃO ========= */
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
   }
-  iniciar();
+  listarProdutos();
 }
 
-async function iniciar(){
-  await carregarCategorias();
-  await listarProdutos();
+/* ========= PREVIEW + VALIDAÇÃO ========= */
+imagem.addEventListener("change", async function(){
+
+  const file = this.files[0];
+  if(!file) return;
+
+  const tamanhoMB = file.size / (1024*1024);
+
+  if(tamanhoMB > MAX_MB){
+    alert("Imagem maior que 3MB ❌");
+    this.value = "";
+    return;
+  }
+
+  imagemComprimida = await comprimirImagem(file);
+
+  previewImg.src = URL.createObjectURL(imagemComprimida);
+  previewImg.style.display="block";
+});
+
+/* ========= COMPRESSÃO ========= */
+function comprimirImagem(file){
+  return new Promise(resolve=>{
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+
+    reader.onload = e=>{
+
+      const img = new Image();
+      img.src = e.target.result;
+
+      img.onload = ()=>{
+
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 800;
+
+        let width = img.width;
+        let height = img.height;
+
+        if(width > MAX_WIDTH){
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img,0,0,width,height);
+
+        canvas.toBlob(blob=>{
+          resolve(new File([blob], file.name, {
+            type:"image/jpeg",
+            lastModified:Date.now()
+          }));
+        },"image/jpeg",0.7); // qualidade 70%
+      };
+    };
+  });
 }
 
-/* ================= CATEGORIAS ================= */
-
-async function carregarCategorias(){
-  const { data } = await supabase
-    .from("categorias")
-    .select("id,nome")
-    .eq("app_id", window.APP_ID)
-    .eq("ativo", true)
-    .order("nome");
-
-  categoria.innerHTML =
-    `<option value="">Categoria</option>` +
-    (data||[]).map(c=>`<option value="${c.id}">${c.nome}</option>`).join("");
-}
-
-/* ================= UPLOAD FOTO ================= */
-
+/* ========= UPLOAD ========= */
 async function uploadImagem(file){
 
   if(!file) return null;
@@ -134,7 +190,7 @@ async function uploadImagem(file){
     .upload(nomeArquivo, file, { upsert:true });
 
   if(error){
-    alert("Erro ao enviar imagem");
+    alert("Erro upload");
     return null;
   }
 
@@ -146,24 +202,22 @@ async function uploadImagem(file){
   return data.publicUrl;
 }
 
-/* ================= SALVAR ================= */
-
+/* ========= SALVAR ========= */
 formProduto.onsubmit = async e=>{
   e.preventDefault();
 
   const id = produtoId.value;
-  const file = imagem.files[0];
+
   let fotoUrl = null;
 
-  if(file){
-    fotoUrl = await uploadImagem(file);
+  if(imagemComprimida){
+    fotoUrl = await uploadImagem(imagemComprimida);
   }
 
   const dados = {
     nome: nome.value,
     preco: Number(preco.value),
     estoque: Number(estoque.value),
-    categoria_id: categoria.value,
     destino: destino.value
   };
 
@@ -184,17 +238,18 @@ formProduto.onsubmit = async e=>{
   }
 
   formProduto.reset();
-  produtoId.value="";
+  previewImg.style.display="none";
+  imagemComprimida=null;
+
   listarProdutos();
 };
 
-/* ================= LISTAR ================= */
-
+/* ========= LISTAR ========= */
 async function listarProdutos(){
 
   const { data } = await supabase
     .from("produtos")
-    .select("*, categorias(nome)")
+    .select("*")
     .eq("app_id", window.APP_ID)
     .eq("ativo", true)
     .order("created_at",{ascending:false});
@@ -207,63 +262,11 @@ async function listarProdutos(){
         ${p.foto?`<img src="${p.foto}">`:""}
         <b>${p.nome}</b><br>
         <b>R$ ${Number(p.preco).toFixed(2)}</b><br>
-        <small>Categoria: ${p.categorias?.nome||"-"}</small><br>
-        <small>Destino: ${p.destino}</small><br>
-        <small>Estoque: ${p.estoque}</small><br>
-
-        <button class="repor" onclick="reporEstoque('${p.id}',${p.estoque})">
-          Repor estoque
-        </button>
-
-        <button class="btn-editar" onclick='editar(${JSON.stringify(p)})'>
-          Editar
-        </button>
-
-        <button class="desativar" onclick="desativarProduto('${p.id}')">
-          Desativar
-        </button>
+        <small>Estoque: ${p.estoque}</small>
       </div>
     `;
   });
 }
-
-/* ================= FUNÇÕES ================= */
-
-function editar(p){
-  produtoId.value=p.id;
-  nome.value=p.nome;
-  preco.value=p.preco;
-  estoque.value=p.estoque;
-  categoria.value=p.categoria_id;
-  destino.value=p.destino;
-  window.scrollTo({top:0,behavior:"smooth"});
-}
-
-async function reporEstoque(id,atual){
-  const qtd=prompt("Quantidade para repor:",1);
-  if(!qtd) return;
-  const n=Number(qtd);
-  if(n<=0) return;
-
-  await supabase.from("produtos")
-    .update({estoque:atual+n})
-    .eq("id",id);
-
-  listarProdutos();
-}
-
-async function desativarProduto(id){
-  if(confirm("Desativar produto?")){
-    await supabase.from("produtos")
-      .update({ativo:false})
-      .eq("id",id);
-    listarProdutos();
-  }
-}
-
-window.reporEstoque=reporEstoque;
-window.editar=editar;
-window.desativarProduto=desativarProduto;
 
 aguardarSessao();
 </script>
