@@ -11,23 +11,22 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
 .container{padding:24px;max-width:1100px;margin:auto}
-
-form{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:24px;display:grid;gap:12px}
+form{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:30px;display:grid;gap:12px}
 input,select,button{padding:12px;border-radius:10px;border:none}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
-.btn-sec{background:#1e293b;color:#fff}
-.lista{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
-.card{background:#0f172a;padding:16px;border-radius:16px}
-.card img{width:100%;height:150px;object-fit:cover;border-radius:12px;margin-bottom:10px}
-.preview{width:100%;height:150px;object-fit:cover;border-radius:12px;margin-top:10px;display:none}
+.lista{display:grid;gap:16px}
+.card{background:#0f172a;padding:16px;border-radius:14px}
+.card img{width:100%;height:160px;object-fit:cover;border-radius:10px;margin-bottom:10px}
+.preview{width:100%;max-height:200px;object-fit:cover;border-radius:10px;display:none}
+.btn-sec{background:#1e293b;color:#fff;margin-top:6px}
+.desativar{background:#ef4444;color:#fff;margin-top:6px}
 </style>
 </head>
-
 <body>
 
 <div class="topo">
-  <h2>📦 Produtos</h2>
-  <button class="btn-sec" onclick="history.back()">Voltar</button>
+  <h2>🍔 Produtos</h2>
+  <button onclick="history.back()">⬅ Voltar</button>
 </div>
 
 <div class="container">
@@ -37,17 +36,21 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 
   <input id="nome" placeholder="Nome do produto" required>
   <input id="preco" type="number" step="0.01" placeholder="Preço" required>
-  <input id="estoque" type="number" min="0" placeholder="Estoque" required>
+  <input id="estoque" type="number" placeholder="Estoque" required>
 
   <select id="destino">
     <option value="cozinha">🍳 Cozinha</option>
     <option value="bar">🍺 Bar</option>
   </select>
 
-  <input id="imagem" type="file" accept="image/*" capture="environment">
+  <!-- 📷 CAMERA -->
+  <input id="imagem" type="file"
+         accept="image/*"
+         capture="environment">
+
   <img id="previewImg" class="preview">
 
-  <button type="submit">Salvar Produto</button>
+  <button type="submit">Salvar produto</button>
 </form>
 
 <div class="lista" id="lista"></div>
@@ -57,19 +60,19 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-const MAX_MB = 3;
+const MAX_MB = 2;
 let imagemFinal = null;
 
-/* ===== ESPERA AUTH ===== */
-async function aguardarSessao(){
+/* 🔐 ESPERA SESSÃO */
+async function esperarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
   }
   listarProdutos();
 }
-aguardarSessao();
+esperarSessao();
 
-/* ===== CAMERA ===== */
+/* 📷 COMPRESSÃO ULTRA LEVE */
 imagem.addEventListener("change", async function(){
 
   const file = this.files[0];
@@ -78,7 +81,7 @@ imagem.addEventListener("change", async function(){
   const tamanhoMB = file.size / (1024*1024);
 
   if(tamanhoMB > MAX_MB){
-    alert("Imagem maior que 3MB");
+    alert("Imagem muito pesada (máx 2MB).");
     this.value="";
     return;
   }
@@ -89,84 +92,72 @@ imagem.addEventListener("change", async function(){
   previewImg.style.display="block";
 });
 
-/* ===== COMPRESSÃO SEGURA ===== */
 function comprimirImagem(file){
   return new Promise(resolve=>{
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
 
-    reader.onload = e=>{
-      const img = new Image();
-      img.src = e.target.result;
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(file);
 
-      img.onload = ()=>{
-        const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 800;
+    img.onload = ()=>{
+      const MAX_WIDTH = 600;
+      const scale = MAX_WIDTH / img.width;
 
-        let width = img.width;
-        let height = img.height;
+      const canvas = document.createElement("canvas");
+      canvas.width = MAX_WIDTH;
+      canvas.height = img.height * scale;
 
-        if(width > MAX_WIDTH){
-          height = height * (MAX_WIDTH / width);
-          width = MAX_WIDTH;
-        }
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
 
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img,0,0,width,height);
-
-        canvas.toBlob(blob=>{
-          resolve(new File([blob], file.name, {type:"image/jpeg"}));
-        },"image/jpeg",0.7);
-      };
+      canvas.toBlob(blob=>{
+        resolve(new File([blob], file.name, {
+          type:"image/jpeg"
+        }));
+      },"image/jpeg",0.5);
     };
   });
 }
 
-/* ===== UPLOAD ===== */
+/* 📦 UPLOAD */
 async function uploadImagem(file){
+  if(!file) return null;
 
-  const nomeArquivo =
-    `${window.APP_ID}/${Date.now()}_${file.name}`;
+  const path = `${window.APP_ID}/${Date.now()}.jpg`;
 
   const { error } = await supabase
     .storage
     .from("produtos")
-    .upload(nomeArquivo, file, {upsert:true});
+    .upload(path,file,{upsert:true});
 
   if(error){
     alert("Erro upload imagem");
-    console.error(error);
     return null;
   }
 
-  const { data } = supabase
+  return supabase
     .storage
     .from("produtos")
-    .getPublicUrl(nomeArquivo);
-
-  return data.publicUrl;
+    .getPublicUrl(path)
+    .data.publicUrl;
 }
 
-/* ===== SALVAR ===== */
+/* 💾 SALVAR */
 formProduto.onsubmit = async e=>{
   e.preventDefault();
 
   const id = produtoId.value;
+
   let fotoUrl = null;
 
   if(imagemFinal){
     fotoUrl = await uploadImagem(imagemFinal);
-    if(!fotoUrl) return;
   }
 
   const dados = {
-    nome: nome.value,
-    preco: Number(preco.value),
-    estoque: Number(estoque.value),
-    destino: destino.value
+    nome:nome.value,
+    preco:Number(preco.value),
+    estoque:Number(estoque.value),
+    destino:destino.value
   };
 
   if(fotoUrl) dados.foto = fotoUrl;
@@ -174,13 +165,12 @@ formProduto.onsubmit = async e=>{
   if(id){
     await supabase.from("produtos")
       .update(dados)
-      .eq("id", id);
-  }else{
+      .eq("id",id);
+  } else {
     await supabase.from("produtos")
       .insert({
         ...dados,
-        foto: fotoUrl,
-        app_id: window.APP_ID,
+        app_id:window.APP_ID,
         ativo:true
       });
   }
@@ -188,18 +178,18 @@ formProduto.onsubmit = async e=>{
   formProduto.reset();
   previewImg.style.display="none";
   imagemFinal=null;
-
+  produtoId.value="";
   listarProdutos();
 };
 
-/* ===== LISTAR ===== */
+/* 📋 LISTAR */
 async function listarProdutos(){
 
   const { data } = await supabase
     .from("produtos")
     .select("*")
-    .eq("app_id", window.APP_ID)
-    .eq("ativo", true)
+    .eq("app_id",window.APP_ID)
+    .eq("ativo",true)
     .order("created_at",{ascending:false});
 
   lista.innerHTML="";
@@ -209,48 +199,54 @@ async function listarProdutos(){
       <div class="card">
         ${p.foto?`<img src="${p.foto}">`:""}
         <b>${p.nome}</b><br>
-        <b>R$ ${Number(p.preco).toFixed(2)}</b><br>
-        <small>Estoque: ${p.estoque}</small><br>
-        <button onclick="editar('${p.id}','${p.nome}',${p.preco},${p.estoque},'${p.destino}')">Editar</button>
-        <button onclick="reporEstoque('${p.id}',${p.estoque})">Repor</button>
-        <button onclick="desativarProduto('${p.id}')">Desativar</button>
+        R$ ${p.preco.toFixed(2)}<br>
+        Estoque: ${p.estoque}<br>
+
+        <button onclick="reporEstoque('${p.id}',${p.estoque})" class="btn-sec">Repor estoque</button>
+        <button onclick="editar('${p.id}','${p.nome}',${p.preco},${p.estoque}','${p.destino}')" class="btn-sec">Editar</button>
+        <button onclick="desativarProduto('${p.id}')" class="desativar">Desativar</button>
       </div>
     `;
   });
 }
 
-/* ===== EDITAR ===== */
-window.editar = function(id,n,p,e,d){
-  produtoId.value=id;
-  nome.value=n;
-  preco.value=p;
-  estoque.value=e;
-  destino.value=d;
-  window.scrollTo({top:0,behavior:"smooth"});
-}
-
-/* ===== REPOR ===== */
-window.reporEstoque = async function(id,atual){
+/* 🔄 REPOR */
+async function reporEstoque(id,atual){
   const qtd = prompt("Quantidade para repor:");
   if(!qtd) return;
 
   await supabase.from("produtos")
-    .update({estoque: atual + Number(qtd)})
+    .update({estoque:atual + Number(qtd)})
     .eq("id",id);
 
   listarProdutos();
 }
 
-/* ===== DESATIVAR ===== */
-window.desativarProduto = async function(id){
-  if(!confirm("Desativar produto?")) return;
-
-  await supabase.from("produtos")
-    .update({ativo:false})
-    .eq("id",id);
-
-  listarProdutos();
+/* ✏️ EDITAR */
+function editar(id,nomeProd,precoProd,estoqueProd,dest){
+  produtoId.value=id;
+  nome.value=nomeProd;
+  preco.value=precoProd;
+  estoque.value=estoqueProd;
+  destino.value=dest;
+  window.scrollTo({top:0,behavior:"smooth"});
 }
+
+/* ❌ DESATIVAR */
+async function desativarProduto(id){
+  if(confirm("Desativar produto?")){
+    await supabase.from("produtos")
+      .update({ativo:false})
+      .eq("id",id);
+    listarProdutos();
+  }
+}
+
+/* EXPÕE */
+window.reporEstoque=reporEstoque;
+window.editar=editar;
+window.desativarProduto=desativarProduto;
+
 </script>
 
 </body>
