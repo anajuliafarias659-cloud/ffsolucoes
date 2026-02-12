@@ -5,7 +5,6 @@
 <title>Caixa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script type="module" src="../js/auth.js"></script>
 
 <style>
@@ -69,116 +68,112 @@ th{color:#94a3b8}
 </div>
 
 <div class="container">
-
-<div class="box" id="boxContas" style="display:none">
-  <h3>🧾 Mesas aguardando pagamento</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Mesa</th>
-        <th>Total</th>
-        <th>Origem</th>
-        <th>Forma sugerida</th>
-        <th>Ação</th>
-      </tr>
-    </thead>
-    <tbody id="listaContas"></tbody>
-  </table>
-</div>
-
+  <div class="box" id="boxContas" style="display:none">
+    <h3>🧾 Mesas aguardando pagamento</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Mesa</th>
+          <th>Total</th>
+          <th>Ação</th>
+        </tr>
+      </thead>
+      <tbody id="listaContas"></tbody>
+    </table>
+  </div>
 </div>
 
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-/* ===== NAVEGAÇÃO ===== */
-window.irPara = function(pagina){
-  location.href = pagina;
-};
+/* ===== ESPERA AUTH DEFINIR APP_ID ===== */
+async function aguardarSessao(){
 
-/* ===== VERIFICA APP_ID ===== */
-if(!window.APP_ID){
-  alert("Sessão inválida");
-  location.href = "/auth/login.html";
-}
-
-/* ===== BUSCA CONTAS ===== */
-async function verificarContas(){
-
-  const { data, error } = await supabase
-    .from("pedidos")
-    .select(`
-      id,
-      origem,
-      forma_pagamento_sugerida,
-      mesas(numero_mesa),
-      pedido_itens(preco,quantidade)
-    `)
-    .eq("app_id", window.APP_ID)
-    .eq("status", "conta_solicitada");
-
-  if(error){
-    console.error(error);
-    return;
+  // espera até auth.js definir APP_ID
+  while(!window.APP_ID){
+    await new Promise(r => setTimeout(r,100));
   }
 
-  const btn = document.getElementById("btnContas");
-  const qtd = document.getElementById("qtdContas");
-  const box = document.getElementById("boxContas");
-  const lista = document.getElementById("listaContas");
+  iniciarCaixa();
+}
 
-  lista.innerHTML = "";
+function irPara(p){
+  location.href = p;
+}
+window.irPara = irPara;
 
-  if(data && data.length > 0){
+async function iniciarCaixa(){
 
-    btn.style.display = "inline-block";
-    btn.classList.add("piscar");
-    qtd.innerText = data.length;
-    box.style.display = "block";
+  async function verificarContas(){
 
-    data.forEach(p=>{
+    const { data, error } = await supabase
+      .from("pedidos")
+      .select(`
+        id,
+        mesas(numero_mesa),
+        pedido_itens(preco,quantidade)
+      `)
+      .eq("app_id", window.APP_ID)
+      .eq("status", "conta_solicitada");
 
-      let total = 0;
+    if(error){
+      console.error(error);
+      return;
+    }
 
-      (p.pedido_itens || []).forEach(i=>{
-        total += Number(i.preco) * Number(i.quantidade);
+    const btn = document.getElementById("btnContas");
+    const qtd = document.getElementById("qtdContas");
+    const box = document.getElementById("boxContas");
+    const lista = document.getElementById("listaContas");
+
+    lista.innerHTML = "";
+
+    if(data && data.length > 0){
+
+      btn.style.display = "inline-block";
+      btn.classList.add("piscar");
+      qtd.innerText = data.length;
+      box.style.display = "block";
+
+      data.forEach(p=>{
+
+        let total = 0;
+        (p.pedido_itens || []).forEach(i=>{
+          total += Number(i.preco) * Number(i.quantidade);
+        });
+
+        lista.innerHTML += `
+          <tr>
+            <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
+            <td>R$ ${total.toFixed(2)}</td>
+            <td>
+              <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
+            </td>
+          </tr>
+        `;
       });
 
-      lista.innerHTML += `
-        <tr>
-          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
-          <td>R$ ${total.toFixed(2)}</td>
-          <td>${p.origem || "-"}</td>
-          <td>${p.forma_pagamento_sugerida?.toUpperCase() || "-"}</td>
-          <td>
-            <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
-          </td>
-        </tr>
-      `;
-    });
-
-  } else {
-
-    btn.style.display = "none";
-    btn.classList.remove("piscar");
-    box.style.display = "none";
+    } else {
+      btn.style.display = "none";
+      btn.classList.remove("piscar");
+      box.style.display = "none";
+    }
   }
+
+  window.irPagamento = function(id){
+    location.href = `pagamento.html?pedido=${id}`;
+  }
+
+  window.scrollContas = function(){
+    document.getElementById("boxContas")
+      .scrollIntoView({behavior:"smooth"});
+  }
+
+  verificarContas();
+  setInterval(verificarContas,3000);
 }
 
-/* ===== IR PAGAMENTO ===== */
-window.irPagamento = function(pedidoId){
-  location.href = `pagamento.html?pedido=${pedidoId}`;
-};
-
-/* ===== SCROLL ===== */
-window.scrollContas = function(){
-  document.getElementById("boxContas")
-    .scrollIntoView({behavior:"smooth"});
-};
-
-verificarContas();
-setInterval(verificarContas,3000);
-
+aguardarSessao();
 </script>
 
 </body>
