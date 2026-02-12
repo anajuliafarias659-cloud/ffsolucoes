@@ -38,6 +38,18 @@ button{
   cursor:pointer;
 }
 button:hover{opacity:0.9}
+.link{
+  margin-top:10px;
+  font-size:14px;
+  cursor:pointer;
+  color:#38bdf8;
+  text-align:center;
+}
+.msg{
+  margin-top:10px;
+  font-size:14px;
+  color:#22c55e;
+}
 </style>
 </head>
 
@@ -48,6 +60,12 @@ button:hover{opacity:0.9}
   <input id="usuario" placeholder="E-mail">
   <input id="senha" type="password" placeholder="Senha">
   <button onclick="login()">Entrar</button>
+
+  <div class="link" onclick="recuperarSenha()">
+    Esqueci minha senha
+  </div>
+
+  <div id="mensagem" class="msg"></div>
 </div>
 
 <script>
@@ -56,6 +74,7 @@ const sb = window.supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+/* 🔐 LOGIN */
 async function login(){
 
   const email = document.getElementById("usuario").value.trim().toLowerCase();
@@ -66,7 +85,6 @@ async function login(){
     return;
   }
 
-  /* 1️⃣ LOGIN SEGURO */
   const { data: authData, error: authError } =
     await sb.auth.signInWithPassword({
       email: email,
@@ -74,30 +92,28 @@ async function login(){
     });
 
   if(authError){
-    alert("Usuário ou senha inválidos");
+    alert(authError.message);
     return;
   }
 
   const userId = authData.user.id;
 
-  /* 2️⃣ BUSCA DADOS NA SUA TABELA */
   const { data: usuario } = await sb
     .from("usuarios")
     .select("id, app_id, ativo")
     .eq("id", userId)
     .maybeSingle();
 
-  if(!usuario){
-    alert("Usuário não encontrado no sistema");
+  if(!usuario || !usuario.app_id){
+    alert("Usuário não vinculado ao sistema.");
     return;
   }
 
   if(!usuario.ativo){
-    alert("Usuário desativado");
+    alert("Usuário desativado.");
     return;
   }
 
-  /* 3️⃣ BUSCA TIPO DO NEGÓCIO */
   const { data: app } = await sb
     .from("apps")
     .select("tipo")
@@ -105,18 +121,15 @@ async function login(){
     .maybeSingle();
 
   if(!app){
-    alert("Negócio não encontrado");
+    alert("Negócio não encontrado.");
     return;
   }
 
   let tipoSessao = app.tipo;
-
-  // 👕 regra loja
   if(app.tipo === "loja-roupas"){
     tipoSessao = "loja";
   }
 
-  /* 4️⃣ SALVA SESSÃO */
   const adminLogado = {
     id: usuario.id,
     email: email,
@@ -125,27 +138,41 @@ async function login(){
   };
 
   localStorage.setItem("admin_logado", JSON.stringify(adminLogado));
-  console.log("LOGIN SEGURO 👉", adminLogado);
 
-  /* 5️⃣ REDIRECIONA */
   if(tipoSessao === "loja"){
     location.href = "../loja-roupas/admin.html";
-
   }else if(tipoSessao === "bar"){
     location.href = "../bar/admin.html";
-
   }else if(tipoSessao === "mercado"){
     location.href = "../mercado/admin.html";
-
   }else if(tipoSessao === "locadora"){
     location.href = "../locadora/admin.html";
-
   }else if(tipoSessao === "hotel"){
     location.href = "../hotel/painel.html";
-
-  }else{
-    alert("Tipo de negócio inválido");
   }
+}
+
+/* 📧 RECUPERAÇÃO DE SENHA */
+async function recuperarSenha(){
+
+  const email = document.getElementById("usuario").value.trim().toLowerCase();
+
+  if(!email){
+    alert("Digite seu e-mail primeiro.");
+    return;
+  }
+
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: "https://www.ffsolucoes.com.br/auth/nova-senha.html"
+  });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  document.getElementById("mensagem").innerHTML =
+    "Link de recuperação enviado para seu e-mail ✅";
 }
 </script>
 
