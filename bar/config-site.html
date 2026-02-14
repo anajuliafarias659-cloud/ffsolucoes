@@ -161,16 +161,28 @@ import { supabase } from "../js/supabase.js";
 let app_id = null;
 
 /* ===============================
-   🔐 INICIAR
+   🔐 VERIFICA SESSÃO PROFISSIONAL
+================================= */
+async function verificarSessao(){
+
+  let { data: { session } } = await supabase.auth.getSession();
+
+  if(session) return session;
+
+  const { data } = await supabase.auth.refreshSession();
+
+  if(data.session) return data.session;
+
+  alert("Sessão expirada");
+  window.location.href = "/auth/login.html";
+}
+
+/* ===============================
+   🚀 INICIAR
 ================================= */
 async function iniciar(){
 
-  const { data: { session } } = await supabase.auth.getSession();
-
-  if(!session){
-    window.location.href = "../auth/login.html";
-    return;
-  }
+  const session = await verificarSessao();
 
   const { data: usuario, error } = await supabase
     .from("usuarios")
@@ -181,7 +193,7 @@ async function iniciar(){
   if(error || !usuario || !usuario.ativo){
     alert("Conta inválida.");
     await supabase.auth.signOut();
-    window.location.href = "../auth/login.html";
+    window.location.href = "/auth/login.html";
     return;
   }
 
@@ -193,10 +205,17 @@ async function iniciar(){
     .eq("id", app_id)
     .single();
 
-  if(!app || !app.ativo || new Date(app.data_expiracao) < new Date()){
-    alert("Plano expirado ou conta desativada.");
+  if(!app || !app.ativo){
+    alert("Conta desativada.");
     await supabase.auth.signOut();
-    window.location.href = "../auth/login.html";
+    window.location.href = "/auth/login.html";
+    return;
+  }
+
+  if(new Date(app.data_expiracao) < new Date()){
+    alert("Plano expirado.");
+    await supabase.auth.signOut();
+    window.location.href = "/auth/login.html";
     return;
   }
 
@@ -225,7 +244,7 @@ const tema_site = document.getElementById("tema_site");
 const layout_categorias = document.getElementById("mostrar_categorias");
 
 /* ===============================
-   TEMA
+   🎨 TEMA
 ================================= */
 function aplicarTema(t){
   document.body.className = "";
@@ -236,7 +255,7 @@ function aplicarTema(t){
 tema_site.onchange = e => aplicarTema(e.target.value);
 
 /* ===============================
-   PREVIEW
+   📷 PREVIEW
 ================================= */
 logo_file.onchange = ()=>{
   const f = logo_file.files[0];
@@ -262,23 +281,30 @@ whatsapp.oninput=e=>{
 };
 
 /* ===============================
-   UPLOAD
+   ☁ UPLOAD
 ================================= */
 async function uploadArquivo(file,bucket){
   if(!file) return null;
+
   const ext=file.name.split(".").pop();
   const path=`${app_id}/${Date.now()}.${ext}`;
+
   const {error}=await supabase.storage
     .from(bucket)
     .upload(path,file,{upsert:true});
-  if(error) return null;
+
+  if(error){
+    console.error(error);
+    return null;
+  }
+
   return supabase.storage
     .from(bucket)
     .getPublicUrl(path).data.publicUrl;
 }
 
 /* ===============================
-   SALVAR
+   💾 SALVAR
 ================================= */
 window.salvar = async function(){
 
@@ -327,7 +353,7 @@ window.salvar = async function(){
 };
 
 /* ===============================
-   LOAD
+   📥 LOAD
 ================================= */
 async function carregarDados(){
 
@@ -362,9 +388,10 @@ async function carregarDados(){
 
 /* INIT */
 iniciar();
-</script>
 
+</script>
 
 </body>
 </html>
+
 
