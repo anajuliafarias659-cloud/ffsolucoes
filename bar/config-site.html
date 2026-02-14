@@ -155,22 +155,60 @@ Link público:<br>
 </div>
 </div>
 
-<script>
-// ================= SUPABASE =================
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
-// ================= ADMIN =================
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin?.app_id){
-  alert("Sessão expirada");
-  location.href="../auth/login.html";
+let app_id = null;
+
+/* ===============================
+   🔐 INICIAR
+================================= */
+async function iniciar(){
+
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if(!session){
+    window.location.href = "../auth/login.html";
+    return;
+  }
+
+  const { data: usuario, error } = await supabase
+    .from("usuarios")
+    .select("app_id, ativo")
+    .eq("id", session.user.id)
+    .single();
+
+  if(error || !usuario || !usuario.ativo){
+    alert("Conta inválida.");
+    await supabase.auth.signOut();
+    window.location.href = "../auth/login.html";
+    return;
+  }
+
+  app_id = usuario.app_id;
+
+  const { data: app } = await supabase
+    .from("apps")
+    .select("ativo, data_expiracao")
+    .eq("id", app_id)
+    .single();
+
+  if(!app || !app.ativo || new Date(app.data_expiracao) < new Date()){
+    alert("Plano expirado ou conta desativada.");
+    await supabase.auth.signOut();
+    window.location.href = "../auth/login.html";
+    return;
+  }
+
+  document.getElementById("link").innerText =
+    `${location.origin}/public/index.html?app_id=${app_id}`;
+
+  carregarDados();
 }
-const app_id = admin.app_id;
 
-// ================= ELEMENTOS =================
+/* ===============================
+   ELEMENTOS
+================================= */
 const nome_site = document.getElementById("nome_site");
 const logo_file = document.getElementById("logo_file");
 const banner_file = document.getElementById("banner_file");
@@ -186,11 +224,9 @@ const horario_fechamento = document.getElementById("horario_fechamento");
 const tema_site = document.getElementById("tema_site");
 const layout_categorias = document.getElementById("mostrar_categorias");
 
-// ================= LINK =================
-link.innerText =
-  `http://127.0.0.1:5500/public/index.html?app_id=${app_id}`;
-
-// ================= APLICA TEMA AO VIVO =================
+/* ===============================
+   TEMA
+================================= */
 function aplicarTema(t){
   document.body.className = "";
   if(t && t !== "padrao"){
@@ -199,7 +235,9 @@ function aplicarTema(t){
 }
 tema_site.onchange = e => aplicarTema(e.target.value);
 
-// ================= PREVIEWS =================
+/* ===============================
+   PREVIEW
+================================= */
 logo_file.onchange = ()=>{
   const f = logo_file.files[0];
   if(f){
@@ -208,6 +246,7 @@ logo_file.onchange = ()=>{
     remover_logo.checked=false;
   }
 };
+
 banner_file.onchange = ()=>{
   const f = banner_file.files[0];
   if(f){
@@ -216,35 +255,33 @@ banner_file.onchange = ()=>{
     remover_banner.checked=false;
   }
 };
-remover_logo.onchange = ()=>{
-  if(remover_logo.checked){
-    logo_preview.style.display="none";
-    logo_file.value="";
-  }
-};
-remover_banner.onchange = ()=>{
-  if(remover_banner.checked){
-    banner_preview.style.display="none";
-    banner_file.value="";
-  }
-};
+
 whatsapp.oninput=e=>{
   const n=e.target.value.replace(/\D/g,"");
   wa_preview.innerText=n?`https://wa.me/55${n}`:"";
 };
 
-// ================= UPLOAD =================
+/* ===============================
+   UPLOAD
+================================= */
 async function uploadArquivo(file,bucket){
   if(!file) return null;
   const ext=file.name.split(".").pop();
   const path=`${app_id}/${Date.now()}.${ext}`;
-  const {error}=await sb.storage.from(bucket).upload(path,file,{upsert:true});
+  const {error}=await supabase.storage
+    .from(bucket)
+    .upload(path,file,{upsert:true});
   if(error) return null;
-  return sb.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+  return supabase.storage
+    .from(bucket)
+    .getPublicUrl(path).data.publicUrl;
 }
 
-// ================= SALVAR =================
-async function salvar(){
+/* ===============================
+   SALVAR
+================================= */
+window.salvar = async function(){
+
   if(!nome_site.value.trim()){
     alert("Informe o nome do site");
     return;
@@ -266,19 +303,20 @@ async function salvar(){
   if(logo_file.files[0]){
     payload.logo_url = await uploadArquivo(logo_file.files[0], "logos");
   }
+
   if(banner_file.files[0]){
     payload.banner_url = await uploadArquivo(banner_file.files[0], "banners");
   }
 
-  const { data: existente } = await sb
+  const { data: existente } = await supabase
     .from("config_site")
     .select("id")
     .eq("app_id", app_id)
     .maybeSingle();
 
   const res = existente
-    ? await sb.from("config_site").update(payload).eq("app_id", app_id)
-    : await sb.from("config_site").insert({ ...payload, app_id });
+    ? await supabase.from("config_site").update(payload).eq("app_id", app_id)
+    : await supabase.from("config_site").insert({ ...payload, app_id });
 
   if(res.error){
     alert(res.error.message);
@@ -286,11 +324,14 @@ async function salvar(){
   }
 
   alert("Configurações salvas 🔥");
-}
+};
 
-// ================= LOAD =================
-(async()=>{
-  const {data}=await sb
+/* ===============================
+   LOAD
+================================= */
+async function carregarDados(){
+
+  const {data} = await supabase
     .from("config_site")
     .select("*")
     .eq("app_id",app_id)
@@ -312,12 +353,18 @@ async function salvar(){
     logo_preview.src=data.logo_url;
     logo_preview.style.display="block";
   }
+
   if(data.banner_url){
     banner_preview.src=data.banner_url;
     banner_preview.style.display="block";
   }
-})();
+}
+
+/* INIT */
+iniciar();
 </script>
+
 
 </body>
 </html>
+
