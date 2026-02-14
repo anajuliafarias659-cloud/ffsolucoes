@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -54,13 +54,6 @@ button.sec{background:#1e293b;color:#fff}
 table{width:100%;border-collapse:collapse;margin-top:12px}
 th,td{padding:10px;border-bottom:1px solid #1e293b;font-size:14px}
 th{color:#94a3b8}
-
-@keyframes piscar{
-  0%{box-shadow:0 0 0 transparent}
-  50%{box-shadow:0 0 18px rgba(234,179,8,.9)}
-  100%{box-shadow:0 0 0 transparent}
-}
-.alerta.piscar{animation:piscar 1s infinite}
 </style>
 </head>
 
@@ -70,9 +63,6 @@ th{color:#94a3b8}
   <h2>💰 Caixa</h2>
   <div>
     <button onclick="irPara('venda-avulsa.html')">➕ Venda Avulsa</button>
-    <button class="alerta" id="btnContas" style="display:none" onclick="scrollContas()">
-      🔔 Contas <span class="badge" id="qtdContas">0</span>
-    </button>
     <button class="sec" onclick="irPara('historico.html')">📊 Histórico</button>
     <button class="sec" onclick="irPara('admin.html')">Voltar</button>
   </div>
@@ -105,20 +95,6 @@ th{color:#94a3b8}
     <button onclick="fecharCaixa()">📄 Fechar Caixa Hoje (PDF)</button>
   </div>
 
-  <div class="box" id="boxContas" style="display:none">
-    <h3>🧾 Mesas aguardando pagamento</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Mesa</th>
-          <th>Total</th>
-          <th>Ação</th>
-        </tr>
-      </thead>
-      <tbody id="listaContas"></tbody>
-    </table>
-  </div>
-
 </div>
 
 <script type="module">
@@ -126,42 +102,39 @@ import { supabase } from "../js/supabase.js";
 
 let resumoPagamentosGlobal = "";
 
-/* 🔐 AGUARDA APP_ID */
+/* 🔐 AGUARDA AUTH */
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
   }
-
-  verificarContas(window.APP_ID);
   gerarFechamento();
-  setInterval(()=>verificarContas(window.APP_ID),3000);
 }
 aguardarSessao();
 
 window.irPara = p => location.href = p;
-window.scrollContas = () =>
-  document.getElementById("boxContas").scrollIntoView({behavior:"smooth"});
-window.irPagamento = id =>
-  location.href = `pagamento.html?pedido=${id}`;
 
-/* 🔥 FECHAMENTO */
+/* 🔥 FECHAMENTO CORRIGIDO */
 window.gerarFechamento = async function(){
 
   const inicio = new Date();
   inicio.setHours(0,0,0,0);
-  const amanha = new Date(inicio.getTime() + 86400000);
+
+  const fim = new Date();
+  fim.setHours(23,59,59,999);
 
   const { data: pedidos } = await supabase
     .from("pedidos")
-    .select("id, forma_pagamento, created_at")
+    .select("id, forma_pagamento, recebido_em")
     .eq("app_id", window.APP_ID)
     .eq("status", "finalizado")
-    .gte("created_at", inicio.toISOString())
-    .lt("created_at", amanha.toISOString());
+    .gte("recebido_em", inicio.toISOString())
+    .lte("recebido_em", fim.toISOString());
 
   if(!pedidos || pedidos.length === 0){
     document.getElementById("totalRecebido").innerText = "R$ 0.00";
     document.getElementById("qtdVendas").innerText = "0";
+    document.getElementById("dataHoje").innerText =
+      new Date().toLocaleDateString("pt-BR");
     resumoPagamentosGlobal = "";
     return;
   }
@@ -238,52 +211,6 @@ window.fecharCaixa = async function(){
 
   doc.save("fechamento-caixa-" + data + ".pdf");
 };
-
-/* 🔔 CONTAS */
-async function verificarContas(appId){
-
-  const { data } = await supabase
-    .from("pedidos")
-    .select("id, mesas(numero_mesa), pedido_itens(preco,quantidade)")
-    .eq("app_id", appId)
-    .eq("status", "conta_solicitada");
-
-  const btn = document.getElementById("btnContas");
-  const qtd = document.getElementById("qtdContas");
-  const box = document.getElementById("boxContas");
-  const lista = document.getElementById("listaContas");
-
-  lista.innerHTML = "";
-
-  if(data && data.length > 0){
-    btn.style.display = "inline-block";
-    btn.classList.add("piscar");
-    qtd.innerText = data.length;
-    box.style.display = "block";
-
-    data.forEach(p=>{
-      let total = 0;
-      (p.pedido_itens || []).forEach(i=>{
-        total += Number(i.preco) * Number(i.quantidade);
-      });
-
-      lista.innerHTML += `
-        <tr>
-          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
-          <td>R$ ${total.toFixed(2)}</td>
-          <td>
-            <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
-          </td>
-        </tr>
-      `;
-    });
-
-  } else {
-    btn.style.display = "none";
-    btn.classList.remove("piscar");
-    box.style.display = "none";
-  }
-}
 </script>
 
 </body>
