@@ -74,22 +74,6 @@ button{
 
 <body>
 
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
-const app_id = admin?.app_id || funcionario?.app_id;
-
-if(!app_id){
-  alert("Sessão expirada");
-  location.href="login-funcionario.html";
-}
-</script>
-
 <div class="topo">➕ Venda Avulsa</div>
 
 <div class="container">
@@ -126,8 +110,41 @@ if(!app_id){
 </div>
 
 <script>
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let app_id = null;
 let produtos = [];
 let carrinho = [];
+
+/* 🔐 VERIFICAR SESSÃO */
+async function verificarSessao(){
+
+  const { data: { session } } = await sb.auth.getSession();
+
+  if(!session){
+    alert("Sessão expirada");
+    location.href="../auth/login.html";
+    return false;
+  }
+
+  const { data: usuario } = await sb
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  if(!usuario){
+    alert("Sessão inválida");
+    location.href="../auth/login.html";
+    return false;
+  }
+
+  app_id = usuario.app_id;
+  return true;
+}
 
 /* ===== PRODUTOS ===== */
 async function carregarProdutos(){
@@ -258,7 +275,7 @@ async function finalizar(){
     app_id,
     pedido_id: null,
     tipo: forma,
-    valor: total,              // 🔥 entra no caixa
+    valor: total,
     troco: forma === "dinheiro" ? troco : 0,
     descricao: "Venda avulsa"
   });
@@ -268,8 +285,12 @@ async function finalizar(){
 }
 
 /* START */
-ajustarForma();
-carregarProdutos();
+(async ()=>{
+  const ok = await verificarSessao();
+  if(!ok) return;
+  ajustarForma();
+  await carregarProdutos();
+})();
 </script>
 
 </body>
