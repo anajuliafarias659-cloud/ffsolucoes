@@ -19,8 +19,14 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
 .filtros{display:flex;gap:8px;margin-bottom:16px}
 .filtros button{flex:1;background:#1e293b;color:#fff}
-.filtros button.ativo{background:#2563eb}
 .bloqueado{opacity:.4;pointer-events:none}
+.notificacao{
+  background:#2563eb;
+  padding:12px;
+  border-radius:10px;
+  margin-bottom:15px;
+  display:none;
+}
 </style>
 </head>
 
@@ -29,6 +35,8 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 <div class="topo" id="tituloMesa">🍽️ Mesa</div>
 
 <div class="container">
+
+<div class="notificacao" id="notificacao"></div>
 
 <input id="busca" placeholder="🔍 Buscar produto">
 
@@ -45,7 +53,6 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
 <div class="total" id="totalPedido">Total: R$ 0,00</div>
 
-<button id="btnEnviar">📨 Enviar pedido</button>
 <button id="btnConta">🧾 Pedir conta</button>
 <button id="btnLiberar" class="bloqueado">🔓 Liberar mesa</button>
 
@@ -89,7 +96,7 @@ async function carregarMesa(){
   }
 }
 
-/* ===== VERIFICA SE JÁ EXISTE PEDIDO ABERTO ===== */
+/* ===== VERIFICA PEDIDO ===== */
 async function verificarPedidoExistente(){
 
   const { data } = await supabase
@@ -102,11 +109,12 @@ async function verificarPedidoExistente(){
 
   if(data){
     pedidoAtual = data;
+    ativarRealtimePedido();
     await carregarPedido();
   }
 }
 
-/* ===== CRIA PEDIDO SOMENTE QUANDO PRECISAR ===== */
+/* ===== CRIA PEDIDO ===== */
 async function criarPedidoSeNecessario(){
 
   if(pedidoAtual) return;
@@ -123,6 +131,48 @@ async function criarPedidoSeNecessario(){
     .single();
 
   pedidoAtual = data;
+  ativarRealtimePedido();
+}
+
+/* ===== REALTIME PEDIDO ===== */
+function ativarRealtimePedido(){
+
+  if(!pedidoAtual) return;
+
+  supabase.channel("pedido-mesa-"+pedidoAtual.id)
+    .on(
+      "postgres_changes",
+      {
+        event:"UPDATE",
+        schema:"public",
+        table:"pedidos",
+        filter:`id=eq.${pedidoAtual.id}`
+      },
+      payload=>{
+
+        const novoStatus = payload.new.status;
+
+        const notif = document.getElementById("notificacao");
+
+        if(novoStatus === "aceito"){
+          notif.innerText="👨‍🍳 Seu pedido está em preparo!";
+          notif.style.display="block";
+        }
+
+        if(novoStatus === "pronto"){
+          notif.innerText="✅ Seu pedido está pronto!";
+          notif.style.display="block";
+        }
+
+        if(novoStatus === "cancelado"){
+          notif.innerText="❌ Seu pedido foi cancelado.";
+          notif.style.display="block";
+        }
+
+        setTimeout(()=>notif.style.display="none",5000);
+      }
+    )
+    .subscribe();
 }
 
 /* ===== PRODUTOS ===== */
@@ -153,51 +203,32 @@ function aplicarFiltros(){
     div.innerHTML += `
       <div class="produto">
         <span>${p.nome} - R$ ${Number(p.preco).toFixed(2)}</span>
-        <button data-id="${p.id}">➕</button>
+        <button onclick="addProduto('${p.id}')">➕</button>
       </div>
     `;
   });
-
-  div.querySelectorAll("button").forEach(btn=>{
-    btn.onclick = () => addProduto(btn.dataset.id);
-  });
 }
 
-/* ===== ADICIONAR PRODUTO ===== */
-async function addProduto(produtoId){
+window.addProduto = async function(produtoId){
 
   await criarPedidoSeNecessario();
 
   const produto = produtosCache.find(p=>p.id===produtoId);
   if(!produto) return;
 
-  const { data } = await supabase
-    .from("pedido_itens")
-    .select("id,quantidade")
-    .eq("pedido_id", pedidoAtual.id)
-    .eq("produto_id", produto.id)
-    .maybeSingle();
-
-  if(data){
-    await supabase
-      .from("pedido_itens")
-      .update({ quantidade: data.quantidade + 1 })
-      .eq("id", data.id);
-  } else {
-    await supabase.from("pedido_itens").insert({
-      app_id: window.APP_ID,
-      pedido_id: pedidoAtual.id,
-      produto_id: produto.id,
-      nome_produto: produto.nome,
-      preco: produto.preco,
-      quantidade: 1,
-      destino: produto.destino,
-      status:"novo"
-    });
-  }
+  await supabase.from("pedido_itens").insert({
+    app_id: window.APP_ID,
+    pedido_id: pedidoAtual.id,
+    produto_id: produto.id,
+    nome_produto: produto.nome,
+    preco: produto.preco,
+    quantidade: 1,
+    destino: produto.destino,
+    status:"novo"
+  });
 
   await carregarPedido();
-}
+};
 
 /* ===== CARREGAR PEDIDO ===== */
 async function carregarPedido(){
@@ -215,19 +246,14 @@ async function carregarPedido(){
 
   (data || []).forEach(i=>{
     total += Number(i.preco) * Number(i.quantidade);
-
-    div.innerHTML += `
-      <div class="item">
-        ${i.nome_produto} x ${i.quantidade}
-      </div>
-    `;
+    div.innerHTML += `<div class="item">${i.nome_produto} x ${i.quantidade}</div>`;
   });
 
   document.getElementById("totalPedido").innerText =
     `Total: R$ ${total.toFixed(2)}`;
 
-  const btn = document.getElementById("btnLiberar");
-  btn.classList.toggle("bloqueado", total > 0);
+  document.getElementById("btnLiberar")
+    .classList.toggle("bloqueado", total > 0);
 }
 
 /* ===== PEDIR CONTA ===== */
@@ -246,20 +272,7 @@ document.getElementById("btnConta").onclick = async () => {
 /* ===== LIBERAR MESA ===== */
 document.getElementById("btnLiberar").onclick = async () => {
 
-  if(!pedidoAtual) {
-    location.href="mesas.html";
-    return;
-  }
-
-  const { count } = await supabase
-    .from("pedido_itens")
-    .select("*",{count:"exact",head:true})
-    .eq("pedido_id", pedidoAtual.id);
-
-  if(count > 0){
-    alert("Ainda existem itens.");
-    return;
-  }
+  if(!pedidoAtual) return;
 
   await supabase
     .from("pedidos")
@@ -269,16 +282,9 @@ document.getElementById("btnLiberar").onclick = async () => {
   location.href="mesas.html";
 };
 
-/* EVENTOS */
 document.getElementById("busca").oninput = aplicarFiltros;
-document.getElementById("fBar").onclick = () => {
-  destinoSelecionado="bar";
-  aplicarFiltros();
-};
-document.getElementById("fCozinha").onclick = () => {
-  destinoSelecionado="cozinha";
-  aplicarFiltros();
-};
+document.getElementById("fBar").onclick = ()=>{destinoSelecionado="bar";aplicarFiltros();};
+document.getElementById("fCozinha").onclick = ()=>{destinoSelecionado="cozinha";aplicarFiltros();};
 
 esperarAuth();
 </script>
