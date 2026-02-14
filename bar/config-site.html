@@ -59,6 +59,9 @@ button{
   margin-top:10px;
   max-height:80px;
   display:none;
+  background:#fff;
+  padding:6px;
+  border-radius:10px;
 }
 
 .link{
@@ -79,12 +82,21 @@ button{
 <label>Nome do site</label>
 <input id="nome_site">
 
+<label>Logo</label>
+<input type="file" id="logo_file" accept="image/*">
+<img id="logo_preview" class="preview">
+<label><input type="checkbox" id="remover_logo"> Remover logo</label>
+
+<label>Banner</label>
+<input type="file" id="banner_file" accept="image/*">
+<img id="banner_preview" class="preview">
+<label><input type="checkbox" id="remover_banner"> Remover banner</label>
+
 <label>WhatsApp</label>
 <input id="whatsapp">
 
 <h3>🛒 Funcionamento</h3>
 
-<label>Modo do cardápio</label>
 <select id="modo_cardapio">
   <option value="venda">Permitir compras</option>
   <option value="vitrine">Somente vitrine</option>
@@ -125,57 +137,28 @@ import { supabase } from "../js/supabase.js";
 
 let app_id = null;
 
-/* ===============================
-   🔐 VERIFICAR SESSÃO
-================================= */
 async function verificarSessao(){
-
-  let { data: { session } } = await supabase.auth.getSession();
-
-  if(session) return session;
-
-  const { data } = await supabase.auth.refreshSession();
-
-  if(data.session) return data.session;
-
-  alert("Sessão expirada");
-  window.location.href = "/auth/login.html";
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    window.location.href="/auth/login.html";
+    return null;
+  }
+  return session;
 }
 
-/* ===============================
-   🚀 INICIAR
-================================= */
 async function iniciar(){
 
   const session = await verificarSessao();
+  if(!session) return;
 
   const { data: usuario } = await supabase
     .from("usuarios")
-    .select("app_id, ativo")
+    .select("app_id")
     .eq("id", session.user.id)
     .single();
 
-  if(!usuario || !usuario.ativo){
-    alert("Conta inválida");
-    window.location.href = "/auth/login.html";
-    return;
-  }
-
   app_id = usuario.app_id;
 
-  const { data: app } = await supabase
-    .from("apps")
-    .select("ativo, data_expiracao")
-    .eq("id", app_id)
-    .single();
-
-  if(!app || !app.ativo || new Date(app.data_expiracao) < new Date()){
-    alert("Plano expirado");
-    window.location.href = "/auth/login.html";
-    return;
-  }
-
-  /* LINKS CORRETOS */
   document.getElementById("link_cardapio").innerText =
     `${location.origin}/bar/public/cardapio/?app_id=${app_id}`;
 
@@ -185,19 +168,46 @@ async function iniciar(){
   carregarDados();
 }
 
-/* ===============================
-   SALVAR
-================================= */
+/* UPLOAD */
+async function uploadArquivo(file,bucket){
+  const ext = file.name.split(".").pop();
+  const path = `${app_id}/${Date.now()}.${ext}`;
+
+  const { error } = await supabase
+    .storage
+    .from(bucket)
+    .upload(path,file,{ upsert:true });
+
+  if(error) return null;
+
+  return supabase
+    .storage
+    .from(bucket)
+    .getPublicUrl(path).data.publicUrl;
+}
+
+/* SALVAR */
 window.salvar = async function(){
 
   const payload = {
-    nome_site: document.getElementById("nome_site").value.trim(),
-    whatsapp: document.getElementById("whatsapp").value || null,
-    modo_cardapio: document.getElementById("modo_cardapio").value,
-    horario_abertura: document.getElementById("horario_abertura").value || null,
-    horario_fechamento: document.getElementById("horario_fechamento").value || null,
-    tema_site: document.getElementById("tema_site").value
+    nome_site: nome_site.value.trim(),
+    whatsapp: whatsapp.value || null,
+    modo_cardapio: modo_cardapio.value,
+    horario_abertura: horario_abertura.value || null,
+    horario_fechamento: horario_fechamento.value || null,
+    tema_site: tema_site.value
   };
+
+  if(remover_logo.checked) payload.logo_url = null;
+  if(remover_banner.checked) payload.banner_url = null;
+
+  if(logo_file.files[0]){
+    payload.logo_url = await uploadArquivo(logo_file.files[0],"logos");
+  }
+
+  if(banner_file.files[0]){
+    payload.banner_url = await uploadArquivo(banner_file.files[0],"banners");
+  }
 
   const { data: existente } = await supabase
     .from("config_site")
@@ -217,9 +227,7 @@ window.salvar = async function(){
   alert("Configurações salvas 🔥");
 };
 
-/* ===============================
-   CARREGAR
-================================= */
+/* CARREGAR */
 async function carregarDados(){
 
   const { data } = await supabase
@@ -230,17 +238,42 @@ async function carregarDados(){
 
   if(!data) return;
 
-  document.getElementById("nome_site").value = data.nome_site || "";
-  document.getElementById("whatsapp").value = data.whatsapp || "";
-  document.getElementById("modo_cardapio").value = data.modo_cardapio || "venda";
-  document.getElementById("horario_abertura").value = data.horario_abertura || "";
-  document.getElementById("horario_fechamento").value = data.horario_fechamento || "";
-  document.getElementById("tema_site").value = data.tema_site || "padrao";
+  nome_site.value = data.nome_site || "";
+  whatsapp.value = data.whatsapp || "";
+  modo_cardapio.value = data.modo_cardapio || "venda";
+  horario_abertura.value = data.horario_abertura || "";
+  horario_fechamento.value = data.horario_fechamento || "";
+  tema_site.value = data.tema_site || "padrao";
+
+  if(data.logo_url){
+    logo_preview.src = data.logo_url;
+    logo_preview.style.display="block";
+  }
+
+  if(data.banner_url){
+    banner_preview.src = data.banner_url;
+    banner_preview.style.display="block";
+  }
 }
 
-/* INIT */
-iniciar();
+/* PREVIEW */
+logo_file.onchange = ()=>{
+  const f = logo_file.files[0];
+  if(f){
+    logo_preview.src = URL.createObjectURL(f);
+    logo_preview.style.display="block";
+  }
+};
 
+banner_file.onchange = ()=>{
+  const f = banner_file.files[0];
+  if(f){
+    banner_preview.src = URL.createObjectURL(f);
+    banner_preview.style.display="block";
+  }
+};
+
+iniciar();
 </script>
 
 </body>
