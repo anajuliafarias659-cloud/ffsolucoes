@@ -5,9 +5,6 @@
 <title>Painel do Bar / Restaurante</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#020617">
-
 <style>
 *{box-sizing:border-box}
 
@@ -24,11 +21,6 @@ body{
   display:flex;
   justify-content:space-between;
   align-items:center;
-}
-
-.topo h2{
-  margin:0;
-  font-size:18px
 }
 
 .sair{
@@ -49,8 +41,9 @@ body{
 
 .grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(180px,1fr));
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
   gap:14px;
+  margin-bottom:30px;
 }
 
 .card{
@@ -66,15 +59,21 @@ body{
   background:#1e293b;
 }
 
-.card h3{
-  margin:0 0 6px;
-  font-size:15px
+.bloco-publico{
+  background:#0f172a;
+  padding:20px;
+  border-radius:14px;
+  margin-top:20px;
 }
 
-.card p{
-  margin:0;
-  font-size:12px;
-  opacity:.7
+select{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border-radius:10px;
+  border:none;
+  background:#1e293b;
+  color:#fff;
 }
 </style>
 </head>
@@ -98,145 +97,169 @@ body{
   <div class="grid">
 
     <div class="card" onclick="irPara('produtos.html')">
-      <h3>📦 Produtos</h3>
-      <p>Cadastro interno</p>
+      📦 Produtos
     </div>
 
     <div class="card" onclick="irPara('categorias.html')">
-      <h3>📂 Categorias</h3>
-      <p>Bebidas e pratos</p>
+      📂 Categorias
     </div>
 
     <div class="card" onclick="irPara('mesas.html')">
-      <h3>🪑 Mesas</h3>
-      <p>Status e controle</p>
+      🪑 Mesas
     </div>
 
     <div class="card" onclick="irPara('cozinha.html')">
-      <h3>🧾 Cozinha</h3>
-      <p>Comandas</p>
+      🧾 Cozinha
     </div>
 
     <div class="card" onclick="irPara('caixa.html')">
-      <h3>💰 Caixa</h3>
-      <p>Entradas / saídas</p>
+      💰 Caixa
     </div>
 
     <div class="card" onclick="irPara('admins.html')">
-      <h3>⚙️ Admins</h3>
-      <p>Usuários</p>
+      ⚙️ Admins
     </div>
-    
-    <div class="card" onclick="irPara('config-site.html')">
-      <h3>⚙️ configurar o Site</h3>
-      <p>Usuários</p>
-    </div>
-    
-    <div class="card" onclick="abrirPublico()">
-  <h3>🌍 Site Público</h3>
-  <p>Cardápio e Site</p>
-</div>
-<h3>🌍 Página Pública Ativa</h3>
-
-<select id="modo_publico">
-  <option value="cardapio">🛒 Cardápio</option>
-  <option value="site">🌐 Site</option>
-</select>
-
 
   </div>
-</div>
 
-<!-- 🔐 AUTH GLOBAL -->
-<script type="module" src="../js/auth.js"></script>
+  <!-- BLOCO PÚBLICO -->
+  <div class="bloco-publico">
+
+    <h3>🌍 Página Pública</h3>
+
+    <select id="modo_publico">
+      <option value="cardapio">🛒 Cardápio</option>
+      <option value="site">🌐 Site</option>
+    </select>
+
+    <div class="card" style="margin-top:15px; text-align:center;"
+         onclick="abrirPaginaPublica()">
+      🚀 Abrir Página Pública
+    </div>
+
+  </div>
+
+</div>
 
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
+let app_id = null;
+
 /* ===============================
-   🔐 VERIFICA SESSÃO
+   VERIFICAR SESSÃO
 ================================= */
 async function verificarSessao(){
-
   const { data: { session } } = await supabase.auth.getSession();
-
   if(!session){
     window.location.href = "/auth/login.html";
     return null;
   }
-
   return session.user.id;
 }
 
 /* ===============================
-   👤 CARREGA USUÁRIO
+   CARREGAR USUÁRIO
 ================================= */
 async function carregarUsuario(){
 
   const userId = await verificarSessao();
   if(!userId) return;
 
-  const { data: usuario, error } = await supabase
+  const { data: usuario } = await supabase
     .from("usuarios")
-    .select("nome, app_id, ativo")
+    .select("nome, app_id")
     .eq("id", userId)
     .single();
 
-  if(error || !usuario || !usuario.ativo){
-    alert("Conta desativada.");
-    await supabase.auth.signOut();
-    window.location.href = "/auth/login.html";
-    return;
-  }
+  if(!usuario) return;
 
-  document.getElementById("nome").innerText = usuario.nome || "Usuário";
+  app_id = usuario.app_id;
+
+  document.getElementById("nome").innerText = usuario.nome;
   document.getElementById("negocioId").innerText = usuario.app_id;
 
-  /* 🔎 Verifica validade do plano */
-  const { data: app } = await supabase
-    .from("apps")
-    .select("data_expiracao, ativo")
-    .eq("id", usuario.app_id)
-    .single();
+  carregarModo();
+}
 
-  if(!app || !app.ativo){
-    alert("Negócio desativado.");
-    await supabase.auth.signOut();
-    window.location.href = "/auth/login.html";
-    return;
-  }
+/* ===============================
+   CARREGAR MODO
+================================= */
+async function carregarModo(){
 
-  if(new Date(app.data_expiracao) < new Date()){
-    alert("Seu período expirou.");
-    await supabase.auth.signOut();
-    window.location.href = "/auth/login.html";
+  const { data } = await supabase
+    .from("config_site")
+    .select("modo_publico")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(data){
+    document.getElementById("modo_publico").value =
+      data.modo_publico || "cardapio";
   }
 }
 
 /* ===============================
-   🚀 NAVEGAÇÃO
+   SALVAR AO TROCAR
 ================================= */
-window.irPara = function(pagina){
-  window.location.href = pagina;
-};
+document.getElementById("modo_publico")
+.addEventListener("change", async (e)=>{
+
+  const modo = e.target.value;
+
+  const { data: existente } = await supabase
+    .from("config_site")
+    .select("id")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(existente){
+    await supabase
+      .from("config_site")
+      .update({ modo_publico: modo })
+      .eq("app_id", app_id);
+  }else{
+    await supabase
+      .from("config_site")
+      .insert({ app_id, modo_publico: modo });
+  }
+
+});
 
 /* ===============================
-   🚪 LOGOUT
+   ABRIR PÁGINA
 ================================= */
-window.logout = async () => {
+window.abrirPaginaPublica = function(){
+
+  const modo = document.getElementById("modo_publico").value;
+
+  const base = location.origin;
+
+  if(modo === "cardapio"){
+    window.open(
+      `${base}/bar/public/cardapio/?app_id=${app_id}`,
+      "_blank"
+    );
+  }
+
+  if(modo === "site"){
+    window.open(
+      `${base}/bar/public/site/?app_id=${app_id}`,
+      "_blank"
+    );
+  }
+};
+
+/* =============================== */
+window.irPara = pagina => window.location.href = pagina;
+
+window.logout = async ()=>{
   await supabase.auth.signOut();
   window.location.href = "/auth/login.html";
 };
 
-/* ===============================
-   INIT
-================================= */
 carregarUsuario();
-
 </script>
 
 </body>
 </html>
-
-
-
