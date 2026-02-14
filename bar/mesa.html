@@ -5,28 +5,17 @@
 <title>Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script type="module" src="../js/auth.js"></script>
-<script type="module" src="../js/supabase.js"></script>
-
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
 .container{max-width:900px;margin:auto;padding:20px}
-input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px}
 .produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
 .produto{display:flex;justify-content:space-between;align-items:center}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
 .filtros{display:flex;gap:8px;margin-bottom:16px}
 .filtros button{flex:1;background:#1e293b;color:#fff}
-.bloqueado{opacity:.4;pointer-events:none}
-.notificacao{
-  background:#2563eb;
-  padding:12px;
-  border-radius:10px;
-  margin-bottom:15px;
-  display:none;
-}
+.filtros button.ativo{background:#2563eb}
 </style>
 </head>
 
@@ -35,10 +24,6 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 <div class="topo" id="tituloMesa">🍽️ Mesa</div>
 
 <div class="container">
-
-<div class="notificacao" id="notificacao"></div>
-
-<input id="busca" placeholder="🔍 Buscar produto">
 
 <div class="filtros">
 <button id="fBar">🍹 Bar</button>
@@ -53,8 +38,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
 <div class="total" id="totalPedido">Total: R$ 0,00</div>
 
-<button id="btnConta">🧾 Pedir conta</button>
-<button id="btnLiberar" class="bloqueado">🔓 Liberar mesa</button>
+<button id="btnEnviar">📨 Enviar pedido</button>
 
 </div>
 
@@ -64,21 +48,31 @@ import { supabase } from "../js/supabase.js";
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 
+let APP_ID = null;
 let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
 
 /* ===============================
-   ESPERA AUTH
+   INICIAR
 ================================= */
-async function esperarAuth(){
-  while(!window.APP_ID){
-    await new Promise(r=>setTimeout(r,100));
-  }
-  iniciarSistema();
-}
+async function iniciar(){
 
-async function iniciarSistema(){
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if(!session){
+    location.href="/auth/login.html";
+    return;
+  }
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  APP_ID = usuario.app_id;
+
   await carregarMesa();
   await verificarPedidoExistente();
   await carregarProdutos();
@@ -109,7 +103,7 @@ async function verificarPedidoExistente(){
     .from("pedidos")
     .select("*")
     .eq("mesa_id", mesaId)
-    .eq("app_id", window.APP_ID)
+    .eq("app_id", APP_ID)
     .not("status","in",'("finalizado","pago")')
     .maybeSingle();
 
@@ -130,7 +124,7 @@ async function criarPedidoSeNecessario(){
   const { data } = await supabase
     .from("pedidos")
     .insert({
-      app_id: window.APP_ID,
+      app_id: APP_ID,
       mesa_id: mesaId,
       status: "aberto",
       origem: "mesa"
@@ -143,64 +137,14 @@ async function criarPedidoSeNecessario(){
 }
 
 /* ===============================
-   ENVIAR PEDIDO
-================================= */
-document.getElementById("btnEnviar").onclick = async () => {
-
-  if(!pedidoAtual) return;
-
-  await supabase
-    .from("pedidos")
-    .update({ status:"novo" })
-    .eq("id", pedidoAtual.id);
-
-  alert("Pedido enviado para cozinha!");
-};
-
-/* ===============================
-   REALTIME
-================================= */
-function ativarRealtime(){
-
-  if(!pedidoAtual) return;
-
-  supabase.channel("mesa-"+pedidoAtual.id)
-    .on(
-      "postgres_changes",
-      {
-        event:"UPDATE",
-        schema:"public",
-        table:"pedidos",
-        filter:`id=eq.${pedidoAtual.id}`
-      },
-      payload=>{
-
-        const status = payload.new.status;
-
-        if(status === "aceito"){
-          alert("👨‍🍳 Pedido em preparo!");
-        }
-
-        if(status === "pronto"){
-          alert("✅ Pedido pronto!");
-        }
-
-        if(status === "cancelado"){
-          alert("❌ Pedido cancelado!");
-        }
-      }
-    )
-    .subscribe();
-}
-
-/* ===============================
    PRODUTOS
 ================================= */
 async function carregarProdutos(){
+
   const { data } = await supabase
     .from("produtos")
     .select("*")
-    .eq("app_id", window.APP_ID)
+    .eq("app_id", APP_ID)
     .eq("ativo", true);
 
   produtosCache = data || [];
@@ -233,7 +177,7 @@ window.addProduto = async function(produtoId){
   const produto = produtosCache.find(p=>p.id===produtoId);
 
   await supabase.from("pedido_itens").insert({
-    app_id: window.APP_ID,
+    app_id: APP_ID,
     pedido_id: pedidoAtual.id,
     produto_id: produto.id,
     nome_produto: produto.nome,
@@ -271,10 +215,70 @@ async function carregarPedido(){
     `Total: R$ ${total.toFixed(2)}`;
 }
 
-esperarAuth();
-</script>
+/* ===============================
+   ENVIAR PEDIDO
+================================= */
+const btnEnviar = document.getElementById("btnEnviar");
+if(btnEnviar){
+  btnEnviar.onclick = async () => {
 
+    if(!pedidoAtual) return;
+
+    await supabase
+      .from("pedidos")
+      .update({ status:"novo" })
+      .eq("id", pedidoAtual.id);
+
+    alert("Pedido enviado para cozinha!");
+  };
+}
+
+/* ===============================
+   REALTIME
+================================= */
+function ativarRealtime(){
+
+  if(!pedidoAtual) return;
+
+  supabase.channel("mesa-"+pedidoAtual.id)
+    .on(
+      "postgres_changes",
+      {
+        event:"UPDATE",
+        schema:"public",
+        table:"pedidos",
+        filter:`id=eq.${pedidoAtual.id}`
+      },
+      payload=>{
+
+        const status = payload.new.status;
+
+        if(status === "aceito"){
+          alert("👨‍🍳 Pedido em preparo!");
+        }
+
+        if(status === "pronto"){
+          alert("✅ Pedido pronto!");
+        }
+      }
+    )
+    .subscribe();
+}
+
+/* FILTROS */
+document.getElementById("fBar").onclick = () => {
+  destinoSelecionado="bar";
+  aplicarFiltros();
+};
+
+document.getElementById("fCozinha").onclick = () => {
+  destinoSelecionado="cozinha";
+  aplicarFiltros();
+};
+
+iniciar();
+
+</script>
 
 </body>
 </html>
-
