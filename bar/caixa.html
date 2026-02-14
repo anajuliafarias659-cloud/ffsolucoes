@@ -96,13 +96,13 @@ th{color:#94a3b8}
 
 <div class="container">
 
-  <!-- ===== RESUMO DO CAIXA ===== -->
+  <!-- FECHAMENTO -->
   <div class="box">
     <h3>📊 Fechamento de Caixa</h3>
 
     <div class="resumo-grid">
       <div class="card">
-        <h4>Total Recebido</h4>
+        <h4>Total Recebido Hoje</h4>
         <p id="totalRecebido">R$ 0.00</p>
       </div>
 
@@ -121,7 +121,7 @@ th{color:#94a3b8}
     <button onclick="gerarFechamento()">📥 Atualizar Fechamento</button>
   </div>
 
-  <!-- ===== CONTAS ===== -->
+  <!-- CONTAS -->
   <div class="box" id="boxContas" style="display:none">
     <h3>🧾 Mesas aguardando pagamento</h3>
     <table>
@@ -135,14 +135,19 @@ th{color:#94a3b8}
       <tbody id="listaContas"></tbody>
     </table>
   </div>
+
 </div>
 
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
 async function iniciar(){
+
   const { data: { session } } = await supabase.auth.getSession();
-  if(!session){ location.href="/auth/login.html"; return; }
+  if(!session){
+    location.href="/auth/login.html";
+    return;
+  }
 
   const { data: usuario } = await supabase
     .from("usuarios")
@@ -150,7 +155,10 @@ async function iniciar(){
     .eq("id", session.user.id)
     .single();
 
-  if(!usuario){ location.href="/auth/login.html"; return; }
+  if(!usuario){
+    location.href="/auth/login.html";
+    return;
+  }
 
   const appId = usuario.app_id;
 
@@ -160,36 +168,57 @@ async function iniciar(){
   setInterval(()=>verificarContas(appId),3000);
 }
 
+window.irPara = p => location.href = p;
+
+window.scrollContas = () =>
+  document.getElementById("boxContas")
+    .scrollIntoView({behavior:"smooth"});
+
+window.irPagamento = id =>
+  location.href = `pagamento.html?pedido=${id}`;
+
 window.gerarFechamento = async function(){
 
   const { data: { session } } = await supabase.auth.getSession();
+  if(!session) return;
+
   const { data: usuario } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", session.user.id)
     .single();
 
+  if(!usuario) return;
+
   const appId = usuario.app_id;
 
-  const hoje = new Date().toISOString().split("T")[0];
+  const agora = new Date();
+  const inicio = new Date();
+  inicio.setHours(0,0,0,0);
 
-  const { data } = await supabase
+  const fim = new Date();
+  fim.setHours(23,59,59,999);
+
+  const { data, error } = await supabase
     .from("pedidos")
     .select(`
       id,
-      pedido_itens(preco,quantidade),
-      created_at
+      created_at,
+      pedido_itens(preco,quantidade)
     `)
     .eq("app_id", appId)
-    .eq("status", "pago");
+    .eq("status", "pago")
+    .gte("created_at", inicio.toISOString())
+    .lte("created_at", fim.toISOString());
+
+  if(error){
+    console.log(error);
+    return;
+  }
 
   let total = 0;
 
-  const vendasHoje = (data || []).filter(p =>
-    p.created_at.startsWith(hoje)
-  );
-
-  vendasHoje.forEach(p=>{
+  (data || []).forEach(p=>{
     (p.pedido_itens || []).forEach(i=>{
       total += Number(i.preco) * Number(i.quantidade);
     });
@@ -199,19 +228,11 @@ window.gerarFechamento = async function(){
     "R$ " + total.toFixed(2);
 
   document.getElementById("qtdVendas").innerText =
-    vendasHoje.length;
+    data?.length || 0;
 
   document.getElementById("dataHoje").innerText =
-    new Date().toLocaleDateString("pt-BR");
+    agora.toLocaleDateString("pt-BR");
 };
-
-window.irPara = p => location.href = p;
-window.scrollContas = () =>
-  document.getElementById("boxContas")
-    .scrollIntoView({behavior:"smooth"});
-
-window.irPagamento = id =>
-  location.href = `pagamento.html?pedido=${id}`;
 
 async function verificarContas(appId){
 
