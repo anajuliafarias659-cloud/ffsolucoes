@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -18,6 +18,33 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 }
 .container{max-width:1200px;margin:auto;padding:24px}
 .box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
+
+.resumo-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:16px;
+  margin-top:15px;
+}
+
+.card{
+  background:#1e293b;
+  padding:15px;
+  border-radius:12px;
+  text-align:center;
+}
+
+.card h4{
+  margin:0;
+  color:#94a3b8;
+  font-size:14px;
+}
+
+.card p{
+  margin:8px 0 0 0;
+  font-size:20px;
+  font-weight:bold;
+  color:#22c55e;
+}
 
 button{
   padding:10px 16px;
@@ -68,6 +95,33 @@ th{color:#94a3b8}
 </div>
 
 <div class="container">
+
+  <!-- ===== RESUMO DO CAIXA ===== -->
+  <div class="box">
+    <h3>📊 Fechamento de Caixa</h3>
+
+    <div class="resumo-grid">
+      <div class="card">
+        <h4>Total Recebido</h4>
+        <p id="totalRecebido">R$ 0.00</p>
+      </div>
+
+      <div class="card">
+        <h4>Quantidade de Vendas</h4>
+        <p id="qtdVendas">0</p>
+      </div>
+
+      <div class="card">
+        <h4>Data</h4>
+        <p id="dataHoje">--/--/----</p>
+      </div>
+    </div>
+
+    <br>
+    <button onclick="gerarFechamento()">📥 Atualizar Fechamento</button>
+  </div>
+
+  <!-- ===== CONTAS ===== -->
   <div class="box" id="boxContas" style="display:none">
     <h3>🧾 Mesas aguardando pagamento</h3>
     <table>
@@ -86,15 +140,9 @@ th{color:#94a3b8}
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-/* ===== VERIFICA SESSÃO DIRETO ===== */
 async function iniciar(){
-
   const { data: { session } } = await supabase.auth.getSession();
-
-  if(!session){
-    location.href="/auth/login.html";
-    return;
-  }
+  if(!session){ location.href="/auth/login.html"; return; }
 
   const { data: usuario } = await supabase
     .from("usuarios")
@@ -102,29 +150,68 @@ async function iniciar(){
     .eq("id", session.user.id)
     .single();
 
-  if(!usuario){
-    location.href="/auth/login.html";
-    return;
-  }
+  if(!usuario){ location.href="/auth/login.html"; return; }
 
   const appId = usuario.app_id;
 
   verificarContas(appId);
+  gerarFechamento(appId);
+
   setInterval(()=>verificarContas(appId),3000);
 }
 
-window.irPara = function(p){
-  location.href = p;
+window.gerarFechamento = async function(){
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  const appId = usuario.app_id;
+
+  const hoje = new Date().toISOString().split("T")[0];
+
+  const { data } = await supabase
+    .from("pedidos")
+    .select(`
+      id,
+      pedido_itens(preco,quantidade),
+      created_at
+    `)
+    .eq("app_id", appId)
+    .eq("status", "pago");
+
+  let total = 0;
+
+  const vendasHoje = (data || []).filter(p =>
+    p.created_at.startsWith(hoje)
+  );
+
+  vendasHoje.forEach(p=>{
+    (p.pedido_itens || []).forEach(i=>{
+      total += Number(i.preco) * Number(i.quantidade);
+    });
+  });
+
+  document.getElementById("totalRecebido").innerText =
+    "R$ " + total.toFixed(2);
+
+  document.getElementById("qtdVendas").innerText =
+    vendasHoje.length;
+
+  document.getElementById("dataHoje").innerText =
+    new Date().toLocaleDateString("pt-BR");
 };
 
-window.scrollContas = function(){
+window.irPara = p => location.href = p;
+window.scrollContas = () =>
   document.getElementById("boxContas")
     .scrollIntoView({behavior:"smooth"});
-};
 
-window.irPagamento = function(id){
+window.irPagamento = id =>
   location.href = `pagamento.html?pedido=${id}`;
-};
 
 async function verificarContas(appId){
 
@@ -153,7 +240,6 @@ async function verificarContas(appId){
     box.style.display = "block";
 
     data.forEach(p=>{
-
       let total = 0;
       (p.pedido_itens || []).forEach(i=>{
         total += Number(i.preco) * Number(i.quantidade);
