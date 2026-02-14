@@ -129,14 +129,18 @@ th{color:#94a3b8}
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-async function iniciar(){
-  const { data:{session} } = await supabase.auth.getSession();
-  if(!session){ location.href="/auth/login.html"; return; }
+/* 🔥 AGUARDA AUTH DEFINIR APP_ID */
+async function aguardarSessao(){
+  while(!window.APP_ID){
+    await new Promise(r=>setTimeout(r,100));
+  }
 
   verificarContas(window.APP_ID);
   gerarFechamento();
   setInterval(()=>verificarContas(window.APP_ID),3000);
 }
+
+aguardarSessao();
 
 window.irPara = p => location.href = p;
 window.scrollContas = () =>
@@ -144,10 +148,13 @@ window.scrollContas = () =>
 window.irPagamento = id =>
   location.href = `pagamento.html?pedido=${id}`;
 
+/* 🔥 FECHAMENTO CORRETO */
 window.gerarFechamento = async function(){
 
-  const inicio = new Date(); inicio.setHours(0,0,0,0);
-  const fim = new Date(); fim.setHours(23,59,59,999);
+  const inicio = new Date();
+  inicio.setHours(0,0,0,0);
+
+  const amanha = new Date(inicio.getTime() + 86400000);
 
   const { data } = await supabase
     .from("pedidos")
@@ -160,13 +167,14 @@ window.gerarFechamento = async function(){
     .eq("app_id", window.APP_ID)
     .eq("status", "finalizado")
     .gte("created_at", inicio.toISOString())
-    .lte("created_at", fim.toISOString());
+    .lt("created_at", amanha.toISOString());
 
   let total = 0;
   let pagamentos = {};
 
   (data || []).forEach(p=>{
     let totalPedido = 0;
+
     (p.pedido_itens || []).forEach(i=>{
       totalPedido += Number(i.preco) * Number(i.quantidade);
     });
@@ -196,6 +204,7 @@ window.gerarFechamento = async function(){
     resumo || "--";
 };
 
+/* 📄 GERAR PDF */
 window.fecharCaixa = async function(){
 
   await gerarFechamento();
@@ -203,14 +212,10 @@ window.fecharCaixa = async function(){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
-  const total =
-    document.getElementById("totalRecebido").innerText;
-  const qtd =
-    document.getElementById("qtdVendas").innerText;
-  const data =
-    document.getElementById("dataHoje").innerText;
-  const formas =
-    document.getElementById("resumoPagamentos").innerText;
+  const total = document.getElementById("totalRecebido").innerText;
+  const qtd = document.getElementById("qtdVendas").innerText;
+  const data = document.getElementById("dataHoje").innerText;
+  const formas = document.getElementById("resumoPagamentos").innerText;
 
   doc.setFontSize(16);
   doc.text("FECHAMENTO DE CAIXA", 20, 20);
@@ -220,15 +225,14 @@ window.fecharCaixa = async function(){
   doc.text("Quantidade de Vendas: " + qtd, 20, 45);
   doc.text("Total Recebido: " + total, 20, 55);
 
-  doc.text(" ", 20, 65);
-  doc.text("Por Forma de Pagamento:", 20, 75);
-
+  doc.text("Por Forma de Pagamento:", 20, 70);
   const linhas = doc.splitTextToSize(formas, 170);
-  doc.text(linhas, 20, 85);
+  doc.text(linhas, 20, 80);
 
   doc.save("fechamento-caixa-" + data + ".pdf");
 };
 
+/* 🔔 CONTAS */
 async function verificarContas(appId){
 
   const { data } = await supabase
@@ -277,8 +281,6 @@ async function verificarContas(appId){
     box.style.display = "none";
   }
 }
-
-iniciar();
 </script>
 
 </body>
