@@ -5,12 +5,10 @@
 <title>Cozinha | Pedidos</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <style>
 :root{
   --bg:#020617;
-  --card:#020617;
+  --card:#0f172a;
   --border:#1e293b;
   --text:#ffffff;
   --muted:#94a3b8;
@@ -61,11 +59,6 @@ header{
   margin-bottom:12px;
 }
 
-.itens{
-  font-size:14px;
-  margin-bottom:12px;
-}
-
 .itens div{
   display:flex;
   justify-content:space-between;
@@ -113,21 +106,71 @@ button{
 
 <audio id="alerta" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
 
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const params = new URLSearchParams(location.search);
-const app_id = params.get("app");
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
 const lista = document.getElementById("lista");
 const alerta = document.getElementById("alerta");
 
-/* CARREGAR PEDIDOS */
+let app_id = null;
+
+/* ===============================
+   🔐 INICIAR SISTEMA
+================================= */
+async function iniciar(){
+
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if(!session){
+    window.location.href = "/auth/login.html";
+    return;
+  }
+
+  const { data: usuario, error } = await supabase
+    .from("usuarios")
+    .select("app_id, ativo")
+    .eq("id", session.user.id)
+    .single();
+
+  if(error || !usuario || !usuario.ativo){
+    alert("Conta inválida.");
+    await supabase.auth.signOut();
+    window.location.href = "/auth/login.html";
+    return;
+  }
+
+  app_id = usuario.app_id;
+
+  const { data: app } = await supabase
+    .from("apps")
+    .select("data_expiracao, ativo")
+    .eq("id", app_id)
+    .single();
+
+  if(!app || !app.ativo){
+    alert("Negócio desativado.");
+    await supabase.auth.signOut();
+    window.location.href = "/auth/login.html";
+    return;
+  }
+
+  if(new Date(app.data_expiracao) < new Date()){
+    alert("Plano expirado.");
+    await supabase.auth.signOut();
+    window.location.href = "/auth/login.html";
+    return;
+  }
+
+  carregarPedidos();
+  ativarRealtime();
+}
+
+/* ===============================
+   📦 CARREGAR PEDIDOS
+================================= */
 async function carregarPedidos(){
-  const { data, error } = await sb
+
+  const { data, error } = await supabase
     .from("pedidos")
     .select("*")
     .eq("app_id", app_id)
@@ -142,8 +185,11 @@ async function carregarPedidos(){
   renderizar(data || []);
 }
 
-/* RENDER */
+/* ===============================
+   🎨 RENDER
+================================= */
 function renderizar(pedidos){
+
   lista.innerHTML = "";
 
   if(pedidos.length === 0){
@@ -152,6 +198,7 @@ function renderizar(pedidos){
   }
 
   pedidos.forEach(p=>{
+
     const mesa = p.itens?.mesa || "-";
     const produtos = p.itens?.produtos || [];
 
@@ -187,35 +234,48 @@ function renderizar(pedidos){
   });
 }
 
-/* STATUS */
-async function mudarStatus(id,status){
-  await sb.from("pedidos").update({ status }).eq("id", id);
+/* ===============================
+   🔄 MUDAR STATUS
+================================= */
+window.mudarStatus = async (id,status)=>{
+  await supabase
+    .from("pedidos")
+    .update({ status })
+    .eq("id", id)
+    .eq("app_id", app_id);
+};
+
+/* ===============================
+   📡 REALTIME
+================================= */
+function ativarRealtime(){
+
+  supabase.channel("pedidos-realtime")
+    .on(
+      "postgres_changes",
+      { event:"INSERT", schema:"public", table:"pedidos" },
+      payload=>{
+        if(payload.new.app_id === app_id){
+          alerta.play();
+          carregarPedidos();
+        }
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event:"UPDATE", schema:"public", table:"pedidos" },
+      payload=>{
+        if(payload.new.app_id === app_id){
+          carregarPedidos();
+        }
+      }
+    )
+    .subscribe();
 }
 
-/* REALTIME */
-sb.channel("pedidos-realtime")
-  .on(
-    "postgres_changes",
-    { event:"INSERT", schema:"public", table:"pedidos" },
-    payload=>{
-      if(payload.new.app_id === app_id){
-        alerta.play();
-        carregarPedidos();
-      }
-    }
-  )
-  .on(
-    "postgres_changes",
-    { event:"UPDATE", schema:"public", table:"pedidos" },
-    payload=>{
-      if(payload.new.app_id === app_id){
-        carregarPedidos();
-      }
-    }
-  )
-  .subscribe();
+/* INIT */
+iniciar();
 
-carregarPedidos();
 </script>
 
 </body>
