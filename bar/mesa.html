@@ -68,7 +68,9 @@ let pedidoAtual = null;
 let produtosCache = [];
 let destinoSelecionado = "bar";
 
-/* 🔐 ESPERA AUTH */
+/* ===============================
+   ESPERA AUTH
+================================= */
 async function esperarAuth(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
@@ -82,7 +84,9 @@ async function iniciarSistema(){
   await carregarProdutos();
 }
 
-/* ===== MESA ===== */
+/* ===============================
+   MESA
+================================= */
 async function carregarMesa(){
   const { data } = await supabase
     .from("mesas")
@@ -96,7 +100,9 @@ async function carregarMesa(){
   }
 }
 
-/* ===== VERIFICA PEDIDO ===== */
+/* ===============================
+   VERIFICA PEDIDO
+================================= */
 async function verificarPedidoExistente(){
 
   const { data } = await supabase
@@ -109,12 +115,14 @@ async function verificarPedidoExistente(){
 
   if(data){
     pedidoAtual = data;
-    ativarRealtimePedido();
+    ativarRealtime();
     await carregarPedido();
   }
 }
 
-/* ===== CRIA PEDIDO ===== */
+/* ===============================
+   CRIAR PEDIDO
+================================= */
 async function criarPedidoSeNecessario(){
 
   if(pedidoAtual) return;
@@ -131,15 +139,32 @@ async function criarPedidoSeNecessario(){
     .single();
 
   pedidoAtual = data;
-  ativarRealtimePedido();
+  ativarRealtime();
 }
 
-/* ===== REALTIME PEDIDO ===== */
-function ativarRealtimePedido(){
+/* ===============================
+   ENVIAR PEDIDO
+================================= */
+document.getElementById("btnEnviar").onclick = async () => {
 
   if(!pedidoAtual) return;
 
-  supabase.channel("pedido-mesa-"+pedidoAtual.id)
+  await supabase
+    .from("pedidos")
+    .update({ status:"novo" })
+    .eq("id", pedidoAtual.id);
+
+  alert("Pedido enviado para cozinha!");
+};
+
+/* ===============================
+   REALTIME
+================================= */
+function ativarRealtime(){
+
+  if(!pedidoAtual) return;
+
+  supabase.channel("mesa-"+pedidoAtual.id)
     .on(
       "postgres_changes",
       {
@@ -150,49 +175,41 @@ function ativarRealtimePedido(){
       },
       payload=>{
 
-        const novoStatus = payload.new.status;
+        const status = payload.new.status;
 
-        const notif = document.getElementById("notificacao");
-
-        if(novoStatus === "aceito"){
-          notif.innerText="👨‍🍳 Seu pedido está em preparo!";
-          notif.style.display="block";
+        if(status === "aceito"){
+          alert("👨‍🍳 Pedido em preparo!");
         }
 
-        if(novoStatus === "pronto"){
-          notif.innerText="✅ Seu pedido está pronto!";
-          notif.style.display="block";
+        if(status === "pronto"){
+          alert("✅ Pedido pronto!");
         }
 
-        if(novoStatus === "cancelado"){
-          notif.innerText="❌ Seu pedido foi cancelado.";
-          notif.style.display="block";
+        if(status === "cancelado"){
+          alert("❌ Pedido cancelado!");
         }
-
-        setTimeout(()=>notif.style.display="none",5000);
       }
     )
     .subscribe();
 }
 
-/* ===== PRODUTOS ===== */
+/* ===============================
+   PRODUTOS
+================================= */
 async function carregarProdutos(){
   const { data } = await supabase
     .from("produtos")
-    .select("id,nome,preco,destino")
+    .select("*")
     .eq("app_id", window.APP_ID)
-    .eq("ativo", true)
-    .order("nome");
+    .eq("ativo", true);
 
   produtosCache = data || [];
   aplicarFiltros();
 }
 
 function aplicarFiltros(){
-  const texto = document.getElementById("busca").value?.toLowerCase() || "";
 
   const lista = produtosCache.filter(p =>
-    p.nome.toLowerCase().includes(texto) &&
     p.destino === destinoSelecionado
   );
 
@@ -214,7 +231,6 @@ window.addProduto = async function(produtoId){
   await criarPedidoSeNecessario();
 
   const produto = produtosCache.find(p=>p.id===produtoId);
-  if(!produto) return;
 
   await supabase.from("pedido_itens").insert({
     app_id: window.APP_ID,
@@ -230,7 +246,9 @@ window.addProduto = async function(produtoId){
   await carregarPedido();
 };
 
-/* ===== CARREGAR PEDIDO ===== */
+/* ===============================
+   CARREGAR PEDIDO
+================================= */
 async function carregarPedido(){
 
   if(!pedidoAtual) return;
@@ -240,54 +258,23 @@ async function carregarPedido(){
     .select("*")
     .eq("pedido_id", pedidoAtual.id);
 
+  let total = 0;
   const div = document.getElementById("pedido");
   div.innerHTML="";
-  let total = 0;
 
   (data || []).forEach(i=>{
-    total += Number(i.preco) * Number(i.quantidade);
+    total += i.preco * i.quantidade;
     div.innerHTML += `<div class="item">${i.nome_produto} x ${i.quantidade}</div>`;
   });
 
   document.getElementById("totalPedido").innerText =
     `Total: R$ ${total.toFixed(2)}`;
-
-  document.getElementById("btnLiberar")
-    .classList.toggle("bloqueado", total > 0);
 }
-
-/* ===== PEDIR CONTA ===== */
-document.getElementById("btnConta").onclick = async () => {
-
-  if(!pedidoAtual) return;
-
-  await supabase
-    .from("pedidos")
-    .update({ status:"conta_solicitada" })
-    .eq("id", pedidoAtual.id);
-
-  alert("Conta solicitada!");
-};
-
-/* ===== LIBERAR MESA ===== */
-document.getElementById("btnLiberar").onclick = async () => {
-
-  if(!pedidoAtual) return;
-
-  await supabase
-    .from("pedidos")
-    .update({ status:"finalizado" })
-    .eq("id", pedidoAtual.id);
-
-  location.href="mesas.html";
-};
-
-document.getElementById("busca").oninput = aplicarFiltros;
-document.getElementById("fBar").onclick = ()=>{destinoSelecionado="bar";aplicarFiltros();};
-document.getElementById("fCozinha").onclick = ()=>{destinoSelecionado="cozinha";aplicarFiltros();};
 
 esperarAuth();
 </script>
 
+
 </body>
 </html>
+
