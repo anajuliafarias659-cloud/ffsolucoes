@@ -24,7 +24,6 @@ body{
   align-items:center;
 }
 
-/* wrapper com pan */
 .mapa-wrapper{
   width:100%;
   height:calc(100vh - 64px);
@@ -39,7 +38,6 @@ body{
   transform-origin:0 0;
 }
 
-/* elementos */
 .bar,.mesa{
   position:absolute;
   border-radius:12px;
@@ -70,25 +68,6 @@ body{
 
 <body>
 
-<script>
-/* SUPABASE */
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
-const app_id = funcionario?.app_id || admin?.app_id;
-
-if(!app_id){
-  alert("Sessão inválida");
-  location.href="../auth/login.html";
-}
-
-const podeEditar = !!admin; // admin edita no mobile e desktop
-</script>
-
 <div class="topo">
   <h3>🗺️ Mapa das Mesas</h3>
   <button onclick="history.back()">Voltar</button>
@@ -101,10 +80,50 @@ const podeEditar = !!admin; // admin edita no mobile e desktop
 </div>
 
 <script>
+/* SUPABASE */
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let app_id = null;
+let podeEditar = false;
+
+/* 🔐 VERIFICAR SESSÃO */
+async function verificarSessao(){
+
+  const { data: { session } } = await sb.auth.getSession();
+
+  if(!session){
+    alert("Sessão inválida");
+    location.href="../auth/login.html";
+    return false;
+  }
+
+  const { data: usuario } = await sb
+    .from("usuarios")
+    .select("app_id, tipo")
+    .eq("id", session.user.id)
+    .single();
+
+  if(!usuario){
+    alert("Sessão inválida");
+    location.href="../auth/login.html";
+    return false;
+  }
+
+  app_id = usuario.app_id;
+
+  // Apenas admin pode editar
+  podeEditar = usuario.tipo === "admin";
+
+  return true;
+}
+
+/* ===== PAN DO MAPA ===== */
 const mapa = document.getElementById("mapa");
 const wrapper = document.getElementById("wrapper");
 
-/* ===== PAN DO MAPA (1 dedo) ===== */
 let panX=0, panY=0, panAtivo=false, startX=0, startY=0;
 const scale = window.innerWidth <= 768 ? 0.7 : 1;
 
@@ -124,7 +143,7 @@ wrapper.addEventListener("touchmove",e=>{
 
 wrapper.addEventListener("touchend",()=>panAtivo=false);
 
-/* ===== DRAG ELEMENTOS (ADMIN) ===== */
+/* ===== DRAG ELEMENTOS ===== */
 function drag(el, config){
   if(!podeEditar) return;
 
@@ -174,16 +193,14 @@ function drag(el, config){
     }
   };
 
-  /* mouse */
   el.addEventListener("mousedown",e=>start(e.clientX,e.clientY));
   document.addEventListener("mousemove",e=>move(e.clientX,e.clientY));
   document.addEventListener("mouseup",end);
 
-  /* touch */
   el.addEventListener("touchstart",e=>{
     if(e.touches.length!==1) return;
     start(e.touches[0].clientX,e.touches[0].clientY);
-    e.stopPropagation(); // impede pan do mapa
+    e.stopPropagation();
   },{passive:false});
 
   el.addEventListener("touchmove",e=>{
@@ -218,6 +235,7 @@ async function carregarBar(){
 
 /* ===== MESAS ===== */
 async function carregarMesas(){
+
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa")
@@ -258,8 +276,12 @@ async function carregarMesas(){
 }
 
 /* START */
-carregarBar();
-carregarMesas();
+(async ()=>{
+  const ok = await verificarSessao();
+  if(!ok) return;
+  await carregarBar();
+  await carregarMesas();
+})();
 </script>
 
 </body>
