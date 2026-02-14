@@ -4,69 +4,39 @@
 <meta charset="UTF-8">
 <title>Histórico de Vendas</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script type="module" src="../js/auth.js"></script>
 
 <style>
-body{
-  margin:0;
-  font-family:Arial,sans-serif;
-  background:#020617;
-  color:#fff;
-}
-.topo{
-  background:#0f172a;
-  padding:16px 24px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-.container{
-  max-width:1200px;
-  margin:auto;
-  padding:24px;
-}
-.card{
-  background:#0f172a;
-  border-radius:18px;
-  padding:18px;
-  margin-bottom:18px;
-}
-.top{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-}
-.mesa{
-  font-size:18px;
-  font-weight:bold;
-}
-.total{
-  font-size:20px;
-  font-weight:900;
-}
-.itens{
-  margin-top:12px;
-}
-.item{
-  display:flex;
-  justify-content:space-between;
-  padding:6px 0;
-  border-bottom:1px solid #1e293b;
-  font-size:14px;
-}
-small{
-  color:#94a3b8;
-}
-.tag{
-  display:inline-block;
-  padding:4px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:bold;
-  margin-top:6px;
-}
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:1200px;margin:auto;padding:24px}
+.card{background:#0f172a;border-radius:18px;padding:18px;margin-bottom:18px}
+.top{display:flex;justify-content:space-between;align-items:flex-start}
+.mesa{font-size:18px;font-weight:bold}
+.total{font-size:20px;font-weight:900}
+.itens{margin-top:12px}
+.item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b;font-size:14px}
+small{color:#94a3b8}
+.tag{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:bold;margin-top:6px}
 .mesa-tag{ background:#2563eb }
 .web-tag{ background:#9333ea }
+button,select{
+  padding:8px 14px;
+  border:none;
+  border-radius:10px;
+  background:#1e293b;
+  color:#fff;
+  cursor:pointer;
+}
+.filtro{margin-bottom:20px}
+.grupo{
+  background:#1e293b;
+  padding:12px;
+  border-radius:12px;
+  margin-bottom:10px;
+  font-weight:bold;
+}
 </style>
 </head>
 
@@ -78,39 +48,57 @@ small{
 </div>
 
 <div class="container">
+
+  <div class="filtro">
+    <label>Detalhar por: </label>
+    <select id="tipoRelatorio">
+      <option value="mesa">Mesa</option>
+      <option value="garcom">Garçom</option>
+    </select>
+  </div>
+
   <div id="lista">Carregando histórico...</div>
 </div>
 
-<script>
-/* ================= SUPABASE ================= */
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
-/* ================= SESSÃO ================= */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
-const app_id = funcionario?.app_id || admin?.app_id;
+let vendas = [];
 
-if(!app_id){
-  alert("Sessão inválida");
-  location.href="../auth/login.html";
+async function iniciar(){
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if(!session){
+    location.href="../auth/login.html";
+    return;
+  }
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  if(!usuario){
+    location.href="../auth/login.html";
+    return;
+  }
+
+  carregarHistorico(usuario.app_id);
+
+  document
+    .getElementById("tipoRelatorio")
+    .addEventListener("change", renderizar);
 }
 
-const lista = document.getElementById("lista");
+async function carregarHistorico(app_id){
 
-/* ================= CARREGAR HISTÓRICO ================= */
-async function carregarHistorico(){
-
-  const { data, error } = await sb
+  const { data, error } = await supabase
     .from("pedidos")
     .select(`
       id,
-      status,
       created_at,
       recebido_por,
-      recebido_em,
       cliente_nome,
       mesa_id,
       mesas ( numero_mesa ),
@@ -121,74 +109,107 @@ async function carregarHistorico(){
       )
     `)
     .eq("app_id", app_id)
-    .eq("status", "pago")
-    .order("recebido_em", { ascending:false });
+    .eq("status", "finalizado")
+    .order("created_at", { ascending:false });
 
   if(error){
-    console.error(error);
-    lista.innerHTML = "Erro ao carregar histórico";
+    document.getElementById("lista").innerHTML =
+      "Erro ao carregar histórico";
     return;
   }
 
-  lista.innerHTML = "";
-
-  if(!data || data.length === 0){
-    lista.innerHTML = "<p>Nenhuma venda registrada</p>";
-    return;
-  }
-
-  data.forEach(p=>{
-    let total = 0;
-    p.pedido_itens.forEach(i=>{
-      total += i.quantidade * i.preco;
-    });
-
-    const origemMesa = !!p.mesa_id;
-
-    lista.innerHTML += `
-      <div class="card">
-        <div class="top">
-          <div>
-            <div class="mesa">
-              ${origemMesa ? `Mesa ${p.mesas.numero_mesa}` : (p.cliente_nome || "Delivery")}
-            </div>
-
-            <span class="tag ${origemMesa ? "mesa-tag" : "web-tag"}">
-              ${origemMesa ? "MESA" : "DELIVERY"}
-            </span>
-
-            <br><br>
-            <small>
-              Recebido por: <b>${p.recebido_por || "—"}</b><br>
-              ${p.recebido_em
-                ? "⏰ " + new Date(p.recebido_em).toLocaleString()
-                : ""}
-            </small>
-          </div>
-
-          <div class="total">
-            R$ ${total.toFixed(2)}
-          </div>
-        </div>
-
-        <div class="itens">
-          ${p.pedido_itens.map(i=>`
-            <div class="item">
-              <span>
-                ${i.quantidade}x ${i.nome_produto}<br>
-                <small>R$ ${i.preco.toFixed(2)} cada</small>
-              </span>
-              <b>R$ ${(i.quantidade * i.preco).toFixed(2)}</b>
-            </div>
-          `).join("")}
-        </div>
-      </div>
-    `;
-  });
+  vendas = data || [];
+  renderizar();
 }
 
-/* START */
-carregarHistorico();
+function renderizar(){
+
+  const tipo =
+    document.getElementById("tipoRelatorio").value;
+
+  const lista = document.getElementById("lista");
+  lista.innerHTML = "";
+
+  if(vendas.length === 0){
+    lista.innerHTML =
+      "<p>Nenhuma venda registrada</p>";
+    return;
+  }
+
+  const grupos = {};
+
+  vendas.forEach(p=>{
+
+    let chave;
+
+    if(tipo === "mesa"){
+      chave = p.mesa_id
+        ? "Mesa " + (p.mesas?.numero_mesa || "-")
+        : "Delivery";
+    } else {
+      chave = p.recebido_por || "Não informado";
+    }
+
+    if(!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(p);
+  });
+
+  for(const grupo in grupos){
+
+    let totalGrupo = 0;
+
+    grupos[grupo].forEach(p=>{
+      (p.pedido_itens || []).forEach(i=>{
+        totalGrupo +=
+          Number(i.quantidade) * Number(i.preco);
+      });
+    });
+
+    lista.innerHTML += `
+      <div class="grupo">
+        ${grupo} — Total: R$ ${totalGrupo.toFixed(2)}
+      </div>
+    `;
+
+    grupos[grupo].forEach(p=>{
+
+      let total = 0;
+      (p.pedido_itens || []).forEach(i=>{
+        total +=
+          Number(i.quantidade) * Number(i.preco);
+      });
+
+      lista.innerHTML += `
+        <div class="card">
+          <div class="top">
+            <div>
+              <small>
+                ⏰ ${new Date(p.created_at).toLocaleString()}
+              </small>
+            </div>
+            <div class="total">
+              R$ ${total.toFixed(2)}
+            </div>
+          </div>
+
+          <div class="itens">
+            ${(p.pedido_itens || []).map(i=>`
+              <div class="item">
+                <span>
+                  ${i.quantidade}x ${i.nome_produto}<br>
+                  <small>R$ ${Number(i.preco).toFixed(2)} cada</small>
+                </span>
+                <b>R$ ${(i.quantidade * i.preco).toFixed(2)}</b>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    });
+  }
+}
+
+iniciar();
 </script>
 
 </body>
