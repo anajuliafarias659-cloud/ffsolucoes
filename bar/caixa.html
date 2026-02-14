@@ -1,238 +1,291 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Pagamento</title>
+<title>Caixa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module" src="../js/auth.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px}
-.container{max-width:600px;margin:auto;padding:24px}
-.box{background:#0f172a;padding:20px;border-radius:16px}
-button{width:100%;padding:14px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer;margin-top:12px}
-input,select{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
-.alert{color:#facc15;margin-top:8px}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:1200px;margin:auto;padding:24px}
+.box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
+
+.resumo-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:16px;
+  margin-top:15px;
+}
+
+.card{
+  background:#1e293b;
+  padding:15px;
+  border-radius:12px;
+  text-align:center;
+}
+
+.card h4{margin:0;color:#94a3b8;font-size:14px}
+.card p{margin:8px 0 0 0;font-size:18px;font-weight:bold;color:#22c55e;white-space:pre-line}
+
+button{
+  padding:10px 16px;
+  border:none;
+  border-radius:10px;
+  background:#22c55e;
+  font-weight:bold;
+  cursor:pointer;
+  margin-right:8px;
+}
+button.sec{background:#1e293b;color:#fff}
+
+.badge{
+  background:#ef4444;
+  color:#fff;
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:12px;
+  margin-left:6px
+}
+
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{padding:10px;border-bottom:1px solid #1e293b;font-size:14px}
+th{color:#94a3b8}
+
+@keyframes piscar{
+  0%{box-shadow:0 0 0 transparent}
+  50%{box-shadow:0 0 18px rgba(234,179,8,.9)}
+  100%{box-shadow:0 0 0 transparent}
+}
+.alerta.piscar{animation:piscar 1s infinite}
 </style>
 </head>
 
 <body>
 
 <div class="topo">
-  <h2>💳 Pagamento</h2>
+  <h2>💰 Caixa</h2>
+  <div>
+    <button onclick="irPara('venda-avulsa.html')">➕ Venda Avulsa</button>
+    <button class="alerta" id="btnContas" style="display:none" onclick="scrollContas()">
+      🔔 Contas <span class="badge" id="qtdContas">0</span>
+    </button>
+    <button class="sec" onclick="irPara('historico.html')">📊 Histórico</button>
+    <button class="sec" onclick="irPara('admin.html')">Voltar</button>
+  </div>
 </div>
 
 <div class="container">
+
   <div class="box">
+    <h3>📊 Fechamento de Caixa</h3>
 
-    <p>Total</p>
-    <h2 id="totalPedido">R$ 0,00</h2>
+    <div class="resumo-grid">
+      <div class="card">
+        <h4>Total Recebido Hoje</h4>
+        <p id="totalRecebido">R$ 0.00</p>
+      </div>
 
-    <label>Forma de Pagamento</label>
-    <select id="formaPagamento">
-      <option value="Dinheiro">Dinheiro</option>
-      <option value="Pix">Pix</option>
-      <option value="Cartão Crédito">Cartão Crédito</option>
-      <option value="Cartão Débito">Cartão Débito</option>
-    </select>
+      <div class="card">
+        <h4>Quantidade de Vendas</h4>
+        <p id="qtdVendas">0</p>
+      </div>
 
-    <label>Valor pago</label>
-    <input type="number" id="valorRecebido" step="0.01">
+      <div class="card">
+        <h4>Por Forma de Pagamento</h4>
+        <p id="resumoPagamentos">--</p>
+      </div>
 
-    <p id="info" class="alert"></p>
+      <div class="card">
+        <h4>Data</h4>
+        <p id="dataHoje">--/--/----</p>
+      </div>
+    </div>
 
-    <p>Troco</p>
-    <h3 id="troco">R$ 0,00</h3>
-
-    <button id="btnConfirmar">Confirmar</button>
-
+    <br>
+    <button onclick="gerarFechamento()">🔄 Atualizar</button>
+    <button onclick="fecharCaixa()">📄 Fechar Caixa Hoje (PDF)</button>
   </div>
+
+  <div class="box" id="boxContas" style="display:none">
+    <h3>🧾 Mesas aguardando pagamento</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Mesa</th>
+          <th>Total</th>
+          <th>Ação</th>
+        </tr>
+      </thead>
+      <tbody id="listaContas"></tbody>
+    </table>
+  </div>
+
 </div>
 
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-const params = new URLSearchParams(location.search);
-const pedidoId = params.get("pedido");
-
-let totalPedido = 0;
-let mesaId = null;
-let processando = false;
-
-/* 🔐 AGUARDA APP_ID */
+/* 🔥 AGUARDA APP_ID */
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
   }
 
-  if(!pedidoId){
-    location.href="caixa.html";
-    return;
-  }
-
-  carregarPedido();
+  verificarContas(window.APP_ID);
+  gerarFechamento();
+  setInterval(()=>verificarContas(window.APP_ID),3000);
 }
 aguardarSessao();
 
-/* CARREGAR PEDIDO */
-async function carregarPedido(){
+window.irPara = p => location.href = p;
+window.scrollContas = () =>
+  document.getElementById("boxContas").scrollIntoView({behavior:"smooth"});
+window.irPagamento = id =>
+  location.href = `pagamento.html?pedido=${id}`;
 
-  const { data: pedido } = await supabase
+/* 🔥 FECHAMENTO BLINDADO */
+window.gerarFechamento = async function(){
+
+  const inicio = new Date();
+  inicio.setHours(0,0,0,0);
+  const amanha = new Date(inicio.getTime() + 86400000);
+
+  const { data: pedidos } = await supabase
     .from("pedidos")
-    .select("mesa_id")
-    .eq("id", pedidoId)
+    .select("id, forma_pagamento, created_at")
     .eq("app_id", window.APP_ID)
-    .single();
+    .eq("status", "finalizado")
+    .gte("created_at", inicio.toISOString())
+    .lt("created_at", amanha.toISOString());
 
-  if(!pedido){
-    alert("Pedido não encontrado");
-    location.href="caixa.html";
+  if(!pedidos || pedidos.length === 0){
+    document.getElementById("totalRecebido").innerText = "R$ 0.00";
+    document.getElementById("qtdVendas").innerText = "0";
+    document.getElementById("resumoPagamentos").innerText = "--";
     return;
   }
 
-  mesaId = pedido.mesa_id;
+  const ids = pedidos.map(p => p.id);
 
   const { data: itens } = await supabase
     .from("pedido_itens")
-    .select("preco,quantidade")
-    .eq("pedido_id", pedidoId);
+    .select("pedido_id, preco, quantidade")
+    .in("pedido_id", ids);
 
-  totalPedido = 0;
+  let total = 0;
+  let pagamentos = {};
 
-  (itens || []).forEach(i=>{
-    totalPedido += Number(i.preco) * Number(i.quantidade);
+  pedidos.forEach(p => {
+
+    let totalPedido = 0;
+
+    (itens || [])
+      .filter(i => i.pedido_id === p.id)
+      .forEach(i => {
+        totalPedido += Number(i.preco) * Number(i.quantidade);
+      });
+
+    total += totalPedido;
+
+    const forma = p.forma_pagamento || "Não informado";
+    if(!pagamentos[forma]) pagamentos[forma] = 0;
+    pagamentos[forma] += totalPedido;
   });
 
-  document.getElementById("totalPedido").innerText =
-    `R$ ${totalPedido.toFixed(2)}`;
-}
+  document.getElementById("totalRecebido").innerText =
+    "R$ " + total.toFixed(2);
 
-/* CALCULAR TROCO */
-function calcular(){
+  document.getElementById("qtdVendas").innerText =
+    pedidos.length;
 
-  const recebido =
-    Number(document.getElementById("valorRecebido").value || 0);
+  document.getElementById("dataHoje").innerText =
+    new Date().toLocaleDateString("pt-BR");
 
-  const descontoMax = totalPedido * 0.10;
-  const minimo = totalPedido - descontoMax;
-
-  const info = document.getElementById("info");
-  const trocoEl = document.getElementById("troco");
-
-  if(recebido < minimo){
-    info.innerText =
-      `Desconto máximo permitido: R$ ${descontoMax.toFixed(2)}`;
-  }
-  else if(recebido < totalPedido){
-    info.innerText =
-      `Desconto aplicado: R$ ${(totalPedido - recebido).toFixed(2)}`;
-  }
-  else{
-    info.innerText="";
+  let resumo = "";
+  for(const forma in pagamentos){
+    resumo += `${forma}: R$ ${pagamentos[forma].toFixed(2)}\n`;
   }
 
-  const troco =
-    recebido > totalPedido ? recebido - totalPedido : 0;
+  document.getElementById("resumoPagamentos").innerText =
+    resumo || "--";
+};
 
-  trocoEl.innerText = `R$ ${troco.toFixed(2)}`;
-}
+/* 📄 PDF */
+window.fecharCaixa = async function(){
 
-document
-  .getElementById("valorRecebido")
-  .addEventListener("input", calcular);
+  await gerarFechamento();
 
-/* CONFIRMAR PAGAMENTO */
-document
-  .getElementById("btnConfirmar")
-  .addEventListener("click", confirmarPagamento);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
 
-async function confirmarPagamento(){
+  const total = document.getElementById("totalRecebido").innerText;
+  const qtd = document.getElementById("qtdVendas").innerText;
+  const data = document.getElementById("dataHoje").innerText;
+  const formas = document.getElementById("resumoPagamentos").innerText;
 
-  if(processando) return;
-  processando = true;
+  doc.setFontSize(16);
+  doc.text("FECHAMENTO DE CAIXA", 20, 20);
 
-  try{
+  doc.setFontSize(12);
+  doc.text("Data: " + data, 20, 35);
+  doc.text("Quantidade de Vendas: " + qtd, 20, 45);
+  doc.text("Total Recebido: " + total, 20, 55);
 
-    const valorPago =
-      Number(document.getElementById("valorRecebido").value);
+  doc.text("Por Forma de Pagamento:", 20, 70);
+  const linhas = doc.splitTextToSize(formas, 170);
+  doc.text(linhas, 20, 80);
 
-    const formaPagamento =
-      document.getElementById("formaPagamento").value;
+  doc.save("fechamento-caixa-" + data + ".pdf");
+};
 
-    if(!valorPago || valorPago <= 0){
-      processando = false;
-      return;
-    }
+/* 🔔 CONTAS */
+async function verificarContas(appId){
 
-    const descontoMax = totalPedido * 0.10;
-    const minimo = totalPedido - descontoMax;
+  const { data } = await supabase
+    .from("pedidos")
+    .select("id, mesas(numero_mesa), pedido_itens(preco,quantidade)")
+    .eq("app_id", appId)
+    .eq("status", "conta_solicitada");
 
-    if(valorPago < minimo){
-      alert("Desconto acima do permitido");
-      processando = false;
-      return;
-    }
+  const btn = document.getElementById("btnContas");
+  const qtd = document.getElementById("qtdContas");
+  const box = document.getElementById("boxContas");
+  const lista = document.getElementById("listaContas");
 
-    const { data:{ session } } =
-      await supabase.auth.getSession();
+  lista.innerHTML = "";
 
-    const nomeUsuario =
-      session?.user?.email || "Sistema";
+  if(data && data.length > 0){
+    btn.style.display = "inline-block";
+    btn.classList.add("piscar");
+    qtd.innerText = data.length;
+    box.style.display = "block";
 
-    /* 1️⃣ FINALIZA PEDIDO + SALVA PAGAMENTO */
+    data.forEach(p=>{
+      let total = 0;
+      (p.pedido_itens || []).forEach(i=>{
+        total += Number(i.preco) * Number(i.quantidade);
+      });
 
-    const { error: erroUpdate } = await supabase
-      .from("pedidos")
-      .update({
-        status: "finalizado",
-        forma_pagamento: formaPagamento,
-        recebido_em: new Date(),
-        recebido_por: nomeUsuario
-      })
-      .eq("id", pedidoId)
-      .eq("app_id", window.APP_ID);
+      lista.innerHTML += `
+        <tr>
+          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
+          <td>R$ ${total.toFixed(2)}</td>
+          <td>
+            <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
+          </td>
+        </tr>
+      `;
+    });
 
-    if(erroUpdate){
-      alert("Erro ao finalizar pedido");
-      processando = false;
-      return;
-    }
-
-    /* 2️⃣ BAIXA ESTOQUE */
-
-    const { data: itens } = await supabase
-      .from("pedido_itens")
-      .select("produto_id,quantidade")
-      .eq("pedido_id", pedidoId);
-
-    if(itens){
-      for(const item of itens){
-        await supabase.rpc("baixar_estoque", {
-          p_produto_id: item.produto_id,
-          p_quantidade: item.quantidade
-        });
-      }
-    }
-
-    /* 3️⃣ LIBERA MESA */
-
-    if(mesaId){
-      await supabase
-        .from("mesas")
-        .update({ status: "livre" })
-        .eq("id", mesaId)
-        .eq("app_id", window.APP_ID);
-    }
-
-    location.href="caixa.html";
-
-  } catch(e){
-    alert("Erro inesperado");
+  } else {
+    btn.style.display = "none";
+    btn.classList.remove("piscar");
+    box.style.display = "none";
   }
-
-  processando = false;
 }
 </script>
 
