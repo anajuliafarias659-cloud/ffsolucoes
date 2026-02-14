@@ -129,7 +129,7 @@ th{color:#94a3b8}
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-/* 🔥 AGUARDA AUTH DEFINIR APP_ID */
+/* 🔥 AGUARDA APP_ID */
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
@@ -139,7 +139,6 @@ async function aguardarSessao(){
   gerarFechamento();
   setInterval(()=>verificarContas(window.APP_ID),3000);
 }
-
 aguardarSessao();
 
 window.irPara = p => location.href = p;
@@ -148,36 +147,47 @@ window.scrollContas = () =>
 window.irPagamento = id =>
   location.href = `pagamento.html?pedido=${id}`;
 
-/* 🔥 FECHAMENTO CORRETO */
+/* 🔥 FECHAMENTO BLINDADO */
 window.gerarFechamento = async function(){
 
   const inicio = new Date();
   inicio.setHours(0,0,0,0);
-
   const amanha = new Date(inicio.getTime() + 86400000);
 
-  const { data } = await supabase
+  const { data: pedidos } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      forma_pagamento,
-      created_at,
-      pedido_itens(preco,quantidade)
-    `)
+    .select("id, forma_pagamento, created_at")
     .eq("app_id", window.APP_ID)
     .eq("status", "finalizado")
     .gte("created_at", inicio.toISOString())
     .lt("created_at", amanha.toISOString());
 
+  if(!pedidos || pedidos.length === 0){
+    document.getElementById("totalRecebido").innerText = "R$ 0.00";
+    document.getElementById("qtdVendas").innerText = "0";
+    document.getElementById("resumoPagamentos").innerText = "--";
+    return;
+  }
+
+  const ids = pedidos.map(p => p.id);
+
+  const { data: itens } = await supabase
+    .from("pedido_itens")
+    .select("pedido_id, preco, quantidade")
+    .in("pedido_id", ids);
+
   let total = 0;
   let pagamentos = {};
 
-  (data || []).forEach(p=>{
+  pedidos.forEach(p => {
+
     let totalPedido = 0;
 
-    (p.pedido_itens || []).forEach(i=>{
-      totalPedido += Number(i.preco) * Number(i.quantidade);
-    });
+    (itens || [])
+      .filter(i => i.pedido_id === p.id)
+      .forEach(i => {
+        totalPedido += Number(i.preco) * Number(i.quantidade);
+      });
 
     total += totalPedido;
 
@@ -190,7 +200,7 @@ window.gerarFechamento = async function(){
     "R$ " + total.toFixed(2);
 
   document.getElementById("qtdVendas").innerText =
-    data?.length || 0;
+    pedidos.length;
 
   document.getElementById("dataHoje").innerText =
     new Date().toLocaleDateString("pt-BR");
@@ -204,7 +214,7 @@ window.gerarFechamento = async function(){
     resumo || "--";
 };
 
-/* 📄 GERAR PDF */
+/* 📄 PDF */
 window.fecharCaixa = async function(){
 
   await gerarFechamento();
@@ -237,11 +247,7 @@ async function verificarContas(appId){
 
   const { data } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      mesas(numero_mesa),
-      pedido_itens(preco,quantidade)
-    `)
+    .select("id, mesas(numero_mesa), pedido_itens(preco,quantidade)")
     .eq("app_id", appId)
     .eq("status", "conta_solicitada");
 
