@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <title>Venda Avulsa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script type="module" src="../js/auth.js"></script>
 
 <style>
 body{margin:0;font-family:Arial,sans-serif;background:#020617;color:#fff}
@@ -109,28 +110,25 @@ button{
 
 </div>
 
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
 let app_id = null;
 let produtos = [];
 let carrinho = [];
 
 /* 🔐 VERIFICAR SESSÃO */
-async function verificarSessao(){
+async function iniciar(){
 
-  const { data: { session } } = await sb.auth.getSession();
+  const { data: { session } } = await supabase.auth.getSession();
 
   if(!session){
     alert("Sessão expirada");
-    location.href="../auth/login.html";
-    return false;
+    location.href="/auth/login.html";
+    return;
   }
 
-  const { data: usuario } = await sb
+  const { data: usuario } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", session.user.id)
@@ -138,17 +136,20 @@ async function verificarSessao(){
 
   if(!usuario){
     alert("Sessão inválida");
-    location.href="../auth/login.html";
-    return false;
+    location.href="/auth/login.html";
+    return;
   }
 
   app_id = usuario.app_id;
-  return true;
+
+  ajustarForma();
+  await carregarProdutos();
 }
 
 /* ===== PRODUTOS ===== */
 async function carregarProdutos(){
-  const { data } = await sb
+
+  const { data } = await supabase
     .from("produtos")
     .select("id,nome,preco")
     .eq("app_id", app_id)
@@ -166,20 +167,20 @@ function renderProdutos(lista){
   lista.forEach(p=>{
     div.innerHTML += `
       <div class="produto">
-        <span>${p.nome} - R$ ${p.preco.toFixed(2)}</span>
+        <span>${p.nome} - R$ ${Number(p.preco).toFixed(2)}</span>
         <button class="add" onclick='addProduto(${JSON.stringify(p)})'>➕</button>
       </div>
     `;
   });
 }
 
-function filtrar(txt){
+window.filtrar = function(txt){
   txt = txt.toLowerCase();
   renderProdutos(produtos.filter(p=>p.nome.toLowerCase().includes(txt)));
-}
+};
 
 /* ===== CARRINHO ===== */
-function addProduto(p){
+window.addProduto = function(p){
   const item = carrinho.find(i=>i.id === p.id);
   if(item){
     item.qtd++;
@@ -187,9 +188,9 @@ function addProduto(p){
     carrinho.push({ ...p, qtd:1 });
   }
   renderCarrinho();
-}
+};
 
-function alterar(id, delta){
+window.alterar = function(id, delta){
   const item = carrinho.find(i=>i.id === id);
   if(!item) return;
 
@@ -198,7 +199,7 @@ function alterar(id, delta){
     carrinho = carrinho.filter(i=>i.id !== id);
   }
   renderCarrinho();
-}
+};
 
 function renderCarrinho(){
   const div = document.getElementById("carrinho");
@@ -224,7 +225,7 @@ function renderCarrinho(){
 }
 
 /* ===== PAGAMENTO ===== */
-function ajustarForma(){
+window.ajustarForma = function(){
   const forma = document.getElementById("forma").value;
   const recebido = document.getElementById("valorRecebido");
   document.getElementById("troco").innerText = "";
@@ -235,9 +236,9 @@ function ajustarForma(){
   } else {
     recebido.disabled = false;
   }
-}
+};
 
-function calcularTroco(){
+window.calcularTroco = function(){
   const forma = document.getElementById("forma").value;
   const recebido = Number(document.getElementById("valorRecebido").value || 0);
   const total = carrinho.reduce((s,i)=>s + i.preco*i.qtd,0);
@@ -250,9 +251,10 @@ function calcularTroco(){
   const troco = recebido - total;
   document.getElementById("troco").innerText =
     troco >= 0 ? `Troco: R$ ${troco.toFixed(2)}` : "";
-}
+};
 
-async function finalizar(){
+window.finalizar = async function(){
+
   if(carrinho.length === 0){
     alert("Nenhum produto adicionado");
     return;
@@ -263,6 +265,7 @@ async function finalizar(){
   const recebido = Number(document.getElementById("valorRecebido").value || 0);
 
   let troco = 0;
+
   if(forma === "dinheiro"){
     if(recebido < total){
       alert("Valor insuficiente");
@@ -271,7 +274,7 @@ async function finalizar(){
     troco = recebido - total;
   }
 
-  await sb.from("pagamentos").insert({
+  await supabase.from("pagamentos").insert({
     app_id,
     pedido_id: null,
     tipo: forma,
@@ -282,15 +285,9 @@ async function finalizar(){
 
   alert("✅ Venda registrada");
   location.href = "caixa.html";
-}
+};
 
-/* START */
-(async ()=>{
-  const ok = await verificarSessao();
-  if(!ok) return;
-  ajustarForma();
-  await carregarProdutos();
-})();
+iniciar();
 </script>
 
 </body>
