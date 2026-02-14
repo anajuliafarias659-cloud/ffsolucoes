@@ -117,13 +117,12 @@ let app_id = null;
 let produtos = [];
 let carrinho = [];
 
-/* 🔐 VERIFICAR SESSÃO */
+/* 🔐 INICIAR */
 async function iniciar(){
 
   const { data: { session } } = await supabase.auth.getSession();
 
   if(!session){
-    alert("Sessão expirada");
     location.href="/auth/login.html";
     return;
   }
@@ -135,7 +134,6 @@ async function iniciar(){
     .single();
 
   if(!usuario){
-    alert("Sessão inválida");
     location.href="/auth/login.html";
     return;
   }
@@ -253,6 +251,7 @@ window.calcularTroco = function(){
     troco >= 0 ? `Troco: R$ ${troco.toFixed(2)}` : "";
 };
 
+/* ===== FINALIZAR VENDA ===== */
 window.finalizar = async function(){
 
   if(carrinho.length === 0){
@@ -274,16 +273,37 @@ window.finalizar = async function(){
     troco = recebido - total;
   }
 
-  await supabase.from("pagamentos").insert({
-    app_id,
-    pedido_id: null,
-    tipo: forma,
-    valor: total,
-    troco: forma === "dinheiro" ? troco : 0,
-    descricao: "Venda avulsa"
-  });
+  /* 1️⃣ CRIA PEDIDO */
+  const { data: pedido, error } = await supabase
+    .from("pedidos")
+    .insert({
+      app_id,
+      status: "finalizado",
+      forma_pagamento: forma,
+      origem: "avulsa",
+      recebido_em: new Date().toISOString()
+    })
+    .select()
+    .single();
 
-  alert("✅ Venda registrada");
+  if(error){
+    console.error(error);
+    alert("Erro ao registrar venda");
+    return;
+  }
+
+  /* 2️⃣ INSERE ITENS */
+  for(const item of carrinho){
+    await supabase.from("pedido_itens").insert({
+      pedido_id: pedido.id,
+      produto_id: item.id,
+      nome_produto: item.nome,
+      quantidade: item.qtd,
+      preco: item.preco
+    });
+  }
+
+  alert("✅ Venda registrada no caixa!");
   location.href = "caixa.html";
 };
 
