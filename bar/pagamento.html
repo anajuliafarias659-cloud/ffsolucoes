@@ -13,7 +13,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .container{max-width:600px;margin:auto;padding:24px}
 .box{background:#0f172a;padding:20px;border-radius:16px}
 button{width:100%;padding:14px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer;margin-top:12px}
-input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
+input,select{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 .alert{color:#facc15;margin-top:8px}
 </style>
 </head>
@@ -26,8 +26,17 @@ input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 
 <div class="container">
   <div class="box">
+
     <p>Total</p>
     <h2 id="totalPedido">R$ 0,00</h2>
+
+    <label>Forma de Pagamento</label>
+    <select id="formaPagamento">
+      <option value="Dinheiro">Dinheiro</option>
+      <option value="Pix">Pix</option>
+      <option value="Cartão Crédito">Cartão Crédito</option>
+      <option value="Cartão Débito">Cartão Débito</option>
+    </select>
 
     <label>Valor pago</label>
     <input type="number" id="valorRecebido" step="0.01">
@@ -38,6 +47,7 @@ input{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
     <h3 id="troco">R$ 0,00</h3>
 
     <button id="btnConfirmar">Confirmar</button>
+
   </div>
 </div>
 
@@ -51,10 +61,7 @@ let totalPedido = 0;
 let mesaId = null;
 let processando = false;
 
-/* ========================= */
-/* 🔐 AGUARDA AUTH DEFINIR APP_ID */
-/* ========================= */
-
+/* 🔐 AGUARDA APP_ID */
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
@@ -67,23 +74,19 @@ async function aguardarSessao(){
 
   carregarPedido();
 }
-
 aguardarSessao();
 
-/* ========================= */
 /* CARREGAR PEDIDO */
-/* ========================= */
-
 async function carregarPedido(){
 
-  const { data: pedido, error } = await supabase
+  const { data: pedido } = await supabase
     .from("pedidos")
     .select("mesa_id")
     .eq("id", pedidoId)
     .eq("app_id", window.APP_ID)
     .single();
 
-  if(error || !pedido){
+  if(!pedido){
     alert("Pedido não encontrado");
     location.href="caixa.html";
     return;
@@ -106,10 +109,7 @@ async function carregarPedido(){
     `R$ ${totalPedido.toFixed(2)}`;
 }
 
-/* ========================= */
 /* CALCULAR TROCO */
-/* ========================= */
-
 function calcular(){
 
   const recebido =
@@ -143,10 +143,7 @@ document
   .getElementById("valorRecebido")
   .addEventListener("input", calcular);
 
-/* ========================= */
 /* CONFIRMAR PAGAMENTO */
-/* ========================= */
-
 document
   .getElementById("btnConfirmar")
   .addEventListener("click", confirmarPagamento);
@@ -160,6 +157,9 @@ async function confirmarPagamento(){
 
     const valorPago =
       Number(document.getElementById("valorRecebido").value);
+
+    const formaPagamento =
+      document.getElementById("formaPagamento").value;
 
     if(!valorPago || valorPago <= 0){
       processando = false;
@@ -175,18 +175,26 @@ async function confirmarPagamento(){
       return;
     }
 
-    /* 1️⃣ FINALIZA PEDIDO (MULTI-NEGÓCIO SEGURO) */
+    const { data:{ session } } =
+      await supabase.auth.getSession();
+
+    const nomeUsuario =
+      session?.user?.email || "Sistema";
+
+    /* 1️⃣ FINALIZA PEDIDO + SALVA PAGAMENTO */
 
     const { error: erroUpdate } = await supabase
       .from("pedidos")
       .update({
-        status: "finalizado"
+        status: "finalizado",
+        forma_pagamento: formaPagamento,
+        recebido_em: new Date(),
+        recebido_por: nomeUsuario
       })
       .eq("id", pedidoId)
       .eq("app_id", window.APP_ID);
 
     if(erroUpdate){
-      console.error("Erro finalizar:", erroUpdate);
       alert("Erro ao finalizar pedido");
       processando = false;
       return;
@@ -221,7 +229,6 @@ async function confirmarPagamento(){
     location.href="caixa.html";
 
   } catch(e){
-    console.error(e);
     alert("Erro inesperado");
   }
 
