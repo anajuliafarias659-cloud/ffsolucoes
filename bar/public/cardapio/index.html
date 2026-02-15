@@ -12,7 +12,6 @@
   --bg:#f6f1eb;
   --text:#2e1f14;
   --border:#e6ded5;
-  --card-bg:#ffffff;
 }
 
 body[data-tema="carnaval"]{--primary:#ec4899;--bg:#581c87;--text:#fff;}
@@ -44,12 +43,15 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
 .produto{background:#fff;border-radius:14px;padding:10px;display:flex;flex-direction:column}
 .produto img{width:100%;height:120px;object-fit:cover;border-radius:10px}
 .preco{color:var(--primary);font-weight:bold;margin-top:4px}
-
-.controls{display:flex;align-items:center;gap:6px;margin-top:auto}
-.controls button{flex:1;border:none;padding:6px;border-radius:8px;background:var(--primary);color:#fff;font-weight:bold}
-.controls span{text-align:center;min-width:24px}
+.add-btn{margin-top:auto;padding:8px;border:none;border-radius:8px;background:var(--primary);color:#fff;font-weight:bold;cursor:pointer}
 
 .carrinho-btn{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:14px 26px;border-radius:999px;font-weight:bold;cursor:pointer}
+
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none}
+.modal-box{position:absolute;bottom:0;left:0;right:0;background:#fff;color:#000;border-radius:20px 20px 0 0;padding:16px;max-height:85vh;overflow:auto}
+.item-carrinho{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.controls{display:flex;align-items:center;gap:6px}
+.controls button{padding:4px 8px;border:none;border-radius:6px;background:var(--primary);color:#fff}
 </style>
 </head>
 
@@ -70,8 +72,18 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
 
 <div class="container" id="conteudo"></div>
 
-<div class="carrinho-btn" onclick="alert('Abrir carrinho aqui')">
+<div class="carrinho-btn" onclick="abrirCarrinho()">
 🛒 Pedido (<span id="qtd">0</span>)
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <h3>🛒 Seu Pedido</h3>
+    <div id="listaCarrinho"></div>
+    <b>Total: R$ <span id="totalCarrinho">0.00</span></b>
+    <br><br>
+    <button onclick="fecharCarrinho()">Fechar</button>
+  </div>
 </div>
 
 <script>
@@ -104,16 +116,8 @@ async function carregarConfig(){
 
   nome.innerText=data.nome_site||"Cardápio";
 
-  if(data.logo_url){
-    logo.src=data.logo_url;
-    logo.style.display="block";
-  }
-
-  if(data.banner_url){
-    banner.src=data.banner_url;
-    banner.style.display="block";
-  }
-
+  if(data.logo_url){logo.src=data.logo_url;logo.style.display="block";}
+  if(data.banner_url){banner.src=data.banner_url;banner.style.display="block";}
   if(data.tema_site && data.tema_site!=="padrao"){
     document.body.dataset.tema=data.tema_site;
   }
@@ -133,49 +137,85 @@ function render(){
   conteudo.innerHTML="";
   produtos.filter(p=>(p.destino||"").toUpperCase()===filtro)
   .forEach(p=>{
-
-    const item=carrinho.find(x=>x.id===p.id);
-    const qtdAtual=item?item.qtd:0;
-
     conteudo.innerHTML+=`
       <div class="produto">
         ${p.foto?`<img src="${p.foto}">`:""}
         <b>${p.nome}</b>
         <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-
-        <div class="controls">
-          <button onclick="diminuir('${p.id}')">-</button>
-          <span>${qtdAtual}</span>
-          <button onclick="aumentar('${p.id}')">+</button>
-        </div>
+        <button class="add-btn" onclick="addProduto('${p.id}')">
+        Adicionar
+        </button>
       </div>
     `;
   });
 }
 
-function aumentar(id){
+function addProduto(id){
   const p=produtos.find(x=>x.id===id);
   const i=carrinho.find(x=>x.id===id);
 
-  if(i){ i.qtd++; }
-  else{ carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1}); }
+  if(i){i.qtd++}
+  else{carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1})}
 
   salvarCarrinho();
-  render();
+  atualizarQtd();
+}
+
+function abrirCarrinho(){
+  document.getElementById("modal").style.display="block";
+  renderCarrinho();
+}
+
+function fecharCarrinho(){
+  document.getElementById("modal").style.display="none";
+}
+
+function renderCarrinho(){
+  const lista=document.getElementById("listaCarrinho");
+  const totalEl=document.getElementById("totalCarrinho");
+
+  lista.innerHTML="";
+  let total=0;
+
+  carrinho.forEach(i=>{
+    const sub=i.preco*i.qtd;
+    total+=sub;
+
+    lista.innerHTML+=`
+      <div class="item-carrinho">
+        <div>
+          <b>${i.nome}</b><br>
+          R$ ${i.preco.toFixed(2)}
+        </div>
+        <div class="controls">
+          <button onclick="diminuir('${i.id}')">-</button>
+          <span>${i.qtd}</span>
+          <button onclick="aumentar('${i.id}')">+</button>
+        </div>
+      </div>
+    `;
+  });
+
+  totalEl.innerText=total.toFixed(2);
+}
+
+function aumentar(id){
+  const item=carrinho.find(x=>x.id===id);
+  if(item)item.qtd++;
+  salvarCarrinho();
+  renderCarrinho();
   atualizarQtd();
 }
 
 function diminuir(id){
-  const i=carrinho.find(x=>x.id===id);
-  if(!i)return;
-
-  i.qtd--;
-  if(i.qtd<=0){
+  const item=carrinho.find(x=>x.id===id);
+  if(!item)return;
+  item.qtd--;
+  if(item.qtd<=0){
     carrinho=carrinho.filter(x=>x.id!==id);
   }
-
   salvarCarrinho();
-  render();
+  renderCarrinho();
   atualizarQtd();
 }
 
