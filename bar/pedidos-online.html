@@ -149,21 +149,7 @@ async function carregarPedidos(){
 
   const { data: pedidos, error } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      created_at,
-      cliente_nome,
-      telefone,
-      endereco,
-      observacao,
-      forma_pagamento,
-      status,
-      pedido_itens!pedido_itens_pedido_fk (
-        nome_produto,
-        quantidade,
-        preco
-      )
-    `)
+    .select("*")
     .eq("app_id", APP_ID)
     .order("created_at",{ascending:false});
 
@@ -181,94 +167,75 @@ async function carregarPedidos(){
     return;
   }
 
-  const grupos = {
-    novo: [],
-    em_preparo: [],
-    saiu_entrega: [],
-    finalizado: []
-  };
+  for(const p of pedidos){
 
-  pedidos.forEach(p=>{
-    if(grupos[p.status]){
-      grupos[p.status].push(p);
-    }
-  });
+    const { data: itens } = await supabase
+      .from("pedido_itens")
+      .select("nome_produto, quantidade, preco")
+      .eq("pedido_id", p.id);
 
-  for(const status in grupos){
+    let total=0;
 
-    if(grupos[status].length===0) continue;
+    const itensHtml=(itens||[]).map(i=>{
+      const sub = Number(i.quantidade)*Number(i.preco);
+      total+=sub;
 
-    lista.innerHTML+=`
-      <div class="status-titulo">
-        ${status.replace("_"," ").toUpperCase()}
-      </div>
-    `;
-
-    grupos[status].forEach(p=>{
-
-      let total=0;
-
-      const itensHtml=(p.pedido_itens||[]).map(i=>{
-        const sub = Number(i.quantidade)*Number(i.preco);
-        total+=sub;
-
-        return `
-          <div class="item">
-            <span>${i.quantidade}x ${i.nome_produto}</span>
-            <span>R$ ${sub.toFixed(2)}</span>
-          </div>
-        `;
-      }).join("");
-
-      lista.innerHTML+=`
-        <div class="card">
-
-          <div class="card-header">
-            <div>
-              <b>${p.cliente_nome||"Cliente"}</b><br>
-              <small>${new Date(p.created_at).toLocaleString()}</small>
-            </div>
-
-            <div>
-              ${status==="novo"?`
-                <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
-                <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
-              `:""}
-
-              ${status==="em_preparo"?`
-                <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu</button>
-              `:""}
-
-              ${status==="saiu_entrega"?`
-                <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Entregue</button>
-              `:""}
-            </div>
-          </div>
-
-          <div class="info">
-            📞 <a class="link" href="https://wa.me/55${p.telefone||""}" target="_blank">
-              ${p.telefone||"-"}
-            </a><br>
-
-            📍 ${p.endereco 
-              ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>` 
-              : "-"}
-
-            <br>💳 ${p.forma_pagamento||"-"}
-            <br>📝 ${p.observacao||"-"}
-          </div>
-
-          <hr>
-
-          ${itensHtml}
-
-          <div class="total">
-            Total: R$ ${total.toFixed(2)}
-          </div>
-
+      return `
+        <div class="item">
+          <span>${i.quantidade}x ${i.nome_produto}</span>
+          <span>R$ ${sub.toFixed(2)}</span>
         </div>
       `;
-    });
+    }).join("");
+
+    lista.innerHTML+=`
+      <div class="card">
+
+        <div class="card-header">
+          <div>
+            <b>${p.cliente_nome||"Cliente"}</b><br>
+            <small>${new Date(p.created_at).toLocaleString()}</small>
+          </div>
+
+          <div>
+            ${p.status==="novo"?`
+              <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
+              <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
+            `:""}
+
+            ${p.status==="em_preparo"?`
+              <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu</button>
+            `:""}
+
+            ${p.status==="saiu_entrega"?`
+              <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Entregue</button>
+            `:""}
+          </div>
+        </div>
+
+        <div class="info">
+          📞 <a class="link" href="https://wa.me/55${p.telefone||""}" target="_blank">
+            ${p.telefone||"-"}
+          </a><br>
+
+          📍 ${p.endereco 
+            ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>` 
+            : "-"}
+
+          <br>💳 ${p.forma_pagamento||"-"}
+          <br>📝 ${p.observacao||"-"}
+        </div>
+
+        <hr>
+
+        ${itensHtml}
+
+        <div class="total">
+          Total: R$ ${total.toFixed(2)}
+        </div>
+
+      </div>
+    `;
   }
 }
 
@@ -285,5 +252,7 @@ window.mudarStatus = async function(id,status){
 iniciar();
 </script>
 
+
 </body>
 </html>
+
