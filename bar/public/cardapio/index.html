@@ -1,217 +1,197 @@
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Pedidos Online</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-const app_id = new URLSearchParams(location.search).get("app") || 
-               new URLSearchParams(location.search).get("app_id");
+<script type="module" src="../js/auth.js"></script>
 
-if(!app_id){ document.body.innerHTML="Indisponível"; throw ""; }
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{
+  background:#0f172a;
+  padding:16px 24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:24px;
+}
+.card{
+  background:#0f172a;
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:16px;
+}
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.item{
+  display:flex;
+  justify-content:space-between;
+  padding:6px 0;
+  border-bottom:1px solid #1e293b;
+  font-size:14px;
+}
+.total{
+  font-weight:bold;
+  font-size:16px;
+  margin-top:8px;
+}
+button{
+  padding:8px 12px;
+  border:none;
+  border-radius:8px;
+  font-weight:bold;
+  cursor:pointer;
+  margin-left:6px;
+}
+.btn-ok{background:#22c55e}
+.btn-cancel{background:#ef4444}
+small{color:#94a3b8}
+.vazio{
+  text-align:center;
+  margin-top:40px;
+  color:#94a3b8;
+}
+</style>
+</head>
 
-let produtos=[], filtro="BAR";
-const carrinhoKey="carrinho_"+app_id;
-let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
-let whatsapp="";
-let fluxoPedido="whatsapp";
+<body>
 
-/* ================= CONFIG ================= */
-async function carregarConfig(){
-  const {data}=await sb
-    .from("config_site")
-    .select("*")
-    .eq("app_id",app_id)
+<div class="topo">
+  <h2>📦 Pedidos Online</h2>
+  <button onclick="history.back()">⬅ Voltar</button>
+</div>
+
+<div class="container" id="lista">
+  Carregando pedidos...
+</div>
+
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+let APP_ID=null;
+
+async function iniciar(){
+
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    location.href="../auth/login.html";
+    return;
+  }
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
     .single();
 
-  if(!data) return;
+  APP_ID = usuario.app_id;
 
-  nome.innerText=data.nome_site||"Cardápio";
-  if(data.logo_url){logo.src=data.logo_url;logo.style.display="block";}
-  if(data.banner_url){banner.src=data.banner_url;banner.style.display="block";}
-  if(data.tema_site) document.body.dataset.tema=data.tema_site;
-
-  whatsapp=data.whatsapp||"";
-  fluxoPedido=data.fluxo_pedido||"whatsapp";
-
-  document.querySelector(".modal-box .add-btn").innerText =
-    fluxoPedido==="sistema" ? "Finalizar Pedido" : "Enviar no WhatsApp";
+  carregarPedidos();
+  setInterval(carregarPedidos,5000);
 }
 
-/* ================= PRODUTOS ================= */
-async function carregarProdutos(){
-  const {data}=await sb.from("produtos")
-    .select("id,nome,preco,foto,destino")
-    .eq("app_id",app_id)
-    .eq("ativo",true)
-    .order("nome");
-  produtos=data||[];
-  render();
-}
+async function carregarPedidos(){
 
-function render(){
-  conteudo.innerHTML="";
-  produtos.filter(p=>(p.destino||"").toUpperCase()===filtro)
-    .forEach(p=>{
-      conteudo.innerHTML+=`
-        <div class="produto">
-          ${p.foto?`<img src="${p.foto}">`:""}
-          <b>${p.nome}</b>
-          <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-          <button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
-        </div>`;
-    });
-  atualizarQtd();
-}
-
-/* ================= CARRINHO ================= */
-function addProduto(id){
-  const p=produtos.find(x=>x.id===id);
-  const i=carrinho.find(x=>x.id===id);
-  i ? i.qtd++ : carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1});
-  salvar();
-}
-
-function salvar(){
-  localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
-  atualizarQtd();
-}
-
-function atualizarQtd(){
-  qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
-}
-
-function abrirCarrinho(){
-  modal.style.display="block";
-  renderCarrinho();
-}
-
-function fecharCarrinho(){
-  modal.style.display="none";
-}
-
-function renderCarrinho(){
-  lista.innerHTML="";
-  let total=0;
-  carrinho.forEach(i=>{
-    const sub=i.preco*i.qtd;
-    total+=sub;
-    lista.innerHTML+=`
-      <div class="item">
-        ${i.nome} x${i.qtd}
-        <button onclick="remover('${i.id}')">−</button>
-      </div>`;
-  });
-  document.getElementById("total").innerText=total.toFixed(2);
-}
-
-function remover(id){
-  const i=carrinho.find(x=>x.id===id);
-  if(i){
-    i.qtd--;
-    if(i.qtd<=0) carrinho=carrinho.filter(x=>x.id!==id);
-    salvar();
-    renderCarrinho();
-  }
-}
-
-function verificarTroco(){
-  trocoBox.style.display = pagamento.value==="Dinheiro" ? "block" : "none";
-}
-
-/* ================= FINALIZAR ================= */
-async function finalizar(){
-
-  if(!cliente.value.trim()){
-    alert("Informe seu nome");
-    return;
-  }
-
-  if(!pagamento.value){
-    alert("Informe a forma de pagamento");
-    return;
-  }
-
-  if(fluxoPedido==="sistema"){
-    await enviarSistema();
-  }else{
-    enviarWhatsApp();
-  }
-}
-
-/* ===== WHATSAPP ===== */
-function enviarWhatsApp(){
-
-  let msg="🛒 *Novo Pedido*\n\n";
-  let total=0;
-
-  carrinho.forEach(i=>{
-    const sub=i.preco*i.qtd;
-    total+=sub;
-    msg+=`• ${i.nome} x${i.qtd} - R$ ${sub.toFixed(2)}\n`;
-  });
-
-  msg+=`\n💰 Total: R$ ${total.toFixed(2)}`;
-  msg+=`\n👤 ${cliente.value}`;
-  if(endereco.value) msg+=`\n📍 ${endereco.value}`;
-  msg+=`\n💳 Pagamento: ${pagamento.value}`;
-  if(pagamento.value==="Dinheiro" && troco.value)
-    msg+=`\n💵 Troco para: R$ ${troco.value}`;
-  if(obs.value) msg+=`\n📝 ${obs.value}`;
-
-  window.open(`https://wa.me/55${whatsapp}?text=${encodeURIComponent(msg)}`,"_blank");
-
-  limpar();
-}
-
-/* ===== SISTEMA ===== */
-async function enviarSistema(){
-
-  let total=0;
-  carrinho.forEach(i=> total+=i.preco*i.qtd);
-
-  const {data:pedido,error} = await sb
+  const { data, error } = await supabase
     .from("pedidos")
-    .insert([{
-      app_id:app_id,
-      cliente_nome:cliente.value,
-      forma_pagamento:pagamento.value,
-      status:"novo",
-      total:total
-    }])
-    .select()
-    .single();
+    .select(`
+      id,
+      created_at,
+      cliente_nome,
+      forma_pagamento,
+      pedido_itens (
+        nome_produto,
+        quantidade,
+        preco
+      )
+    `)
+    .eq("app_id", APP_ID)
+    .eq("status","novo")
+    .order("created_at",{ascending:false});
+
+  const lista = document.getElementById("lista");
+  lista.innerHTML="";
 
   if(error){
-    alert("Erro ao enviar pedido.");
-    console.error(error);
+    lista.innerHTML="Erro ao carregar pedidos";
     return;
   }
 
-  const itens = carrinho.map(i=>({
-    pedido_id:pedido.id,
-    nome_produto:i.nome,
-    quantidade:i.qtd,
-    preco:i.preco
-  }));
+  if(!data || data.length===0){
+    lista.innerHTML='<div class="vazio">Nenhum pedido novo</div>';
+    return;
+  }
 
-  await sb.from("pedido_itens").insert(itens);
+  data.forEach(p=>{
 
-  alert("Pedido enviado com sucesso!");
-  limpar();
+    let total=0;
+
+    const itensHtml = (p.pedido_itens||[]).map(i=>{
+      const sub = Number(i.quantidade)*Number(i.preco);
+      total+=sub;
+      return `
+        <div class="item">
+          <span>${i.quantidade}x ${i.nome_produto}</span>
+          <span>R$ ${sub.toFixed(2)}</span>
+        </div>`;
+    }).join("");
+
+    lista.innerHTML+=`
+      <div class="card">
+        <div class="top">
+          <div>
+            <b>${p.cliente_nome||"Cliente"}</b><br>
+            <small>${new Date(p.created_at).toLocaleString()}</small><br>
+            <small>Pagamento: ${p.forma_pagamento||"-"}</small>
+          </div>
+          <div>
+            <button class="btn-ok" onclick="aceitar('${p.id}')">✔ Aceitar</button>
+            <button class="btn-cancel" onclick="cancelar('${p.id}')">✖ Cancelar</button>
+          </div>
+        </div>
+
+        ${itensHtml}
+
+        <div class="total">
+          Total: R$ ${total.toFixed(2)}
+        </div>
+      </div>`;
+  });
 }
 
-function limpar(){
-  carrinho=[];
-  salvar();
-  fecharCarrinho();
-}
+window.aceitar = async function(id){
 
-/* ================= TABS ================= */
-btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();};
-btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();};
+  await supabase
+    .from("pedidos")
+    .update({ status:"finalizado" })
+    .eq("id",id);
 
-(async()=>{
-  await carregarConfig();
-  await carregarProdutos();
-})();
+  carregarPedidos();
+};
+
+window.cancelar = async function(id){
+
+  if(!confirm("Deseja cancelar este pedido?")) return;
+
+  await supabase
+    .from("pedidos")
+    .update({ status:"cancelado" })
+    .eq("id",id);
+
+  carregarPedidos();
+};
+
+iniciar();
 </script>
+
+</body>
+</html>
