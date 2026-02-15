@@ -2,230 +2,195 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Cozinha</title>
+<title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script type="module" src="../js/auth.js"></script>
 
 <style>
-body{
-  margin:0;
-  font-family:Arial, sans-serif;
-  background:#020617;
-  color:#fff;
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{
+  background:#0f172a;
+  padding:16px 24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
 }
 .container{
-  max-width:900px;
+  max-width:1100px;
   margin:auto;
   padding:24px;
 }
-h2{ margin-top:0; }
-
-.pedido{
+.card{
   background:#0f172a;
-  border-radius:18px;
-  padding:18px;
-  margin-bottom:20px;
-  border-left:6px solid #22c55e;
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:16px;
 }
-
-.tag{
-  display:inline-block;
-  padding:4px 12px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:bold;
-  margin-bottom:6px;
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
 }
-
-.mesa{ background:#2563eb }
-
-.itens{ margin-top:10px; }
-
 .item{
   display:flex;
   justify-content:space-between;
   padding:6px 0;
   border-bottom:1px solid #1e293b;
+  font-size:14px;
 }
-
 .total{
-  margin-top:12px;
-  font-size:18px;
-  font-weight:900;
+  font-weight:bold;
+  font-size:16px;
+  margin-top:8px;
 }
-
-.acoes{
-  margin-top:14px;
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-}
-
 button{
-  padding:10px 16px;
-  border-radius:10px;
+  padding:8px 12px;
   border:none;
+  border-radius:8px;
   font-weight:bold;
   cursor:pointer;
+  margin-left:6px;
 }
-
-.aceitar{ background:#22c55e }
-.pronto{ background:#3b82f6 }
-.excluir{ background:#ef4444 }
-
-.aceito-tag{
-  background:#16a34a;
-  padding:10px 16px;
-  border-radius:10px;
-  font-weight:bold;
+.btn-ok{background:#22c55e}
+.btn-cancel{background:#ef4444}
+small{color:#94a3b8}
+.vazio{
+  text-align:center;
+  margin-top:40px;
+  color:#94a3b8;
 }
 </style>
 </head>
 
 <body>
 
-<div class="container">
-  <h2>🍳 Pedidos da Cozinha</h2>
-  <div id="lista">Carregando pedidos...</div>
+<div class="topo">
+  <h2>📦 Pedidos Online</h2>
+  <button onclick="history.back()">⬅ Voltar</button>
 </div>
 
-<script>
-/* ================= SUPABASE ================= */
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<div class="container" id="lista">
+  Carregando pedidos...
+</div>
 
-/* ================= APP ================= */
-const params = new URLSearchParams(location.search);
-const app_id = params.get("app_id") || localStorage.getItem("app_id");
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
-if(!app_id){
-  document.body.innerHTML = "<h2 style='padding:20px'>App inválido</h2>";
-  throw "";
+let APP_ID=null;
+
+async function iniciar(){
+
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    location.href="../auth/login.html";
+    return;
+  }
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  APP_ID = usuario.app_id;
+
+  carregarPedidos();
+  setInterval(carregarPedidos,5000);
 }
 
-localStorage.setItem("app_id", app_id);
-const lista = document.getElementById("lista");
-
-/* ================= CARREGAR PEDIDOS ================= */
 async function carregarPedidos(){
 
-  const { data, error } = await sb
+  const { data, error } = await supabase
     .from("pedidos")
     .select(`
       id,
-      status,
       created_at,
-      mesa_id,
-      mesas ( numero_mesa ),
+      cliente_nome,
+      forma_pagamento,
       pedido_itens (
         nome_produto,
         quantidade,
-        preco,
-        destino
+        preco
       )
     `)
-    .eq("app_id", app_id)
-    .in("status", ["aberto","enviado","aceito"])
-    .order("created_at", { ascending:true });
+    .eq("app_id", APP_ID)
+    .eq("status","novo")
+    .order("created_at",{ascending:false});
+
+  const lista = document.getElementById("lista");
+  lista.innerHTML="";
 
   if(error){
-    console.error(error);
-    lista.innerHTML = "Erro ao carregar pedidos";
+    lista.innerHTML="Erro ao carregar pedidos";
     return;
   }
 
-  lista.innerHTML = "";
-
-  const pedidosCozinha = (data || []).filter(p =>
-    p.pedido_itens.some(i => i.destino === "cozinha")
-  );
-
-  if(pedidosCozinha.length === 0){
-    lista.innerHTML = "<p>Nenhum pedido da cozinha</p>";
+  if(!data || data.length===0){
+    lista.innerHTML='<div class="vazio">Nenhum pedido novo</div>';
     return;
   }
 
-  pedidosCozinha.forEach(pedido=>{
+  data.forEach(p=>{
 
-    const itens = pedido.pedido_itens.filter(i => i.destino === "cozinha");
+    let total=0;
 
-    const total = itens.reduce(
-      (s,i)=> s + (i.preco * i.quantidade), 0
-    );
+    const itensHtml = (p.pedido_itens||[]).map(i=>{
+      const sub = Number(i.quantidade)*Number(i.preco);
+      total+=sub;
+      return `
+        <div class="item">
+          <span>${i.quantidade}x ${i.nome_produto}</span>
+          <span>R$ ${sub.toFixed(2)}</span>
+        </div>`;
+    }).join("");
 
-    const numeroMesa = pedido.mesas?.numero_mesa ?? "-";
-
-    lista.innerHTML += `
-      <div class="pedido">
-        <span class="tag mesa">Mesa ${numeroMesa}</span>
-
-        <div class="itens">
-          ${itens.map(i=>`
-            <div class="item">
-              <span>${i.quantidade}x ${i.nome_produto}</span>
-              <b>R$ ${(i.preco * i.quantidade).toFixed(2)}</b>
-            </div>
-          `).join("")}
+    lista.innerHTML+=`
+      <div class="card">
+        <div class="top">
+          <div>
+            <b>${p.cliente_nome||"Cliente"}</b><br>
+            <small>${new Date(p.created_at).toLocaleString()}</small><br>
+            <small>Pagamento: ${p.forma_pagamento||"-"}</small>
+          </div>
+          <div>
+            <button class="btn-ok" onclick="aceitar('${p.id}')">✔ Aceitar</button>
+            <button class="btn-cancel" onclick="cancelar('${p.id}')">✖ Cancelar</button>
+          </div>
         </div>
 
-        <div class="total">Total cozinha: R$ ${total.toFixed(2)}</div>
+        ${itensHtml}
 
-        <div class="acoes">
-          ${
-            pedido.status === "aberto" || pedido.status === "enviado"
-            ? `<button class="aceitar" onclick="aceitarPedido('${pedido.id}')">Aceitar</button>`
-            : `<div class="aceito-tag">✔ Em preparo</div>`
-          }
-
-          <button class="pronto" onclick="marcarPronto('${pedido.id}')">
-            Pedido pronto
-          </button>
-
-          <button class="excluir" onclick="excluirPedido('${pedido.id}')">
-            Excluir
-          </button>
+        <div class="total">
+          Total: R$ ${total.toFixed(2)}
         </div>
-      </div>
-    `;
+      </div>`;
   });
 }
 
-/* ================= AÇÕES ================= */
-async function aceitarPedido(id){
-  await sb.from("pedidos")
-    .update({ status:"aceito" })
-    .eq("id", id)
-    .eq("app_id", app_id);
+window.aceitar = async function(id){
+
+  await supabase
+    .from("pedidos")
+    .update({ status:"finalizado" })
+    .eq("id",id);
 
   carregarPedidos();
-}
+};
 
-/* 🔥 CORREÇÃO AQUI */
-async function marcarPronto(id){
-  await sb.from("pedidos")
-    .update({ status:"aguardando_pagamento" })
-    .eq("id", id)
-    .eq("app_id", app_id);
+window.cancelar = async function(id){
 
-  carregarPedidos();
-}
+  if(!confirm("Deseja cancelar este pedido?")) return;
 
-async function excluirPedido(id){
-  if(!confirm("Excluir pedido?")) return;
-
-  await sb.from("pedidos")
-    .delete()
-    .eq("id", id)
-    .eq("app_id", app_id);
+  await supabase
+    .from("pedidos")
+    .update({ status:"cancelado" })
+    .eq("id",id);
 
   carregarPedidos();
-}
+};
 
-/* ================= AUTO REFRESH ================= */
-carregarPedidos();
-setInterval(carregarPedidos, 5000);
+iniciar();
 </script>
 
 </body>
