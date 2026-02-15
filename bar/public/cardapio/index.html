@@ -11,7 +11,6 @@
   --primary:#8b5e3c;
   --bg:#f6f1eb;
   --text:#2e1f14;
-  --border:#e6ded5;
 }
 
 body[data-tema="carnaval"]{--primary:#ec4899;--bg:#581c87;--text:#fff;}
@@ -27,10 +26,6 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
 .topo::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.4)}
 .topo-conteudo{position:relative;color:#fff;text-align:center}
 .logo{max-height:70px;margin-bottom:10px}
-
-.tabs{display:flex;gap:10px;padding:16px}
-.tab{flex:1;padding:12px;border-radius:12px;border:none;font-weight:bold;cursor:pointer}
-.tab.ativo{background:var(--primary);color:#fff}
 
 .container{padding:16px;display:grid;gap:12px}
 @media(max-width:768px){
@@ -48,10 +43,12 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
 .carrinho-btn{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:14px 26px;border-radius:999px;font-weight:bold;cursor:pointer}
 
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none}
-.modal-box{position:absolute;bottom:0;left:0;right:0;background:#fff;color:#000;border-radius:20px 20px 0 0;padding:16px;max-height:85vh;overflow:auto}
+.modal-box{position:absolute;bottom:0;left:0;right:0;background:#fff;color:#000;border-radius:20px 20px 0 0;padding:16px;max-height:90vh;overflow:auto}
+
 .item-carrinho{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .controls{display:flex;align-items:center;gap:6px}
 .controls button{padding:4px 8px;border:none;border-radius:6px;background:var(--primary);color:#fff}
+input,textarea,select{width:100%;margin-top:8px;padding:8px;border-radius:8px;border:1px solid #ccc}
 </style>
 </head>
 
@@ -65,11 +62,6 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
   </div>
 </div>
 
-<div class="tabs">
-  <button class="tab ativo" id="btnBar">Bar</button>
-  <button class="tab" id="btnCozinha">Restaurante</button>
-</div>
-
 <div class="container" id="conteudo"></div>
 
 <div class="carrinho-btn" onclick="abrirCarrinho()">
@@ -78,16 +70,35 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
 
 <div class="modal" id="modal">
   <div class="modal-box">
+
     <h3>🛒 Seu Pedido</h3>
     <div id="listaCarrinho"></div>
     <b>Total: R$ <span id="totalCarrinho">0.00</span></b>
-    <br><br>
+
+    <hr>
+
+    <input id="cliente" placeholder="Seu nome *">
+    <input id="telefone" placeholder="WhatsApp *">
+    <input id="endereco" placeholder="Endereço ou localização">
+    <button onclick="pegarLocalizacao()">📍 Usar minha localização</button>
+    <textarea id="obs" placeholder="Observações"></textarea>
+
+    <select id="pagamento">
+      <option value="">Forma de pagamento *</option>
+      <option value="Pix">Pix</option>
+      <option value="Cartão">Cartão</option>
+      <option value="Dinheiro">Dinheiro</option>
+    </select>
+
+    <br>
+    <button onclick="finalizarPedido()">Finalizar Pedido</button>
     <button onclick="fecharCarrinho()">Fechar</button>
+
   </div>
 </div>
 
 <script>
-const sb = supabase.createClient(
+const sb=supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
@@ -95,12 +106,9 @@ const sb = supabase.createClient(
 const params=new URLSearchParams(location.search);
 const app_id=params.get("app")||params.get("app_id");
 
-let produtos=[],filtro="BAR";
+let produtos=[];
 const carrinhoKey="carrinho_"+app_id;
 let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
-
-const conteudo=document.getElementById("conteudo");
-const qtd=document.getElementById("qtd");
 
 function salvarCarrinho(){
   localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
@@ -113,11 +121,7 @@ function atualizarQtd(){
 async function carregarConfig(){
   const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).maybeSingle();
   if(!data)return;
-
   nome.innerText=data.nome_site||"Cardápio";
-
-  if(data.logo_url){logo.src=data.logo_url;logo.style.display="block";}
-  if(data.banner_url){banner.src=data.banner_url;banner.style.display="block";}
   if(data.tema_site && data.tema_site!=="padrao"){
     document.body.dataset.tema=data.tema_site;
   }
@@ -125,18 +129,16 @@ async function carregarConfig(){
 
 async function carregarProdutos(){
   const {data}=await sb.from("produtos")
-    .select("id,nome,preco,foto,destino")
+    .select("id,nome_attach, nome,preco,foto")
     .eq("app_id",app_id)
     .eq("ativo",true);
-
   produtos=data||[];
   render();
 }
 
 function render(){
   conteudo.innerHTML="";
-  produtos.filter(p=>(p.destino||"").toUpperCase()===filtro)
-  .forEach(p=>{
+  produtos.forEach(p=>{
     conteudo.innerHTML+=`
       <div class="produto">
         ${p.foto?`<img src="${p.foto}">`:""}
@@ -153,40 +155,30 @@ function render(){
 function addProduto(id){
   const p=produtos.find(x=>x.id===id);
   const i=carrinho.find(x=>x.id===id);
-
-  if(i){i.qtd++}
-  else{carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1})}
-
+  if(i)i.qtd++;
+  else carrinho.push({id:p.id,nome:p.nome,preco:p.preco,qtd:1});
   salvarCarrinho();
   atualizarQtd();
 }
 
 function abrirCarrinho(){
-  document.getElementById("modal").style.display="block";
+  modal.style.display="block";
   renderCarrinho();
 }
 
 function fecharCarrinho(){
-  document.getElementById("modal").style.display="none";
+  modal.style.display="none";
 }
 
 function renderCarrinho(){
-  const lista=document.getElementById("listaCarrinho");
-  const totalEl=document.getElementById("totalCarrinho");
-
-  lista.innerHTML="";
+  listaCarrinho.innerHTML="";
   let total=0;
-
   carrinho.forEach(i=>{
     const sub=i.preco*i.qtd;
     total+=sub;
-
-    lista.innerHTML+=`
+    listaCarrinho.innerHTML+=`
       <div class="item-carrinho">
-        <div>
-          <b>${i.nome}</b><br>
-          R$ ${i.preco.toFixed(2)}
-        </div>
+        <div>${i.nome}</div>
         <div class="controls">
           <button onclick="diminuir('${i.id}')">-</button>
           <span>${i.qtd}</span>
@@ -195,32 +187,70 @@ function renderCarrinho(){
       </div>
     `;
   });
-
-  totalEl.innerText=total.toFixed(2);
+  totalCarrinho.innerText=total.toFixed(2);
 }
 
 function aumentar(id){
-  const item=carrinho.find(x=>x.id===id);
-  if(item)item.qtd++;
+  const i=carrinho.find(x=>x.id===id);
+  if(i)i.qtd++;
   salvarCarrinho();
   renderCarrinho();
   atualizarQtd();
 }
 
 function diminuir(id){
-  const item=carrinho.find(x=>x.id===id);
-  if(!item)return;
-  item.qtd--;
-  if(item.qtd<=0){
-    carrinho=carrinho.filter(x=>x.id!==id);
-  }
+  const i=carrinho.find(x=>x.id===id);
+  if(!i)return;
+  i.qtd--;
+  if(i.qtd<=0)carrinho=carrinho.filter(x=>x.id!==id);
   salvarCarrinho();
   renderCarrinho();
   atualizarQtd();
 }
 
-btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
-btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
+function pegarLocalizacao(){
+  if(!navigator.geolocation)return;
+  navigator.geolocation.getCurrentPosition(pos=>{
+    endereco.value=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+  });
+}
+
+async function finalizarPedido(){
+
+  if(!cliente.value||!telefone.value||!pagamento.value){
+    alert("Preencha nome, telefone e pagamento");
+    return;
+  }
+
+  let total=0;
+  carrinho.forEach(i=>total+=i.preco*i.qtd);
+
+  const {data:pedido}=await sb.from("pedidos").insert([{
+    app_id,
+    cliente_nome:cliente.value,
+    telefone:telefone.value,
+    endereco:endereco.value,
+    observacao:obs.value,
+    forma_pagamento:pagamento.value,
+    status:"novo",
+    total
+  }]).select().single();
+
+  await sb.from("pedido_itens").insert(
+    carrinho.map(i=>({
+      pedido_id:pedido.id,
+      nome_produto:i.nome,
+      quantidade:i.qtd,
+      preco:i.preco
+    }))
+  );
+
+  alert("Pedido enviado!");
+  carrinho=[];
+  salvarCarrinho();
+  atualizarQtd();
+  fecharCarrinho();
+}
 
 (async()=>{
   await carregarConfig();
