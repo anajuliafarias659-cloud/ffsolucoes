@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module" src="../js/auth.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -16,7 +17,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .total{font-size:20px;font-weight:900}
 .item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b;font-size:14px}
 small{color:#94a3b8}
-button,select{
+button,select,input{
   padding:8px 14px;
   border:none;
   border-radius:10px;
@@ -24,19 +25,13 @@ button,select{
   color:#fff;
   cursor:pointer;
 }
-.filtro{margin-bottom:20px}
+.filtro{margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .grupo{
   background:#1e293b;
   padding:12px;
   border-radius:12px;
   margin-bottom:10px;
   font-weight:bold;
-}
-.fechamento{
-  background:#14532d;
-  padding:14px;
-  border-radius:12px;
-  margin-bottom:12px;
 }
 </style>
 </head>
@@ -51,17 +46,19 @@ button,select{
 <div class="container">
 
   <div class="filtro">
-    <label>Detalhar por: </label>
+    <label>Data:</label>
+    <input type="date" id="filtroData">
+
+    <label>Detalhar por:</label>
     <select id="tipoRelatorio">
       <option value="mesa">Mesa</option>
       <option value="garcom">Garçom</option>
     </select>
+
+    <button onclick="buscarPorData()">🔍 Buscar</button>
+    <button onclick="gerarPDFHistorico()">📄 Gerar PDF</button>
   </div>
 
-  <h3>📄 Fechamentos de Caixa</h3>
-  <div id="listaFechamentos"></div>
-
-  <h3>🧾 Pedidos</h3>
   <div id="lista">Carregando histórico...</div>
 
 </div>
@@ -70,6 +67,7 @@ button,select{
 import { supabase } from "../js/supabase.js";
 
 let vendas = [];
+let APP_ID = null;
 
 async function iniciar(){
 
@@ -90,52 +88,21 @@ async function iniciar(){
     return;
   }
 
-  carregarFechamentos(usuario.app_id);
-  carregarHistorico(usuario.app_id);
+  APP_ID = usuario.app_id;
+
+  carregarHistorico(APP_ID);
 
   document
     .getElementById("tipoRelatorio")
     .addEventListener("change", renderizar);
 }
 
-/* ================================
-   🔥 FECHAMENTOS SALVOS
-================================ */
+/* ===============================
+   CARREGAR HISTÓRICO (COM FILTRO)
+=============================== */
+async function carregarHistorico(app_id, dataFiltro = null){
 
-async function carregarFechamentos(app_id){
-
-  const { data } = await supabase
-    .from("fechamentos_caixa")
-    .select("*")
-    .eq("app_id", app_id)
-    .order("created_at", { ascending:false });
-
-  const box = document.getElementById("listaFechamentos");
-  box.innerHTML = "";
-
-  if(!data || data.length === 0){
-    box.innerHTML = "<p>Nenhum fechamento registrado</p>";
-    return;
-  }
-
-  data.forEach(f=>{
-    box.innerHTML += `
-      <div class="fechamento">
-        <b>Data:</b> ${new Date(f.data).toLocaleDateString()} <br>
-        <b>Vendas:</b> ${f.qtd_vendas} <br>
-        <b>Total:</b> R$ ${Number(f.total).toFixed(2)}
-      </div>
-    `;
-  });
-}
-
-/* ================================
-   🔥 PEDIDOS
-================================ */
-
-async function carregarHistorico(app_id){
-
-  const { data, error } = await supabase
+  let query = supabase
     .from("pedidos")
     .select(`
       id,
@@ -153,6 +120,18 @@ async function carregarHistorico(app_id){
     .in("status", ["finalizado","fechado"])
     .order("created_at", { ascending:false });
 
+  if(dataFiltro){
+    const inicio = new Date(dataFiltro);
+    inicio.setHours(0,0,0,0);
+    const fim = new Date(inicio.getTime() + 86400000);
+
+    query = query
+      .gte("created_at", inicio.toISOString())
+      .lt("created_at", fim.toISOString());
+  }
+
+  const { data, error } = await query;
+
   if(error){
     document.getElementById("lista").innerHTML =
       "Erro ao carregar histórico";
@@ -163,6 +142,19 @@ async function carregarHistorico(app_id){
   renderizar();
 }
 
+/* ===============================
+   BUSCAR POR DATA
+=============================== */
+window.buscarPorData = function(){
+  const dataSelecionada =
+    document.getElementById("filtroData").value;
+
+  carregarHistorico(APP_ID, dataSelecionada);
+};
+
+/* ===============================
+   RENDERIZAR
+=============================== */
 function renderizar(){
 
   const tipo =
@@ -173,7 +165,7 @@ function renderizar(){
 
   if(vendas.length === 0){
     lista.innerHTML =
-      "<p>Nenhuma venda registrada</p>";
+      "<p>Nenhuma venda encontrada</p>";
     return;
   }
 
@@ -233,9 +225,7 @@ function renderizar(){
 
           ${(p.pedido_itens || []).map(i=>`
             <div class="item">
-              <span>
-                ${i.quantidade}x ${i.nome_produto}
-              </span>
+              <span>${i.quantidade}x ${i.nome_produto}</span>
               <b>R$ ${(i.quantidade * i.preco).toFixed(2)}</b>
             </div>
           `).join("")}
@@ -244,6 +234,56 @@ function renderizar(){
     });
   }
 }
+
+/* ===============================
+   GERAR PDF
+=============================== */
+window.gerarPDFHistorico = function(){
+
+  if(vendas.length === 0){
+    alert("Nenhum registro para gerar PDF.");
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  doc.setFontSize(16);
+  doc.text("RELATÓRIO DE VENDAS", 20, 20);
+
+  let y = 35;
+  let totalGeral = 0;
+
+  vendas.forEach(p=>{
+
+    let total = 0;
+    (p.pedido_itens || []).forEach(i=>{
+      total += Number(i.quantidade) * Number(i.preco);
+    });
+
+    totalGeral += total;
+
+    doc.setFontSize(10);
+    doc.text(
+      `${new Date(p.created_at).toLocaleString()} - R$ ${total.toFixed(2)}`,
+      20,
+      y
+    );
+
+    y += 8;
+
+    if(y > 270){
+      doc.addPage();
+      y = 20;
+    }
+  });
+
+  y += 10;
+  doc.setFontSize(12);
+  doc.text("TOTAL GERAL: R$ " + totalGeral.toFixed(2), 20, y);
+
+  doc.save("relatorio-historico.pdf");
+};
 
 iniciar();
 </script>
