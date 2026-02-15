@@ -7,14 +7,31 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;font-family:Arial;background:#f6f1eb}
+:root{
+--primary:#8b5e3c;
+--bg:#f6f1eb;
+--text:#2e1f14;
+}
+body{margin:0;font-family:Arial;background:var(--bg);color:var(--text)}
+.topo{height:220px;position:relative;display:flex;align-items:center;justify-content:center}
+.banner{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+.topo::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.4)}
+.topo-conteudo{position:relative;color:#fff;text-align:center}
+.logo{max-height:70px;display:none}
+
+.tabs{display:flex;gap:10px;padding:15px}
+.tab{flex:1;padding:12px;border:none;border-radius:10px;background:#fff;font-weight:bold}
+.tab.ativo{background:var(--primary);color:#fff}
+
 .container{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:15px;padding:15px}
 .produto{background:#fff;padding:10px;border-radius:12px;display:flex;flex-direction:column}
 .produto img{width:100%;height:120px;object-fit:cover;border-radius:10px}
 .preco{font-weight:bold;margin:5px 0}
 button{padding:8px;border:none;border-radius:8px;cursor:pointer}
-.add-btn{background:#22c55e;color:#fff}
+.add-btn{background:var(--primary);color:#fff}
+
 .carrinho-btn{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#000;color:#fff;padding:12px 25px;border-radius:999px}
+
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none}
 .modal-box{position:absolute;bottom:0;left:0;right:0;background:#fff;padding:20px;border-radius:20px 20px 0 0;max-height:90vh;overflow:auto}
 .item{display:flex;justify-content:space-between;margin:6px 0}
@@ -23,6 +40,19 @@ input,select,textarea{width:100%;margin-top:8px;padding:10px;border-radius:8px;b
 </style>
 </head>
 <body>
+
+<div class="topo">
+<img id="banner" class="banner">
+<div class="topo-conteudo">
+<img id="logo" class="logo">
+<h1 id="nome">Cardápio</h1>
+</div>
+</div>
+
+<div class="tabs">
+<button class="tab ativo" id="btnBar">Bar</button>
+<button class="tab" id="btnCozinha">Cozinha</button>
+</div>
 
 <div class="container" id="conteudo"></div>
 
@@ -51,7 +81,6 @@ input,select,textarea{width:100%;margin-top:8px;padding:10px;border-radius:8px;b
 
 <button class="add-btn" onclick="finalizar()">Finalizar Pedido</button>
 <button onclick="fecharCarrinho()">Fechar</button>
-
 </div>
 </div>
 
@@ -66,6 +95,7 @@ if(!app_id){ alert("App inválido"); throw ""; }
 
 let produtos=[];
 let carrinho=[];
+let filtro="BAR";
 const carrinhoKey="carrinho_"+app_id;
 
 carrinho = JSON.parse(localStorage.getItem(carrinhoKey)) || [];
@@ -74,20 +104,28 @@ function salvarCarrinho(){
 localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
 }
 
+async function carregarConfig(){
+const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).single();
+if(!data) return;
+if(data.nome_site) nome.innerText=data.nome_site;
+if(data.logo_url){logo.src=data.logo_url;logo.style.display="block";}
+if(data.banner_url){banner.src=data.banner_url;banner.style.display="block";}
+if(data.tema_site) document.body.dataset.tema=data.tema_site;
+}
+
 async function carregarProdutos(){
-const {data} = await sb
-.from("produtos")
-.select("id,nome,preco,foto")
+const {data}=await sb.from("produtos")
+.select("id,nome,preco,foto,destino")
 .eq("app_id",app_id)
 .eq("ativo",true);
-
 produtos=data||[];
 render();
 }
 
 function render(){
 conteudo.innerHTML="";
-produtos.forEach(p=>{
+produtos.filter(p=>(p.destino||"").toUpperCase()===filtro)
+.forEach(p=>{
 conteudo.innerHTML+=`
 <div class="produto">
 ${p.foto?`<img src="${p.foto}">`:""}
@@ -109,7 +147,7 @@ atualizarQtd();
 
 function diminuir(id){
 const i=carrinho.find(x=>x.id===id);
-if(!i) return;
+if(!i)return;
 i.qtd--;
 if(i.qtd<=0) carrinho=carrinho.filter(x=>x.id!==id);
 salvarCarrinho();
@@ -121,21 +159,14 @@ function atualizarQtd(){
 qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
-function abrirCarrinho(){
-modal.style.display="block";
-renderCarrinho();
-}
-
-function fecharCarrinho(){
-modal.style.display="none";
-}
+function abrirCarrinho(){modal.style.display="block";renderCarrinho();}
+function fecharCarrinho(){modal.style.display="none";}
 
 function renderCarrinho(){
 lista.innerHTML="";
 let total=0;
 carrinho.forEach(i=>{
-const sub=i.preco*i.qtd;
-total+=sub;
+total+=i.preco*i.qtd;
 lista.innerHTML+=`
 <div class="item">
 <span>${i.nome} x${i.qtd}</span>
@@ -150,10 +181,7 @@ document.getElementById("total").innerText=total.toFixed(2);
 
 async function finalizar(){
 
-if(carrinho.length===0){
-alert("Adicione produtos antes.");
-return;
-}
+if(carrinho.length===0){alert("Adicione produtos.");return;}
 
 const nome=document.getElementById("cliente").value.trim();
 const telefone=document.getElementById("telefone").value.trim();
@@ -161,13 +189,11 @@ const endereco=document.getElementById("endereco").value.trim();
 const obs=document.getElementById("obs").value.trim();
 const pagamento=document.getElementById("pagamento").value;
 
-if(!nome){ alert("Informe seu nome."); return; }
-if(!pagamento){ alert("Selecione pagamento."); return; }
+if(!nome||!pagamento){alert("Preencha nome e pagamento.");return;}
 
 let total=0;
 carrinho.forEach(i=>total+=i.preco*i.qtd);
 
-/* BUSCAR CONFIG */
 const { data: config } = await sb
 .from("config_site")
 .select("fluxo_pedido, whatsapp")
@@ -176,81 +202,44 @@ const { data: config } = await sb
 
 const fluxo=config?.fluxo_pedido||"sistema";
 
-/* ================== FLUXO SISTEMA ================== */
+/* SISTEMA */
 if(fluxo==="sistema"){
+const {data:pedido,error}=await sb.from("pedidos").insert([{
+app_id,cliente_nome:nome,telefone,endereco,observacao:obs,
+forma_pagamento:pagamento,total,status:"novo"
+}]).select().single();
+if(error){alert("Erro pedido");return;}
 
-const {data:pedido,error:erroPedido}=await sb
-.from("pedidos")
-.insert([{
-app_id,
-cliente_nome:nome,
-telefone,
-endereco,
-observacao:obs,
-forma_pagamento:pagamento,
-total,
-status:"novo"
-}])
-.select()
-.single();
-
-if(erroPedido){
-console.error(erroPedido);
-alert("Erro ao criar pedido");
-return;
-}
-
-const itens=carrinho.map(i=>({
+await sb.from("pedido_itens").insert(
+carrinho.map(i=>({
 pedido_id:pedido.id,
 produto_id:i.id,
 nome_produto:i.nome,
 quantidade:i.qtd,
 preco:i.preco
-}));
-
-const {error:erroItens}=await sb
-.from("pedido_itens")
-.insert(itens);
-
-if(erroItens){
-console.error(erroItens);
-alert("Erro ao salvar itens");
-return;
+}))
+);
+alert("Pedido enviado!");
 }
 
-alert("Pedido enviado para o sistema!");
-
-}
-
-/* ================== FLUXO WHATSAPP ================== */
+/* WHATS */
 if(fluxo==="whatsapp"){
-
-let msg="🛒 *Novo Pedido*%0A%0A";
-
-carrinho.forEach(i=>{
-msg+=`• ${i.nome} x${i.qtd}%0A`;
-});
-
-msg+=`%0A💰 Total: R$ ${total.toFixed(2)}%0A`;
-msg+=`👤 ${nome}%0A`;
-msg+=`📞 ${telefone}%0A`;
-if(endereco) msg+=`📍 ${endereco}%0A`;
-msg+=`💳 ${pagamento}%0A`;
-if(obs) msg+=`📝 ${obs}`;
-
+let msg="🛒 *Novo Pedido*%0A";
+carrinho.forEach(i=>msg+=`• ${i.nome} x${i.qtd}%0A`);
+msg+=`%0ATotal: R$ ${total.toFixed(2)}%0A${nome}%0A${telefone}`;
 window.open(`https://wa.me/55${config.whatsapp}?text=${msg}`,"_blank");
-
 }
 
 carrinho=[];
 salvarCarrinho();
 atualizarQtd();
 fecharCarrinho();
-
 }
 
-carregarProdutos();
-</script>
+btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
+btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
 
+(async()=>{await carregarConfig();await carregarProdutos();})();
+</script>
 </body>
 </html>
