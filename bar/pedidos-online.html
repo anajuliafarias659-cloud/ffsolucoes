@@ -7,7 +7,13 @@
 <script type="module" src="../js/auth.js"></script>
 
 <style>
-body{margin:0;font-family:Arial;background:#020617;color:#fff}
+body{
+  margin:0;
+  font-family:Arial;
+  background:#020617;
+  color:#fff;
+}
+
 .topo{
   background:#0f172a;
   padding:16px 24px;
@@ -15,22 +21,44 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
   justify-content:space-between;
   align-items:center;
 }
+
 .container{
-  max-width:1100px;
+  max-width:1200px;
   margin:auto;
   padding:24px;
 }
+
+.status-titulo{
+  margin:30px 0 15px;
+  font-size:18px;
+  font-weight:bold;
+  border-bottom:2px solid #1e293b;
+  padding-bottom:6px;
+}
+
 .card{
   background:#0f172a;
   border-radius:16px;
-  padding:16px;
+  padding:18px;
   margin-bottom:16px;
+  border:1px solid #1e293b;
 }
-.top{
+
+.card-header{
   display:flex;
   justify-content:space-between;
-  align-items:center;
+  align-items:flex-start;
+  margin-bottom:10px;
 }
+
+.card-header b{
+  font-size:16px;
+}
+
+.card small{
+  color:#94a3b8;
+}
+
 .item{
   display:flex;
   justify-content:space-between;
@@ -38,31 +66,37 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
   border-bottom:1px solid #1e293b;
   font-size:14px;
 }
+
 .total{
+  margin-top:10px;
   font-weight:bold;
-  font-size:16px;
-  margin-top:8px;
+  font-size:15px;
 }
+
+.info{
+  margin-top:10px;
+  font-size:13px;
+  color:#cbd5e1;
+}
+
 button{
-  padding:8px 12px;
+  padding:6px 10px;
   border:none;
   border-radius:8px;
   font-weight:bold;
   cursor:pointer;
-  margin-left:6px;
+  margin-left:5px;
 }
-.btn-ok{background:#22c55e}
+
+.btn-aceitar{background:#22c55e}
+.btn-preparo{background:#f59e0b}
+.btn-entrega{background:#3b82f6}
+.btn-finalizar{background:#16a34a}
 .btn-cancel{background:#ef4444}
-small{color:#94a3b8}
-.vazio{
-  text-align:center;
-  margin-top:40px;
-  color:#94a3b8;
-}
-.info{
-  margin-top:8px;
-  font-size:13px;
-  color:#cbd5e1;
+
+.link{
+  color:#60a5fa;
+  text-decoration:none;
 }
 </style>
 </head>
@@ -105,96 +139,113 @@ async function iniciar(){
 
 async function carregarPedidos(){
 
-  const { data: pedidos, error } = await supabase
+  const { data: pedidos } = await supabase
     .from("pedidos")
     .select("*")
     .eq("app_id", APP_ID)
-    .eq("status","novo")
     .order("created_at",{ascending:false});
 
   const lista = document.getElementById("lista");
   lista.innerHTML="";
 
-  if(error){
-    lista.innerHTML="Erro ao carregar pedidos";
-    return;
-  }
-
   if(!pedidos || pedidos.length===0){
-    lista.innerHTML='<div class="vazio">Nenhum pedido novo</div>';
+    lista.innerHTML="Nenhum pedido encontrado";
     return;
   }
 
-  for(const p of pedidos){
+  const statusLista = {
+    novo: [],
+    em_preparo: [],
+    saiu_entrega: [],
+    finalizado: []
+  };
 
-    const { data: itens } = await supabase
-      .from("pedido_itens")
-      .select("*")
-      .eq("pedido_id", p.id);
+  pedidos.forEach(p=>{
+    if(statusLista[p.status])
+      statusLista[p.status].push(p);
+  });
 
-    let total=0;
+  for(const status in statusLista){
 
-    const itensHtml = (itens||[]).map(i=>{
-      const sub = Number(i.quantidade)*Number(i.preco);
-      total+=sub;
-
-      return `
-        <div class="item">
-          <span>${i.quantidade}x ${i.nome_produto}</span>
-          <span>R$ ${sub.toFixed(2)}</span>
-        </div>`;
-    }).join("");
+    if(statusLista[status].length===0) continue;
 
     lista.innerHTML+=`
-      <div class="card">
+      <div class="status-titulo">
+        ${status.replace("_"," ").toUpperCase()}
+      </div>
+    `;
 
-        <div class="top">
-          <div>
-            <b>${p.cliente_nome||"Cliente"}</b><br>
-            <small>${new Date(p.created_at).toLocaleString()}</small><br>
-            <small>Pagamento: ${p.forma_pagamento||"-"}</small>
+    for(const p of statusLista[status]){
+
+      const { data: itens } = await supabase
+        .from("pedido_itens")
+        .select("*")
+        .eq("pedido_id", p.id);
+
+      let total=0;
+
+      const itensHtml=(itens||[]).map(i=>{
+        const sub=i.quantidade*i.preco;
+        total+=sub;
+        return `
+          <div class="item">
+            <span>${i.quantidade}x ${i.nome_produto}</span>
+            <span>R$ ${sub.toFixed(2)}</span>
           </div>
-          <div>
-            <button class="btn-ok" onclick="aceitar('${p.id}')">✔ Aceitar</button>
-            <button class="btn-cancel" onclick="cancelar('${p.id}')">✖ Cancelar</button>
+        `;
+      }).join("");
+
+      lista.innerHTML+=`
+        <div class="card">
+
+          <div class="card-header">
+            <div>
+              <b>${p.cliente_nome}</b><br>
+              <small>${new Date(p.created_at).toLocaleString()}</small>
+            </div>
+
+            <div>
+              ${status==="novo"?`
+                <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
+                <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
+              `:""}
+
+              ${status==="em_preparo"?`
+                <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu</button>
+              `:""}
+
+              ${status==="saiu_entrega"?`
+                <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Entregue</button>
+              `:""}
+            </div>
           </div>
+
+          <div class="info">
+            📞 <a class="link" href="https://wa.me/55${p.telefone}" target="_blank">${p.telefone||"-"}</a><br>
+            📍 ${p.endereco ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>` : "-"}<br>
+            💳 ${p.forma_pagamento||"-"}<br>
+            📝 ${p.observacao||"-"}
+          </div>
+
+          <hr>
+
+          ${itensHtml}
+
+          <div class="total">
+            Total: R$ ${total.toFixed(2)}
+          </div>
+
         </div>
-
-        <div class="info">
-          📞 ${p.telefone||"-"}<br>
-          📍 ${p.endereco||"-"}<br>
-          📝 ${p.observacao||"-"}
-        </div>
-
-        <hr>
-
-        ${itensHtml}
-
-        <div class="total">
-          Total: R$ ${total.toFixed(2)}
-        </div>
-
-      </div>`;
+      `;
+    }
   }
 }
 
-window.aceitar = async function(id){
+window.mudarStatus = async function(id,status){
 
   await supabase
     .from("pedidos")
-    .update({ status:"em_preparo" })
-    .eq("id",id);
-
-  carregarPedidos();
-};
-
-window.cancelar = async function(id){
-
-  if(!confirm("Deseja cancelar este pedido?")) return;
-
-  await supabase
-    .from("pedidos")
-    .update({ status:"cancelado" })
+    .update({ status })
     .eq("id",id);
 
   carregarPedidos();
