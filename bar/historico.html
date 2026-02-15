@@ -13,14 +13,9 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .container{max-width:1200px;margin:auto;padding:24px}
 .card{background:#0f172a;border-radius:18px;padding:18px;margin-bottom:18px}
 .top{display:flex;justify-content:space-between;align-items:flex-start}
-.mesa{font-size:18px;font-weight:bold}
 .total{font-size:20px;font-weight:900}
-.itens{margin-top:12px}
 .item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b;font-size:14px}
 small{color:#94a3b8}
-.tag{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:bold;margin-top:6px}
-.mesa-tag{ background:#2563eb }
-.web-tag{ background:#9333ea }
 button,select{
   padding:8px 14px;
   border:none;
@@ -36,6 +31,12 @@ button,select{
   border-radius:12px;
   margin-bottom:10px;
   font-weight:bold;
+}
+.fechamento{
+  background:#14532d;
+  padding:14px;
+  border-radius:12px;
+  margin-bottom:12px;
 }
 </style>
 </head>
@@ -57,7 +58,12 @@ button,select{
     </select>
   </div>
 
+  <h3>📄 Fechamentos de Caixa</h3>
+  <div id="listaFechamentos"></div>
+
+  <h3>🧾 Pedidos</h3>
   <div id="lista">Carregando histórico...</div>
+
 </div>
 
 <script type="module">
@@ -84,12 +90,48 @@ async function iniciar(){
     return;
   }
 
+  carregarFechamentos(usuario.app_id);
   carregarHistorico(usuario.app_id);
 
   document
     .getElementById("tipoRelatorio")
     .addEventListener("change", renderizar);
 }
+
+/* ================================
+   🔥 FECHAMENTOS SALVOS
+================================ */
+
+async function carregarFechamentos(app_id){
+
+  const { data } = await supabase
+    .from("fechamentos_caixa")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("created_at", { ascending:false });
+
+  const box = document.getElementById("listaFechamentos");
+  box.innerHTML = "";
+
+  if(!data || data.length === 0){
+    box.innerHTML = "<p>Nenhum fechamento registrado</p>";
+    return;
+  }
+
+  data.forEach(f=>{
+    box.innerHTML += `
+      <div class="fechamento">
+        <b>Data:</b> ${new Date(f.data).toLocaleDateString()} <br>
+        <b>Vendas:</b> ${f.qtd_vendas} <br>
+        <b>Total:</b> R$ ${Number(f.total).toFixed(2)}
+      </div>
+    `;
+  });
+}
+
+/* ================================
+   🔥 PEDIDOS
+================================ */
 
 async function carregarHistorico(app_id){
 
@@ -99,7 +141,6 @@ async function carregarHistorico(app_id){
       id,
       created_at,
       recebido_por,
-      cliente_nome,
       mesa_id,
       mesas ( numero_mesa ),
       pedido_itens (
@@ -109,7 +150,7 @@ async function carregarHistorico(app_id){
       )
     `)
     .eq("app_id", app_id)
-    .eq("status", "finalizado")
+    .in("status", ["finalizado","fechado"])
     .order("created_at", { ascending:false });
 
   if(error){
@@ -182,27 +223,22 @@ function renderizar(){
       lista.innerHTML += `
         <div class="card">
           <div class="top">
-            <div>
-              <small>
-                ⏰ ${new Date(p.created_at).toLocaleString()}
-              </small>
-            </div>
+            <small>
+              ⏰ ${new Date(p.created_at).toLocaleString()}
+            </small>
             <div class="total">
               R$ ${total.toFixed(2)}
             </div>
           </div>
 
-          <div class="itens">
-            ${(p.pedido_itens || []).map(i=>`
-              <div class="item">
-                <span>
-                  ${i.quantidade}x ${i.nome_produto}<br>
-                  <small>R$ ${Number(i.preco).toFixed(2)} cada</small>
-                </span>
-                <b>R$ ${(i.quantidade * i.preco).toFixed(2)}</b>
-              </div>
-            `).join("")}
-          </div>
+          ${(p.pedido_itens || []).map(i=>`
+            <div class="item">
+              <span>
+                ${i.quantidade}x ${i.nome_produto}
+              </span>
+              <b>R$ ${(i.quantidade * i.preco).toFixed(2)}</b>
+            </div>
+          `).join("")}
         </div>
       `;
     });
