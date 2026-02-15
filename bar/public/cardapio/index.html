@@ -13,7 +13,6 @@
   --text:#2e1f14;
   --border:#e6ded5;
   --card-bg:#ffffff;
-  --card-text:#2e1f14;
 }
 
 *{box-sizing:border-box}
@@ -39,12 +38,10 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);}
   display:grid;
   gap:16px;
 }
-
 @media (max-width:768px){
   .container{grid-template-columns:repeat(2,1fr);}
   .produto img{height:120px;}
 }
-
 @media (min-width:769px){
   .container{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
 }
@@ -52,7 +49,6 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);}
 /* PRODUTO */
 .produto{
   background:var(--card-bg);
-  color:var(--card-text);
   border-radius:16px;
   padding:12px;
   border:1px solid var(--border);
@@ -114,16 +110,13 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);}
   overflow:auto;
 }
 .item{display:flex;justify-content:space-between;margin-bottom:8px;font-size:14px;}
-.item button{border:none;background:#e5e7eb;padding:2px 8px;border-radius:6px;}
 input,textarea,select{
   width:100%;
   margin-top:8px;
   padding:10px;
   border-radius:10px;
   border:1px solid #e5e7eb;
-  font-size:14px;
 }
-textarea{resize:none}
 </style>
 </head>
 
@@ -163,19 +156,21 @@ textarea{resize:none}
       <option value="Dinheiro">Dinheiro</option>
     </select>
     <textarea id="obs" placeholder="Observações"></textarea>
-    <button class="add-btn" onclick="finalizar()" id="btnFinalizar">Enviar</button>
+    <button class="add-btn" onclick="finalizar()" id="btnFinalizar">
+      Enviar
+    </button>
     <button class="add-btn" style="background:#64748b" onclick="fecharCarrinho()">Fechar</button>
   </div>
 </div>
 
 <script>
-const sb = supabase.createClient("https://pdajixsoowcyhnjwhgpc.supabase.co","SUA_CHAVE_PUBLICA_AQUI");
-
+const sb = supabase.createClient("SUA_URL","SUA_CHAVE_PUBLICA");
 const app_id=new URLSearchParams(location.search).get("app_id");
 if(!app_id){document.body.innerHTML="Indisponível";throw "";}
 
 let produtos=[],filtro="BAR",carrinho=[],whatsapp="",fluxoPedido="whatsapp";
 
+/* CONFIG */
 async function carregarConfig(){
   const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).single();
   if(!data)return;
@@ -187,6 +182,7 @@ async function carregarConfig(){
   btnFinalizar.innerText=fluxoPedido==="sistema"?"Finalizar Pedido":"Enviar no WhatsApp";
 }
 
+/* PRODUTOS */
 async function carregarProdutos(){
   const {data}=await sb.from("produtos")
     .select("id,nome,preco,foto,destino")
@@ -198,26 +194,44 @@ async function carregarProdutos(){
 
 function render(){
   conteudo.innerHTML="";
-  produtos.filter(p=>(p.destino||"").toUpperCase()===filtro)
-    .forEach(p=>{
-      conteudo.innerHTML+=`
-      <div class="produto">
-        ${p.foto?`<img src="${p.foto}">`:""}
-        <b>${p.nome}</b>
-        <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-        <button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
-      </div>`;
-    });
+  const filtrados = produtos.filter(p=>{
+    const destino = (p.destino||"").toString().toUpperCase().trim();
+    return destino===filtro;
+  });
+
+  if(filtrados.length===0){
+    conteudo.innerHTML="<p>Nenhum produto encontrado.</p>";
+    return;
+  }
+
+  filtrados.forEach(p=>{
+    conteudo.innerHTML+=`
+    <div class="produto">
+      ${p.foto?`<img src="${p.foto}">`:""}
+      <b>${p.nome}</b>
+      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+      <button class="add-btn" onclick="addProduto('${p.id}')">
+        Adicionar
+      </button>
+    </div>`;
+  });
 }
 
+/* CARRINHO */
 function addProduto(id){
   const p=produtos.find(x=>x.id===id);
   const i=carrinho.find(x=>x.id===id);
   i?i.qtd++:carrinho.push({...p,qtd:1});
+  atualizarQtd();
+}
+
+function atualizarQtd(){
+  qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
 function abrirCarrinho(){modal.style.display="block";renderCarrinho();}
 function fecharCarrinho(){modal.style.display="none";}
+
 function renderCarrinho(){
   lista.innerHTML="";let total=0;
   carrinho.forEach(i=>{
@@ -227,7 +241,13 @@ function renderCarrinho(){
   document.getElementById("total").innerText=total.toFixed(2);
 }
 
+/* FINALIZAR */
 async function finalizar(){
+  if(!cliente.value.trim()||!pagamento.value){
+    alert("Preencha nome e pagamento");
+    return;
+  }
+
   if(fluxoPedido==="sistema"){
     let total=0;carrinho.forEach(i=>total+=i.preco*i.qtd);
     const {data:pedido}=await sb.from("pedidos").insert([{
@@ -235,18 +255,27 @@ async function finalizar(){
       forma_pagamento:pagamento.value,
       status:"novo",total
     }]).select().single();
+
     await sb.from("pedido_itens").insert(
-      carrinho.map(i=>({pedido_id:pedido.id,nome_produto:i.nome,quantidade:i.qtd,preco:i.preco}))
+      carrinho.map(i=>({
+        pedido_id:pedido.id,
+        nome_produto:i.nome,
+        quantidade:i.qtd,
+        preco:i.preco
+      }))
     );
+
     alert("Pedido enviado!");
   }else{
-    let msg="Novo Pedido\n";let total=0;
-    carrinho.forEach(i=>{total+=i.preco*i.qtd;msg+=`${i.nome} x${i.qtd}\n`;});
+    let msg="Novo Pedido\n";
+    carrinho.forEach(i=>msg+=`${i.nome} x${i.qtd}\n`);
     window.open(`https://wa.me/55${whatsapp}?text=${encodeURIComponent(msg)}`);
   }
-  carrinho=[];fecharCarrinho();
+
+  carrinho=[];atualizarQtd();fecharCarrinho();
 }
 
+/* TABS */
 btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
 btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
 
