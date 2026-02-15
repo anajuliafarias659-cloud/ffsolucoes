@@ -39,7 +39,7 @@ body{
   margin:auto;
 }
 
-/* 📱 CELULAR → 2 POR LINHA */
+/* GRID */
 .grid{
   display:grid;
   grid-template-columns:repeat(2,1fr);
@@ -47,7 +47,6 @@ body{
   margin-bottom:30px;
 }
 
-/* 💻 DESKTOP → AUTOMÁTICO */
 @media(min-width:768px){
   .grid{
     grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
@@ -64,6 +63,7 @@ body{
   flex-direction:column;
   justify-content:center;
   text-align:center;
+  position:relative;
 }
 
 .card:hover{
@@ -71,9 +71,28 @@ body{
   background:#1e293b;
 }
 
-.card h3{
-  margin:0 0 10px 0;
-  font-size:15px;
+/* 🔔 BADGE */
+.badge{
+  position:absolute;
+  top:8px;
+  right:8px;
+  background:#ef4444;
+  color:#fff;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:12px;
+  display:none;
+}
+
+/* ✨ ANIMAÇÃO */
+@keyframes piscar {
+  0%{box-shadow:0 0 0 transparent;}
+  50%{box-shadow:0 0 20px rgba(239,68,68,.9);}
+  100%{box-shadow:0 0 0 transparent;}
+}
+
+.piscar{
+  animation:piscar 1s infinite;
 }
 
 select{
@@ -93,9 +112,7 @@ select{
   cursor:pointer;
 }
 
-.botao-link:hover{
-  opacity:1;
-}
+.botao-link:hover{opacity:1}
 </style>
 </head>
 
@@ -121,21 +138,24 @@ select{
     <div class="card" onclick="irPara('categorias.html')">📂 Categorias</div>
     <div class="card" onclick="irPara('mesas.html')">🪑 Mesas</div>
     <div class="card" onclick="irPara('cozinha.html')">🧾 Cozinha</div>
-    <div class="card" onclick="irPara('pedidos.html')">🧾 pedidos Online</div>
+
+    <!-- 🔔 PEDIDOS ONLINE -->
+    <div class="card" id="cardPedidos" onclick="irPara('pedidos-online.html')">
+      🧾 Pedidos Online
+      <span class="badge" id="badgePedidos">0</span>
+    </div>
+
     <div class="card" onclick="irPara('caixa.html')">💰 Caixa</div>
-    <div class="card" onclick="irPara('config-site.html')">💰 Configura o site / virine</div>
+    <div class="card" onclick="irPara('config-site.html')">⚙️ Configura o site / vitrine</div>
     <div class="card" onclick="irPara('admins.html')">⚙️ Admins</div>
     <div class="card" onclick="irPara('mapa-mesas.html')">🗺️ Mapa pra Organiza mesas</div>
 
-    <!-- 🌍 PÁGINA PÚBLICA -->
     <div class="card">
       <h3>🌍 Página Pública</h3>
-
       <select id="modo_publico">
         <option value="cardapio">🛒 Cardápio</option>
         <option value="site">🌐 Site</option>
       </select>
-
       <div class="botao-link" onclick="compartilharPagina()">
         🔗 Compartilhar Página
       </div>
@@ -150,17 +170,17 @@ import { supabase } from "../js/supabase.js";
 
 let app_id = null;
 
-/* 🔐 VERIFICAR SESSÃO */
+/* 🔐 SESSÃO */
 async function verificarSessao(){
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data:{ session } } = await supabase.auth.getSession();
   if(!session){
-    window.location.href = "/auth/login.html";
+    window.location.href="/auth/login.html";
     return null;
   }
   return session.user.id;
 }
 
-/* 👤 CARREGAR USUÁRIO */
+/* 👤 USUÁRIO */
 async function carregarUsuario(){
 
   const userId = await verificarSessao();
@@ -176,88 +196,57 @@ async function carregarUsuario(){
 
   app_id = usuario.app_id;
 
-  document.getElementById("nome").innerText = usuario.nome;
-  document.getElementById("negocioId").innerText = usuario.app_id;
+  nome.innerText = usuario.nome;
+  negocioId.innerText = usuario.app_id;
 
-  carregarModo();
+  verificarPedidos();
+  setInterval(verificarPedidos,5000);
 }
 
-/* 🌍 CARREGAR MODO */
-async function carregarModo(){
+/* 🔔 VERIFICAR PEDIDOS NOVOS */
+async function verificarPedidos(){
 
   const { data } = await supabase
-    .from("config_site")
-    .select("modo_cardapio")
-    .eq("app_id", app_id)
-    .maybeSingle();
-
-  if(data){
-    document.getElementById("modo_publico").value =
-      data.modo_cardapio || "cardapio";
-  } else {
-    document.getElementById("modo_publico").value = "cardapio";
-  }
-}
-
-/* 💾 SALVAR AO TROCAR */
-document.addEventListener("change", async (e)=>{
-
-  if(e.target.id !== "modo_publico") return;
-
-  const modo = e.target.value;
-
-  const { data: existente } = await supabase
-    .from("config_site")
+    .from("pedidos")
     .select("id")
     .eq("app_id", app_id)
-    .maybeSingle();
+    .eq("status","novo");
 
-  if(existente){
-    await supabase
-      .from("config_site")
-      .update({ modo_cardapio: modo })
-      .eq("app_id", app_id);
+  const badge = document.getElementById("badgePedidos");
+  const card = document.getElementById("cardPedidos");
+
+  if(data && data.length > 0){
+
+    badge.style.display="inline-block";
+    badge.innerText = data.length;
+
+    card.classList.add("piscar");
+
   }else{
-    await supabase
-      .from("config_site")
-      .insert({ app_id, modo_cardapio: modo });
-  }
 
-});
+    badge.style.display="none";
+    card.classList.remove("piscar");
+  }
+}
 
 /* 🔗 COMPARTILHAR */
 window.compartilharPagina = function(){
-
   const modo = document.getElementById("modo_publico").value;
   const base = location.origin;
 
-  let url = "";
+  let url = modo==="cardapio"
+    ? `${base}/bar/public/cardapio/?app_id=${app_id}`
+    : `${base}/bar/public/site/?app_id=${app_id}`;
 
-  if(modo === "cardapio"){
-    url = `${base}/bar/public/cardapio/?app_id=${app_id}`;
-  }
-
-  if(modo === "site"){
-    url = `${base}/bar/public/site/?app_id=${app_id}`;
-  }
-
-  if(navigator.share){
-    navigator.share({
-      title: "Página do meu negócio",
-      text: "Confira aqui:",
-      url: url
-    });
-  }else{
-    navigator.clipboard.writeText(url);
-    alert("Link copiado 🔥");
-  }
+  navigator.clipboard.writeText(url);
+  alert("Link copiado 🔥");
 };
 
 window.irPara = pagina => window.location.href = pagina;
 
 window.logout = async ()=>{
   await supabase.auth.signOut();
-  window.location.href = "/auth/login.html";
+  window.location.href="/auth/login.html";
 };
 
 carregarUsuario();
@@ -265,6 +254,3 @@ carregarUsuario();
 
 </body>
 </html>
-
-
-
