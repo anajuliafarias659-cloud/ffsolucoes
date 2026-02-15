@@ -28,27 +28,37 @@ body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
 .logo{max-height:70px;margin-bottom:10px}
 
 .container{padding:16px;display:grid;gap:12px}
-@media(max-width:768px){
-  .container{grid-template-columns:repeat(2,1fr)}
-}
-@media(min-width:769px){
-  .container{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
-}
+@media(max-width:768px){.container{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:769px){.container{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}
 
 .produto{background:#fff;border-radius:14px;padding:10px;display:flex;flex-direction:column}
 .produto img{width:100%;height:120px;object-fit:cover;border-radius:10px}
 .preco{color:var(--primary);font-weight:bold;margin-top:4px}
 .add-btn{margin-top:auto;padding:8px;border:none;border-radius:8px;background:var(--primary);color:#fff;font-weight:bold;cursor:pointer}
 
-.carrinho-btn{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:14px 26px;border-radius:999px;font-weight:bold;cursor:pointer}
+.carrinho-btn{
+  position:fixed;bottom:20px;left:50%;
+  transform:translateX(-50%);
+  background:var(--primary);
+  color:#fff;padding:14px 26px;
+  border-radius:999px;font-weight:bold;cursor:pointer;
+}
 
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none}
-.modal-box{position:absolute;bottom:0;left:0;right:0;background:#fff;color:#000;border-radius:20px 20px 0 0;padding:16px;max-height:90vh;overflow:auto}
+.modal-box{
+  position:absolute;bottom:0;left:0;right:0;
+  background:#fff;color:#000;
+  border-radius:20px 20px 0 0;
+  padding:16px;max-height:90vh;overflow:auto
+}
 
 .item-carrinho{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .controls{display:flex;align-items:center;gap:6px}
 .controls button{padding:4px 8px;border:none;border-radius:6px;background:var(--primary);color:#fff}
-input,textarea,select{width:100%;margin-top:8px;padding:8px;border-radius:8px;border:1px solid #ccc}
+
+input,textarea,select{
+  width:100%;margin-top:8px;padding:8px;border-radius:8px;border:1px solid #ccc
+}
 </style>
 </head>
 
@@ -91,7 +101,10 @@ input,textarea,select{width:100%;margin-top:8px;padding:8px;border-radius:8px;bo
     </select>
 
     <br>
-    <button onclick="finalizarPedido()">Finalizar Pedido</button>
+    <button onclick="finalizarPedido()" id="btnFinalizar">
+      Finalizar Pedido
+    </button>
+
     <button onclick="fecharCarrinho()">Fechar</button>
 
   </div>
@@ -107,6 +120,8 @@ const params=new URLSearchParams(location.search);
 const app_id=params.get("app")||params.get("app_id");
 
 let produtos=[];
+let fluxoPedido="sistema";
+let whatsappNumero="";
 const carrinhoKey="carrinho_"+app_id;
 let carrinho=JSON.parse(localStorage.getItem(carrinhoKey))||[];
 
@@ -119,19 +134,34 @@ function atualizarQtd(){
 }
 
 async function carregarConfig(){
-  const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).maybeSingle();
+  const {data}=await sb.from("config_site")
+    .select("*")
+    .eq("app_id",app_id)
+    .maybeSingle();
+
   if(!data)return;
+
   nome.innerText=data.nome_site||"Cardápio";
+
   if(data.tema_site && data.tema_site!=="padrao"){
     document.body.dataset.tema=data.tema_site;
   }
+
+  fluxoPedido=data.fluxo_pedido||"sistema";
+  whatsappNumero=data.whatsapp||"";
+
+  btnFinalizar.innerText=
+    fluxoPedido==="sistema"
+    ?"Finalizar Pedido"
+    :"Enviar no WhatsApp";
 }
 
 async function carregarProdutos(){
   const {data}=await sb.from("produtos")
-    .select("id,nome_attach, nome,preco,foto")
+    .select("id,nome,preco,foto")
     .eq("app_id",app_id)
     .eq("ativo",true);
+
   produtos=data||[];
   render();
 }
@@ -173,9 +203,11 @@ function fecharCarrinho(){
 function renderCarrinho(){
   listaCarrinho.innerHTML="";
   let total=0;
+
   carrinho.forEach(i=>{
     const sub=i.preco*i.qtd;
     total+=sub;
+
     listaCarrinho.innerHTML+=`
       <div class="item-carrinho">
         <div>${i.nome}</div>
@@ -187,6 +219,7 @@ function renderCarrinho(){
       </div>
     `;
   });
+
   totalCarrinho.innerText=total.toFixed(2);
 }
 
@@ -211,7 +244,8 @@ function diminuir(id){
 function pegarLocalizacao(){
   if(!navigator.geolocation)return;
   navigator.geolocation.getCurrentPosition(pos=>{
-    endereco.value=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+    endereco.value=
+      `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
   });
 }
 
@@ -225,27 +259,56 @@ async function finalizarPedido(){
   let total=0;
   carrinho.forEach(i=>total+=i.preco*i.qtd);
 
-  const {data:pedido}=await sb.from("pedidos").insert([{
-    app_id,
-    cliente_nome:cliente.value,
-    telefone:telefone.value,
-    endereco:endereco.value,
-    observacao:obs.value,
-    forma_pagamento:pagamento.value,
-    status:"novo",
-    total
-  }]).select().single();
+  if(fluxoPedido==="sistema"){
 
-  await sb.from("pedido_itens").insert(
-    carrinho.map(i=>({
-      pedido_id:pedido.id,
-      nome_produto:i.nome,
-      quantidade:i.qtd,
-      preco:i.preco
-    }))
-  );
+    const {data:pedido,error}=await sb.from("pedidos").insert([{
+      app_id,
+      cliente_nome:cliente.value,
+      telefone:telefone.value,
+      endereco:endereco.value,
+      observacao:obs.value,
+      forma_pagamento:pagamento.value,
+      status:"novo",
+      total
+    }]).select().single();
 
-  alert("Pedido enviado!");
+    if(error){
+      alert("Erro ao enviar pedido");
+      return;
+    }
+
+    await sb.from("pedido_itens").insert(
+      carrinho.map(i=>({
+        pedido_id:pedido.id,
+        nome_produto:i.nome,
+        quantidade:i.qtd,
+        preco:i.preco
+      }))
+    );
+
+    alert("Pedido enviado!");
+
+  }else{
+
+    let msg="🛒 *Novo Pedido*\n\n";
+
+    carrinho.forEach(i=>{
+      msg+=`• ${i.nome} x${i.qtd}\n`;
+    });
+
+    msg+=`\n💰 Total: R$ ${total.toFixed(2)}`;
+    msg+=`\n👤 ${cliente.value}`;
+    msg+=`\n📞 ${telefone.value}`;
+    if(endereco.value) msg+=`\n📍 ${endereco.value}`;
+    if(obs.value) msg+=`\n📝 ${obs.value}`;
+    msg+=`\n💳 ${pagamento.value}`;
+
+    window.open(
+      `https://wa.me/55${whatsappNumero}?text=${encodeURIComponent(msg)}`,
+      "_blank"
+    );
+  }
+
   carrinho=[];
   salvarCarrinho();
   atualizarQtd();
