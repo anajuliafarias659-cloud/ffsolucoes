@@ -23,23 +23,24 @@ body{
 }
 
 .container{
-  max-width:1200px;
+  max-width:1100px;
   margin:auto;
   padding:24px;
 }
 
 .status-titulo{
-  margin:30px 0 15px;
+  margin:35px 0 15px;
   font-size:18px;
   font-weight:bold;
   border-bottom:2px solid #1e293b;
   padding-bottom:6px;
+  color:#22c55e;
 }
 
 .card{
   background:#0f172a;
-  border-radius:16px;
-  padding:18px;
+  border-radius:14px;
+  padding:16px;
   margin-bottom:16px;
   border:1px solid #1e293b;
 }
@@ -59,6 +60,13 @@ body{
   color:#94a3b8;
 }
 
+.info{
+  margin-top:8px;
+  font-size:13px;
+  color:#cbd5e1;
+  line-height:1.6;
+}
+
 .item{
   display:flex;
   justify-content:space-between;
@@ -73,23 +81,17 @@ body{
   font-size:15px;
 }
 
-.info{
-  margin-top:10px;
-  font-size:13px;
-  color:#cbd5e1;
-}
-
 button{
   padding:6px 10px;
   border:none;
   border-radius:8px;
   font-weight:bold;
   cursor:pointer;
-  margin-left:5px;
+  margin-left:6px;
+  font-size:12px;
 }
 
 .btn-aceitar{background:#22c55e}
-.btn-preparo{background:#f59e0b}
 .btn-entrega{background:#3b82f6}
 .btn-finalizar{background:#16a34a}
 .btn-cancel{background:#ef4444}
@@ -97,6 +99,12 @@ button{
 .link{
   color:#60a5fa;
   text-decoration:none;
+}
+
+.vazio{
+  text-align:center;
+  opacity:.6;
+  margin-top:40px;
 }
 </style>
 </head>
@@ -139,21 +147,40 @@ async function iniciar(){
 
 async function carregarPedidos(){
 
-  const { data: pedidos } = await supabase
+  const { data: pedidos, error } = await supabase
     .from("pedidos")
-    .select("*")
+    .select(`
+      id,
+      created_at,
+      cliente_nome,
+      telefone,
+      endereco,
+      observacao,
+      forma_pagamento,
+      status,
+      pedido_itens (
+        nome_produto,
+        quantidade,
+        preco
+      )
+    `)
     .eq("app_id", APP_ID)
     .order("created_at",{ascending:false});
 
   const lista = document.getElementById("lista");
   lista.innerHTML="";
 
-  if(!pedidos || pedidos.length===0){
-    lista.innerHTML="Nenhum pedido encontrado";
+  if(error){
+    lista.innerHTML="Erro ao carregar pedidos";
     return;
   }
 
-  const statusLista = {
+  if(!pedidos || pedidos.length===0){
+    lista.innerHTML='<div class="vazio">Nenhum pedido encontrado</div>';
+    return;
+  }
+
+  const grupos = {
     novo: [],
     em_preparo: [],
     saiu_entrega: [],
@@ -161,13 +188,14 @@ async function carregarPedidos(){
   };
 
   pedidos.forEach(p=>{
-    if(statusLista[p.status])
-      statusLista[p.status].push(p);
+    if(grupos[p.status]){
+      grupos[p.status].push(p);
+    }
   });
 
-  for(const status in statusLista){
+  for(const status in grupos){
 
-    if(statusLista[status].length===0) continue;
+    if(grupos[status].length===0) continue;
 
     lista.innerHTML+=`
       <div class="status-titulo">
@@ -175,18 +203,14 @@ async function carregarPedidos(){
       </div>
     `;
 
-    for(const p of statusLista[status]){
-
-      const { data: itens } = await supabase
-        .from("pedido_itens")
-        .select("*")
-        .eq("pedido_id", p.id);
+    grupos[status].forEach(p=>{
 
       let total=0;
 
-      const itensHtml=(itens||[]).map(i=>{
-        const sub=i.quantidade*i.preco;
+      const itensHtml=(p.pedido_itens||[]).map(i=>{
+        const sub = Number(i.quantidade)*Number(i.preco);
         total+=sub;
+
         return `
           <div class="item">
             <span>${i.quantidade}x ${i.nome_produto}</span>
@@ -200,7 +224,7 @@ async function carregarPedidos(){
 
           <div class="card-header">
             <div>
-              <b>${p.cliente_nome}</b><br>
+              <b>${p.cliente_nome||"Cliente"}</b><br>
               <small>${new Date(p.created_at).toLocaleString()}</small>
             </div>
 
@@ -221,10 +245,16 @@ async function carregarPedidos(){
           </div>
 
           <div class="info">
-            📞 <a class="link" href="https://wa.me/55${p.telefone}" target="_blank">${p.telefone||"-"}</a><br>
-            📍 ${p.endereco ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>` : "-"}<br>
-            💳 ${p.forma_pagamento||"-"}<br>
-            📝 ${p.observacao||"-"}
+            📞 <a class="link" href="https://wa.me/55${p.telefone||""}" target="_blank">
+              ${p.telefone||"-"}
+            </a><br>
+
+            📍 ${p.endereco 
+              ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>` 
+              : "-"}
+
+            <br>💳 ${p.forma_pagamento||"-"}
+            <br>📝 ${p.observacao||"-"}
           </div>
 
           <hr>
@@ -237,7 +267,7 @@ async function carregarPedidos(){
 
         </div>
       `;
-    }
+    });
   }
 }
 
