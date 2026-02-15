@@ -8,21 +8,62 @@
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
-.container{max-width:1100px;margin:auto;padding:24px}
-.card{background:#0f172a;border-radius:16px;padding:16px;margin-bottom:16px}
-.top{display:flex;justify-content:space-between;align-items:flex-start}
-.item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b;font-size:14px}
-.total{font-weight:bold;font-size:16px;margin-top:8px}
-button{padding:8px 12px;border:none;border-radius:8px;font-weight:bold;cursor:pointer;margin-left:6px}
+.topo{
+  background:#0f172a;
+  padding:16px 24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:24px;
+}
+.card{
+  background:#0f172a;
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:16px;
+}
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.item{
+  display:flex;
+  justify-content:space-between;
+  padding:6px 0;
+  border-bottom:1px solid #1e293b;
+  font-size:14px;
+}
+.total{
+  font-weight:bold;
+  font-size:16px;
+  margin-top:8px;
+}
+button{
+  padding:8px 12px;
+  border:none;
+  border-radius:8px;
+  font-weight:bold;
+  cursor:pointer;
+  margin-left:6px;
+}
 .btn-ok{background:#22c55e}
-.btn-delivery{background:#f59e0b}
-.btn-final{background:#3b82f6}
 .btn-cancel{background:#ef4444}
 small{color:#94a3b8}
-.vazio{text-align:center;margin-top:40px;color:#94a3b8}
-a{color:#22c55e;text-decoration:none}
-a:hover{text-decoration:underline}
+.vazio{
+  text-align:center;
+  margin-top:40px;
+  color:#94a3b8;
+}
+.info{
+  margin-top:8px;
+  font-size:13px;
+  color:#cbd5e1;
+}
 </style>
 </head>
 
@@ -64,200 +105,97 @@ async function iniciar(){
 
 async function carregarPedidos(){
 
-  const { data } = await supabase
+  const { data: pedidos, error } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      created_at,
-      cliente_nome,
-      telefone,
-      endereco,
-      observacao,
-      forma_pagamento,
-      status,
-      pedido_itens (
-        nome_produto,
-        quantidade,
-        preco
-      )
-    `)
+    .select("*")
     .eq("app_id", APP_ID)
-    .neq("status","cancelado")
+    .eq("status","novo")
     .order("created_at",{ascending:false});
 
-  const lista=document.getElementById("lista");
+  const lista = document.getElementById("lista");
   lista.innerHTML="";
 
-  if(!data || data.length===0){
-    lista.innerHTML='<div class="vazio">Nenhum pedido</div>';
+  if(error){
+    lista.innerHTML="Erro ao carregar pedidos";
     return;
   }
 
-  data.forEach(p=>{
+  if(!pedidos || pedidos.length===0){
+    lista.innerHTML='<div class="vazio">Nenhum pedido novo</div>';
+    return;
+  }
+
+  for(const p of pedidos){
+
+    const { data: itens } = await supabase
+      .from("pedido_itens")
+      .select("*")
+      .eq("pedido_id", p.id);
 
     let total=0;
 
-    const itensHtml=(p.pedido_itens||[]).map(i=>{
-      const sub=Number(i.quantidade)*Number(i.preco);
+    const itensHtml = (itens||[]).map(i=>{
+      const sub = Number(i.quantidade)*Number(i.preco);
       total+=sub;
-      return `<div class="item">
-                <span>${i.quantidade}x ${i.nome_produto}</span>
-                <span>R$ ${sub.toFixed(2)}</span>
-              </div>`;
+
+      return `
+        <div class="item">
+          <span>${i.quantidade}x ${i.nome_produto}</span>
+          <span>R$ ${sub.toFixed(2)}</span>
+        </div>`;
     }).join("");
 
     lista.innerHTML+=`
       <div class="card">
+
         <div class="top">
           <div>
             <b>${p.cliente_nome||"Cliente"}</b><br>
             <small>${new Date(p.created_at).toLocaleString()}</small><br>
-
-            ${p.telefone ? `<small>📱 ${p.telefone}</small><br>` : ""}
-
-            ${p.endereco ? `
-              <small>
-                📍 <a href="${p.endereco}" target="_blank">
-                Ver localização
-                </a>
-              </small><br>
-            ` : ""}
-
-            ${p.observacao ? `
-              <small>📝 ${p.observacao}</small><br>
-            ` : ""}
-
-            <small>Pagamento: ${p.forma_pagamento||"-"}</small><br>
-            <small>Status: ${p.status}</small>
+            <small>Pagamento: ${p.forma_pagamento||"-"}</small>
           </div>
           <div>
-            ${botoesStatus(p)}
+            <button class="btn-ok" onclick="aceitar('${p.id}')">✔ Aceitar</button>
+            <button class="btn-cancel" onclick="cancelar('${p.id}')">✖ Cancelar</button>
           </div>
         </div>
+
+        <div class="info">
+          📞 ${p.telefone||"-"}<br>
+          📍 ${p.endereco||"-"}<br>
+          📝 ${p.observacao||"-"}
+        </div>
+
+        <hr>
 
         ${itensHtml}
 
         <div class="total">
           Total: R$ ${total.toFixed(2)}
         </div>
+
       </div>`;
-  });
+  }
 }
 
-function botoesStatus(p){
-
-  if(p.status==="novo"){
-    return `
-      <button class="btn-ok" onclick="aceitar('${p.id}')">✔ Aceitar</button>
-      <button class="btn-cancel" onclick="cancelar('${p.id}')">✖ Cancelar</button>`;
-  }
-
-  if(p.status==="em_preparo"){
-    return `
-      <button class="btn-delivery" onclick="saiuEntrega('${p.id}')">
-      🚚 Saiu p/ Entrega</button>`;
-  }
-
-  if(p.status==="saiu_entrega"){
-    return `
-      <button class="btn-final" onclick="finalizar('${p.id}')">
-      ✅ Finalizar</button>`;
-  }
-
-  return "";
-}
-
-async function enviarWhats(pedido,mensagem){
-
-  if(!pedido.telefone) return;
-
-  window.open(
-    `https://wa.me/55${pedido.telefone}?text=${encodeURIComponent(mensagem)}`,
-    "_blank"
-  );
-}
-
-window.aceitar=async function(id){
-
-  const { data:pedido } = await supabase
-    .from("pedidos")
-    .select("cliente_nome, telefone")
-    .eq("id",id)
-    .single();
+window.aceitar = async function(id){
 
   await supabase
     .from("pedidos")
-    .update({status:"em_preparo"})
-    .eq("id",id);
-
-  await enviarWhats(pedido,
-`Olá ${pedido.cliente_nome || ""} 👋
-
-✅ Seu pedido foi aceito!
-👨‍🍳 Já está em preparo.
-
-Avisaremos quando sair para entrega 🚀`
-  );
-
-  carregarPedidos();
-};
-
-window.saiuEntrega=async function(id){
-
-  const { data:pedido } = await supabase
-    .from("pedidos")
-    .select("cliente_nome, telefone")
-    .eq("id",id)
-    .single();
-
-  await supabase
-    .from("pedidos")
-    .update({status:"saiu_entrega"})
-    .eq("id",id);
-
-  await enviarWhats(pedido,
-`🚚 Seu pedido saiu para entrega!
-
-📱 Fique atento ao celular.
-Nosso entregador pode entrar em contato.
-
-Obrigado pela preferência 🙏`
-  );
-
-  carregarPedidos();
-};
-
-window.finalizar=async function(id){
-
-  await supabase
-    .from("pedidos")
-    .update({status:"finalizado"})
+    .update({ status:"em_preparo" })
     .eq("id",id);
 
   carregarPedidos();
 };
 
-window.cancelar=async function(id){
+window.cancelar = async function(id){
 
   if(!confirm("Deseja cancelar este pedido?")) return;
 
-  const { data:pedido } = await supabase
-    .from("pedidos")
-    .select("cliente_nome, telefone")
-    .eq("id",id)
-    .single();
-
   await supabase
     .from("pedidos")
-    .update({status:"cancelado"})
+    .update({ status:"cancelado" })
     .eq("id",id);
-
-  await enviarWhats(pedido,
-`Olá ${pedido.cliente_nome || ""}
-
-❌ Seu pedido foi cancelado.
-Se precisar estamos à disposição.`
-  );
 
   carregarPedidos();
 };
