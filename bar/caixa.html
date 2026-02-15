@@ -16,9 +16,19 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .resumo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-top:15px}
 .card{background:#1e293b;padding:15px;border-radius:12px;text-align:center}
 .card h4{margin:0;color:#94a3b8;font-size:14px}
-.card p{margin:8px 0 0 0;font-size:18px;font-weight:bold;color:#22c55e}
+.card p{margin:8px 0 0 0;font-size:18px;font-weight:bold;color:#22c55e;white-space:pre-line}
 button{padding:10px 16px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer;margin-right:8px}
 button.sec{background:#1e293b;color:#fff}
+.badge{background:#ef4444;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:6px}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{padding:10px;border-bottom:1px solid #1e293b;font-size:14px}
+th{color:#94a3b8}
+.alerta.piscar{animation:piscar 1s infinite}
+@keyframes piscar{
+  0%{box-shadow:0 0 0 transparent}
+  50%{box-shadow:0 0 18px rgba(234,179,8,.9)}
+  100%{box-shadow:0 0 0 transparent}
+}
 </style>
 </head>
 
@@ -27,13 +37,16 @@ button.sec{background:#1e293b;color:#fff}
 <div class="topo">
   <h2>💰 Caixa</h2>
   <div>
-    <button onclick="gerarFechamento()">🔄 Atualizar</button>
-    <button onclick="fecharCaixa()">📄 Gerar PDF</button>
-    <button class="sec" onclick="location.href='admin.html'">Voltar</button>
+    <button class="alerta" id="btnContas" style="display:none" onclick="scrollContas()">
+      🔔 Contas <span class="badge" id="qtdContas">0</span>
+    </button>
+    <button class="sec" onclick="irPara('historico.html')">📊 Histórico</button>
+    <button class="sec" onclick="irPara('admin.html')">Voltar</button>
   </div>
 </div>
 
 <div class="container">
+
   <div class="box">
     <h3>📊 Fechamento de Caixa</h3>
 
@@ -49,21 +62,46 @@ button.sec{background:#1e293b;color:#fff}
       </div>
 
       <div class="card">
+        <h4>Por Forma de Pagamento</h4>
+        <p id="formasPagamento">--</p>
+      </div>
+
+      <div class="card">
         <h4>Data</h4>
         <p id="dataHoje">--/--/----</p>
       </div>
     </div>
+
+    <br>
+    <button onclick="gerarFechamento()">🔄 Atualizar</button>
+    <button onclick="gerarPDF()">📄 Gerar PDF</button>
   </div>
+
+  <div class="box" id="boxContas" style="display:none">
+    <h3>🧾 Mesas aguardando pagamento</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Mesa</th>
+          <th>Total</th>
+          <th>Ação</th>
+        </tr>
+      </thead>
+      <tbody id="listaContas"></tbody>
+    </table>
+  </div>
+
 </div>
 
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-let pedidosDoDia = [];
+let resumoFormasGlobal = "";
 
 async function iniciar(){
 
   const { data: { session } } = await supabase.auth.getSession();
+
   if(!session){
     location.href="/auth/login.html";
     return;
@@ -78,6 +116,59 @@ async function iniciar(){
   window.APP_ID = usuario.app_id;
 
   await gerarFechamento();
+  await verificarContas();
+
+  setInterval(verificarContas,3000);
+}
+
+window.irPara = p => location.href = p;
+window.scrollContas = () =>
+  document.getElementById("boxContas").scrollIntoView({behavior:"smooth"});
+window.irPagamento = id =>
+  location.href = `pagamento.html?pedido=${id}`;
+
+async function verificarContas(){
+
+  const { data } = await supabase
+    .from("pedidos")
+    .select("id, mesas(numero_mesa), pedido_itens(preco,quantidade)")
+    .eq("app_id", window.APP_ID)
+    .eq("status","conta_solicitada");
+
+  const btn = document.getElementById("btnContas");
+  const qtd = document.getElementById("qtdContas");
+  const box = document.getElementById("boxContas");
+  const lista = document.getElementById("listaContas");
+
+  lista.innerHTML="";
+
+  if(data && data.length>0){
+
+    btn.style.display="inline-block";
+    btn.classList.add("piscar");
+    qtd.innerText=data.length;
+    box.style.display="block";
+
+    data.forEach(p=>{
+      let total=0;
+      (p.pedido_itens || []).forEach(i=>{
+        total+=Number(i.preco)*Number(i.quantidade);
+      });
+
+      lista.innerHTML+=`
+        <tr>
+          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
+          <td>R$ ${total.toFixed(2)}</td>
+          <td><button onclick="irPagamento('${p.id}')">💳 Pagar</button></td>
+        </tr>
+      `;
+    });
+
+  } else {
+    btn.style.display="none";
+    btn.classList.remove("piscar");
+    box.style.display="none";
+  }
 }
 
 window.gerarFechamento = async function(){
@@ -88,108 +179,70 @@ window.gerarFechamento = async function(){
   const fim = new Date();
   fim.setHours(23,59,59,999);
 
-  const { data } = await supabase
+  const { data: pedidos } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      mesa_id,
-      forma_pagamento,
-      mesas(numero_mesa),
-      pedido_itens(preco,quantidade)
-    `)
+    .select("id, forma_pagamento, pedido_itens(preco,quantidade)")
     .eq("app_id", window.APP_ID)
     .eq("status","finalizado")
     .gte("created_at", inicio.toISOString())
     .lte("created_at", fim.toISOString());
 
-  pedidosDoDia = data || [];
+  let total=0;
+  let formas={};
 
-  let total = 0;
+  (pedidos || []).forEach(p=>{
+    let totalPedido=0;
 
-  pedidosDoDia.forEach(p=>{
     (p.pedido_itens || []).forEach(i=>{
-      total += Number(i.preco) * Number(i.quantidade);
+      totalPedido+=Number(i.preco)*Number(i.quantidade);
     });
+
+    total+=totalPedido;
+
+    const forma=p.forma_pagamento || "Não informado";
+    if(!formas[forma]) formas[forma]=0;
+    formas[forma]+=totalPedido;
   });
 
   document.getElementById("totalRecebido").innerText =
-    "R$ " + total.toFixed(2);
+    "R$ "+total.toFixed(2);
 
   document.getElementById("qtdVendas").innerText =
-    pedidosDoDia.length;
+    pedidos?.length || 0;
 
   document.getElementById("dataHoje").innerText =
     new Date().toLocaleDateString("pt-BR");
+
+  let resumo="";
+  for(const f in formas){
+    resumo+=`${f}: R$ ${formas[f].toFixed(2)}\n`;
+  }
+
+  resumoFormasGlobal=resumo;
+  document.getElementById("formasPagamento").innerText =
+    resumo || "--";
 };
 
-/* =========================
-   PDF COMPLETO PROFISSIONAL
-========================= */
-
-window.fecharCaixa = async function(){
-
-  await gerarFechamento();
+window.gerarPDF = function(){
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
-  const dataHoje = new Date().toLocaleDateString("pt-BR");
-
   doc.setFontSize(16);
-  doc.text("FECHAMENTO DE CAIXA", 20, 20);
+  doc.text("FECHAMENTO DE CAIXA",20,20);
 
   doc.setFontSize(12);
-  doc.text("Data: " + dataHoje, 20, 35);
+  doc.text("Data: "+document.getElementById("dataHoje").innerText,20,35);
+  doc.text("Total Recebido: "+document.getElementById("totalRecebido").innerText,20,45);
+  doc.text("Quantidade de Vendas: "+document.getElementById("qtdVendas").innerText,20,55);
 
-  let y = 50;
-  let total = 0;
-  let formas = {};
-
-  doc.text("Detalhamento:", 20, y);
-  y += 10;
-
-  pedidosDoDia.forEach(p=>{
-
-    let totalPedido = 0;
-
-    (p.pedido_itens || []).forEach(i=>{
-      totalPedido += Number(i.preco) * Number(i.quantidade);
-    });
-
-    total += totalPedido;
-
-    let identificacao = "Venda Avulsa";
-    if(p.mesas?.numero_mesa){
-      identificacao = "Mesa " + p.mesas.numero_mesa;
-    }
-
-    let forma = p.forma_pagamento || "Não informado";
-
-    if(!formas[forma]) formas[forma] = 0;
-    formas[forma] += totalPedido;
-
-    doc.text(`${identificacao} | ${forma} | R$ ${totalPedido.toFixed(2)}`, 20, y);
-    y += 8;
-
-    if(y > 270){
-      doc.addPage();
-      y = 20;
-    }
-  });
-
-  y += 5;
-  doc.text("Total Geral: R$ " + total.toFixed(2), 20, y);
-
-  y += 12;
-  doc.text("Resumo por Forma de Pagamento:", 20, y);
-  y += 8;
-
-  for(const forma in formas){
-    doc.text(`${forma}: R$ ${formas[forma].toFixed(2)}`, 20, y);
-    y += 8;
+  if(resumoFormasGlobal){
+    doc.text("Por Forma de Pagamento:",20,70);
+    const linhas = doc.splitTextToSize(resumoFormasGlobal,170);
+    doc.text(linhas,20,80);
   }
 
-  doc.save("fechamento-caixa-" + dataHoje + ".pdf");
+  doc.save("fechamento-caixa.pdf");
 };
 
 iniciar();
