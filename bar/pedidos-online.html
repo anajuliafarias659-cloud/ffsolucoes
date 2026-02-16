@@ -121,7 +121,6 @@ async function iniciar(){
 
   carregarPedidos();
 
-  // REALTIME
   supabase
   .channel('pedidos-channel')
   .on(
@@ -141,21 +140,15 @@ async function iniciar(){
 
 async function carregarPedidos(){
 
-  const { data: pedidos, error } = await supabase
+  const { data: pedidos } = await supabase
     .from("pedidos")
     .select("*")
     .eq("app_id", APP_ID)
-    .not("status","in","(finalizado,cancelado)") // 🔥 some automaticamente
+    .not("status","in","(finalizado,cancelado)")
     .order("created_at",{ascending:true});
 
   const lista = document.getElementById("lista");
   lista.innerHTML="";
-
-  if(error){
-    console.log(error);
-    lista.innerHTML="Erro ao carregar pedidos";
-    return;
-  }
 
   if(!pedidos || pedidos.length===0){
     lista.innerHTML="Nenhum pedido ativo";
@@ -213,7 +206,6 @@ async function carregarPedidos(){
           📞 <a class="link" href="https://wa.me/55${(p.telefone||"").replace(/\D/g,"")}" target="_blank">
             ${p.telefone}
           </a><br>
-
           🏠 ${p.endereco || "-"}<br>
           💳 ${p.forma_pagamento || "-"}<br>
           📝 ${p.observacao || "-"}
@@ -236,16 +228,20 @@ window.mudarStatus = async function(id,status){
 
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_nome, telefone")
+    .select("cliente_nome, telefone, endereco, forma_pagamento, total")
     .eq("id", id)
     .single();
+
+  const { data: itens } = await supabase
+    .from("pedido_itens")
+    .select("nome_produto, quantidade")
+    .eq("pedido_id", id);
 
   await supabase
     .from("pedidos")
     .update({ status })
     .eq("id", id);
 
-  // 🔥 Remove da tela automaticamente se finalizar ou cancelar
   if(status==="finalizado" || status==="cancelado"){
     carregarPedidos();
   }
@@ -254,33 +250,42 @@ window.mudarStatus = async function(id,status){
 
   const numero = pedido.telefone.replace(/\D/g,"");
 
-  let mensagem = "";
+  let listaProdutos = "";
+  if(itens && itens.length){
+    itens.forEach(i=>{
+      listaProdutos += `• ${i.quantidade}x ${i.nome_produto}\n`;
+    });
+  }
+
+  let mensagem = `Olá ${pedido.cliente_nome} 👋
+
+🧾 *Detalhes do seu pedido:*
+
+${listaProdutos}
+
+💰 Total: R$ ${Number(pedido.total || 0).toFixed(2)}
+💳 Pagamento: ${pedido.forma_pagamento || "-"}
+📍 Endereço: ${pedido.endereco || "-"}
+
+`;
 
   if(status==="em_preparo"){
-    mensagem = `Olá ${pedido.cliente_nome} 😊
-
-Seu pedido foi ACEITO ✅
-Já está sendo preparado 🍳`;
+    mensagem += `✅ Seu pedido foi ACEITO e já está sendo preparado 🍳`;
   }
 
   if(status==="saiu_entrega"){
-    mensagem = `Olá ${pedido.cliente_nome} 🚚
-
-Seu pedido saiu para entrega!
+    mensagem += `🚚 Seu pedido saiu para entrega!
 Fique atento ao telefone 📞`;
   }
 
   if(status==="finalizado"){
-    mensagem = `Olá ${pedido.cliente_nome} 🙌
-
-Pedido entregue com sucesso!
+    mensagem += `🎉 Pedido entregue com sucesso!
 Obrigado pela preferência 💚`;
   }
 
   if(status==="cancelado"){
-    mensagem = `Olá ${pedido.cliente_nome},
-
-Seu pedido foi cancelado.`;
+    mensagem += `❌ Seu pedido foi cancelado.
+Qualquer dúvida estamos à disposição.`;
   }
 
   const link = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`;
