@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <script type="module" src="../js/auth.js"></script>
 
 <style>
@@ -31,9 +32,16 @@ body{
 .card{
   background:#0f172a;
   border-radius:14px;
-  padding:16px;
+  padding:18px;
   margin-bottom:20px;
   border:1px solid #1e293b;
+}
+
+.card-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-bottom:10px;
 }
 
 .item{
@@ -57,15 +65,24 @@ body{
   line-height:1.6;
 }
 
+button{
+  padding:6px 10px;
+  border:none;
+  border-radius:8px;
+  font-weight:bold;
+  cursor:pointer;
+  margin-left:6px;
+  font-size:12px;
+}
+
+.btn-aceitar{background:#22c55e}
+.btn-entrega{background:#3b82f6}
+.btn-finalizar{background:#16a34a}
+.btn-cancel{background:#ef4444}
+
 .link{
   color:#60a5fa;
   text-decoration:none;
-}
-
-.vazio{
-  text-align:center;
-  opacity:.6;
-  margin-top:40px;
 }
 </style>
 </head>
@@ -118,13 +135,12 @@ async function carregarPedidos(){
   lista.innerHTML="";
 
   if(error){
-    console.error(error);
     lista.innerHTML="Erro ao carregar pedidos";
     return;
   }
 
   if(!pedidos || pedidos.length===0){
-    lista.innerHTML='<div class="vazio">Nenhum pedido encontrado</div>';
+    lista.innerHTML="Nenhum pedido encontrado";
     return;
   }
 
@@ -142,7 +158,6 @@ async function carregarPedidos(){
       itens.forEach(i=>{
         const sub = Number(i.quantidade) * Number(i.preco);
         total += sub;
-
         htmlItens += `
           <div class="item">
             <span>${i.quantidade}x ${i.nome_produto}</span>
@@ -157,24 +172,43 @@ async function carregarPedidos(){
     lista.innerHTML += `
       <div class="card">
 
-        <b>${p.cliente_nome || "Cliente"}</b><br>
-        <small>${new Date(p.created_at).toLocaleString()}</small>
+        <div class="card-header">
+          <div>
+            <b>${p.cliente_nome || "Cliente"}</b><br>
+            <small>${new Date(p.created_at).toLocaleString()}</small>
+          </div>
+
+          <div>
+            ${p.status==="novo"?`
+              <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
+              <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
+            `:""}
+
+            ${p.status==="em_preparo"?`
+              <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu</button>
+            `:""}
+
+            ${p.status==="saiu_entrega"?`
+              <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Entregue</button>
+            `:""}
+          </div>
+        </div>
 
         <div class="info">
-          📞 ${
-            p.telefone
-            ? `<a class="link" href="https://wa.me/55${p.telefone}" target="_blank">${p.telefone}</a>`
-            : "-"
-          }<br>
+          📞 <a class="link" href="https://wa.me/55${p.telefone || ""}" target="_blank">
+            ${p.telefone || "-"}
+          </a><br>
+
+          🏠 Endereço: ${p.endereco || "-"}<br>
 
           📍 ${
-            p.endereco
-            ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>`
-            : "-"
-          }<br>
+            p.endereco && p.endereco.includes("http")
+              ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>`
+              : ""
+          }
 
-          💳 ${p.forma_pagamento || "-"}<br>
-          📝 ${p.observacao || "-"}
+          <br>💳 ${p.forma_pagamento || "-"}
+          <br>📝 ${p.observacao || "-"}
         </div>
 
         <hr>
@@ -189,6 +223,64 @@ async function carregarPedidos(){
     `;
   }
 }
+
+window.mudarStatus = async function(id,status){
+
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select("cliente_nome, telefone")
+    .eq("id", id)
+    .single();
+
+  await supabase
+    .from("pedidos")
+    .update({ status })
+    .eq("id", id);
+
+  if(!pedido?.telefone){
+    carregarPedidos();
+    return;
+  }
+
+  const numero = pedido.telefone.replace(/\D/g,"");
+
+  let mensagem = "";
+
+  if(status==="em_preparo"){
+    mensagem = `Olá ${pedido.cliente_nome} 😊
+
+Seu pedido foi ACEITO ✅
+Já está em preparo 🍳
+
+Avisaremos quando sair para entrega 🚀`;
+  }
+
+  if(status==="saiu_entrega"){
+    mensagem = `Olá ${pedido.cliente_nome} 🚚
+
+Seu pedido saiu para entrega!
+Fique atento ao telefone 📞`;
+  }
+
+  if(status==="finalizado"){
+    mensagem = `Olá ${pedido.cliente_nome} 🙌
+
+Pedido entregue com sucesso!
+Obrigado pela preferência 💚`;
+  }
+
+  if(status==="cancelado"){
+    mensagem = `Olá ${pedido.cliente_nome}
+
+Seu pedido foi cancelado.
+Qualquer dúvida estamos à disposição.`;
+  }
+
+  const link = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`;
+  window.open(link,"_blank");
+
+  carregarPedidos();
+};
 
 iniciar();
 </script>
