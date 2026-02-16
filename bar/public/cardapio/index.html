@@ -82,14 +82,13 @@ input,select,textarea{width:100%;margin-top:8px;padding:10px;border-radius:8px;b
 <hr>
 
 <input id="cliente" placeholder="Seu nome *">
-<input id="telefone" placeholder="Telefone" onblur="buscarCliente()">
+<input id="telefone" placeholder="Telefone">
 
 <input id="endereco_rua" placeholder="Rua / Avenida *">
 <input id="endereco_numero" placeholder="Número *">
 <input id="endereco_ref" placeholder="Complemento / Referência">
 
 <input id="endereco" placeholder="Link da localização (opcional)">
-<button onclick="pegarLocalizacao()">📍 Pegar minha localização</button>
 
 <select id="pagamento">
 <option value="">Forma de pagamento *</option>
@@ -121,9 +120,79 @@ carrinho = JSON.parse(localStorage.getItem(carrinhoKey)) || [];
 
 function salvarCarrinho(){localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));}
 
-/* --- RESTANTE DO CÓDIGO IGUAL AO SEU --- */
+async function carregarProdutos(){
+const {data}=await sb.from("produtos")
+.select("id,nome,preco,foto,destino")
+.eq("app_id",app_id)
+.eq("ativo",true);
 
-/* 🔥 AJUSTE AQUI: */
+produtos=data||[];
+render();
+}
+
+function render(){
+conteudo.innerHTML="";
+produtos.filter(p=>(p.destino||"").toUpperCase()===filtro)
+.forEach(p=>{
+conteudo.innerHTML+=`
+<div class="produto">
+${p.foto?`<img src="${p.foto}">`:""}
+<b>${p.nome}</b>
+<div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+<button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
+</div>`;
+});
+atualizarQtd();
+}
+
+function addProduto(id){
+const p=produtos.find(x=>x.id===id);
+const i=carrinho.find(x=>x.id===id);
+i?i.qtd++:carrinho.push({...p,qtd:1});
+salvarCarrinho();
+atualizarQtd();
+}
+
+function atualizarQtd(){qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);}
+function abrirCarrinho(){modal.style.display="block";renderCarrinho();}
+function fecharCarrinho(){modal.style.display="none";}
+
+function renderCarrinho(){
+lista.innerHTML="";
+let total=0;
+carrinho.forEach(i=>{
+total+=i.preco*i.qtd;
+lista.innerHTML+=`
+<div class="item">
+<span>${i.nome} x${i.qtd}</span>
+<div>
+<button class="qty-btn" onclick="addProduto('${i.id}')">+</button>
+</div>
+</div>`;
+});
+document.getElementById("total").innerText=total.toFixed(2);
+}
+
+/* FINALIZAR AJUSTADO */
+async function finalizar(){
+
+if(carrinho.length===0){alert("Adicione produtos.");return;}
+
+const nomeCliente=cliente.value.trim();
+const telefoneVal=telefone.value.trim();
+const rua=endereco_rua.value.trim();
+const numero=endereco_numero.value.trim();
+const pagamentoVal=pagamento.value;
+
+if(!nomeCliente||!rua||!numero||!pagamentoVal){
+alert("Preencha nome, endereço, número e pagamento.");
+return;
+}
+
+let total=0;
+carrinho.forEach(i=> total+=i.preco*i.qtd);
+
+/* 🔥 AJUSTE AQUI */
 const {data:pedidoExistente}=await sb.from("pedidos")
 .select("*")
 .eq("app_id",app_id)
@@ -133,6 +202,76 @@ const {data:pedidoExistente}=await sb.from("pedidos")
 .limit(1)
 .maybeSingle();
 
+if(pedidoExistente){
+
+const confirmar=confirm(
+"Você já possui um pedido em andamento.\n\nDeseja adicionar os itens ao pedido atual?"
+);
+
+if(confirmar){
+
+const novoTotal=Number(pedidoExistente.total||0)+total;
+
+await sb.from("pedido_itens").insert(
+carrinho.map(i=>({
+id:crypto.randomUUID(),
+pedido_id:pedidoExistente.id,
+produto_id:i.id,
+nome_produto:i.nome,
+quantidade:i.qtd,
+preco:i.preco,
+app_id:app_id
+}))
+);
+
+await sb.from("pedidos")
+.update({total:novoTotal})
+.eq("id",pedidoExistente.id);
+
+alert("Itens adicionados ao pedido existente!");
+
+}else{
+alert("Pedido cancelado pelo cliente.");
+return;
+}
+
+}else{
+
+const {data:pedido}=await sb.from("pedidos").insert([{
+app_id,
+cliente_nome:nomeCliente,
+telefone:telefoneVal,
+endereco:`${rua}, Nº ${numero}`,
+forma_pagamento:pagamentoVal,
+total,
+status:"novo"
+}]).select().single();
+
+await sb.from("pedido_itens").insert(
+carrinho.map(i=>({
+id:crypto.randomUUID(),
+pedido_id:pedido.id,
+produto_id:i.id,
+nome_produto:i.nome,
+quantidade:i.qtd,
+preco:i.preco,
+app_id:app_id
+}))
+);
+
+alert("Pedido enviado com sucesso!");
+}
+
+carrinho=[];
+salvarCarrinho();
+atualizarQtd();
+fecharCarrinho();
+}
+
+btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
+btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
+
+(async()=>{await carregarProdutos();})();
 </script>
 
 </body>
