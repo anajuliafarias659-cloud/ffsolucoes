@@ -137,21 +137,7 @@ async function carregarPedidos(){
 
   const { data: pedidos, error } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      created_at,
-      cliente_nome,
-      telefone,
-      endereco,
-      observacao,
-      forma_pagamento,
-      status,
-      pedido_itens (
-        nome_produto,
-        quantidade,
-        preco
-      )
-    `)
+    .select("*")
     .eq("app_id", APP_ID)
     .order("created_at",{ascending:false});
 
@@ -165,76 +151,53 @@ async function carregarPedidos(){
   }
 
   if(!pedidos || pedidos.length===0){
-    lista.innerHTML='<div class="vazio">Nenhum pedido encontrado</div>';
+    lista.innerHTML="Nenhum pedido encontrado";
     return;
   }
 
-  pedidos.forEach(p=>{
+  for(const p of pedidos){
 
-    let total=0;
+    const { data: itens } = await supabase
+      .from("pedido_itens")
+      .select("nome_produto, quantidade, preco")
+      .eq("pedido_id", p.id);
 
-    const itensHtml=(p.pedido_itens || []).map(i=>{
-      const sub = Number(i.quantidade)*Number(i.preco);
-      total+=sub;
+    let total = 0;
 
-      return `
-        <div class="item">
-          <span>${i.quantidade}x ${i.nome_produto}</span>
-          <span>R$ ${sub.toFixed(2)}</span>
-        </div>
-      `;
-    }).join("");
+    let htmlItens = "";
 
-    lista.innerHTML+=`
-      <div class="card">
-
-        <div class="card-header">
-          <div>
-            <b>${p.cliente_nome || "Cliente"}</b><br>
-            <small>${new Date(p.created_at).toLocaleString()}</small>
+    if(itens && itens.length){
+      itens.forEach(i=>{
+        const sub = Number(i.quantidade) * Number(i.preco);
+        total += sub;
+        htmlItens += `
+          <div style="display:flex;justify-content:space-between;margin:5px 0;">
+            <span>${i.quantidade}x ${i.nome_produto}</span>
+            <span>R$ ${sub.toFixed(2)}</span>
           </div>
+        `;
+      });
+    } else {
+      htmlItens = "<small>Nenhum item encontrado</small>";
+    }
 
-          <div>
-            ${p.status==="novo"?`
-              <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
-              <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
-            `:""}
-
-            ${p.status==="em_preparo"?`
-              <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu</button>
-            `:""}
-
-            ${p.status==="saiu_entrega"?`
-              <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Entregue</button>
-            `:""}
-          </div>
-        </div>
-
-        <div class="info">
-          📞 <a class="link" href="https://wa.me/55${p.telefone||""}" target="_blank">
-            ${p.telefone||"-"}
-          </a><br>
-
-          📍 ${p.endereco 
-            ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>` 
-            : "-"}
-
-          <br>💳 ${p.forma_pagamento||"-"}
-          <br>📝 ${p.observacao||"-"}
-        </div>
+    lista.innerHTML += `
+      <div style="background:#0f172a;padding:15px;border-radius:10px;margin-bottom:15px;">
+        <b>${p.cliente_nome || "Cliente"}</b><br>
+        <small>${new Date(p.created_at).toLocaleString()}</small>
 
         <hr>
 
-        ${itensHtml}
+        ${htmlItens}
 
-        <div class="total">
-          Total: R$ ${total.toFixed(2)}
-        </div>
+        <hr>
 
+        <b>Total: R$ ${total.toFixed(2)}</b>
       </div>
     `;
-  });
+  }
 }
+
 
 window.mudarStatus = async function(id,status){
 
@@ -251,3 +214,4 @@ iniciar();
 
 </body>
 </html>
+
