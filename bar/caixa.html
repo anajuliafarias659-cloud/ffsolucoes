@@ -99,13 +99,12 @@ async function aguardarSessao(){
 
   console.log("APP_ID carregado:", window.APP_ID);
 
-  // 🔥 GARANTE QUE REALTIME USE A SESSÃO ATUAL
   const { data: { session } } = await supabase.auth.getSession();
   if(session){
     await supabase.realtime.setAuth(session.access_token);
   }
 
-  await verificarContas(window.APP_ID);
+  await verificarContas();
   await gerarFechamento();
   ativarRealtime();
 }
@@ -116,7 +115,7 @@ window.scrollContas = () => document.getElementById("boxContas").scrollIntoView(
 window.irPagamento = id => location.href = `pagamento.html?pedido=${id}`;
 
 /* =========================
-   REALTIME ESTÁVEL
+   REALTIME DEFINITIVO
 ========================= */
 function ativarRealtime(){
 
@@ -124,14 +123,12 @@ function ativarRealtime(){
     supabase.removeChannel(canalRealtime);
   }
 
-  console.log("Iniciando Realtime...");
-
   canalRealtime = supabase
-    .channel("caixa-"+window.APP_ID)
+    .channel("caixa-realtime")
     .on(
       "postgres_changes",
       {
-        event: "*",
+        event: "UPDATE",
         schema: "public",
         table: "pedidos"
       },
@@ -139,13 +136,11 @@ function ativarRealtime(){
 
         console.log("Evento recebido:", payload);
 
-        const novoStatus = payload.new?.status;
-
-        if(novoStatus === "conta_solicitada"){
+        if(payload.new.status === "conta_solicitada"){
           tocarSomNotificacao();
         }
 
-        await verificarContas(window.APP_ID);
+        await verificarContas();
         await gerarFechamento();
       }
     )
@@ -155,11 +150,73 @@ function ativarRealtime(){
 }
 
 /* =========================
-   SOM NOTIFICAÇÃO
+   SOM
 ========================= */
 function tocarSomNotificacao(){
   const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
   audio.play().catch(()=>{});
+}
+
+/* =========================
+   CONTAS (SEM BLOQUEIO RLS)
+========================= */
+async function verificarContas(){
+
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select(`
+      id,
+      app_id,
+      status,
+      mesas(numero_mesa),
+      pedido_itens(preco,quantidade)
+    `)
+    .eq("status", "conta_solicitada");
+
+  if(error){
+    console.error("Erro buscar contas:", error);
+    return;
+  }
+
+  const btn = document.getElementById("btnContas");
+  const qtd = document.getElementById("qtdContas");
+  const box = document.getElementById("boxContas");
+  const lista = document.getElementById("listaContas");
+
+  lista.innerHTML = "";
+
+  const filtrados = (data || []).filter(p => p.app_id === window.APP_ID);
+
+  if(filtrados.length > 0){
+
+    btn.style.display = "inline-block";
+    btn.classList.add("piscar");
+    qtd.innerText = filtrados.length;
+    box.style.display = "block";
+
+    filtrados.forEach(p=>{
+      let total = 0;
+
+      (p.pedido_itens || []).forEach(i=>{
+        total += Number(i.preco) * Number(i.quantidade);
+      });
+
+      lista.innerHTML += `
+        <tr>
+          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
+          <td>R$ ${total.toFixed(2)}</td>
+          <td>
+            <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
+          </td>
+        </tr>
+      `;
+    });
+
+  } else {
+    btn.style.display = "none";
+    btn.classList.remove("piscar");
+    box.style.display = "none";
+  }
 }
 
 /* =========================
@@ -223,126 +280,11 @@ window.gerarFechamento = async function(){
   }
   resumoPagamentosGlobal = resumo;
 };
-
-/* =========================
-   FECHAR CAIXA
-========================= */
-window.fecharCaixa = async function(){
-
-  await gerarFechamento();
-
-  const totalTexto = document.getElementById("totalRecebido").innerText;
-  const qtd = parseInt(document.getElementById("qtdVendas").innerText);
-  const dataBR = document.getElementById("dataHoje").innerText;
-
-  const totalNumero = Number(totalTexto.replace("R$","").trim());
-
-  if(qtd === 0){
-    alert("Não há vendas para fechar hoje.");
-    return;
-  }
-
-  if(!confirm("Deseja realmente fechar o caixa?")){
-    return;
-  }
-
-  await supabase.from("fechamentos_caixa").insert([{
-    app_id: window.APP_ID,
-    data: new Date().toISOString().split("T")[0],
-    total: totalNumero,
-    qtd_vendas: qtd,
-    resumo_pagamentos: resumoPagamentosGlobal
-  }]);
-
-  const inicio = new Date();
-  inicio.setHours(0,0,0,0);
-  const amanha = new Date(inicio.getTime() + 86400000);
-
-  await supabase
-    .from("pedidos")
-    .update({ status: "fechado" })
-    .eq("app_id", window.APP_ID)
-    .eq("status", "finalizado")
-    .gte("created_at", inicio.toISOString())
-    .lt("created_at", amanha.toISOString());
-
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  doc.setFontSize(16);
-  doc.text("FECHAMENTO DE CAIXA", 20, 20);
-  doc.setFontSize(12);
-  doc.text("Data: " + dataBR, 20, 35);
-  doc.text("Quantidade de Vendas: " + qtd, 20, 45);
-  doc.text("Total Recebido: R$ " + totalNumero.toFixed(2), 20, 55);
-
-  if(resumoPagamentosGlobal){
-    doc.text("Por Forma de Pagamento:", 20, 70);
-    const linhas = doc.splitTextToSize(resumoPagamentosGlobal, 170);
-    doc.text(linhas, 20, 80);
-  }
-
-  doc.save("fechamento-caixa-" + dataBR + ".pdf");
-
-  document.getElementById("totalRecebido").innerText = "R$ 0.00";
-  document.getElementById("qtdVendas").innerText = "0";
-  resumoPagamentosGlobal = "";
-
-  alert("✅ Caixa fechado com sucesso!");
-};
-
-/* =========================
-   CONTAS
-========================= */
-async function verificarContas(appId){
-
-  const { data } = await supabase
-    .from("pedidos")
-    .select("id, mesas(numero_mesa), pedido_itens(preco,quantidade)")
-    .eq("app_id", appId)
-    .eq("status", "conta_solicitada");
-
-  const btn = document.getElementById("btnContas");
-  const qtd = document.getElementById("qtdContas");
-  const box = document.getElementById("boxContas");
-  const lista = document.getElementById("listaContas");
-
-  lista.innerHTML = "";
-
-  if(data && data.length > 0){
-    btn.style.display = "inline-block";
-    btn.classList.add("piscar");
-    qtd.innerText = data.length;
-    box.style.display = "block";
-
-    data.forEach(p=>{
-      let total = 0;
-      (p.pedido_itens || []).forEach(i=>{
-        total += Number(i.preco) * Number(i.quantidade);
-      });
-
-      lista.innerHTML += `
-        <tr>
-          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
-          <td>R$ ${total.toFixed(2)}</td>
-          <td>
-            <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
-          </td>
-        </tr>
-      `;
-    });
-
-  } else {
-    btn.style.display = "none";
-    btn.classList.remove("piscar");
-    box.style.display = "none";
-  }
-}
 </script>
-
 
 
 </body>
 </html>
+
 
 
