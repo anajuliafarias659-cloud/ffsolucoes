@@ -98,24 +98,13 @@ async function iniciar(){
 }
 
 /* ===============================
-   CARREGAR HISTÓRICO (COM FILTRO)
+   CARREGAR HISTÓRICO (SEM EMBED)
 =============================== */
 async function carregarHistorico(app_id, dataFiltro = null){
 
   let query = supabase
     .from("pedidos")
-    .select(`
-      id,
-      created_at,
-      recebido_por,
-      mesa_id,
-      mesas ( numero_mesa ),
-      pedido_itens (
-        nome_produto,
-        quantidade,
-        preco
-      )
-    `)
+    .select("id, created_at, recebido_por, mesa_id")
     .eq("app_id", app_id)
     .in("status", ["finalizado","fechado"])
     .order("created_at", { ascending:false });
@@ -130,15 +119,43 @@ async function carregarHistorico(app_id, dataFiltro = null){
       .lt("created_at", fim.toISOString());
   }
 
-  const { data, error } = await query;
+  const { data: pedidos, error } = await query;
 
   if(error){
     document.getElementById("lista").innerHTML =
       "Erro ao carregar histórico";
+    console.error(error);
     return;
   }
 
-  vendas = data || [];
+  if(!pedidos || pedidos.length === 0){
+    vendas = [];
+    renderizar();
+    return;
+  }
+
+  const ids = pedidos.map(p => p.id);
+
+  const { data: itens } = await supabase
+    .from("pedido_itens")
+    .select("pedido_id, nome_produto, quantidade, preco")
+    .in("pedido_id", ids);
+
+  const mesaIds = pedidos
+    .map(p => p.mesa_id)
+    .filter(id => id !== null);
+
+  const { data: mesas } = await supabase
+    .from("mesas")
+    .select("id, numero_mesa")
+    .in("id", mesaIds);
+
+  vendas = pedidos.map(p => ({
+    ...p,
+    pedido_itens: (itens || []).filter(i => i.pedido_id === p.id),
+    mesas: (mesas || []).find(m => m.id === p.mesa_id)
+  }));
+
   renderizar();
 }
 
