@@ -2,285 +2,287 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Cardápio</title>
+<title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script type="module" src="../js/auth.js"></script>
 
 <style>
-:root{
-  --primary:#8b5e3c;
-  --bg:#f6f1eb;
-  --text:#2e1f14;
+body{
+  margin:0;
+  font-family:Arial;
+  background:#020617;
+  color:#fff;
 }
-body{margin:0;font-family:Arial;background:var(--bg);color:var(--text);}
-.topo{height:220px;position:relative;display:flex;align-items:center;justify-content:center;}
-.banner{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;}
-.topo::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.4);}
-.topo-conteudo{position:relative;color:#fff;text-align:center;}
-.logo{max-height:70px;display:none}
-.tabs{display:flex;gap:10px;padding:15px}
-.tab{flex:1;padding:12px;border:none;border-radius:10px;background:#fff;font-weight:bold;cursor:pointer;}
-.tab.ativo{background:var(--primary);color:#fff;}
-.container{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:15px;padding:15px;}
-.produto{background:#fff;padding:10px;border-radius:12px;display:flex;flex-direction:column;}
-.produto img{width:100%;height:120px;object-fit:cover;border-radius:10px;}
-.preco{font-weight:bold;margin:5px 0}
-button{padding:8px;border:none;border-radius:8px;cursor:pointer;}
-.add-btn{background:var(--primary);color:#fff;}
-.carrinho-btn{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:12px 25px;border-radius:999px;}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;}
-.modal-box{position:absolute;bottom:0;left:0;right:0;background:#fff;padding:20px;border-radius:20px 20px 0 0;max-height:90vh;overflow:auto;}
-.item{display:flex;justify-content:space-between;margin:6px 0;}
-.qty-btn{background:#ddd;padding:2px 8px;border-radius:6px;}
-input,select,textarea{width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #ddd;}
+
+.topo{
+  background:#0f172a;
+  padding:16px 24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:24px;
+}
+
+.card{
+  background:#0f172a;
+  border-radius:14px;
+  padding:18px;
+  margin-bottom:20px;
+  border:1px solid #1e293b;
+}
+
+.card-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-bottom:10px;
+}
+
+.item{
+  display:flex;
+  justify-content:space-between;
+  padding:6px 0;
+  border-bottom:1px solid #1e293b;
+  font-size:14px;
+}
+
+.total{
+  margin-top:10px;
+  font-weight:bold;
+  font-size:15px;
+}
+
+.info{
+  margin-top:10px;
+  font-size:13px;
+  color:#cbd5e1;
+  line-height:1.6;
+}
+
+button{
+  padding:6px 10px;
+  border:none;
+  border-radius:8px;
+  font-weight:bold;
+  cursor:pointer;
+  margin-left:6px;
+  font-size:12px;
+}
+
+.btn-aceitar{background:#22c55e}
+.btn-entrega{background:#3b82f6}
+.btn-finalizar{background:#16a34a}
+.btn-cancel{background:#ef4444}
+
+.link{
+  color:#60a5fa;
+  text-decoration:none;
+}
 </style>
 </head>
 
 <body>
 
 <div class="topo">
-<img id="banner" class="banner">
-<div class="topo-conteudo">
-<img id="logo" class="logo">
-<h1 id="nome">Cardápio</h1>
-</div>
+  <h2>📦 Pedidos Online</h2>
+  <button onclick="history.back()">⬅ Voltar</button>
 </div>
 
-<div class="tabs">
-<button class="tab ativo" id="btnBar">Bar</button>
-<button class="tab" id="btnCozinha">Cozinha</button>
+<div class="container" id="lista">
+  Carregando pedidos...
 </div>
 
-<div class="container" id="conteudo"></div>
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
-<div class="carrinho-btn" onclick="abrirCarrinho()">
-🛒 Pedido (<span id="qtd">0</span>)
-</div>
+let APP_ID=null;
 
-<div class="modal" id="modal">
-<div class="modal-box">
+async function iniciar(){
 
-<h3>Seu Pedido</h3>
-<div id="lista"></div>
-<b>Total: R$ <span id="total">0.00</span></b>
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    location.href="../auth/login.html";
+    return;
+  }
 
-<hr>
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
 
-<input id="cliente" placeholder="Seu nome *">
-<input id="telefone" placeholder="Telefone">
+  APP_ID = usuario.app_id;
 
-<input id="rua" placeholder="Rua *">
-<input id="numero" placeholder="Número *">
-<input id="bairro" placeholder="Bairro">
-<input id="cidade" placeholder="Cidade">
-<input id="link_localizacao" placeholder="Link da localização (opcional)">
-<button type="button" onclick="pegarLocalizacao()">📍 Pegar minha localização</button>
-
-<select id="pagamento">
-<option value="">Forma de pagamento *</option>
-<option value="Pix">Pix</option>
-<option value="Cartão">Cartão</option>
-<option value="Dinheiro">Dinheiro</option>
-</select>
-
-<textarea id="obs" placeholder="Observação"></textarea>
-
-<button class="add-btn" onclick="finalizar()">Finalizar Pedido</button>
-<button onclick="fecharCarrinho()">Fechar</button>
-
-</div>
-</div>
-
-<script>
-const sb = supabase.createClient(
-"https://pdajixsoowcyhnjwhgpc.supabase.co",
-"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const app_id = new URLSearchParams(location.search).get("app_id");
-if(!app_id){ alert("App inválido"); throw ""; }
-
-let produtos=[], carrinho=[], filtro="BAR";
-const carrinhoKey="carrinho_"+app_id;
-carrinho = JSON.parse(localStorage.getItem(carrinhoKey)) || [];
-
-function salvarCarrinho(){
-localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
+  carregarPedidos();
+  setInterval(carregarPedidos,5000);
 }
 
-async function carregarConfig(){
-const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).single();
-if(!data)return;
-if(data.nome_site) nome.innerText=data.nome_site;
-if(data.logo_url){logo.src=data.logo_url;logo.style.display="block";}
-if(data.banner_url){banner.src=data.banner_url;banner.style.display="block";}
+async function carregarPedidos(){
+
+  const { data: pedidos, error } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .order("created_at",{ascending:false});
+
+  const lista = document.getElementById("lista");
+  lista.innerHTML="";
+
+  if(error){
+    lista.innerHTML="Erro ao carregar pedidos";
+    return;
+  }
+
+  if(!pedidos || pedidos.length===0){
+    lista.innerHTML="Nenhum pedido encontrado";
+    return;
+  }
+
+  for(const p of pedidos){
+
+    const { data: itens } = await supabase
+      .from("pedido_itens")
+      .select("nome_produto, quantidade, preco")
+      .eq("pedido_id", p.id);
+
+    let total = 0;
+    let htmlItens = "";
+
+    if(itens && itens.length){
+      itens.forEach(i=>{
+        const sub = Number(i.quantidade) * Number(i.preco);
+        total += sub;
+        htmlItens += `
+          <div class="item">
+            <span>${i.quantidade}x ${i.nome_produto}</span>
+            <span>R$ ${sub.toFixed(2)}</span>
+          </div>
+        `;
+      });
+    } else {
+      htmlItens = "<small>Nenhum item encontrado</small>";
+    }
+
+    lista.innerHTML += `
+      <div class="card">
+
+        <div class="card-header">
+          <div>
+            <b>${p.cliente_nome || "Cliente"}</b><br>
+            <small>${new Date(p.created_at).toLocaleString()}</small>
+          </div>
+
+          <div>
+            ${p.status==="novo"?`
+              <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
+              <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
+            `:""}
+
+            ${p.status==="em_preparo"?`
+              <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu</button>
+            `:""}
+
+            ${p.status==="saiu_entrega"?`
+              <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Entregue</button>
+            `:""}
+          </div>
+        </div>
+
+        <div class="info">
+          📞 <a class="link" href="https://wa.me/55${p.telefone || ""}" target="_blank">
+            ${p.telefone || "-"}
+          </a><br>
+
+          🏠 Endereço: ${p.endereco || "-"}<br>
+
+          📍 ${
+            p.endereco && p.endereco.includes("http")
+              ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>`
+              : ""
+          }
+
+          <br>💳 ${p.forma_pagamento || "-"}
+          <br>📝 ${p.observacao || "-"}
+        </div>
+
+        <hr>
+
+        ${htmlItens}
+
+        <div class="total">
+          Total: R$ ${total.toFixed(2)}
+        </div>
+
+      </div>
+    `;
+  }
 }
 
-async function carregarProdutos(){
-const {data}=await sb.from("produtos")
-.select("id,nome,preco,foto,destino")
-.eq("app_id",app_id)
-.eq("ativo",true);
-produtos=data||[];
-render();
-}
+window.mudarStatus = async function(id,status){
 
-function render(){
-conteudo.innerHTML="";
-produtos.filter(p=>(p.destino||"").toUpperCase()===filtro)
-.forEach(p=>{
-conteudo.innerHTML+=`
-<div class="produto">
-${p.foto?`<img src="${p.foto}">`:""}
-<b>${p.nome}</b>
-<div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-<button class="add-btn" onclick="addProduto('${p.id}')">Adicionar</button>
-</div>`;
-});
-atualizarQtd();
-}
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select("cliente_nome, telefone")
+    .eq("id", id)
+    .single();
 
-function addProduto(id){
-const p=produtos.find(x=>x.id===id);
-const i=carrinho.find(x=>x.id===id);
-i?i.qtd++:carrinho.push({...p,qtd:1});
-salvarCarrinho();
-atualizarQtd();
-}
+  await supabase
+    .from("pedidos")
+    .update({ status })
+    .eq("id", id);
 
-function diminuir(id){
-const i=carrinho.find(x=>x.id===id);
-if(!i)return;
-i.qtd--;
-if(i.qtd<=0) carrinho=carrinho.filter(x=>x.id!==id);
-salvarCarrinho();
-renderCarrinho();
-atualizarQtd();
-}
+  if(!pedido?.telefone){
+    carregarPedidos();
+    return;
+  }
 
-function atualizarQtd(){
-qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
-}
+  const numero = pedido.telefone.replace(/\D/g,"");
 
-function abrirCarrinho(){modal.style.display="block";renderCarrinho();}
-function fecharCarrinho(){modal.style.display="none";}
+  let mensagem = "";
 
-function renderCarrinho(){
-lista.innerHTML="";
-let total=0;
-carrinho.forEach(i=>{
-total+=i.preco*i.qtd;
-lista.innerHTML+=`
-<div class="item">
-<span>${i.nome} x${i.qtd}</span>
-<div>
-<button class="qty-btn" onclick="diminuir('${i.id}')">−</button>
-<button class="qty-btn" onclick="addProduto('${i.id}')">+</button>
-</div>
-</div>`;
-});
-document.getElementById("total").innerText=total.toFixed(2);
-}
+  if(status==="em_preparo"){
+    mensagem = `Olá ${pedido.cliente_nome} 😊
 
-function pegarLocalizacao(){
-navigator.geolocation.getCurrentPosition(pos=>{
-const link=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-link_localizacao.value=link;
-});
-}
+Seu pedido foi ACEITO ✅
+Já está em preparo 🍳
 
-async function finalizar(){
+Avisaremos quando sair para entrega 🚀`;
+  }
 
-if(carrinho.length===0){alert("Adicione produtos.");return;}
+  if(status==="saiu_entrega"){
+    mensagem = `Olá ${pedido.cliente_nome} 🚚
 
-const nomeCliente=cliente.value.trim();
-const telefoneVal=telefone.value.trim();
-const ruaVal=rua.value.trim();
-const numeroVal=numero.value.trim();
-const bairroVal=bairro.value.trim();
-const cidadeVal=cidade.value.trim();
-const linkVal=link_localizacao.value.trim();
-const obsVal=obs.value.trim();
-const pagamentoVal=pagamento.value;
+Seu pedido saiu para entrega!
+Fique atento ao telefone 📞`;
+  }
 
-if(!nomeCliente||!pagamentoVal||!ruaVal||!numeroVal){
-alert("Preencha nome, rua, número e pagamento.");
-return;
-}
+  if(status==="finalizado"){
+    mensagem = `Olá ${pedido.cliente_nome} 🙌
 
-let total=0;
-carrinho.forEach(i=>total+=i.preco*i.qtd);
+Pedido entregue com sucesso!
+Obrigado pela preferência 💚`;
+  }
 
-const enderecoCompleto=`
-Rua: ${ruaVal}, Nº ${numeroVal}
-Bairro: ${bairroVal}
-Cidade: ${cidadeVal}
-${linkVal? "\nMapa: "+linkVal : ""}
-`;
+  if(status==="cancelado"){
+    mensagem = `Olá ${pedido.cliente_nome}
 
-/* SALVAR OU ATUALIZAR CLIENTE */
-await sb.from("clientes").upsert([{
-app_id,
-nome:nomeCliente,
-telefone:telefoneVal,
-rua:ruaVal,
-numero:numeroVal,
-bairro:bairroVal,
-cidade:cidadeVal,
-link_localizacao:linkVal
-}],{
-onConflict:"app_id,telefone"
-});
+Seu pedido foi cancelado.
+Qualquer dúvida estamos à disposição.`;
+  }
 
-const {data:config}=await sb
-.from("config_site")
-.select("fluxo_pedido,whatsapp")
-.eq("app_id",app_id)
-.single();
+  const link = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`;
+  window.open(link,"_blank");
 
-if(config?.fluxo_pedido==="sistema"){
-await sb.from("pedidos").insert([{
-app_id,
-cliente_nome:nomeCliente,
-telefone:telefoneVal,
-endereco:enderecoCompleto,
-observacao:obsVal,
-forma_pagamento:pagamentoVal,
-total,
-status:"novo"
-}]);
-alert("Pedido enviado com sucesso!");
-}
+  carregarPedidos();
+};
 
-if(config?.fluxo_pedido==="whatsapp"){
-const numero=config.whatsapp?.replace(/\D/g,'');
-let msg=`🛒 *NOVO PEDIDO*\n\n`;
-carrinho.forEach(i=>{
-msg+=`• ${i.nome} x${i.qtd} - R$ ${(i.preco*i.qtd).toFixed(2)}\n`;
-});
-msg+=`\n────────────\n`;
-msg+=`💰 Total: R$ ${total.toFixed(2)}\n\n`;
-msg+=`👤 ${nomeCliente}\n`;
-msg+=`📞 ${telefoneVal}\n`;
-msg+=`📍 ${enderecoCompleto}\n`;
-msg+=`💳 ${pagamentoVal}\n`;
-if(obsVal) msg+=`📝 ${obsVal}\n`;
-window.open(`https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`,"_blank");
-}
-
-carrinho=[];
-salvarCarrinho();
-atualizarQtd();
-fecharCarrinho();
-}
-
-btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
-btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
-
-(async()=>{
-await carregarConfig();
-await carregarProdutos();
-})();
+iniciar();
 </script>
 
 </body>
