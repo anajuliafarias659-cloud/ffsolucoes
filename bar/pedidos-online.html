@@ -125,7 +125,7 @@ async function iniciar(){
 
   carregarPedidos();
 
-  // 🔥 REALTIME (não embaralha)
+  // REALTIME
   supabase
   .channel('pedidos-channel')
   .on(
@@ -149,7 +149,7 @@ async function carregarPedidos(){
     .from("pedidos")
     .select("*")
     .eq("app_id", APP_ID)
-    .order("created_at",{ascending:true}); // ORDEM FIXA
+    .order("created_at",{ascending:true});
 
   const lista = document.getElementById("lista");
   lista.innerHTML="";
@@ -255,11 +255,51 @@ async function carregarPedidos(){
 
 window.mudarStatus = async function(id,status){
 
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select("cliente_nome, telefone")
+    .eq("id", id)
+    .single();
+
   await supabase
     .from("pedidos")
     .update({ status })
     .eq("id", id);
 
+  if(!pedido?.telefone) return;
+
+  const numero = pedido.telefone.replace(/\D/g,"");
+
+  let mensagem = "";
+
+  if(status==="em_preparo"){
+    mensagem = `Olá ${pedido.cliente_nome} 😊
+
+Seu pedido foi ACEITO ✅
+Já está sendo preparado 🍳`;
+  }
+
+  if(status==="saiu_entrega"){
+    mensagem = `Olá ${pedido.cliente_nome} 🚚
+
+Seu pedido saiu para entrega!`;
+  }
+
+  if(status==="finalizado"){
+    mensagem = `Olá ${pedido.cliente_nome} 🙌
+
+Pedido entregue com sucesso!
+Obrigado pela preferência 💚`;
+  }
+
+  if(status==="cancelado"){
+    mensagem = `Olá ${pedido.cliente_nome},
+
+Seu pedido foi cancelado.`;
+  }
+
+  const link = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`;
+  window.open(link,"_blank");
 };
 
 window.excluirAntigos = async function(){
@@ -271,7 +311,6 @@ window.excluirAntigos = async function(){
     .delete()
     .in("status", ["finalizado","cancelado"])
     .eq("app_id", APP_ID);
-
 };
 
 iniciar();
