@@ -79,6 +79,7 @@ button{
 .btn-entrega{background:#3b82f6}
 .btn-finalizar{background:#16a34a}
 .btn-cancel{background:#ef4444}
+.btn-limpar{background:#f59e0b}
 
 .link{
   color:#60a5fa;
@@ -91,7 +92,10 @@ button{
 
 <div class="topo">
   <h2>📦 Pedidos Online</h2>
-  <button onclick="history.back()">⬅ Voltar</button>
+  <div>
+    <button class="btn-limpar" onclick="limparVisual()">🧹 Limpar Finalizados</button>
+    <button onclick="history.back()">⬅ Voltar</button>
+  </div>
 </div>
 
 <div class="container" id="lista">
@@ -129,7 +133,8 @@ async function carregarPedidos(){
     .from("pedidos")
     .select("*")
     .eq("app_id", APP_ID)
-    .order("created_at",{ascending:false});
+    .eq("oculto", false)
+    .order("created_at",{ascending:true}); // ORDEM DE CHEGADA
 
   const lista = document.getElementById("lista");
   lista.innerHTML="";
@@ -165,7 +170,6 @@ async function carregarPedidos(){
       });
     }
 
-    // Separar endereço e link
     let enderecoTexto = "-";
     let linkMapa = "";
 
@@ -235,58 +239,21 @@ async function carregarPedidos(){
 
 window.mudarStatus = async function(id,status){
 
-  const { data: pedido } = await supabase
-    .from("pedidos")
-    .select("cliente_nome, telefone")
-    .eq("id", id)
-    .single();
-
   await supabase
     .from("pedidos")
     .update({ status })
     .eq("id", id);
 
-  if(!pedido?.telefone){
-    carregarPedidos();
-    return;
-  }
+  carregarPedidos();
+};
 
-  const numero = pedido.telefone.replace(/\D/g,"");
+window.limparVisual = async function(){
 
-  let mensagem = "";
-
-  if(status==="em_preparo"){
-    mensagem = `Olá ${pedido.cliente_nome} 😊
-
-Seu pedido foi ACEITO ✅
-Já está sendo preparado 🍳
-
-Assim que sair para entrega avisaremos 🚚`;
-  }
-
-  if(status==="saiu_entrega"){
-    mensagem = `Olá ${pedido.cliente_nome} 🚚
-
-Seu pedido saiu para entrega!
-Em breve estará chegando 📦`;
-  }
-
-  if(status==="finalizado"){
-    mensagem = `Olá ${pedido.cliente_nome} 🙌
-
-Pedido entregue com sucesso!
-Agradecemos sua preferência 💚`;
-  }
-
-  if(status==="cancelado"){
-    mensagem = `Olá ${pedido.cliente_nome}
-
-Seu pedido foi cancelado.
-Qualquer dúvida estamos à disposição.`;
-  }
-
-  const link = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`;
-  window.open(link,"_blank");
+  await supabase
+    .from("pedidos")
+    .update({ oculto: true })
+    .in("status", ["finalizado","cancelado"])
+    .eq("app_id", APP_ID);
 
   carregarPedidos();
 };
