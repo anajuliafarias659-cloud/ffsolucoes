@@ -258,30 +258,41 @@ const enderecoCompleto=`${rua}, Nº ${numero}${ref?` - ${ref}`:""}${linkMapa?`\n
 let total=0;
 carrinho.forEach(i=> total+=i.preco*i.qtd);
 
+/* salva cliente normal */
 await sb.from("clientes").upsert([{
-app_id,nome:nomeCliente,telefone:telefoneVal,
-rua,numero,complemento:ref,endereco_link:linkMapa
+app_id,
+nome:nomeCliente,
+telefone:telefoneVal,
+rua,
+numero,
+complemento:ref,
+endereco_link:linkMapa
 }],{onConflict:'app_id,telefone'});
 
-const {data:pedidoExistente}=await sb.from("pedidos")
+/* 🔥 PROCURA PEDIDO EM ANDAMENTO (MAS NÃO SE TIVER SAIDO PRA ENTREGA) */
+const { data: pedidoExistente } = await sb
+.from("pedidos")
 .select("*")
-.eq("app_id",app_id)
-.eq("telefone",telefoneVal)
-.eq("status","em_preparo")
-.single();
+.eq("app_id", app_id)
+.eq("telefone", telefoneVal)
+.in("status", ["novo","em_preparo"])
+.order("created_at",{ascending:false})
+.limit(1)
+.maybeSingle();
 
+/* SE EXISTE PEDIDO EM ANDAMENTO */
 if(pedidoExistente){
 
-const confirmar=confirm(
-"Você já possui um pedido em preparo.\n\n" +
-"Deseja adicionar os novos itens ao pedido atual?\n\n" +
-"OK = Adicionar\nCancelar = Novo pedido"
+const confirmar = confirm(
+"Você já possui um pedido em andamento.\n\n" +
+"Deseja adicionar os novos itens ao pedido atual?"
 );
 
 if(confirmar){
 
-const novoTotal=Number(pedidoExistente.total)+total;
+const novoTotal = Number(pedidoExistente.total || 0) + total;
 
+/* adiciona itens no pedido existente */
 await sb.from("pedido_itens").insert(
 carrinho.map(i=>({
 id:crypto.randomUUID(),
@@ -294,14 +305,16 @@ app_id:app_id
 }))
 );
 
+/* atualiza total */
 await sb.from("pedidos")
-.update({total:novoTotal})
-.eq("id",pedidoExistente.id);
+.update({ total: novoTotal })
+.eq("id", pedidoExistente.id);
 
-alert("Itens adicionados ao pedido em preparo!");
+alert("Itens adicionados ao pedido em andamento!");
 
 }else{
 
+/* cria novo pedido separado */
 const {data:pedido}=await sb.from("pedidos").insert([{
 app_id,
 cliente_nome:nomeCliente,
@@ -330,6 +343,7 @@ alert("Novo pedido criado!");
 
 }else{
 
+/* NÃO EXISTE PEDIDO EM ANDAMENTO */
 const {data:pedido}=await sb.from("pedidos").insert([{
 app_id,
 cliente_nome:nomeCliente,
@@ -361,6 +375,7 @@ salvarCarrinho();
 atualizarQtd();
 fecharCarrinho();
 }
+
 
 btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
 btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
