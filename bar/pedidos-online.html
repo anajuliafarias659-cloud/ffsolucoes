@@ -79,7 +79,6 @@ button{
 .btn-entrega{background:#3b82f6}
 .btn-finalizar{background:#16a34a}
 .btn-cancel{background:#ef4444}
-.btn-excluir{background:#f59e0b}
 
 .link{
   color:#60a5fa;
@@ -92,10 +91,7 @@ button{
 
 <div class="topo">
   <h2>📦 Pedidos Online</h2>
-  <div>
-    <button class="btn-excluir" onclick="excluirAntigos()">🗑 Excluir Finalizados</button>
-    <button onclick="history.back()">⬅ Voltar</button>
-  </div>
+  <button onclick="history.back()">⬅ Voltar</button>
 </div>
 
 <div class="container" id="lista">
@@ -149,6 +145,7 @@ async function carregarPedidos(){
     .from("pedidos")
     .select("*")
     .eq("app_id", APP_ID)
+    .not("status","in","(finalizado,cancelado)") // 🔥 some automaticamente
     .order("created_at",{ascending:true});
 
   const lista = document.getElementById("lista");
@@ -161,7 +158,7 @@ async function carregarPedidos(){
   }
 
   if(!pedidos || pedidos.length===0){
-    lista.innerHTML="Nenhum pedido encontrado";
+    lista.innerHTML="Nenhum pedido ativo";
     return;
   }
 
@@ -186,25 +183,12 @@ async function carregarPedidos(){
       });
     }
 
-    let enderecoTexto = "-";
-    let linkMapa = "";
-
-    if(p.endereco){
-      if(p.endereco.includes("http")){
-        const partes = p.endereco.split("\n");
-        enderecoTexto = partes[0] || "-";
-        linkMapa = partes[1] || "";
-      } else {
-        enderecoTexto = p.endereco;
-      }
-    }
-
     lista.innerHTML += `
       <div class="card">
 
         <div class="card-header">
           <div>
-            <b>${p.cliente_nome || "Cliente"}</b><br>
+            <b>${p.cliente_nome}</b><br>
             <small>${new Date(p.created_at).toLocaleString()}</small><br>
             <small>Status: ${p.status}</small>
           </div>
@@ -227,15 +211,10 @@ async function carregarPedidos(){
 
         <div class="info">
           📞 <a class="link" href="https://wa.me/55${(p.telefone||"").replace(/\D/g,"")}" target="_blank">
-            ${p.telefone || "-"}
+            ${p.telefone}
           </a><br>
 
-          🏠 ${enderecoTexto}<br>
-
-          ${linkMapa ? `
-          📍 <a class="link" href="${linkMapa}" target="_blank">Ver localização</a><br>
-          ` : ""}
-
+          🏠 ${p.endereco || "-"}<br>
           💳 ${p.forma_pagamento || "-"}<br>
           📝 ${p.observacao || "-"}
         </div>
@@ -266,6 +245,11 @@ window.mudarStatus = async function(id,status){
     .update({ status })
     .eq("id", id);
 
+  // 🔥 Remove da tela automaticamente se finalizar ou cancelar
+  if(status==="finalizado" || status==="cancelado"){
+    carregarPedidos();
+  }
+
   if(!pedido?.telefone) return;
 
   const numero = pedido.telefone.replace(/\D/g,"");
@@ -282,7 +266,8 @@ Já está sendo preparado 🍳`;
   if(status==="saiu_entrega"){
     mensagem = `Olá ${pedido.cliente_nome} 🚚
 
-Seu pedido saiu para entrega!`;
+Seu pedido saiu para entrega!
+Fique atento ao telefone 📞`;
   }
 
   if(status==="finalizado"){
@@ -300,17 +285,6 @@ Seu pedido foi cancelado.`;
 
   const link = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`;
   window.open(link,"_blank");
-};
-
-window.excluirAntigos = async function(){
-
-  if(!confirm("Deseja excluir pedidos finalizados e cancelados?")) return;
-
-  await supabase
-    .from("pedidos")
-    .delete()
-    .in("status", ["finalizado","cancelado"])
-    .eq("app_id", APP_ID);
 };
 
 iniciar();
