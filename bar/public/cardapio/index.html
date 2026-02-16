@@ -252,6 +252,10 @@ function salvarCarrinho(){
 localStorage.setItem(carrinhoKey,JSON.stringify(carrinho));
 }
 
+/* =========================
+   CONFIG + PRODUTOS
+========================= */
+
 async function carregarConfig(){
 const {data}=await sb.from("config_site").select("*").eq("app_id",app_id).single();
 if(!data)return;
@@ -275,6 +279,10 @@ const {data}=await sb.from("produtos")
 produtos=data||[];
 render();
 }
+
+/* =========================
+   RENDER
+========================= */
 
 function render(){
 conteudo.innerHTML="";
@@ -313,8 +321,14 @@ function atualizarQtd(){
 qtd.innerText=carrinho.reduce((s,i)=>s+i.qtd,0);
 }
 
-function abrirCarrinho(){modal.style.display="block";renderCarrinho();}
-function fecharCarrinho(){modal.style.display="none";}
+function abrirCarrinho(){
+modal.style.display="block";
+renderCarrinho();
+}
+
+function fecharCarrinho(){
+modal.style.display="none";
+}
 
 function renderCarrinho(){
 lista.innerHTML="";
@@ -333,12 +347,62 @@ lista.innerHTML+=`
 document.getElementById("total").innerText=total.toFixed(2);
 }
 
+/* =========================
+   GEOLOCALIZAÇÃO
+========================= */
+
 function pegarLocalizacao(){
-navigator.geolocation.getCurrentPosition(pos=>{
-const link=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-document.getElementById("endereco").value=link;
+navigator.geolocation.getCurrentPosition(async pos=>{
+const lat=pos.coords.latitude;
+const lng=pos.coords.longitude;
+
+link_localizacao.value=`https://www.google.com/maps?q=${lat},${lng}`;
+
+try{
+const res=await fetch(
+`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`
+);
+const data=await res.json();
+if(data.address){
+rua.value=data.address.road||"";
+bairro.value=data.address.suburb||"";
+cidade.value=data.address.city||data.address.town||"";
+}
+}catch(e){}
 });
 }
+
+/* =========================
+   BUSCAR CLIENTE
+========================= */
+
+async function buscarClientePorTelefone(tel){
+if(!tel) return;
+
+const {data}=await sb
+.from("clientes")
+.select("*")
+.eq("telefone",tel)
+.eq("app_id",app_id)
+.single();
+
+if(data){
+cliente.value=data.nome||"";
+rua.value=data.rua||"";
+numero.value=data.numero||"";
+bairro.value=data.bairro||"";
+cidade.value=data.cidade||"";
+link_localizacao.value=data.link_localizacao||"";
+}
+}
+
+telefone.addEventListener("blur",()=>{
+buscarClientePorTelefone(telefone.value.trim());
+});
+
+/* =========================
+   FINALIZAR
+========================= */
 
 async function finalizar(){
 
@@ -346,18 +410,42 @@ if(carrinho.length===0){alert("Adicione produtos.");return;}
 
 const nomeCliente=cliente.value.trim();
 const telefoneVal=telefone.value.trim();
-const enderecoVal=endereco.value.trim();
+const ruaVal=rua.value.trim();
+const numeroVal=numero.value.trim();
+const bairroVal=bairro.value.trim();
+const cidadeVal=cidade.value.trim();
+const linkVal=link_localizacao.value.trim();
 const obsVal=obs.value.trim();
 const pagamentoVal=pagamento.value;
 
-if(!nomeCliente||!pagamentoVal){
-alert("Preencha nome e pagamento.");
+if(!nomeCliente||!pagamentoVal||!ruaVal||!numeroVal){
+alert("Preencha nome, rua, número e pagamento.");
 return;
 }
 
 let total=0;
 carrinho.forEach(i=>total+=i.preco*i.qtd);
 
+const enderecoCompleto=`
+Rua: ${ruaVal}, Nº ${numeroVal}
+Bairro: ${bairroVal}
+Cidade: ${cidadeVal}
+${linkVal? "\nMapa: "+linkVal : ""}
+`;
+
+/* SALVAR OU ATUALIZAR CLIENTE */
+await sb.from("clientes").upsert([{
+app_id,
+nome:nomeCliente,
+telefone:telefoneVal,
+rua:ruaVal,
+numero:numeroVal,
+bairro:bairroVal,
+cidade:cidadeVal,
+link_localizacao:linkVal
+}],{onConflict:"telefone"});
+
+/* BUSCAR CONFIG */
 const {data:config}=await sb
 .from("config_site")
 .select("fluxo_pedido,whatsapp")
@@ -371,7 +459,7 @@ const {data:pedido,error}=await sb.from("pedidos").insert([{
 app_id,
 cliente_nome:nomeCliente,
 telefone:telefoneVal,
-endereco:enderecoVal,
+endereco:enderecoCompleto,
 observacao:obsVal,
 forma_pagamento:pagamentoVal,
 total,
@@ -410,7 +498,7 @@ msg+=`\n────────────\n`;
 msg+=`💰 Total: R$ ${total.toFixed(2)}\n\n`;
 msg+=`👤 ${nomeCliente}\n`;
 msg+=`📞 ${telefoneVal}\n`;
-msg+=`📍 ${enderecoVal}\n`;
+msg+=`📍 ${enderecoCompleto}\n`;
 msg+=`💳 ${pagamentoVal}\n`;
 
 if(obsVal) msg+=`📝 ${obsVal}\n`;
@@ -427,6 +515,10 @@ atualizarQtd();
 fecharCarrinho();
 }
 
+/* =========================
+   TABS
+========================= */
+
 btnBar.onclick=()=>{filtro="BAR";btnBar.classList.add("ativo");btnCozinha.classList.remove("ativo");render();}
 btnCozinha.onclick=()=>{filtro="COZINHA";btnCozinha.classList.add("ativo");btnBar.classList.remove("ativo");render();}
 
@@ -436,5 +528,7 @@ await carregarProdutos();
 })();
 </script>
 
+
 </body>
 </html>
+
