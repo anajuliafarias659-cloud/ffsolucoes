@@ -97,10 +97,8 @@ input,select,textarea{width:100%;margin-top:8px;padding:10px;border-radius:8px;b
 
 <input id="endereco_rua" placeholder="Rua / Avenida *">
 <input id="endereco_numero" placeholder="Número *">
-<input id="endereco_ref" placeholder="Complemento / Referência">
-
+<input id="endereco_ref" placeholder="Bairro / Complemento">
 <input id="endereco" placeholder="Link da localização (opcional)">
-<button onclick="pegarLocalizacao()">📍 Pegar minha localização</button>
 
 <select id="pagamento">
 <option value="">Forma de pagamento *</option>
@@ -207,32 +205,6 @@ lista.innerHTML+=`
 document.getElementById("total").innerText=total.toFixed(2);
 }
 
-function pegarLocalizacao(){
-navigator.geolocation.getCurrentPosition(pos=>{
-const link=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-document.getElementById("endereco").value=link;
-});
-}
-
-async function buscarCliente(){
-const telefoneVal=telefone.value.trim();
-if(!telefoneVal) return;
-
-const {data}=await sb.from("clientes")
-.select("*")
-.eq("app_id",app_id)
-.eq("telefone",telefoneVal)
-.single();
-
-if(!data) return;
-
-cliente.value=data.nome||"";
-endereco_rua.value=data.rua||"";
-endereco_numero.value=data.numero||"";
-endereco_ref.value=data.bairro||"";
-endereco.value=data.link_localizacao||"";
-}
-
 async function finalizar(){
 
 if(carrinho.length===0){alert("Adicione produtos.");return;}
@@ -241,7 +213,7 @@ const nomeCliente=cliente.value.trim();
 const telefoneVal=telefone.value.trim();
 const rua=endereco_rua.value.trim();
 const numero=endereco_numero.value.trim();
-const ref=endereco_ref.value.trim();
+const bairro=endereco_ref.value.trim();
 const linkMapa=endereco.value.trim();
 const obsVal=obs.value.trim();
 const pagamentoVal=pagamento.value;
@@ -251,24 +223,71 @@ alert("Preencha nome, endereço, número e pagamento.");
 return;
 }
 
-const enderecoCompleto=`${rua}, Nº ${numero}${ref?` - ${ref}`:""}${linkMapa?`\n${linkMapa}`:""}`;
+const enderecoCompleto=`${rua}, Nº ${numero}${bairro?` - ${bairro}`:""}${linkMapa?`\n${linkMapa}`:""}`;
 
 let total=0;
 carrinho.forEach(i=> total+=i.preco*i.qtd);
 
+/* SALVA CLIENTE */
 await sb.from("clientes").upsert([{
 app_id,
 nome:nomeCliente,
 telefone:telefoneVal,
 rua,
 numero,
-bairro:ref,
+bairro,
 link_localizacao:linkMapa
 }],{onConflict:'app_id,telefone'});
 
-/* resto do código permanece exatamente igual */
+/* VERIFICA PEDIDO EM ANDAMENTO */
+const {data:pedidoExistente}=await sb.from("pedidos")
+.select("*")
+.eq("app_id",app_id)
+.eq("telefone",telefoneVal)
+.in("status",["novo","em_preparo"])
+.order("created_at",{ascending:false})
+.limit(1)
+.maybeSingle();
 
-alert("Agora o 400 acabou.");
+let pedidoId;
+
+if(pedidoExistente){
+const novoTotal=Number(pedidoExistente.total||0)+total;
+
+await sb.from("pedidos")
+.update({total:novoTotal})
+.eq("id",pedidoExistente.id);
+
+pedidoId=pedidoExistente.id;
+}else{
+const {data:pedido}=await sb.from("pedidos").insert([{
+app_id,
+cliente_nome:nomeCliente,
+telefone:telefoneVal,
+endereco:enderecoCompleto,
+observacao:obsVal,
+forma_pagamento:pagamentoVal,
+total,
+status:"novo"
+}]).select().single();
+
+pedidoId=pedido.id;
+}
+
+/* INSERE ITENS */
+await sb.from("pedido_itens").insert(
+carrinho.map(i=>({
+id:crypto.randomUUID(),
+pedido_id:pedidoId,
+produto_id:i.id,
+nome_produto:i.nome,
+quantidade:i.qtd,
+preco:i.preco,
+app_id:app_id
+}))
+);
+
+alert("Pedido enviado com sucesso!");
 
 carrinho=[];
 salvarCarrinho();
