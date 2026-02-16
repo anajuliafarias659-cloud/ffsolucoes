@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="../js/auth.js"></script>
 
 <style>
 body{
@@ -33,7 +32,7 @@ body{
   background:#0f172a;
   border-radius:14px;
   padding:16px;
-  margin-bottom:18px;
+  margin-bottom:20px;
   border:1px solid #1e293b;
 }
 
@@ -41,10 +40,11 @@ body{
   display:flex;
   justify-content:space-between;
   align-items:flex-start;
+  margin-bottom:10px;
 }
 
-.card small{
-  color:#94a3b8;
+.card-header b{
+  font-size:16px;
 }
 
 .item{
@@ -52,11 +52,20 @@ body{
   justify-content:space-between;
   padding:6px 0;
   border-bottom:1px solid #1e293b;
+  font-size:14px;
 }
 
 .total{
   margin-top:10px;
   font-weight:bold;
+  font-size:15px;
+}
+
+.info{
+  margin-top:8px;
+  font-size:13px;
+  color:#cbd5e1;
+  line-height:1.6;
 }
 
 button{
@@ -70,14 +79,20 @@ button{
 }
 
 .btn-aceitar{background:#22c55e}
-.btn-cancel{background:#ef4444}
 .btn-preparo{background:#f59e0b}
 .btn-entrega{background:#3b82f6}
 .btn-finalizar{background:#16a34a}
+.btn-cancel{background:#ef4444}
 
 .link{
   color:#60a5fa;
   text-decoration:none;
+}
+
+.vazio{
+  text-align:center;
+  opacity:.6;
+  margin-top:40px;
 }
 </style>
 </head>
@@ -101,7 +116,6 @@ let APP_ID=null;
 async function iniciar(){
 
   const { data:{ session } } = await supabase.auth.getSession();
-
   if(!session){
     location.href="../auth/login.html";
     return;
@@ -121,31 +135,46 @@ async function iniciar(){
 
 async function carregarPedidos(){
 
-  const { data: pedidos } = await supabase
+  const { data: pedidos, error } = await supabase
     .from("pedidos")
-    .select("*")
+    .select(`
+      id,
+      created_at,
+      cliente_nome,
+      telefone,
+      endereco,
+      observacao,
+      forma_pagamento,
+      status,
+      pedido_itens (
+        nome_produto,
+        quantidade,
+        preco
+      )
+    `)
     .eq("app_id", APP_ID)
     .order("created_at",{ascending:false});
 
   const lista = document.getElementById("lista");
   lista.innerHTML="";
 
-  if(!pedidos || pedidos.length===0){
-    lista.innerHTML="Nenhum pedido encontrado";
+  if(error){
+    console.error(error);
+    lista.innerHTML="Erro ao carregar pedidos";
     return;
   }
 
-  for(const p of pedidos){
+  if(!pedidos || pedidos.length===0){
+    lista.innerHTML='<div class="vazio">Nenhum pedido encontrado</div>';
+    return;
+  }
 
-    const { data: itens } = await supabase
-      .from("pedido_itens")
-      .select("nome_produto, quantidade, preco")
-      .eq("pedido_id", p.id);
+  pedidos.forEach(p=>{
 
     let total=0;
 
-    const itensHtml=(itens||[]).map(i=>{
-      const sub=i.quantidade*i.preco;
+    const itensHtml=(p.pedido_itens || []).map(i=>{
+      const sub = Number(i.quantidade)*Number(i.preco);
       total+=sub;
 
       return `
@@ -158,20 +187,67 @@ async function carregarPedidos(){
 
     lista.innerHTML+=`
       <div class="card">
-        <b>${p.cliente_nome || "Cliente"}</b><br>
-        <small>${new Date(p.created_at).toLocaleString()}</small>
+
+        <div class="card-header">
+          <div>
+            <b>${p.cliente_nome || "Cliente"}</b><br>
+            <small>${new Date(p.created_at).toLocaleString()}</small>
+          </div>
+
+          <div>
+            ${p.status==="novo"?`
+              <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
+              <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
+            `:""}
+
+            ${p.status==="em_preparo"?`
+              <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu</button>
+            `:""}
+
+            ${p.status==="saiu_entrega"?`
+              <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Entregue</button>
+            `:""}
+          </div>
+        </div>
+
+        <div class="info">
+          📞 <a class="link" href="https://wa.me/55${p.telefone||""}" target="_blank">
+            ${p.telefone||"-"}
+          </a><br>
+
+          📍 ${p.endereco 
+            ? `<a class="link" href="${p.endereco}" target="_blank">Ver localização</a>` 
+            : "-"}
+
+          <br>💳 ${p.forma_pagamento||"-"}
+          <br>📝 ${p.observacao||"-"}
+        </div>
+
         <hr>
+
         ${itensHtml}
-        <div class="total">Total: R$ ${total.toFixed(2)}</div>
+
+        <div class="total">
+          Total: R$ ${total.toFixed(2)}
+        </div>
+
       </div>
     `;
-  }
+  });
 }
+
+window.mudarStatus = async function(id,status){
+
+  await supabase
+    .from("pedidos")
+    .update({ status })
+    .eq("id",id);
+
+  carregarPedidos();
+};
 
 iniciar();
 </script>
 
-
 </body>
 </html>
-
