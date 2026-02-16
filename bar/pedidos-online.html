@@ -79,6 +79,7 @@ button{
 .btn-entrega{background:#3b82f6}
 .btn-finalizar{background:#16a34a}
 .btn-cancel{background:#ef4444}
+.btn-excluir{background:#f59e0b}
 
 .link{
   color:#60a5fa;
@@ -91,7 +92,10 @@ button{
 
 <div class="topo">
   <h2>📦 Pedidos Online</h2>
-  <button onclick="history.back()">⬅ Voltar</button>
+  <div>
+    <button class="btn-excluir" onclick="excluirAntigos()">🗑 Excluir Finalizados</button>
+    <button onclick="history.back()">⬅ Voltar</button>
+  </div>
 </div>
 
 <div class="container" id="lista">
@@ -120,7 +124,23 @@ async function iniciar(){
   APP_ID = usuario.app_id;
 
   carregarPedidos();
-  setInterval(carregarPedidos,5000);
+
+  // 🔥 REALTIME (não embaralha)
+  supabase
+  .channel('pedidos-channel')
+  .on(
+    'postgres_changes',
+    {
+      event: '*',
+      schema: 'public',
+      table: 'pedidos',
+      filter: `app_id=eq.${APP_ID}`
+    },
+    () => {
+      carregarPedidos();
+    }
+  )
+  .subscribe();
 }
 
 async function carregarPedidos(){
@@ -129,7 +149,7 @@ async function carregarPedidos(){
     .from("pedidos")
     .select("*")
     .eq("app_id", APP_ID)
-    .order("created_at",{ascending:true}); // ORDEM DE CHEGADA
+    .order("created_at",{ascending:true}); // ORDEM FIXA
 
   const lista = document.getElementById("lista");
   lista.innerHTML="";
@@ -235,29 +255,23 @@ async function carregarPedidos(){
 
 window.mudarStatus = async function(id,status){
 
-  const { data: pedido } = await supabase
-    .from("pedidos")
-    .select("cliente_nome, telefone")
-    .eq("id", id)
-    .single();
-
   await supabase
     .from("pedidos")
     .update({ status })
     .eq("id", id);
 
-  if(pedido?.telefone){
-    const numero = pedido.telefone.replace(/\D/g,"");
+};
 
-    let mensagem = `Olá ${pedido.cliente_nome},
+window.excluirAntigos = async function(){
 
-Seu pedido agora está com status: ${status.replace("_"," ")} 😊`;
+  if(!confirm("Deseja excluir pedidos finalizados e cancelados?")) return;
 
-    const link = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`;
-    window.open(link,"_blank");
-  }
+  await supabase
+    .from("pedidos")
+    .delete()
+    .in("status", ["finalizado","cancelado"])
+    .eq("app_id", APP_ID);
 
-  carregarPedidos();
 };
 
 iniciar();
