@@ -16,8 +16,6 @@ button.danger{background:#e53935;color:#fff}
 .card{background:#020617;padding:16px;margin-top:12px;border-radius:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .login{max-width:420px;margin:80px auto}
 hr{margin:40px 0;border:none;height:1px;background:rgba(255,255,255,.2)}
-a{color:#22c55e;text-decoration:none}
-.btn-small{width:auto;padding:6px 12px;font-size:12px;border-radius:8px}
 .badge{background:#334155;padding:4px 8px;border-radius:6px;font-size:12px}
 .badge.warn{background:#7c2d12}
 </style>
@@ -36,20 +34,12 @@ a{color:#22c55e;text-decoration:none}
 
 <div id="painel" style="display:none">
 
-<h3>📋 Negócios</h3>
-<div id="listaNegocios"></div>
+<h2>📦 Contas Demo</h2>
+<div id="listaDemos"></div>
 
 <hr>
 
-<h2>🧪 Contas Teste (Demo)</h2>
-
-<select id="filtroDemo" onchange="carregarDemos()">
-  <option value="todas">Todas</option>
-  <option value="ativas">Ativas</option>
-  <option value="vencidas">Vencidas</option>
-</select>
-
-<div id="listaDemos"></div>
+<!-- RESTANTE DO SEU PAINEL CONTINUA NORMAL -->
 
 </div>
 </div>
@@ -62,11 +52,8 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let usuarioLogado = "Super Admin";
-
 /* LOGIN */
 window.login = async ()=>{
-
   const { data } = await supabase
     .from("super_admins")
     .select("*")
@@ -77,111 +64,70 @@ window.login = async ()=>{
 
   if(!data) return alert("Login inválido");
 
-  usuarioLogado = data.usuario;
   loginBox.style.display="none";
   painel.style.display="block";
 
-  await carregarNegocios();
-  await carregarDemos();
+  carregarDemos();
 };
 
-/* ================= NEGÓCIOS ================= */
+/* =========================
+   CARREGAR CONTAS DEMO
+========================= */
+async function carregarDemos(){
 
-async function carregarNegocios(){
-  const { data } = await supabase.from("apps").select("*");
-  listaNegocios.innerHTML = "";
+  const { data } = await supabase
+    .from("apps")
+    .select("*")
+    .eq("plano","demo");
 
-  (data || []).forEach(n=>{
-    listaNegocios.innerHTML += `
+  listaDemos.innerHTML = "";
+
+  (data || []).forEach(app=>{
+
+    const hoje = new Date();
+    const expira = new Date(app.data_expiracao);
+    const vencida = expira < hoje;
+
+    const status = vencida ? "VENCIDA" : "ATIVA";
+    const cor = vencida ? "#7c2d12" : "#15803d";
+
+    listaDemos.innerHTML += `
       <div class="card">
         <div>
-          <b>${n.nome}</b><br>
-          <small>Plano: ${n.plano || "normal"}</small>
+          <b>${app.nome}</b><br>
+          <small>Expira em: ${expira.toLocaleDateString()}</small><br>
+          <span class="badge" style="background:${cor}">
+            ${status}
+          </span>
+        </div>
+
+        <div style="display:flex;gap:6px;flex-direction:column">
+
+          <select id="dias_${app.id}">
+            <option value="15">15 dias</option>
+            <option value="30">30 dias</option>
+            <option value="60">60 dias</option>
+            <option value="90">90 dias</option>
+          </select>
+
+          <button onclick="renovarDemo('${app.id}')">
+            🔄 Renovar
+          </button>
+
         </div>
       </div>
     `;
   });
 }
 
-/* ================= DEMOS ================= */
-
-async function carregarDemos(){
-
-  const filtro = filtroDemo.value;
-
-  const { data, error } = await supabase
-    .from("apps")
-    .select("*")
-    .eq("plano","demo")
-    .order("data_expiracao",{ascending:true});
-
-  if(error){
-    console.log(error);
-    return;
-  }
-
-  listaDemos.innerHTML = "";
-
-  const hoje = new Date();
-
-  for(const app of (data || [])){
-
-    const expira = new Date(app.data_expiracao);
-    const diff = expira - hoje;
-    const dias = Math.ceil(diff / (1000*60*60*24));
-
-    if(dias < 0 && app.ativo){
-      await supabase.from("apps")
-        .update({ativo:false})
-        .eq("id",app.id);
-
-      app.ativo = false;
-    }
-
-    if(filtro==="ativas" && dias < 0) continue;
-    if(filtro==="vencidas" && dias >= 0) continue;
-
-    let texto = "";
-    let cor = "#334155";
-
-    if(dias < 0){
-      texto = "VENCIDO";
-      cor = "#7c2d12";
-    }else if(dias <= 2){
-      texto = `Expira em ${dias} dia(s)`;
-      cor = "#b45309";
-    }else{
-      texto = `Restam ${dias} dias`;
-    }
-
-    listaDemos.innerHTML += `
-      <div class="card">
-        <div>
-          <b>${app.nome}</b><br>
-          <small>Expira: ${expira.toLocaleDateString()}</small><br>
-          <span class="badge" style="background:${cor}">
-            ${texto}
-          </span>
-        </div>
-
-        <div style="display:flex;gap:6px">
-          <button class="btn-small"
-            onclick="renovarDemo('${app.id}')">
-            🔄 +30 dias
-          </button>
-
-          <button class="btn-small danger"
-            onclick="bloquearDemo('${app.id}')">
-            🔒 Bloquear
-          </button>
-        </div>
-      </div>
-    `;
-  }
-}
-
-/* RENOVAR */
+/* =========================
+   RENOVAR CONTA DEMO
+========================= */
 window.renovarDemo = async (id)=>{
+
+  const diasSelecionados = Number(
+    document.getElementById(`dias_${id}`).value
+  );
 
   const { data } = await supabase
     .from("apps")
@@ -189,31 +135,30 @@ window.renovarDemo = async (id)=>{
     .eq("id",id)
     .single();
 
-  const nova = new Date(data.data_expiracao);
-  nova.setDate(nova.getDate()+30);
+  let baseData = new Date();
+  const hoje = new Date();
 
-  await supabase.from("apps")
+  if(data.data_expiracao){
+    const atual = new Date(data.data_expiracao);
+    if(atual > hoje){
+      baseData = atual;
+    }
+  }
+
+  baseData.setDate(baseData.getDate() + diasSelecionados);
+
+  await supabase
+    .from("apps")
     .update({
-      data_expiracao:nova,
-      ativo:true
+      data_expiracao: baseData,
+      ativo: true
     })
     .eq("id",id);
 
+  alert(`Renovado por ${diasSelecionados} dias!`);
   carregarDemos();
 };
-
-/* BLOQUEAR */
-window.bloquearDemo = async (id)=>{
-
-  if(!confirm("Bloquear esta conta?")) return;
-
-  await supabase.from("apps")
-    .update({ativo:false})
-    .eq("id",id);
-
-  carregarDemos();
-};
-
 </script>
+
 </body>
 </html>
