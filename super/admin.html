@@ -36,64 +36,20 @@ a{color:#22c55e;text-decoration:none}
 
 <div id="painel" style="display:none">
 
-<h2>🏢 Criar Negócio</h2>
-<input id="nomeNegocio" placeholder="Nome do negócio">
-<select id="tipoNegocio">
-  <option value="bar">Bar</option>
-  <option value="restaurante">Restaurante</option>
-  <option value="mercado">Mercado</option>
-  <option value="locadora">Locadora</option>
-  <option value="hotel">Hotel</option>
-</select>
-<button onclick="criarNegocio()">Salvar Negócio</button>
-
 <h3>📋 Negócios</h3>
 <div id="listaNegocios"></div>
 
 <hr>
 
-<h2>👤 Criar Admin</h2>
-<input id="usuarioAdmin" placeholder="Usuário">
-<input id="senhaAdmin" type="password" placeholder="Senha">
-<select id="permissaoAdmin">
-  <option value="editar">Editar</option>
-  <option value="visualizar">Visualizar</option>
+<h2>🧪 Contas Teste (Demo)</h2>
+
+<select id="filtroDemo" onchange="carregarDemos()">
+  <option value="todas">Todas</option>
+  <option value="ativas">Ativas</option>
+  <option value="vencidas">Vencidas</option>
 </select>
-<select id="appAdmin"></select>
-<button onclick="criarAdmin()">Criar Admin</button>
 
-<h3>👥 Admins</h3>
-<div id="listaAdmins"></div>
-
-<hr>
-
-<h2>💰 Cadastro de Vendedor</h2>
-<div class="card" style="flex-direction:column">
-  <input id="nomeVendedor" placeholder="Nome completo">
-  <input id="emailVendedor" placeholder="E-mail / usuário">
-  <input id="senhaVendedor" type="password" placeholder="Senha">
-  <input id="comissaoVendedor" type="number" value="10">
-  <button onclick="criarVendedor()">Cadastrar Vendedor</button>
-</div>
-
-<h3>🧾 Vendedores</h3>
-<div id="listaVendedores"></div>
-<hr>
-
-<h2>💬 Chat</h2>
-
-<div id="chatBox" style="
-  background:#020617;
-  height:300px;
-  overflow-y:auto;
-  padding:10px;
-  border-radius:12px;
-  margin-bottom:10px
-"></div>
-<select id="destinatario"></select>
-
-<input id="mensagemChat" placeholder="Digite a mensagem">
-<button onclick="enviarMensagem()">Enviar</button>
+<div id="listaDemos"></div>
 
 </div>
 </div>
@@ -106,24 +62,11 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let mapaApps = {};
-let mapaCriadores = {};
 let usuarioLogado = "Super Admin";
-
-/* LINK SITE PÚBLICO */
-function gerarLinkPublico(app){
-  const base = "https://anajuliafarias659-cloud.github.io/ffsolucoes/";
-  switch(app.tipo){
-    case "mercado": return base + `mercado/public/site.html?app=${app.id}`;
-    case "bar": return base + `bar/public/site/index.html?app=${app.id}`;
-    case "locadora": return base + `locadora/public/index.html?app_id=${app.id}`;
-    case "hotel": return base + `hotel/public/site/index.html?id=${app.id}`;
-    default: return "#";
-  }
-}
 
 /* LOGIN */
 window.login = async ()=>{
+
   const { data } = await supabase
     .from("super_admins")
     .select("*")
@@ -139,292 +82,138 @@ window.login = async ()=>{
   painel.style.display="block";
 
   await carregarNegocios();
-await carregarAdmins();
-await carregarVendedores();
-
+  await carregarDemos();
 };
 
-/* NEGÓCIOS */
-window.criarNegocio = async ()=>{
-  const { error } = await supabase.from("apps").insert({
-    nome: nomeNegocio.value,
-    tipo: tipoNegocio.value,
-    usar_categorias: tipoNegocio.value !== "hotel",
-    created_by: usuarioLogado,
-    bloqueado: false
-  });
-
-  if(error) return alert(error.message);
-  nomeNegocio.value="";
-  carregarNegocios();
-};
-
-window.editarNegocio = async (id,nome)=>{
-  const novo = prompt("Novo nome:", nome);
-  if(!novo) return;
-  await supabase.from("apps").update({ nome: novo }).eq("id", id);
-  carregarNegocios();
-};
-
-window.excluirNegocio = async id=>{
-  if(!confirm("Excluir negócio?")) return;
-  await supabase.from("apps").delete().eq("id", id);
-  carregarNegocios();
-};
-
-window.desbloquearNegocio = async id=>{
-  await supabase.from("apps").update({ bloqueado:false }).eq("id", id);
-  carregarNegocios();
-};
-async function carregarAdminsChat(){
-  const { data, error } = await supabase
-    .from("admins")
-    .select("id, usuario")
-    .eq("ativo", true);
-
-  if(error){
-    console.error(error);
-    return;
-  }
-
-  destinatario.innerHTML = "";
-
-  (data || []).forEach(a=>{
-    destinatario.innerHTML += `
-      <option value="${a.id}">
-        ${a.usuario}
-      </option>
-    `;
-  });
-}
+/* ================= NEGÓCIOS ================= */
 
 async function carregarNegocios(){
-
-  // 1️⃣ Busca todos os apps
-  const { data: apps } = await supabase
-    .from("apps")
-    .select("*");
-
-  // 2️⃣ Busca todos os vendedores
-  const { data: vendedores } = await supabase
-    .from("usuarios")
-    .select("id, nome")
-    .eq("tipo", "vendedor");
-
-  // 3️⃣ Mapa vendedor_id -> nome
-  const mapaVendedores = {};
-  (vendedores || []).forEach(v=>{
-    mapaVendedores[v.id] = v.nome;
-  });
-
+  const { data } = await supabase.from("apps").select("*");
   listaNegocios.innerHTML = "";
-  appAdmin.innerHTML = "";
-  mapaApps = {};
 
-  (apps || []).forEach(n=>{
-    mapaApps[n.id] = `${n.nome} (${n.tipo})`;
-
-    const criador = n.vendedor_id
-      ? mapaVendedores[n.vendedor_id] || "Vendedor (não encontrado)"
-      : "Super Admin";
-
-    const status = n.bloqueado
-      ? `<span class="badge warn">BLOQUEADO</span>`
-      : `<span class="badge">ATIVO</span>`;
-
-    const link = gerarLinkPublico(n);
-
+  (data || []).forEach(n=>{
     listaNegocios.innerHTML += `
       <div class="card">
         <div>
           <b>${n.nome}</b><br>
-          <small style="opacity:.8">
-            Criado por: <b>${criador}</b>
-          </small><br>
-          ${status}<br>
-          <a href="${link}" target="_blank">🌍 Site Público</a>
-        </div>
-
-        <div style="display:flex;gap:6px">
-          <button class="btn-small" onclick="editarNegocio('${n.id}','${n.nome}')">✏️</button>
-          <button class="btn-small danger" onclick="excluirNegocio('${n.id}')">🗑️</button>
-          ${n.bloqueado
-            ? `<button class="btn-small" onclick="desbloquearNegocio('${n.id}')">🔓</button>`
-            : ``}
+          <small>Plano: ${n.plano || "normal"}</small>
         </div>
       </div>
     `;
-
-    appAdmin.innerHTML += `<option value="${n.id}">${n.nome}</option>`;
   });
 }
 
+/* ================= DEMOS ================= */
 
-/* ADMINS */
-window.criarAdmin = async ()=>{
-  await supabase.from("admins").insert({
-    usuario:usuarioAdmin.value,
-    senha:senhaAdmin.value,
-    permissao:permissaoAdmin.value,
-    app_id:appAdmin.value,
-    ativo:true
-  });
-  usuarioAdmin.value="";
-  senhaAdmin.value="";
-  carregarAdmins();
-};
+async function carregarDemos(){
 
-async function carregarAdmins(){
-  const { data } = await supabase.from("admins").select("*");
+  const filtro = filtroDemo.value;
 
-  listaAdmins.innerHTML = "";
+  const { data, error } = await supabase
+    .from("apps")
+    .select("*")
+    .eq("plano","demo")
+    .order("data_expiracao",{ascending:true});
 
-  (data || []).forEach(a=>{
-    listaAdmins.innerHTML += `
+  if(error){
+    console.log(error);
+    return;
+  }
+
+  listaDemos.innerHTML = "";
+
+  const hoje = new Date();
+
+  for(const app of (data || [])){
+
+    const expira = new Date(app.data_expiracao);
+    const diff = expira - hoje;
+    const dias = Math.ceil(diff / (1000*60*60*24));
+
+    if(dias < 0 && app.ativo){
+      await supabase.from("apps")
+        .update({ativo:false})
+        .eq("id",app.id);
+
+      app.ativo = false;
+    }
+
+    if(filtro==="ativas" && dias < 0) continue;
+    if(filtro==="vencidas" && dias >= 0) continue;
+
+    let texto = "";
+    let cor = "#334155";
+
+    if(dias < 0){
+      texto = "VENCIDO";
+      cor = "#7c2d12";
+    }else if(dias <= 2){
+      texto = `Expira em ${dias} dia(s)`;
+      cor = "#b45309";
+    }else{
+      texto = `Restam ${dias} dias`;
+    }
+
+    listaDemos.innerHTML += `
       <div class="card">
         <div>
-          <b>${a.usuario}</b><br>
-          <span class="badge">
-            ${mapaApps[a.app_id] || "não identificado"}
+          <b>${app.nome}</b><br>
+          <small>Expira: ${expira.toLocaleDateString()}</small><br>
+          <span class="badge" style="background:${cor}">
+            ${texto}
           </span>
         </div>
 
         <div style="display:flex;gap:6px">
-          <button class="btn-small" onclick="editarAdmin('${a.id}','${a.usuario}')">✏️</button>
-          <button class="btn-small danger" onclick="excluirAdmin('${a.id}')">🗑️</button>
+          <button class="btn-small"
+            onclick="renovarDemo('${app.id}')">
+            🔄 +30 dias
+          </button>
+
+          <button class="btn-small danger"
+            onclick="bloquearDemo('${app.id}')">
+            🔒 Bloquear
+          </button>
         </div>
       </div>
     `;
-  });
-}
-
-// ✏️ EDITAR ADMIN
-window.editarAdmin = async (id, usuarioAtual)=>{
-  const novoUsuario = prompt("Novo usuário:", usuarioAtual);
-  if(!novoUsuario) return;
-
-  const novaSenha = prompt("Nova senha (deixe vazio para não alterar):");
-
-  const dados = { usuario: novoUsuario };
-  if(novaSenha){
-    dados.senha = novaSenha;
   }
-
-  await supabase
-    .from("admins")
-    .update(dados)
-    .eq("id", id);
-
-  carregarAdmins();
-};
-
-// 🗑️ EXCLUIR ADMIN
-window.excluirAdmin = async (id)=>{
-  if(!confirm("Excluir este admin?")) return;
-
-  await supabase
-    .from("admins")
-    .delete()
-    .eq("id", id);
-
-  carregarAdmins();
-};
-
-
-
-/* VENDEDORES */
-window.criarVendedor = async ()=>{
-  await supabase.from("usuarios").insert({
-    nome:nomeVendedor.value,
-    email:emailVendedor.value,
-    senha:senhaVendedor.value,
-    tipo:"vendedor",
-    comissao_percentual:Number(comissaoVendedor.value),
-    ativo:true
-  });
-  nomeVendedor.value="";
-  emailVendedor.value="";
-  senhaVendedor.value="";
-  comissaoVendedor.value=10;
-  carregarVendedores();
-};
-
-async function carregarVendedores(){
-  const { data } = await supabase.from("usuarios").select("*").eq("tipo","vendedor");
-  listaVendedores.innerHTML="";
-  (data||[]).forEach(v=>{
-  const status = v.ativo
-    ? `<span class="badge">ATIVO</span>`
-    : `<span class="badge warn">INATIVO</span>`;
-
-  const botao = v.ativo
-    ? `<button class="btn-small danger" onclick="desativarVendedor('${v.id}')">🚫</button>`
-    : `<button class="btn-small" onclick="ativarVendedor('${v.id}')">✅</button>`;
-
-  listaVendedores.innerHTML += `
-    <div class="card">
-      <div>
-        <b>${v.nome}</b><br>
-        <small>${v.email}</small><br>
-        ${status}
-        <span class="badge">Comissão: ${v.comissao_percentual}%</span>
-      </div>
-
-      <div style="display:flex;gap:6px">
-        ${botao}
-      </div>
-    </div>
-  `;
-});
-async function carregarAdminsChat(){
-  const { data, error } = await supabase
-    .from("admins")
-    .select("id, usuario")
-    .eq("ativo", true);
-
-  if(error){
-    console.error(error);
-    return;
-  }
-
-  destinatario.innerHTML = "";
-
-  (data || []).forEach(a=>{
-    destinatario.innerHTML += `
-      <option value="${a.id}">
-        ${a.usuario}
-      </option>
-    `;
-  });
 }
 
+/* RENOVAR */
+window.renovarDemo = async (id)=>{
 
-}
-// 🔒 DESATIVAR VENDEDOR
-window.desativarVendedor = async (id)=>{
-  if(!confirm("Desativar este vendedor?")) return;
+  const { data } = await supabase
+    .from("apps")
+    .select("data_expiracao")
+    .eq("id",id)
+    .single();
 
-  await supabase
-    .from("usuarios")
-    .update({ ativo: false })
-    .eq("id", id);
+  const nova = new Date(data.data_expiracao);
+  nova.setDate(nova.getDate()+30);
 
-  carregarVendedores();
+  await supabase.from("apps")
+    .update({
+      data_expiracao:nova,
+      ativo:true
+    })
+    .eq("id",id);
+
+  carregarDemos();
 };
 
-// 🔓 ATIVAR VENDEDOR
-window.ativarVendedor = async (id)=>{
-  if(!confirm("Ativar este vendedor?")) return;
+/* BLOQUEAR */
+window.bloquearDemo = async (id)=>{
 
-  await supabase
-    .from("usuarios")
-    .update({ ativo: true })
-    .eq("id", id);
+  if(!confirm("Bloquear esta conta?")) return;
 
-  carregarVendedores();
+  await supabase.from("apps")
+    .update({ativo:false})
+    .eq("id",id);
+
+  carregarDemos();
 };
 
 </script>
-
 </body>
 </html>
