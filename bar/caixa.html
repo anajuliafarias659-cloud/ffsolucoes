@@ -89,15 +89,10 @@ import { supabase } from "../js/supabase.js";
 let resumoPagamentosGlobal = "";
 let canalRealtime = null;
 
-/* =========================
-   AGUARDAR SESSÃO
-========================= */
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
   }
-
-  console.log("APP_ID carregado:", window.APP_ID);
 
   const { data: { session } } = await supabase.auth.getSession();
   if(session){
@@ -114,69 +109,43 @@ window.irPara = p => location.href = p;
 window.scrollContas = () => document.getElementById("boxContas").scrollIntoView({behavior:"smooth"});
 window.irPagamento = id => location.href = `pagamento.html?pedido=${id}`;
 
-/* =========================
-   REALTIME DEFINITIVO
-========================= */
 function ativarRealtime(){
-
   if(canalRealtime){
     supabase.removeChannel(canalRealtime);
   }
 
   canalRealtime = supabase
     .channel("caixa-realtime")
-    .on(
-      "postgres_changes",
+    .on("postgres_changes",
       {
         event: "UPDATE",
         schema: "public",
         table: "pedidos"
       },
       async (payload) => {
-
-        console.log("Evento recebido:", payload);
-
         if(payload.new.status === "conta_solicitada"){
-          tocarSomNotificacao();
+          tocarSom();
         }
-
         await verificarContas();
         await gerarFechamento();
       }
     )
-    .subscribe((status) => {
-      console.log("Status realtime:", status);
-    });
+    .subscribe();
 }
 
-/* =========================
-   SOM
-========================= */
-function tocarSomNotificacao(){
+function tocarSom(){
   const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
   audio.play().catch(()=>{});
 }
 
-/* =========================
-   CONTAS (SEM BLOQUEIO RLS)
-========================= */
 async function verificarContas(){
 
-  const { data, error } = await supabase
+  const { data: pedidos } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      app_id,
-      status,
-      mesas(numero_mesa),
-      pedido_itens(preco,quantidade)
-    `)
+    .select("id, app_id, mesa_id")
     .eq("status", "conta_solicitada");
 
-  if(error){
-    console.error("Erro buscar contas:", error);
-    return;
-  }
+  const filtrados = (pedidos || []).filter(p => p.app_id === window.APP_ID);
 
   const btn = document.getElementById("btnContas");
   const qtd = document.getElementById("qtdContas");
@@ -185,106 +154,56 @@ async function verificarContas(){
 
   lista.innerHTML = "";
 
-  const filtrados = (data || []).filter(p => p.app_id === window.APP_ID);
-
-  if(filtrados.length > 0){
-
-    btn.style.display = "inline-block";
-    btn.classList.add("piscar");
-    qtd.innerText = filtrados.length;
-    box.style.display = "block";
-
-    filtrados.forEach(p=>{
-      let total = 0;
-
-      (p.pedido_itens || []).forEach(i=>{
-        total += Number(i.preco) * Number(i.quantidade);
-      });
-
-      lista.innerHTML += `
-        <tr>
-          <td>Mesa ${p.mesas?.numero_mesa || "-"}</td>
-          <td>R$ ${total.toFixed(2)}</td>
-          <td>
-            <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
-          </td>
-        </tr>
-      `;
-    });
-
-  } else {
+  if(filtrados.length === 0){
     btn.style.display = "none";
     btn.classList.remove("piscar");
     box.style.display = "none";
-  }
-}
-
-/* =========================
-   GERAR FECHAMENTO
-========================= */
-window.gerarFechamento = async function(){
-
-  const inicio = new Date();
-  inicio.setHours(0,0,0,0);
-  const amanha = new Date(inicio.getTime() + 86400000);
-
-  const { data: pedidos } = await supabase
-    .from("pedidos")
-    .select("id, forma_pagamento, created_at")
-    .eq("app_id", window.APP_ID)
-    .eq("status", "finalizado")
-    .gte("created_at", inicio.toISOString())
-    .lt("created_at", amanha.toISOString());
-
-  if(!pedidos || pedidos.length === 0){
-    document.getElementById("totalRecebido").innerText = "R$ 0.00";
-    document.getElementById("qtdVendas").innerText = "0";
-    document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
-    resumoPagamentosGlobal = "";
     return;
   }
 
-  const ids = pedidos.map(p => p.id);
+  const ids = filtrados.map(p => p.id);
 
   const { data: itens } = await supabase
     .from("pedido_itens")
     .select("pedido_id, preco, quantidade")
     .in("pedido_id", ids);
 
-  let total = 0;
-  let pagamentos = {};
+  const mesaIds = filtrados.map(p => p.mesa_id);
 
-  pedidos.forEach(p => {
-    let totalPedido = 0;
+  const { data: mesas } = await supabase
+    .from("mesas")
+    .select("id, numero_mesa")
+    .in("id", mesaIds);
+
+  btn.style.display = "inline-block";
+  btn.classList.add("piscar");
+  qtd.innerText = filtrados.length;
+  box.style.display = "block";
+
+  filtrados.forEach(p=>{
+
+    let total = 0;
 
     (itens || [])
       .filter(i => i.pedido_id === p.id)
-      .forEach(i => {
-        totalPedido += Number(i.preco) * Number(i.quantidade);
+      .forEach(i=>{
+        total += Number(i.preco) * Number(i.quantidade);
       });
 
-    total += totalPedido;
+    const mesa = (mesas || []).find(m => m.id === p.mesa_id);
 
-    const forma = p.forma_pagamento || "Não informado";
-    if(!pagamentos[forma]) pagamentos[forma] = 0;
-    pagamentos[forma] += totalPedido;
+    lista.innerHTML += `
+      <tr>
+        <td>Mesa ${mesa?.numero_mesa || "-"}</td>
+        <td>R$ ${total.toFixed(2)}</td>
+        <td>
+          <button onclick="irPagamento('${p.id}')">💳 Pagar</button>
+        </td>
+      </tr>
+    `;
   });
-
-  document.getElementById("totalRecebido").innerText = "R$ " + total.toFixed(2);
-  document.getElementById("qtdVendas").innerText = pedidos.length;
-  document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
-
-  let resumo = "";
-  for(const forma in pagamentos){
-    resumo += `${forma}: R$ ${pagamentos[forma].toFixed(2)}\n`;
-  }
-  resumoPagamentosGlobal = resumo;
-};
+}
 </script>
-
 
 </body>
 </html>
-
-
-
