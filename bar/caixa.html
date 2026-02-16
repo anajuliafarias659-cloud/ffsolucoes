@@ -87,20 +87,67 @@ th{color:#94a3b8}
 import { supabase } from "../js/supabase.js";
 
 let resumoPagamentosGlobal = "";
+let canalRealtime = null;
 
+/* =========================
+   AGUARDAR SESSÃO
+========================= */
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r=>setTimeout(r,100));
   }
-  verificarContas(window.APP_ID);
-  gerarFechamento();
-  setInterval(()=>verificarContas(window.APP_ID),3000);
+
+  await verificarContas(window.APP_ID);
+  await gerarFechamento();
+  ativarRealtime();
 }
 aguardarSessao();
 
 window.irPara = p => location.href = p;
 window.scrollContas = () => document.getElementById("boxContas").scrollIntoView({behavior:"smooth"});
 window.irPagamento = id => location.href = `pagamento.html?pedido=${id}`;
+
+/* =========================
+   REALTIME PROFISSIONAL
+========================= */
+function ativarRealtime(){
+
+  if(canalRealtime){
+    supabase.removeChannel(canalRealtime);
+  }
+
+  canalRealtime = supabase
+    .channel("caixa-contas-"+window.APP_ID)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pedidos",
+        filter: `app_id=eq.${window.APP_ID}`
+      },
+      async (payload) => {
+
+        const novoStatus = payload.new?.status;
+
+        if(novoStatus === "conta_solicitada"){
+          tocarSomNotificacao();
+        }
+
+        await verificarContas(window.APP_ID);
+        await gerarFechamento();
+      }
+    )
+    .subscribe();
+}
+
+/* =========================
+   SOM NOTIFICAÇÃO
+========================= */
+function tocarSomNotificacao(){
+  const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+  audio.play().catch(()=>{});
+}
 
 /* =========================
    GERAR FECHAMENTO
@@ -165,7 +212,7 @@ window.gerarFechamento = async function(){
 };
 
 /* =========================
-   FECHAR CAIXA COMPLETO
+   FECHAR CAIXA
 ========================= */
 window.fecharCaixa = async function(){
 
@@ -186,7 +233,6 @@ window.fecharCaixa = async function(){
     return;
   }
 
-  /* SALVA HISTÓRICO */
   await supabase.from("fechamentos_caixa").insert([{
     app_id: window.APP_ID,
     data: new Date().toISOString().split("T")[0],
@@ -195,7 +241,6 @@ window.fecharCaixa = async function(){
     resumo_pagamentos: resumoPagamentosGlobal
   }]);
 
-  /* MARCA PEDIDOS COMO FECHADO */
   const inicio = new Date();
   inicio.setHours(0,0,0,0);
   const amanha = new Date(inicio.getTime() + 86400000);
@@ -208,7 +253,6 @@ window.fecharCaixa = async function(){
     .gte("created_at", inicio.toISOString())
     .lt("created_at", amanha.toISOString());
 
-  /* PDF */
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
@@ -283,5 +327,7 @@ async function verificarContas(appId){
 }
 </script>
 
+
 </body>
 </html>
+
