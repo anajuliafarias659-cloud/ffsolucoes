@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Painel Admin • Serviços</title>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <style>
 body{
   margin:0;
@@ -13,7 +15,6 @@ body{
   color:#fff;
   padding:20px;
 }
-
 h1{
   text-align:center;
   color:#1de9b6;
@@ -26,17 +27,29 @@ h1{
   border-radius:12px;
 }
 
-select,button{
+label{
+  display:block;
+  margin-top:10px;
+  font-size:14px;
+}
+
+select,textarea,button{
+  width:100%;
   padding:8px;
   border-radius:8px;
   border:none;
-  margin-top:8px;
+  margin-top:5px;
+}
+
+textarea{
+  resize:none;
 }
 
 button{
   background:#1de9b6;
   font-weight:bold;
   cursor:pointer;
+  margin-top:10px;
 }
 </style>
 </head>
@@ -44,14 +57,22 @@ button{
 <body>
 
 <h1>📋 Painel de Serviços</h1>
-
-<div id="lista"></div>
+<div id="lista">Verificando acesso...</div>
 
 <script type="module">
+
+/* ================= SUPABASE ================= */
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+const supabase = createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+/* ================= FIREBASE ================= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, collection, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
-/* FIREBASE CONFIG */
 const firebaseConfig = {
   apiKey: "AIzaSyBgar59yF1k6XmfG0iNOXvWCWKIa9dHcdI",
   authDomain: "servicospc-b3382.firebaseapp.com",
@@ -63,9 +84,36 @@ const db = getFirestore(app);
 
 const lista = document.getElementById("lista");
 
+/* ================= PROTEGER ADMIN ================= */
+async function proteger(){
+
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
+
+  if(!user){
+    window.location.href = "login-admin.html";
+    return;
+  }
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("tipo")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if(!usuario || usuario.tipo !== "admin"){
+    await supabase.auth.signOut();
+    window.location.href = "login-admin.html";
+    return;
+  }
+
+  carregarServicos();
+}
+
+/* ================= CARREGAR SERVIÇOS ================= */
 async function carregarServicos(){
 
-  lista.innerHTML = "Carregando...";
+  lista.innerHTML = "Carregando serviços...";
 
   const querySnapshot = await getDocs(collection(db, "servicos"));
 
@@ -82,31 +130,39 @@ async function carregarServicos(){
         <strong>Serviço:</strong> ${dados.servico}<br>
         <strong>Status atual:</strong> ${dados.status}<br>
 
+        <label>Status</label>
         <select id="status-${docSnap.id}">
-          <option value="Pendente">Pendente</option>
-          <option value="Em andamento">Em andamento</option>
-          <option value="Finalizado">Finalizado</option>
+          <option ${dados.status==="Pendente"?"selected":""}>Pendente</option>
+          <option ${dados.status==="Em andamento"?"selected":""}>Em andamento</option>
+          <option ${dados.status==="Finalizado"?"selected":""}>Finalizado</option>
         </select>
 
-        <button onclick="atualizar('${docSnap.id}')">Atualizar Status</button>
+        <label>Descrição do Problema</label>
+        <textarea id="problema-${docSnap.id}" rows="3">${dados.problema || ""}</textarea>
+
+        <button onclick="atualizar('${docSnap.id}')">Atualizar</button>
       </div>
     `;
   });
 }
 
+/* ================= ATUALIZAR ================= */
 window.atualizar = async (codigo) => {
 
   const novoStatus = document.getElementById("status-"+codigo).value;
+  const problema = document.getElementById("problema-"+codigo).value;
 
   await updateDoc(doc(db, "servicos", codigo), {
-    status: novoStatus
+    status: novoStatus,
+    problema: problema
   });
 
-  alert("Status atualizado!");
+  alert("Atualizado com sucesso!");
   carregarServicos();
 };
 
-carregarServicos();
+proteger();
+
 </script>
 
 </body>
