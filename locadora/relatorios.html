@@ -19,6 +19,8 @@ const supabase = createClient(
 );
 
 let dadosAtuais = [];
+let APP_ID = null;
+
 
 /* ================= UTIL ================= */
 
@@ -46,9 +48,11 @@ window.cadastrarVeiculo = async function(){
     return alert("Preencha placa e modelo");
 
   const { error } = await supabase.from("veiculos").insert({
-    placa: placa.value.toUpperCase(),
-    modelo: modelo.value
-  });
+  placa: placa.value.toUpperCase(),
+  modelo: modelo.value,
+  app_id: APP_ID
+});
+
 
   if(error) return alert(error.message);
 
@@ -58,7 +62,11 @@ window.cadastrarVeiculo = async function(){
 }
 
 async function carregarVeiculos(){
-  const { data } = await supabase.from("veiculos").select("*");
+  const { data } = await supabase
+    .from("veiculos")
+    .select("*")
+    .eq("app_id", APP_ID);
+
   selectVeiculo.innerHTML="<option value=''>Selecione</option>";
 
   data?.forEach(v=>{
@@ -69,14 +77,45 @@ async function carregarVeiculos(){
     `;
   });
 }
+async function pegarAppId(){
 
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if(!session){
+    window.location.href = "../auth/login.html";
+    return;
+  }
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  if(!usuario?.app_id){
+    alert("App não encontrado");
+    return;
+  }
+
+  APP_ID = usuario.app_id;
+}
 window.excluirVeiculo = async function(){
   const id = selectVeiculo.value;
   if(!id) return alert("Selecione um veículo");
   if(!confirm("Excluir veículo e todos lançamentos?")) return;
 
-  await supabase.from("lancamentos").delete().eq("veiculo_id", id);
-  await supabase.from("veiculos").delete().eq("id", id);
+  await supabase
+  .from("lancamentos")
+  .delete()
+  .eq("veiculo_id", id)
+  .eq("app_id", APP_ID);
+
+  await supabase
+  .from("veiculos")
+  .delete()
+  .eq("id", id)
+  .eq("app_id", APP_ID);
+
 
   carregarVeiculos();
   carregarLancamentos();
@@ -93,18 +132,20 @@ window.cadastrarLancamento = async function(){
     .toLocaleString('pt-BR', { month:'long' });
 
   const { error } = await supabase.from("lancamentos").insert({
-    veiculo_id: selectVeiculo.value,
-    cliente: cliente.value,
-    descricao: descricao.value,
-    km_inicial: Number(kmInicial.value)||0,
-    km_final: Number(kmFinal.value)||0,
-    quantidade: Number(quantidade.value)||0,
-    valor: converterRealParaNumero(valor.value),
-    despesa: converterRealParaNumero(despesa.value),
-    data_inicio: dataInicio.value,
-    data_fim: dataFim.value,
-    mes
-  });
+  veiculo_id: selectVeiculo.value,
+  cliente: cliente.value,
+  descricao: descricao.value,
+  km_inicial: Number(kmInicial.value)||0,
+  km_final: Number(kmFinal.value)||0,
+  quantidade: Number(quantidade.value)||0,
+  valor: converterRealParaNumero(valor.value),
+  despesa: converterRealParaNumero(despesa.value),
+  data_inicio: dataInicio.value,
+  data_fim: dataFim.value,
+  mes,
+  app_id: APP_ID
+});
+
 
   if(error) return alert(error.message);
 
@@ -117,8 +158,10 @@ async function carregarLancamentos(){
   const veiculoSelecionado = selectVeiculo.value;
 
   let query = supabase
-    .from("lancamentos")
-    .select("*, veiculos(modelo,placa)")
+  .from("lancamentos")
+  .select("*, veiculos(modelo,placa)")
+  .eq("app_id", APP_ID)
+
     .order("created_at",{ascending:false});
 
   // 🔥 FILTRO AQUI
@@ -177,9 +220,16 @@ totalLucroSpan.innerText = totalLucro.toLocaleString('pt-BR',{minimumFractionDig
 
 window.excluirLancamento = async function(id){
   if(!confirm("Excluir este lançamento?")) return;
-  await supabase.from("lancamentos").delete().eq("id", id);
+
+  await supabase
+    .from("lancamentos")
+    .delete()
+    .eq("id", id)
+    .eq("app_id", APP_ID);
+
   carregarLancamentos();
 }
+
 
 /* ================= PDF GERAL ================= */
 
@@ -367,7 +417,9 @@ function atualizarFiltroMes(){
   });
 }
 
-window.addEventListener("DOMContentLoaded", ()=>{
+window.addEventListener("DOMContentLoaded", async ()=>{
+
+  await pegarAppId();
 
   formatarMoeda(document.getElementById("valor"));
   formatarMoeda(document.getElementById("despesa"));
@@ -380,8 +432,8 @@ window.addEventListener("DOMContentLoaded", ()=>{
 
   document.getElementById("mesFiltro")
     .addEventListener("change", filtrarPorMes);
-
 });
+
 
 
 function filtrarPorMes(){
