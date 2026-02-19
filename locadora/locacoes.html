@@ -23,30 +23,10 @@ header{background:#0f172a;padding:18px 24px;font-size:22px;font-weight:700}
 .aprovar{background:#22c55e}
 .recusar{background:#ef4444;color:#fff}
 hr{opacity:.2}
-
 #modal,#modalAceite{display:none;position:fixed;inset:0;background:#0009;z-index:999}
 .box{background:#0b1220;padding:20px;border-radius:16px;max-width:900px;margin:3% auto;max-height:90vh;overflow:auto}
 .box-sm{background:#0b1220;padding:20px;border-radius:16px;max-width:420px;margin:10% auto}
-
-.doc{
-  max-width:100%;
-  max-height:260px;
-  border-radius:12px;
-  margin-top:10px;
-  cursor:pointer;
-}
-.doc-label{
-  margin-top:14px;
-  font-weight:700;
-  opacity:.85;
-}
-input{
-  width:100%;
-  padding:10px;
-  border-radius:10px;
-  border:none;
-  margin-top:6px;
-}
+input{width:100%;padding:10px;border-radius:10px;border:none;margin-top:6px}
 </style>
 </head>
 
@@ -54,45 +34,30 @@ input{
 
 <header>📋 Locações – Administração</header>
 
-<div style="padding:16px;text-align:right">
-  <button class="btn recusar" onclick="excluirAntigos()">🗑️ Excluir recusadas</button>
-</div>
-
 <div class="container">
   <div class="grid" id="lista"></div>
 </div>
 
-<!-- MODAL DETALHES -->
 <div id="modal">
   <div class="box">
-    <h3>📄 Detalhes da Solicitação</h3>
+    <h3>Detalhes</h3>
     <div id="detalhes"></div>
-
     <hr>
-
-    <button class="btn ver" onclick="baixarPDF()">⬇ Baixar PDF</button>
-    <br><br>
-
     <button class="btn aprovar" onclick="aceitar()">✔ Aceitar</button>
     <button class="btn recusar" onclick="recusar()">❌ Recusar</button>
     <button class="btn ver" onclick="fechar()">Fechar</button>
   </div>
 </div>
 
-<!-- MODAL ACEITE -->
 <div id="modalAceite">
   <div class="box-sm">
-    <h3>✔ Confirmar Locação</h3>
-
+    <h3>Confirmar Locação</h3>
     <label>Dias</label>
     <input id="aDias" readonly>
-
     <label>Diária (R$)</label>
-    <input id="aDiaria" type="number" min="0" oninput="recalcularTotal()">
-
-    <label>Total (R$)</label>
+    <input id="aDiaria" type="number" oninput="recalcularTotal()">
+    <label>Total</label>
     <input id="aTotal" readonly>
-
     <br>
     <button class="btn aprovar" onclick="confirmarAceite()">Confirmar</button>
     <button class="btn ver" onclick="fecharAceite()">Cancelar</button>
@@ -106,11 +71,9 @@ const sb = supabase.createClient(
 );
 
 const appId = localStorage.getItem("app_id");
-
 if(!appId){
-  alert("Sessão inválida. Faça login novamente.");
-  window.location.href="../auth/login.html";
-  throw new Error("sem app_id");
+  alert("Sessão inválida");
+  location.href="../auth/login.html";
 }
 
 let atual=null;
@@ -125,7 +88,6 @@ async function carregar(){
     .order("created_at",{ascending:false});
 
   lista.innerHTML="";
-
   if(!data?.length){
     lista.innerHTML="<p>Nenhuma solicitação.</p>";
     return;
@@ -135,70 +97,37 @@ async function carregar(){
     lista.innerHTML+=`
       <div class="card">
         <b>${l.nome}</b><br>
-        Veículo: <b>${l.veiculo_modelo || "—"}</b><br>
-        Dias: ${l.dias} — Total: R$ ${l.total || "—"}<br><br>
-        <span class="badge ${l.status}">${l.status.toUpperCase()}</span>
-        <hr>
-        <button class="btn ver" onclick="ver('${l.id}')">👁️ Ver detalhes</button>
+        Veículo: ${l.veiculo_modelo}<br>
+        Dias: ${l.dias}<br>
+        Status: ${l.status}<br><br>
+        <button class="btn ver" onclick="ver('${l.id}')">Ver</button>
       </div>
     `;
   });
 }
 
-/* VER DETALHES */
 async function ver(id){
   atual=id;
-
-  const { data } = await sb
-    .from("locacoes")
-    .select("*")
-    .eq("id",id)
-    .single();
-
+  const { data } = await sb.from("locacoes").select("*").eq("id",id).single();
   dadosAtuais=data;
 
   detalhes.innerHTML=`
-    <p><b>Cliente:</b> ${data.nome}</p>
-    <p><b>Telefone:</b> ${data.telefone}</p>
-    <p><b>CPF:</b> ${data.cpf}</p>
-    <p><b>Pagamento:</b> ${data.forma_pagamento || "-"}</p>
-    <p><b>Veículo:</b> ${data.veiculo_modelo}</p>
-    <p><b>Dias:</b> ${data.dias}</p>
-    <p><b>Total:</b> R$ ${data.total || "-"}</p>
-
-    <hr>
-
-    ${renderDoc("📸 Selfie", data.selfie_url)}
-    ${renderDoc("🪪 RG Frente", data.rg_frente_url)}
-    ${renderDoc("🪪 RG Verso", data.rg_verso_url)}
-    ${renderDoc("🚗 CNH", data.cnh_url)}
+    Cliente: ${data.nome}<br>
+    CPF: ${data.cpf}<br>
+    Telefone: ${data.telefone}<br>
+    Veículo: ${data.veiculo_modelo}<br>
+    Dias: ${data.dias}<br>
+    Pagamento: ${data.forma_pagamento}
   `;
 
   modal.style.display="block";
 }
 
-/* RENDER DOCUMENTO */
-function renderDoc(label,url){
-  if(!url){
-    return `
-      <div class="doc-label">${label}</div>
-      <p>Não enviado</p>
-    `;
-  }
-
-  return `
-    <div class="doc-label">${label}</div>
-    <img src="${url}" class="doc"
-         onclick="window.open('${url}','_blank')">
-  `;
-}
-
-/* ACEITE */
 function aceitar(){
   aDias.value=dadosAtuais.dias;
   const d=Number(dadosAtuais.veiculo_diaria||0);
-  aDiaria.value=d>0?d:"";
-  aTotal.value=d>0?(d*dadosAtuais.dias).toFixed(2):"0.00";
+  aDiaria.value=d;
+  aTotal.value=(d*dadosAtuais.dias).toFixed(2);
   modalAceite.style.display="block";
 }
 
@@ -207,9 +136,9 @@ function recalcularTotal(){
 }
 
 async function confirmarAceite(){
-  const diaria=Number(aDiaria.value||0);
-  const total=Number(aTotal.value||0);
-  if(diaria<=0){alert("Informe a diária");return;}
+
+  const diaria=Number(aDiaria.value);
+  const total=Number(aTotal.value);
 
   await sb.from("locacoes").update({
     status:"ativa",
@@ -217,13 +146,66 @@ async function confirmarAceite(){
     total:total
   }).eq("id",atual);
 
+  const { jsPDF } = window.jspdf;
+
+  /* PDF CLIENTE */
+  const pdfCliente=new jsPDF();
+  pdfCliente.text("CONTRATO DE LOCAÇÃO",10,20);
+  pdfCliente.text(`Cliente: ${dadosAtuais.nome}`,10,35);
+  pdfCliente.text(`Veículo: ${dadosAtuais.veiculo_modelo}`,10,45);
+  pdfCliente.text(`Dias: ${dadosAtuais.dias}`,10,55);
+  pdfCliente.text(`Total: R$ ${total}`,10,65);
+  pdfCliente.text("Prazo pagamento: 15 minutos",10,80);
+
+  const blobCliente=pdfCliente.output("blob");
+  const pathCliente=`${appId}/${Date.now()}-cliente.pdf`;
+
+  await sb.storage.from("contratos_cliente")
+    .upload(pathCliente,blobCliente,{upsert:true});
+
+  const contratoClienteUrl=sb.storage
+    .from("contratos_cliente")
+    .getPublicUrl(pathCliente).data.publicUrl;
+
+  /* PDF INTERNO */
+  const pdfInterno=new jsPDF();
+  pdfInterno.text("CONTRATO INTERNO",10,20);
+  pdfInterno.text(`Cliente: ${dadosAtuais.nome}`,10,35);
+  pdfInterno.text(`CPF: ${dadosAtuais.cpf}`,10,45);
+  pdfInterno.text(`Telefone: ${dadosAtuais.telefone}`,10,55);
+
+  const blobInterno=pdfInterno.output("blob");
+  const pathInterno=`${appId}/${Date.now()}-interno.pdf`;
+
+  await sb.storage.from("contratos_interno")
+    .upload(pathInterno,blobInterno,{upsert:true});
+
+  /* WHATSAPP */
+  const tel=dadosAtuais.telefone.replace(/\D/g,"");
+
+  const msg=`
+Olá ${dadosAtuais.nome},
+
+Sua locação foi APROVADA ✅
+
+Veículo: ${dadosAtuais.veiculo_modelo}
+Dias: ${dadosAtuais.dias}
+Total: R$ ${total}
+
+Contrato:
+${contratoClienteUrl}
+
+Prazo para pagamento: 15 minutos.
+`;
+
+  window.open(`https://wa.me/55${tel}?text=${encodeURIComponent(msg)}`,"_blank");
+
   fecharAceite();
   fechar();
   carregar();
 }
 
 async function recusar(){
-  if(!confirm("Recusar solicitação?"))return;
   await sb.from("locacoes").update({status:"recusada"}).eq("id",atual);
   fechar();
   carregar();
@@ -231,27 +213,6 @@ async function recusar(){
 
 function fechar(){modal.style.display="none";}
 function fecharAceite(){modalAceite.style.display="none";}
-
-async function excluirAntigos(){
-  if(!confirm("Excluir recusadas?")) return;
-
-  await sb.from("locacoes")
-    .delete()
-    .eq("app_id",appId)
-    .eq("status","recusada");
-
-  carregar();
-}
-
-/* PDF */
-async function baixarPDF(){
-  const { jsPDF } = window.jspdf;
-  const pdf=new jsPDF();
-  pdf.text(`Cliente: ${dadosAtuais.nome}`,10,20);
-  pdf.text(`Veículo: ${dadosAtuais.veiculo_modelo}`,10,30);
-  pdf.text(`Total: R$ ${dadosAtuais.total}`,10,40);
-  pdf.save(`locacao-${dadosAtuais.nome}.pdf`);
-}
 
 carregar();
 </script>
