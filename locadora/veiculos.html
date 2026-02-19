@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
+*{box-sizing:border-box}
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .container{max-width:900px;margin:40px auto;padding:20px}
 .box{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
@@ -43,7 +44,7 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 <input id="dias" type="number" placeholder="Dias alugado" style="display:none">
 <input id="fotos" type="file" accept="image/*" multiple>
 
-<button onclick="cadastrarVeiculo()">Cadastrar Veículo</button>
+<button id="btnSalvar" onclick="cadastrarVeiculo()">Cadastrar Veículo</button>
 </div>
 
 <div class="box">
@@ -59,32 +60,48 @@ const db = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin?.app_id){
-  alert("Locadora não selecionada");
+/* ===== NOVO PADRÃO APP_ID ===== */
+const app_id = localStorage.getItem("app_id");
+
+if(!app_id){
+  alert("Locadora não encontrada. Faça login novamente.");
+  window.location.href = "../auth/login.html";
   throw new Error("sem app_id");
 }
 
+/* ===== ELEMENTOS ===== */
+const modeloEl = document.getElementById("modelo");
+const diariaEl = document.getElementById("diaria");
+const statusEl = document.getElementById("status");
+const diasEl = document.getElementById("dias");
+const fotosEl = document.getElementById("fotos");
+const lista = document.getElementById("lista");
+const btnSalvar = document.getElementById("btnSalvar");
+
+/* ===== STATUS ===== */
 function setStatus(valor){
-  status.value = valor;
-  dias.style.display = valor === "alugado" ? "block" : "none";
+  statusEl.value = valor;
+  diasEl.style.display = valor === "alugado" ? "block" : "none";
 }
 
+/* ===== UPLOAD ===== */
 async function uploadFotos(files){
   const urls=[];
   for(const f of files){
     const nome=`${Date.now()}_${f.name}`;
     await db.storage.from("veiculos").upload(nome,f);
-    urls.push(db.storage.from("veiculos").getPublicUrl(nome).data.publicUrl);
+    const publicUrl = db.storage.from("veiculos").getPublicUrl(nome).data.publicUrl;
+    urls.push(publicUrl);
   }
   return urls;
 }
 
+/* ===== CADASTRAR ===== */
 async function cadastrarVeiculo(){
   const modelo = modeloEl.value.trim();
-  const diariaVal = diaria.value ? Number(diaria.value) : null;
-  const statusVal = status.value;
-  const diasVal = Number(dias.value)||null;
+  const diaria = diariaEl.value ? Number(diariaEl.value) : null;
+  const status = statusEl.value;
+  const dias = Number(diasEl.value)||null;
 
   if(!modelo){
     alert("Informe o modelo");
@@ -95,32 +112,34 @@ async function cadastrarVeiculo(){
   const foto_url = fotos[0] || null;
 
   await db.from("veiculos").insert({
-    app_id: admin.app_id,
+    app_id,
     modelo,
-    diaria: diariaVal,
-    status: statusVal,
-    dias_alugado: diasVal,
+    diaria,
+    status,
+    dias_alugado: dias,
     foto_url,
     fotos
   });
 
   modeloEl.value="";
-  diaria.value="";
-  dias.value="";
+  diariaEl.value="";
+  diasEl.value="";
   fotosEl.value="";
   setStatus("disponivel");
 
   carregarVeiculos();
 }
 
+/* ===== LISTAR ===== */
 async function carregarVeiculos(){
   const {data} = await db
     .from("veiculos")
     .select("*")
-    .eq("app_id",admin.app_id)
+    .eq("app_id",app_id)
     .order("created_at",{ascending:false});
 
   lista.innerHTML="";
+
   data.forEach(v=>{
     lista.innerHTML+=`
     <div class="veiculo">
@@ -130,7 +149,7 @@ async function carregarVeiculos(){
         Diária: ${v.diaria ? `R$ ${v.diaria}` : "—"}<br>
         Status: ${v.status}
         <div class="actions">
-          <button onclick="toggleStatus('${v.id}','${v.status}','${v.modelo}',${v.diaria||0})">
+          <button onclick="toggleStatus('${v.id}','${v.status}',${v.diaria||0})">
             ${v.status==="disponivel"?"Marcar alugado":"Marcar disponível"}
           </button>
           <button class="edit" onclick="editarVeiculo('${v.id}')">Editar</button>
@@ -141,12 +160,14 @@ async function carregarVeiculos(){
   });
 }
 
-async function toggleStatus(id,status,modelo,diaria){
+/* ===== ALTERAR STATUS ===== */
+async function toggleStatus(id,status,diaria){
   if(status==="disponivel"){
     if(!diaria){
       alert("Este veículo não possui diária definida.");
       return;
     }
+
     const dias=Number(prompt("Quantos dias?"));
     if(!dias||dias<=0)return;
 
@@ -158,6 +179,7 @@ async function toggleStatus(id,status,modelo,diaria){
       dias_alugado:dias,
       data_fim:fim.toISOString().split("T")[0]
     }).eq("id",id);
+
   }else{
     await db.from("veiculos").update({
       status:"disponivel",
@@ -165,42 +187,42 @@ async function toggleStatus(id,status,modelo,diaria){
       data_fim:null
     }).eq("id",id);
   }
+
   carregarVeiculos();
 }
 
+/* ===== EDITAR ===== */
 async function editarVeiculo(id){
   const {data}=await db.from("veiculos").select("*").eq("id",id).single();
+
   modeloEl.value=data.modelo;
-  diaria.value=data.diaria||"";
-  status.value=data.status;
+  diariaEl.value=data.diaria||"";
+  statusEl.value=data.status;
   setStatus(data.status);
 
-  const btn=document.querySelector(".box button");
-  btn.textContent="Atualizar Veículo";
-  btn.onclick=()=>atualizarVeiculo(id);
+  btnSalvar.textContent="Atualizar Veículo";
+  btnSalvar.onclick=()=>atualizarVeiculo(id);
 }
 
+/* ===== ATUALIZAR ===== */
 async function atualizarVeiculo(id){
   await db.from("veiculos").update({
     modelo:modeloEl.value,
-    diaria: diaria.value?Number(diaria.value):null,
-    status:status.value,
-    dias_alugado:Number(dias.value)||null
+    diaria: diariaEl.value?Number(diariaEl.value):null,
+    status:statusEl.value,
+    dias_alugado:Number(diasEl.value)||null
   }).eq("id",id);
 
   location.reload();
 }
 
+/* ===== EXCLUIR ===== */
 async function excluir(id){
   if(confirm("Excluir veículo?")){
     await db.from("veiculos").delete().eq("id",id);
     carregarVeiculos();
   }
 }
-
-const modeloEl=modelo;
-const diariaEl=diaria;
-const fotosEl=fotos;
 
 carregarVeiculos();
 </script>
