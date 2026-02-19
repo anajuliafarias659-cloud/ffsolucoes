@@ -36,7 +36,12 @@ header h2{
   border-radius:16px;
   padding:20px;
 }
-label{font-weight:700;font-size:14px;margin-top:12px;display:block}
+label{
+  font-weight:700;
+  font-size:14px;
+  margin-top:12px;
+  display:block
+}
 input{
   width:100%;
   padding:12px;
@@ -54,9 +59,11 @@ input{
   text-align:center;
   cursor:pointer;
 }
+.btn-sec{
+  background:#333;
+}
 canvas{
   width:100%;
-  max-width:100%;
   border:2px dashed #ccc;
   border-radius:12px;
   margin-top:10px;
@@ -66,6 +73,13 @@ video{
   border-radius:12px;
   display:none;
   margin-top:10px;
+}
+.info-box{
+  background:#f8f8f8;
+  padding:12px;
+  border-radius:10px;
+  margin-top:10px;
+  font-size:14px;
 }
 </style>
 </head>
@@ -78,6 +92,10 @@ video{
 </header>
 
 <div class="container">
+
+  <div class="info-box">
+    Ao finalizar você confirma que leu e concorda com os termos da locação.
+  </div>
 
   <label>Veículo</label>
   <input id="veiculo" readonly>
@@ -97,37 +115,39 @@ video{
   <label>Total</label>
   <input id="total" readonly>
 
-  <div class="btn" onclick="abrirCamera()">📸 Tirar Selfie</div>
+  <div class="btn" onclick="abrirCamera()">📸 Abrir Câmera</div>
   <video id="video" playsinline></video>
-  <canvas id="selfie"></canvas>
+  <div class="btn btn-sec" onclick="capturar()">Capturar Selfie</div>
+  <canvas id="selfie" height="250"></canvas>
 
   <label>Assinatura</label>
-  <canvas id="assinatura" height="160"></canvas>
+  <canvas id="assinatura" height="180"></canvas>
+  <div class="btn btn-sec" onclick="limparAssinatura()">Limpar Assinatura</div>
 
   <div class="btn" onclick="finalizar()">Finalizar Contrato</div>
 
 </div>
 
 <script>
-/* SUPABASE */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* PARAM */
 const params = new URLSearchParams(location.search);
 const locacaoId = params.get("locacao");
+
 if(!locacaoId){
   alert("Contrato inválido");
   throw new Error("sem locacao");
 }
 
-let stream = null;
 let LOCACAO = null;
+let stream = null;
 
 /* CARREGAR */
 async function carregar(){
+
   const { data:locacao } = await sb
     .from("locacoes")
     .select("*")
@@ -151,7 +171,6 @@ async function carregar(){
 
   LOCACAO = locacao;
 
-  /* CONFIG SITE */
   const { data:config } = await sb
     .from("config_site")
     .select("*")
@@ -166,11 +185,11 @@ async function carregar(){
     nomeSite.innerText = config.nome_site || "Finalização da Locação";
   }
 
-  veiculo.value = locacao.veiculo_nome || "Veículo";
+  veiculo.value = locacao.veiculo_nome || "";
   nome.value = locacao.nome || "";
   telefone.value = locacao.telefone || "";
   dias.value = locacao.dias;
-  total.value = "R$ " + locacao.total;
+  total.value = "R$ " + Number(locacao.total).toLocaleString("pt-BR",{minimumFractionDigits:2});
 }
 
 carregar();
@@ -184,6 +203,7 @@ async function abrirCamera(){
 }
 
 function capturar(){
+  if(!stream) return alert("Abra a câmera primeiro");
   selfie.width = video.videoWidth;
   selfie.height = video.videoHeight;
   selfie.getContext("2d").drawImage(video,0,0);
@@ -193,25 +213,74 @@ function capturar(){
   stream.getTracks().forEach(t=>t.stop());
 }
 
-/* ASSINATURA */
-const ctx = assinatura.getContext("2d");
-let desenhando=false;
-assinatura.addEventListener("mousedown",e=>{
-  desenhando=true;
+/* ASSINATURA TOUCH + MOUSE */
+const assinaturaCanvas = document.getElementById("assinatura");
+const ctx = assinaturaCanvas.getContext("2d");
+let desenhando = false;
+
+function iniciar(e){
+  desenhando = true;
   ctx.beginPath();
-  ctx.moveTo(e.offsetX,e.offsetY);
-});
-assinatura.addEventListener("mousemove",e=>{
+  ctx.moveTo(getX(e), getY(e));
+}
+function desenhar(e){
   if(!desenhando) return;
-  ctx.lineTo(e.offsetX,e.offsetY);
+  ctx.lineTo(getX(e), getY(e));
   ctx.stroke();
-});
-window.addEventListener("mouseup",()=>desenhando=false);
+}
+function parar(){ desenhando = false; }
+
+function getX(e){
+  return e.touches ? e.touches[0].clientX - assinaturaCanvas.getBoundingClientRect().left : e.offsetX;
+}
+function getY(e){
+  return e.touches ? e.touches[0].clientY - assinaturaCanvas.getBoundingClientRect().top : e.offsetY;
+}
+
+assinaturaCanvas.addEventListener("mousedown", iniciar);
+assinaturaCanvas.addEventListener("mousemove", desenhar);
+window.addEventListener("mouseup", parar);
+
+assinaturaCanvas.addEventListener("touchstart", iniciar);
+assinaturaCanvas.addEventListener("touchmove", desenhar);
+assinaturaCanvas.addEventListener("touchend", parar);
+
+function limparAssinatura(){
+  ctx.clearRect(0,0,assinaturaCanvas.width,assinaturaCanvas.height);
+}
 
 /* FINALIZAR */
 async function finalizar(){
+
+  if(!nome.value || !cpf.value || !telefone.value){
+    alert("Preencha todos os dados");
+    return;
+  }
+
+  if(selfie.width === 0){
+    alert("Tire a selfie");
+    return;
+  }
+
+  const assinaturaVazia = ctx.getImageData(0,0,assinaturaCanvas.width,assinaturaCanvas.height)
+    .data.every(p => p === 0);
+
+  if(assinaturaVazia){
+    alert("Assine o contrato");
+    return;
+  }
+
+  const selfieBase64 = selfie.toDataURL("image/png");
+  const assinaturaBase64 = assinaturaCanvas.toDataURL("image/png");
+
   await sb.from("locacoes")
-    .update({ contrato_status:"finalizado" })
+    .update({
+      contrato_status:"finalizado",
+      selfie_base64: selfieBase64,
+      assinatura_base64: assinaturaBase64,
+      cpf: cpf.value,
+      telefone: telefone.value
+    })
     .eq("id", LOCACAO.id);
 
   alert("Contrato finalizado com sucesso!");
