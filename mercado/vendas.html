@@ -100,27 +100,40 @@ let timerBusca = null;
 /* ========= VALIDAR SESSÃO ========= */
 
 async function validarSessao(){
-const { data } = await supabaseClient.auth.getSession();
-if(!data.session){
-alert("Sessão inválida");
-location.href="login.html";
-return false;
-}
-app_id = data.session.user.id;
-await carregarEmpresa();
-return true;
+  const { data } = await supabaseClient.auth.getSession();
+
+  if(!data.session){
+    alert("Sessão inválida");
+    location.href="login.html";
+    return false;
+  }
+
+  app_id = data.session.user.id;
+
+  await carregarEmpresa(); // 🔥 busca nome correto pelo ID
+
+  return true;
 }
 
-/* ========= BUSCAR EMPRESA ========= */
+/* ========= BUSCAR NOME DO NEGÓCIO PELO ID ========= */
 
 async function carregarEmpresa(){
-const { data } = await supabaseClient
-.from("empresas") // se sua tabela tiver outro nome me fala
-.select("nome")
-.eq("app_id", app_id)
-.single();
 
-if(data) nomeEmpresa = data.nome;
+  const { data, error } = await supabaseClient
+    .from("negocios")   // 🔥 nome correto da tabela
+    .select("nome")
+    .eq("id", app_id)   // 🔥 busca pelo ID do negócio
+    .single();
+
+  if(error){
+    console.error("Erro ao buscar negócio:", error);
+    nomeEmpresa = "Minha Empresa";
+    return;
+  }
+
+  if(data){
+    nomeEmpresa = data.nome;
+  }
 }
 
 function round2(v){ return Math.round(v*100)/100; }
@@ -138,233 +151,238 @@ const valorPago = document.getElementById("valorPago");
 const infoPagamento = document.getElementById("infoPagamento");
 const formFiado = document.getElementById("formFiado");
 
-/* ========= BUSCAR PRODUTO ========= */
+/* ========= BUSCA PRODUTO ========= */
 
 function autoBuscar(){
-clearTimeout(timerBusca);
-const v = codigo.value.trim();
-if(!v){ listaBusca.innerHTML=""; return; }
-timerBusca=setTimeout(()=>buscarGeral(v),200);
+  clearTimeout(timerBusca);
+  const v = codigo.value.trim();
+  if(!v){ listaBusca.innerHTML=""; return; }
+  timerBusca=setTimeout(()=>buscarGeral(v),200);
 }
 
 async function buscarGeral(v){
 
-let data=[];
-let error=null;
+  let res;
 
-if(/^\d+$/.test(v)){
-const res = await supabaseClient
-.from("produtos")
-.select("*")
-.eq("app_id",app_id)
-.eq("codigo_barras",v);
-data=res.data; error=res.error;
-}else{
-const res = await supabaseClient
-.from("produtos")
-.select("*")
-.eq("app_id",app_id)
-.ilike("nome",`%${v}%`)
-.limit(5);
-data=res.data; error=res.error;
-}
+  if(/^\d+$/.test(v)){
+    res = await supabaseClient
+      .from("produtos")
+      .select("*")
+      .eq("app_id",app_id)
+      .eq("codigo_barras",v);
+  }else{
+    res = await supabaseClient
+      .from("produtos")
+      .select("*")
+      .eq("app_id",app_id)
+      .ilike("nome",`%${v}%`)
+      .limit(5);
+  }
 
-listaBusca.innerHTML="";
-if(error){ console.error(error); return; }
+  const { data, error } = res;
 
-if(!data || data.length===0){
-listaBusca.innerHTML="<div class='lista-item'>Nenhum produto</div>";
-return;
-}
+  listaBusca.innerHTML="";
 
-data.forEach(p=>{
-listaBusca.innerHTML+=`
-<div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
-${p.nome} — R$ ${Number(p.preco).toFixed(2)}
-</div>`;
-});
+  if(error){ console.error(error); return; }
+
+  if(!data || data.length===0){
+    listaBusca.innerHTML="<div class='lista-item'>Nenhum produto</div>";
+    return;
+  }
+
+  data.forEach(p=>{
+    listaBusca.innerHTML+=`
+    <div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
+      ${p.nome} — R$ ${Number(p.preco).toFixed(2)}
+    </div>`;
+  });
 }
 
 function selecionarProduto(p){
-produtoAtual=p;
-prevNome.innerText=p.nome;
-prevPreco.innerText=Number(p.preco).toFixed(2);
-prevEstoque.innerText=p.estoque;
-previewProduto.classList.remove("hidden");
-listaBusca.innerHTML="";
+  produtoAtual=p;
+  prevNome.innerText=p.nome;
+  prevPreco.innerText=Number(p.preco).toFixed(2);
+  prevEstoque.innerText=p.estoque;
+  previewProduto.classList.remove("hidden");
+  listaBusca.innerHTML="";
 }
 
 function confirmarAdicionar(){
 
-const qtd=Number(quantidade.value);
+  const qtd=Number(quantidade.value);
 
-if(qtd>produtoAtual.estoque){
-alert("Estoque insuficiente");
-return;
-}
+  if(qtd>produtoAtual.estoque){
+    alert("Estoque insuficiente");
+    return;
+  }
 
-carrinho.push({
-id:produtoAtual.id,
-nome:produtoAtual.nome,
-qtd,
-preco:Number(produtoAtual.preco),
-subtotal:round2(qtd*Number(produtoAtual.preco))
-});
+  carrinho.push({
+    id:produtoAtual.id,
+    nome:produtoAtual.nome,
+    qtd,
+    preco:Number(produtoAtual.preco),
+    subtotal:round2(qtd*Number(produtoAtual.preco))
+  });
 
-atualizarCarrinho();
-previewProduto.classList.add("hidden");
-codigo.value="";
+  atualizarCarrinho();
+  previewProduto.classList.add("hidden");
+  codigo.value="";
 }
 
 /* ========= CARRINHO ========= */
 
 function atualizarCarrinho(){
-carrinhoDiv.innerHTML="";
-total=0;
+  carrinhoDiv.innerHTML="";
+  total=0;
 
-carrinho.forEach(i=>{
-total+=i.subtotal;
-carrinhoDiv.innerHTML+=`${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
-});
+  carrinho.forEach(i=>{
+    total+=i.subtotal;
+    carrinhoDiv.innerHTML+=`${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
+  });
 
-totalSpan.innerText=round2(total).toFixed(2);
-localStorage.setItem("carrinho_caixa",JSON.stringify(carrinho));
+  totalSpan.innerText=round2(total).toFixed(2);
+  localStorage.setItem("carrinho_caixa",JSON.stringify(carrinho));
 }
 
 function calcularPagamento(){
-infoPagamento.innerText="";
-const pago=round2(Number(valorPago.value));
-if(isNaN(pago)||pago<=0) return;
-if(pago<total) infoPagamento.innerText=`Falta: R$ ${(total-pago).toFixed(2)}`;
-else if(pago>total) infoPagamento.innerText=`Troco: R$ ${(pago-total).toFixed(2)}`;
-else infoPagamento.innerText="Pagamento exato";
+  infoPagamento.innerText="";
+  const pago=round2(Number(valorPago.value));
+  if(isNaN(pago)||pago<=0) return;
+  if(pago<total) infoPagamento.innerText=`Falta: R$ ${(total-pago).toFixed(2)}`;
+  else if(pago>total) infoPagamento.innerText=`Troco: R$ ${(pago-total).toFixed(2)}`;
+  else infoPagamento.innerText="Pagamento exato";
 }
 
 /* ========= RECIBO ========= */
 
 function gerarRecibo(tipo, pago, devido = 0, cliente = null){
 
-const data = new Date().toLocaleString("pt-BR");
+  const data = new Date().toLocaleString("pt-BR");
 
-let itensHTML = "";
-carrinho.forEach(i=>{
-itensHTML += `
-<tr>
-<td>${i.nome}</td>
-<td>${i.qtd}</td>
-<td>R$ ${i.preco.toFixed(2)}</td>
-<td>R$ ${i.subtotal.toFixed(2)}</td>
-</tr>`;
-});
+  let itensHTML = "";
+  carrinho.forEach(i=>{
+    itensHTML += `
+      <tr>
+        <td>${i.nome}</td>
+        <td>${i.qtd}</td>
+        <td>R$ ${i.preco.toFixed(2)}</td>
+        <td>R$ ${i.subtotal.toFixed(2)}</td>
+      </tr>`;
+  });
 
-const troco = pago > total ? round2(pago-total) : 0;
+  const troco = pago > total ? round2(pago-total) : 0;
 
-const recibo = `
-<html>
-<head>
-<title>Recibo</title>
-<style>
-body{font-family:monospace;padding:20px}
-h2{text-align:center}
-table{width:100%;border-collapse:collapse;margin-top:10px}
-th,td{border-bottom:1px dashed #000;padding:4px;font-size:12px;text-align:left}
-.total{font-weight:bold;margin-top:10px}
-</style>
-</head>
-<body>
+  const recibo = `
+  <html>
+  <head>
+    <title>Recibo</title>
+    <style>
+      body{font-family:monospace;padding:20px}
+      h2{text-align:center}
+      table{width:100%;border-collapse:collapse;margin-top:10px}
+      th,td{border-bottom:1px dashed #000;padding:4px;font-size:12px;text-align:left}
+      .total{font-weight:bold;margin-top:10px}
+    </style>
+  </head>
+  <body>
 
-<h2>${nomeEmpresa}</h2>
-<p>${data}</p>
+    <h2>${nomeEmpresa}</h2>
+    <p>${data}</p>
 
-<table>
-<tr>
-<th>Item</th>
-<th>Qtd</th>
-<th>Preço</th>
-<th>Total</th>
-</tr>
-${itensHTML}
-</table>
+    <table>
+      <tr>
+        <th>Item</th>
+        <th>Qtd</th>
+        <th>Preço</th>
+        <th>Total</th>
+      </tr>
+      ${itensHTML}
+    </table>
 
-<p class="total">TOTAL: R$ ${total.toFixed(2)}</p>
-<p>Forma: ${tipo}</p>
-<p>Pago: R$ ${pago.toFixed(2)}</p>
-${troco>0?`<p>Troco: R$ ${troco.toFixed(2)}</p>`:""}
-${devido>0?`<p>Devido: R$ ${devido.toFixed(2)}</p>`:""}
-${cliente?`<p>Cliente: ${cliente}</p>`:""}
+    <p class="total">TOTAL: R$ ${total.toFixed(2)}</p>
+    <p>Forma: ${tipo}</p>
+    <p>Pago: R$ ${pago.toFixed(2)}</p>
+    ${troco>0?`<p>Troco: R$ ${troco.toFixed(2)}</p>`:""}
+    ${devido>0?`<p>Devido: R$ ${devido.toFixed(2)}</p>`:""}
+    ${cliente?`<p>Cliente: ${cliente}</p>`:""}
 
-<p style="text-align:center;margin-top:20px">
-Obrigado pela preferência!
-</p>
+    <p style="text-align:center;margin-top:20px">
+      Obrigado pela preferência!
+    </p>
 
-<script>
-window.print();
-setTimeout(()=>window.close(),500);
-<\/script>
+    <script>
+      window.print();
+      setTimeout(()=>window.close(),500);
+    <\/script>
 
-</body>
-</html>
-`;
+  </body>
+  </html>
+  `;
 
-const win = window.open("", "RECIBO", "width=400,height=600");
-win.document.write(recibo);
-win.document.close();
+  const win = window.open("", "RECIBO", "width=400,height=600");
+  win.document.write(recibo);
+  win.document.close();
 }
 
 /* ========= FINALIZAR VENDA ========= */
 
 async function finalizarVenda(tipo){
 
-if(carrinho.length===0){ alert("Carrinho vazio"); return; }
+  if(carrinho.length===0){ alert("Carrinho vazio"); return; }
 
-const pago=round2(Number(valorPago.value));
-if(isNaN(pago)||pago<=0){ alert("Informe valor válido"); return; }
+  const pago=round2(Number(valorPago.value));
+  if(isNaN(pago)||pago<=0){ alert("Informe valor válido"); return; }
 
-for(const i of carrinho){
+  for(const i of carrinho){
 
-await supabaseClient.from("vendas").insert({
-app_id:app_id,
-produto_id:i.id,
-quantidade:i.qtd,
-valor_total:i.subtotal,
-valor_pago:pago,
-valor_devido:0,
-forma_pagamento:tipo
-});
+    await supabaseClient.from("vendas").insert({
+      app_id:app_id,
+      produto_id:i.id,
+      quantidade:i.qtd,
+      valor_total:i.subtotal,
+      valor_pago:pago,
+      valor_devido:0,
+      forma_pagamento:tipo
+    });
 
-/* 🔥 BAIXA ESTOQUE SEGURA */
-await supabaseClient.rpc("baixar_estoque", {
-produto_id_input: i.id,
-quantidade_input: i.qtd
-});
+    /* 🔥 BAIXA ESTOQUE CORRETA */
+    await supabaseClient
+      .from("produtos")
+      .update({ estoque: supabaseClient.rpc ? undefined : undefined })
+      .eq("id", i.id);
 
-}
+    await supabaseClient.rpc("baixar_estoque", {
+      produto_id_input: i.id,
+      quantidade_input: i.qtd
+    });
+  }
 
-gerarRecibo(tipo, pago, 0);
+  gerarRecibo(tipo, pago, 0);
 
-carrinho=[];
-localStorage.removeItem("carrinho_caixa");
-valorPago.value="";
-infoPagamento.innerText="";
-atualizarCarrinho();
-alert("Venda finalizada");
+  carrinho=[];
+  localStorage.removeItem("carrinho_caixa");
+  valorPago.value="";
+  infoPagamento.innerText="";
+  atualizarCarrinho();
+  alert("Venda finalizada");
 }
 
 /* ========= INICIAR ========= */
 
 document.addEventListener("DOMContentLoaded",async()=>{
-const ok=await validarSessao();
-if(!ok) return;
+  const ok=await validarSessao();
+  if(!ok) return;
 
-const salvo=localStorage.getItem("carrinho_caixa");
-if(salvo){
-carrinho=JSON.parse(salvo);
-atualizarCarrinho();
-}
+  const salvo=localStorage.getItem("carrinho_caixa");
+  if(salvo){
+    carrinho=JSON.parse(salvo);
+    atualizarCarrinho();
+  }
 });
 
 </script>
 </body>
 </html>
+
 
 
