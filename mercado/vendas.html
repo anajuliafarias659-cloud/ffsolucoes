@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>Caixa | FF Soluções</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -44,106 +43,259 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size
 
 <div class="mobile-pos">
 
-  <!-- BUSCA -->
-  <div class="card">
-    <input id="codigo" placeholder="Código ou nome do produto" oninput="autoBuscar()">
-    <div id="listaBusca"></div>
-  </div>
+<div class="card">
+<input id="codigo" placeholder="Código ou nome do produto" oninput="autoBuscar()">
+<div id="listaBusca"></div>
+</div>
 
-  <div class="card">
-    <input id="quantidade" type="number" min="1" value="1">
-  </div>
+<div class="card">
+<input id="quantidade" type="number" min="1" value="1">
+</div>
 
-  <div class="card hidden" id="previewProduto">
-    <b id="prevNome"></b>
-    <p>R$ <span id="prevPreco"></span> | Estoque: <span id="prevEstoque"></span></p>
-    <button onclick="confirmarAdicionar()">Adicionar ao carrinho</button>
-  </div>
+<div class="card hidden" id="previewProduto">
+<b id="prevNome"></b>
+<p>R$ <span id="prevPreco"></span> | Estoque: <span id="prevEstoque"></span></p>
+<button onclick="confirmarAdicionar()">Adicionar ao carrinho</button>
+</div>
 
-  <!-- CARRINHO -->
-  <div class="card carrinho">
-    <b>🛒 Carrinho</b>
-    <div id="carrinho"></div>
-  </div>
+<div class="card carrinho">
+<b>🛒 Carrinho</b>
+<div id="carrinho"></div>
+</div>
 
-  <!-- PAGAMENTO -->
-  <div class="card pagamento">
-    <b>💳 Pagamento</b>
+<div class="card pagamento">
+<b>💳 Pagamento</b>
+<input id="valorPago" type="number" step="0.01" placeholder="Valor pago" oninput="calcularPagamento()">
+<button class="dinheiro" onclick="finalizarVenda('DINHEIRO')">Dinheiro</button>
+<button class="pix" onclick="finalizarVenda('PIX')">PIX</button>
+<button class="cartao" onclick="finalizarVenda('CARTAO')">Cartão</button>
+<button class="fiado" onclick="abrirFiado()">Fiado</button>
+<div id="infoPagamento" class="info"></div>
+</div>
 
-    <input id="valorPago" type="number" step="0.01"
-      placeholder="Valor pago" oninput="calcularPagamento()">
-
-    <button class="dinheiro" onclick="finalizarVenda('DINHEIRO')">Dinheiro</button>
-    <button class="pix" onclick="finalizarVenda('PIX')">PIX</button>
-    <button class="cartao" onclick="finalizarVenda('CARTAO')">Cartão</button>
-    <button class="fiado" onclick="abrirFiado()">Fiado</button>
-
-    <div id="infoPagamento" class="info"></div>
-  </div>
-
-  <!-- FIADO -->
-  <div class="card hidden" id="formFiado">
-    <input id="fiadoNome" placeholder="Nome do cliente">
-    <input id="fiadoCpf" placeholder="CPF (11 dígitos)">
-    <textarea id="fiadoObs" placeholder="Observação"></textarea>
-    <button class="fiado" onclick="confirmarFiado()">Confirmar Fiado</button>
-  </div>
+<div class="card hidden" id="formFiado">
+<input id="fiadoNome" placeholder="Nome do cliente">
+<input id="fiadoCpf" placeholder="CPF (11 dígitos)">
+<textarea id="fiadoObs" placeholder="Observação"></textarea>
+<button class="fiado" onclick="confirmarFiado()">Confirmar Fiado</button>
+</div>
 
 </div>
 
 <div class="total-fixo">
-  TOTAL: R$ <span id="total">0.00</span>
+TOTAL: R$ <span id="total">0.00</span>
 </div>
 
 <script>
-/* ===== BUSCA AUTOMÁTICA ===== */
+
+const supabaseClient = supabase.createClient(
+"https://pdajixsoowcyhnjwhgpc.supabase.co",
+"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let app_id = null;
+
+async function validarSessao(){
+const { data } = await supabaseClient.auth.getSession();
+if(!data.session){
+alert("Sessão inválida");
+location.href="login.html";
+return false;
+}
+app_id = data.session.user.id;
+return true;
+}
+
+function round2(v){ return Math.round(v*100)/100; }
+
+const codigo = document.getElementById("codigo");
+const quantidade = document.getElementById("quantidade");
+const listaBusca = document.getElementById("listaBusca");
+const previewProduto = document.getElementById("previewProduto");
+const prevNome = document.getElementById("prevNome");
+const prevPreco = document.getElementById("prevPreco");
+const prevEstoque = document.getElementById("prevEstoque");
+const carrinhoDiv = document.getElementById("carrinho");
+const totalSpan = document.getElementById("total");
+const valorPago = document.getElementById("valorPago");
+const infoPagamento = document.getElementById("infoPagamento");
+const formFiado = document.getElementById("formFiado");
+
+let carrinho = [];
+let produtoAtual = null;
+let total = 0;
+let timerBusca = null;
+
 function autoBuscar(){
-  clearTimeout(timerBusca);
-  const v = codigo.value.trim();
-
-  if(v === ""){
-    listaBusca.innerHTML = "";
-    return;
-  }
-
-  timerBusca = setTimeout(()=>{
-    buscarGeral(v);
-  }, 300);
+clearTimeout(timerBusca);
+const v = codigo.value.trim();
+if(v === ""){
+listaBusca.innerHTML = "";
+return;
+}
+timerBusca = setTimeout(()=>{ buscarGeral(v); },200);
 }
 
 async function buscarGeral(v){
 
-  const termo = v.trim();
+const termo = v.trim();
+let data = [];
+let error = null;
 
-  const { data, error } = await supabaseClient
-    .from("produtos")
-    .select("*")
-    .eq("app_id", app_id)
-    .or(`codigo_barras.eq.${termo},nome.ilike.%${termo}%`)
-    .limit(5);
+if(/^\d+$/.test(termo)){
+const res = await supabaseClient
+.from("produtos")
+.select("*")
+.eq("app_id", app_id)
+.eq("codigo_barras", termo)
+.limit(5);
 
-  listaBusca.innerHTML = "";
+data = res.data;
+error = res.error;
 
-  if(error){
-    console.error(error);
-    return;
-  }
+}else{
 
-  if(!data || data.length === 0){
-    listaBusca.innerHTML = "<div class='lista-item'>Nenhum produto encontrado</div>";
-    return;
-  }
+const res = await supabaseClient
+.from("produtos")
+.select("*")
+.eq("app_id", app_id)
+.ilike("nome", `%${termo}%`)
+.limit(5);
 
-  data.forEach(p=>{
-    listaBusca.innerHTML += `
-      <div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
-        ${p.nome} — R$ ${Number(p.preco).toFixed(2)}
-      </div>`;
-  });
+data = res.data;
+error = res.error;
 }
+
+listaBusca.innerHTML = "";
+
+if(error){
+console.error(error);
+return;
+}
+
+if(!data || data.length === 0){
+listaBusca.innerHTML = "<div class='lista-item'>Nenhum produto encontrado</div>";
+return;
+}
+
+data.forEach(p=>{
+listaBusca.innerHTML += `
+<div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
+${p.nome} — R$ ${Number(p.preco).toFixed(2)}
+</div>`;
+});
+}
+
+function selecionarProduto(p){
+produtoAtual = p;
+prevNome.innerText = p.nome;
+prevPreco.innerText = Number(p.preco).toFixed(2);
+prevEstoque.innerText = p.estoque;
+previewProduto.classList.remove("hidden");
+listaBusca.innerHTML = "";
+}
+
+function confirmarAdicionar(){
+const qtd = Number(quantidade.value);
+carrinho.push({
+id: produtoAtual.id,
+nome: produtoAtual.nome,
+qtd,
+preco: Number(produtoAtual.preco),
+subtotal: round2(qtd * Number(produtoAtual.preco))
+});
+atualizarCarrinho();
+previewProduto.classList.add("hidden");
+codigo.value = "";
+}
+
+function atualizarCarrinho(){
+carrinhoDiv.innerHTML = "";
+total = 0;
+carrinho.forEach(i=>{
+total += i.subtotal;
+carrinhoDiv.innerHTML += `${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
+});
+totalSpan.innerText = round2(total).toFixed(2);
+}
+
+function calcularPagamento(){
+infoPagamento.innerText = "";
+const pago = round2(Number(valorPago.value));
+if(isNaN(pago) || pago <= 0) return;
+if(pago < total) infoPagamento.innerText = `Falta: R$ ${(total-pago).toFixed(2)}`;
+else if(pago > total) infoPagamento.innerText = `Troco: R$ ${(pago-total).toFixed(2)}`;
+else infoPagamento.innerText = "Pagamento exato";
+}
+
+async function finalizarVenda(tipo){
+
+if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
+
+const pago = round2(Number(valorPago.value));
+if(isNaN(pago) || pago <= 0){ alert("Informe valor válido"); return; }
+
+for(const i of carrinho){
+await supabaseClient.from("vendas").insert({
+app_id: app_id,
+produto_id: i.id,
+quantidade: i.qtd,
+valor_total: total,
+valor_pago: pago,
+valor_devido: 0,
+forma_pagamento: tipo
+});
+}
+
+carrinho = [];
+valorPago.value = "";
+atualizarCarrinho();
+alert(`Venda finalizada em ${tipo}`);
+}
+
+function abrirFiado(){
+if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
+formFiado.classList.remove("hidden");
+}
+
+async function confirmarFiado(){
+
+const nome = document.getElementById("fiadoNome").value.trim();
+const cpf = document.getElementById("fiadoCpf").value.replace(/\D/g,"");
+const obs = document.getElementById("fiadoObs").value;
+const pago = round2(Number(valorPago.value) || 0);
+const devido = round2(total - pago);
+
+if(!nome || cpf.length !== 11){
+alert("Informe nome e CPF válido");
+return;
+}
+
+for(const i of carrinho){
+await supabaseClient.from("vendas").insert({
+app_id: app_id,
+produto_id: i.id,
+quantidade: i.qtd,
+valor_total: total,
+valor_pago: pago,
+valor_devido: devido,
+forma_pagamento: "FIADO",
+cliente_nome: nome,
+cliente_cpf: cpf,
+observacao: obs
+});
+}
+
+alert(`Fiado salvo. Deve R$ ${devido.toFixed(2)}`);
+location.reload();
+}
+
+document.addEventListener("DOMContentLoaded", async ()=>{
+const ok = await validarSessao();
+if(!ok) return;
+});
+
 </script>
 
 </body>
 </html>
-
-
