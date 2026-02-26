@@ -14,9 +14,7 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size
 .mobile-pos{padding:12px;padding-bottom:260px}
 .card{background:#0f172a;border-radius:14px;padding:12px;margin-bottom:10px}
 .card input,.card textarea,.card button{
-  width:100%;padding:10px;font-size:14px;
-  border-radius:10px;border:none;margin-bottom:6px
-}
+width:100%;padding:10px;font-size:14px;border-radius:10px;border:none;margin-bottom:6px}
 .card input,.card textarea{background:#020617;color:#fff}
 .card button{cursor:pointer;background:#0ea5e9;color:#fff}
 .lista-item{padding:8px;border-radius:8px;background:#020617;margin-bottom:4px;cursor:pointer}
@@ -27,11 +25,10 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size
 .pagamento .cartao{background:#2563eb}
 .pagamento .fiado{background:#7c3aed}
 .total-fixo{
-  position:fixed;bottom:0;left:0;width:100%;
-  background:#020617;border-top:1px solid #0f172a;
-  color:#38bdf8;text-align:center;padding:12px;
-  font-size:18px;font-weight:900
-}
+position:fixed;bottom:0;left:0;width:100%;
+background:#020617;border-top:1px solid #0f172a;
+color:#38bdf8;text-align:center;padding:12px;
+font-size:18px;font-weight:900}
 .info{text-align:center;font-weight:bold;margin-top:4px}
 .hidden{display:none}
 </style>
@@ -94,6 +91,10 @@ const supabaseClient = supabase.createClient(
 );
 
 let app_id = null;
+let carrinho = [];
+let produtoAtual = null;
+let total = 0;
+let timerBusca = null;
 
 async function validarSessao(){
 const { data } = await supabaseClient.auth.getSession();
@@ -121,65 +122,46 @@ const valorPago = document.getElementById("valorPago");
 const infoPagamento = document.getElementById("infoPagamento");
 const formFiado = document.getElementById("formFiado");
 
-let carrinho = [];
-let produtoAtual = null;
-let total = 0;
-let timerBusca = null;
-
 function autoBuscar(){
 clearTimeout(timerBusca);
 const v = codigo.value.trim();
-if(v === ""){
-listaBusca.innerHTML = "";
-return;
-}
-timerBusca = setTimeout(()=>{ buscarGeral(v); },200);
+if(!v){ listaBusca.innerHTML=""; return; }
+timerBusca=setTimeout(()=>buscarGeral(v),200);
 }
 
 async function buscarGeral(v){
 
-const termo = v.trim();
-let data = [];
-let error = null;
+let data=[];
+let error=null;
 
-if(/^\d+$/.test(termo)){
+if(/^\d+$/.test(v)){
 const res = await supabaseClient
 .from("produtos")
 .select("*")
-.eq("app_id", app_id)
-.eq("codigo_barras", termo)
-.limit(5);
-
-data = res.data;
-error = res.error;
-
+.eq("app_id",app_id)
+.eq("codigo_barras",v);
+data=res.data; error=res.error;
 }else{
-
 const res = await supabaseClient
 .from("produtos")
 .select("*")
-.eq("app_id", app_id)
-.ilike("nome", `%${termo}%`)
+.eq("app_id",app_id)
+.ilike("nome",`%${v}%`)
 .limit(5);
-
-data = res.data;
-error = res.error;
+data=res.data; error=res.error;
 }
 
-listaBusca.innerHTML = "";
+listaBusca.innerHTML="";
 
-if(error){
-console.error(error);
-return;
-}
+if(error){ console.error(error); return; }
 
-if(!data || data.length === 0){
-listaBusca.innerHTML = "<div class='lista-item'>Nenhum produto encontrado</div>";
+if(!data || data.length===0){
+listaBusca.innerHTML="<div class='lista-item'>Nenhum produto</div>";
 return;
 }
 
 data.forEach(p=>{
-listaBusca.innerHTML += `
+listaBusca.innerHTML+=`
 <div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
 ${p.nome} — R$ ${Number(p.preco).toFixed(2)}
 </div>`;
@@ -187,112 +169,139 @@ ${p.nome} — R$ ${Number(p.preco).toFixed(2)}
 }
 
 function selecionarProduto(p){
-produtoAtual = p;
-prevNome.innerText = p.nome;
-prevPreco.innerText = Number(p.preco).toFixed(2);
-prevEstoque.innerText = p.estoque;
+produtoAtual=p;
+prevNome.innerText=p.nome;
+prevPreco.innerText=Number(p.preco).toFixed(2);
+prevEstoque.innerText=p.estoque;
 previewProduto.classList.remove("hidden");
-listaBusca.innerHTML = "";
+listaBusca.innerHTML="";
 }
 
 function confirmarAdicionar(){
-const qtd = Number(quantidade.value);
+
+const qtd=Number(quantidade.value);
+
+if(qtd>produtoAtual.estoque){
+alert("Estoque insuficiente");
+return;
+}
+
 carrinho.push({
-id: produtoAtual.id,
-nome: produtoAtual.nome,
+id:produtoAtual.id,
+nome:produtoAtual.nome,
 qtd,
-preco: Number(produtoAtual.preco),
-subtotal: round2(qtd * Number(produtoAtual.preco))
+preco:Number(produtoAtual.preco),
+estoque:produtoAtual.estoque,
+subtotal:round2(qtd*Number(produtoAtual.preco))
 });
+
 atualizarCarrinho();
 previewProduto.classList.add("hidden");
-codigo.value = "";
+codigo.value="";
 }
 
 function atualizarCarrinho(){
-carrinhoDiv.innerHTML = "";
-total = 0;
+carrinhoDiv.innerHTML="";
+total=0;
+
 carrinho.forEach(i=>{
-total += i.subtotal;
-carrinhoDiv.innerHTML += `${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
+total+=i.subtotal;
+carrinhoDiv.innerHTML+=`${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
 });
-totalSpan.innerText = round2(total).toFixed(2);
+
+totalSpan.innerText=round2(total).toFixed(2);
+localStorage.setItem("carrinho_caixa",JSON.stringify(carrinho));
 }
 
 function calcularPagamento(){
-infoPagamento.innerText = "";
-const pago = round2(Number(valorPago.value));
-if(isNaN(pago) || pago <= 0) return;
-if(pago < total) infoPagamento.innerText = `Falta: R$ ${(total-pago).toFixed(2)}`;
-else if(pago > total) infoPagamento.innerText = `Troco: R$ ${(pago-total).toFixed(2)}`;
-else infoPagamento.innerText = "Pagamento exato";
+infoPagamento.innerText="";
+const pago=round2(Number(valorPago.value));
+if(isNaN(pago)||pago<=0) return;
+if(pago<total) infoPagamento.innerText=`Falta: R$ ${(total-pago).toFixed(2)}`;
+else if(pago>total) infoPagamento.innerText=`Troco: R$ ${(pago-total).toFixed(2)}`;
+else infoPagamento.innerText="Pagamento exato";
 }
 
 async function finalizarVenda(tipo){
 
-if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
+if(carrinho.length===0){ alert("Carrinho vazio"); return; }
 
-const pago = round2(Number(valorPago.value));
-if(isNaN(pago) || pago <= 0){ alert("Informe valor válido"); return; }
+const pago=round2(Number(valorPago.value));
+if(isNaN(pago)||pago<=0){ alert("Informe valor válido"); return; }
 
 for(const i of carrinho){
+
 await supabaseClient.from("vendas").insert({
-app_id: app_id,
-produto_id: i.id,
-quantidade: i.qtd,
-valor_total: total,
-valor_pago: pago,
-valor_devido: 0,
-forma_pagamento: tipo
+app_id:app_id,
+produto_id:i.id,
+quantidade:i.qtd,
+valor_total:total,
+valor_pago:pago,
+valor_devido:0,
+forma_pagamento:tipo
 });
+
+await supabaseClient.from("produtos")
+.update({ estoque:i.estoque-i.qtd })
+.eq("id",i.id);
 }
 
-carrinho = [];
-valorPago.value = "";
+carrinho=[];
+localStorage.removeItem("carrinho_caixa");
+valorPago.value="";
+infoPagamento.innerText="";
 atualizarCarrinho();
-alert(`Venda finalizada em ${tipo}`);
+alert("Venda finalizada");
 }
 
 function abrirFiado(){
-if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
+if(carrinho.length===0){ alert("Carrinho vazio"); return; }
 formFiado.classList.remove("hidden");
 }
 
 async function confirmarFiado(){
 
-const nome = document.getElementById("fiadoNome").value.trim();
-const cpf = document.getElementById("fiadoCpf").value.replace(/\D/g,"");
-const obs = document.getElementById("fiadoObs").value;
-const pago = round2(Number(valorPago.value) || 0);
-const devido = round2(total - pago);
+const nome=document.getElementById("fiadoNome").value.trim();
+const cpf=document.getElementById("fiadoCpf").value.replace(/\D/g,"");
+const obs=document.getElementById("fiadoObs").value;
+const pago=round2(Number(valorPago.value)||0);
+const devido=round2(total-pago);
 
-if(!nome || cpf.length !== 11){
-alert("Informe nome e CPF válido");
-return;
-}
+if(!nome||cpf.length!==11){ alert("CPF inválido"); return; }
 
 for(const i of carrinho){
+
 await supabaseClient.from("vendas").insert({
-app_id: app_id,
-produto_id: i.id,
-quantidade: i.qtd,
-valor_total: total,
-valor_pago: pago,
-valor_devido: devido,
-forma_pagamento: "FIADO",
-cliente_nome: nome,
-cliente_cpf: cpf,
-observacao: obs
+app_id:app_id,
+produto_id:i.id,
+quantidade:i.qtd,
+valor_total:total,
+valor_pago:pago,
+valor_devido:devido,
+forma_pagamento:"FIADO",
+cliente_nome:nome,
+cliente_cpf:cpf,
+observacao:obs
 });
+
+await supabaseClient.from("produtos")
+.update({ estoque:i.estoque-i.qtd })
+.eq("id",i.id);
 }
 
-alert(`Fiado salvo. Deve R$ ${devido.toFixed(2)}`);
+localStorage.removeItem("carrinho_caixa");
 location.reload();
 }
 
-document.addEventListener("DOMContentLoaded", async ()=>{
-const ok = await validarSessao();
+document.addEventListener("DOMContentLoaded",async()=>{
+const ok=await validarSessao();
 if(!ok) return;
+
+const salvo=localStorage.getItem("carrinho_caixa");
+if(salvo){
+carrinho=JSON.parse(salvo);
+atualizarCarrinho();
+}
 });
 
 </script>
