@@ -97,7 +97,7 @@ let produtoAtual = null;
 let total = 0;
 let timerBusca = null;
 
-/* ========= VALIDAR SESSÃO ========= */
+/* ================= VALIDAR SESSÃO ================= */
 
 async function validarSessao(){
   const { data } = await supabaseClient.auth.getSession();
@@ -110,30 +110,18 @@ async function validarSessao(){
 
   app_id = data.session.user.id;
 
-  await carregarEmpresa(); // 🔥 busca nome correto pelo ID
-
-  return true;
-}
-
-/* ========= BUSCAR NOME DO NEGÓCIO PELO ID ========= */
-
-async function carregarEmpresa(){
-
-  const { data, error } = await supabaseClient
-    .from("negocios")   // 🔥 nome correto da tabela
+  // 🔥 BUSCAR NOME DO NEGÓCIO PELO ID
+  const { data: empresa } = await supabaseClient
+    .from("negocios") // se for outro nome, troque aqui
     .select("nome")
-    .eq("id", app_id)   // 🔥 busca pelo ID do negócio
+    .eq("id", app_id)
     .single();
 
-  if(error){
-    console.error("Erro ao buscar negócio:", error);
-    nomeEmpresa = "Minha Empresa";
-    return;
+  if(empresa){
+    nomeEmpresa = empresa.nome;
   }
 
-  if(data){
-    nomeEmpresa = data.nome;
-  }
+  return true;
 }
 
 function round2(v){ return Math.round(v*100)/100; }
@@ -151,7 +139,7 @@ const valorPago = document.getElementById("valorPago");
 const infoPagamento = document.getElementById("infoPagamento");
 const formFiado = document.getElementById("formFiado");
 
-/* ========= BUSCA PRODUTO ========= */
+/* ================= BUSCA PRODUTO ================= */
 
 function autoBuscar(){
   clearTimeout(timerBusca);
@@ -182,7 +170,6 @@ async function buscarGeral(v){
   const { data, error } = res;
 
   listaBusca.innerHTML="";
-
   if(error){ console.error(error); return; }
 
   if(!data || data.length===0){
@@ -221,6 +208,7 @@ function confirmarAdicionar(){
     nome:produtoAtual.nome,
     qtd,
     preco:Number(produtoAtual.preco),
+    estoque:produtoAtual.estoque,
     subtotal:round2(qtd*Number(produtoAtual.preco))
   });
 
@@ -229,7 +217,7 @@ function confirmarAdicionar(){
   codigo.value="";
 }
 
-/* ========= CARRINHO ========= */
+/* ================= CARRINHO ================= */
 
 function atualizarCarrinho(){
   carrinhoDiv.innerHTML="";
@@ -253,7 +241,7 @@ function calcularPagamento(){
   else infoPagamento.innerText="Pagamento exato";
 }
 
-/* ========= RECIBO ========= */
+/* ================= RECIBO ================= */
 
 function gerarRecibo(tipo, pago, devido = 0, cliente = null){
 
@@ -324,7 +312,7 @@ function gerarRecibo(tipo, pago, devido = 0, cliente = null){
   win.document.close();
 }
 
-/* ========= FINALIZAR VENDA ========= */
+/* ================= FINALIZAR VENDA ================= */
 
 async function finalizarVenda(tipo){
 
@@ -345,16 +333,12 @@ async function finalizarVenda(tipo){
       forma_pagamento:tipo
     });
 
-    /* 🔥 BAIXA ESTOQUE CORRETA */
+    // 🔥 ESTOQUE COMO ERA ANTES (SEM RPC)
     await supabaseClient
       .from("produtos")
-      .update({ estoque: supabaseClient.rpc ? undefined : undefined })
-      .eq("id", i.id);
-
-    await supabaseClient.rpc("baixar_estoque", {
-      produto_id_input: i.id,
-      quantidade_input: i.qtd
-    });
+      .update({ estoque:i.estoque - i.qtd })
+      .eq("id",i.id)
+      .eq("app_id",app_id);
   }
 
   gerarRecibo(tipo, pago, 0);
@@ -367,7 +351,7 @@ async function finalizarVenda(tipo){
   alert("Venda finalizada");
 }
 
-/* ========= INICIAR ========= */
+/* ================= INICIAR ================= */
 
 document.addEventListener("DOMContentLoaded",async()=>{
   const ok=await validarSessao();
@@ -383,6 +367,7 @@ document.addEventListener("DOMContentLoaded",async()=>{
 </script>
 </body>
 </html>
+
 
 
 
