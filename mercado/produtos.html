@@ -77,24 +77,36 @@ button{font-weight:bold;cursor:pointer}
 </div>
 
 <script>
-// ===== SESSÃO =====
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || !admin.app_id){
-  alert("Sessão inválida");
-  location.href="login.html";
-}
-
 // ===== SUPABASE =====
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// ===== FOTOS =====
+let app_id = null;
+
+/* ===== VALIDAR SESSÃO ===== */
+async function validarSessao(){
+  const { data } = await sb.auth.getSession();
+
+  if(!data.session){
+    alert("Sessão inválida");
+    location.href="login.html";
+    return false;
+  }
+
+  app_id = data.session.user.id;
+  return true;
+}
+
+/* ===== FOTOS ===== */
 let fotosTemp=[];
 
 const cameraInput = document.getElementById("cameraInput");
 const galeriaInput = document.getElementById("galeriaInput");
+const preview = document.getElementById("preview");
+const box = document.getElementById("box");
+const lista = document.getElementById("lista");
 
 function atualizarPreview(){
   preview.innerHTML="";
@@ -131,12 +143,12 @@ galeriaInput.onchange=()=>{
   galeriaInput.value="";
 };
 
-// ===== TOGGLE =====
+/* ===== TOGGLE ===== */
 function toggle(){
   box.style.display = box.style.display==="none"?"block":"none";
 }
 
-// ===== CADASTRAR =====
+/* ===== CADASTRAR ===== */
 async function cadastrar(){
   if(!nome.value) return alert("Nome obrigatório");
 
@@ -144,7 +156,7 @@ async function cadastrar(){
 
   for(const file of fotosTemp){
     const ext=file.name.split(".").pop();
-    const path=`${admin.app_id}/${crypto.randomUUID()}.${ext}`;
+    const path=`${app_id}/${crypto.randomUUID()}.${ext}`;
 
     await sb.storage.from("produtos").upload(path,file);
     const {data}=sb.storage.from("produtos").getPublicUrl(path);
@@ -152,7 +164,7 @@ async function cadastrar(){
   }
 
   await sb.from("produtos").insert({
-    app_id:admin.app_id,
+    app_id:app_id,
     nome:nome.value,
     codigo_barra:codigo.value,
     preco:Number(preco.value),
@@ -166,12 +178,14 @@ async function cadastrar(){
   carregar();
 }
 
-// ===== LISTAR / EDITAR / REPOR =====
+/* ===== LISTAR / EDITAR / REPOR ===== */
 async function carregar(){
   const {data}=await sb.from("produtos")
     .select("*")
-    .eq("app_id",admin.app_id)
+    .eq("app_id",app_id)
     .order("nome");
+
+  if(!data) return;
 
   lista.innerHTML="";
 
@@ -220,8 +234,14 @@ async function excluir(id){
   carregar();
 }
 
-carregar();
+/* ===== INICIAR ===== */
+document.addEventListener("DOMContentLoaded", async ()=>{
+  const ok = await validarSessao();
+  if(ok){
+    await carregar();
+  }
+});
 </script>
-
 </body>
 </html>
+
