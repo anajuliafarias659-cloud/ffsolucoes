@@ -109,22 +109,30 @@ input[type=date]{
 </div>
 
 <script>
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-
-if(!admin || !admin.app_id){
-  alert("Sessão inválida");
-  location.href="login.html";
-}
-
 const supabaseClient = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+let app_id = null;
 const SENHA_APAGAR = "1234";
 
 const inputData = document.getElementById("filtroData");
 inputData.valueAsDate = new Date();
+
+/* 🔐 VALIDAR SESSÃO REAL */
+async function validarSessao(){
+  const { data } = await supabaseClient.auth.getSession();
+
+  if(!data.session){
+    alert("Sessão inválida");
+    location.href = "login.html";
+    return false;
+  }
+
+  app_id = data.session.user.id;
+  return true;
+}
 
 /* RELATÓRIO */
 async function carregarRelatorio(){
@@ -144,7 +152,7 @@ async function carregarRelatorio(){
       *,
       produtos ( nome )
     `)
-    .eq("app_id", admin.app_id)
+    .eq("app_id", app_id)
     .gte("created_at", inicio)
     .lte("created_at", fim)
     .order("created_at", { ascending:false });
@@ -161,11 +169,12 @@ async function carregarRelatorio(){
   let dinheiro=0,pix=0,cartao=0;
 
   if(!data || data.length===0){
-    lista.innerHTML = `<tr>
-      <td colspan="7" style="text-align:center;opacity:.7">
-        Nenhuma venda no dia
-      </td>
-    </tr>`;
+    lista.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center;opacity:.7">
+          Nenhuma venda no dia
+        </td>
+      </tr>`;
   }
 
   data?.forEach(v=>{
@@ -187,8 +196,7 @@ async function carregarRelatorio(){
         <td>R$ ${Number(v.valor_pago||0).toFixed(2)}</td>
         <td class="fiado">R$ ${Number(v.valor_devido||0).toFixed(2)}</td>
         <td>${new Date(v.created_at).toLocaleString("pt-BR")}</td>
-      </tr>
-    `;
+      </tr>`;
   });
 
   document.getElementById("totalVendido").innerText=`R$ ${totalVendido.toFixed(2)}`;
@@ -202,6 +210,7 @@ async function carregarRelatorio(){
 /* 🧨 APAGAR GERAL ESCONDIDO */
 document.addEventListener("keydown", async (e)=>{
   if(e.ctrlKey && e.altKey && e.key.toLowerCase()==="l"){
+
     const senha = prompt("Acesso restrito. Digite a senha:");
     if(senha !== SENHA_APAGAR){
       alert("Senha incorreta");
@@ -213,16 +222,22 @@ document.addEventListener("keydown", async (e)=>{
     await supabaseClient
       .from("vendas")
       .delete()
-      .eq("app_id", admin.app_id);
+      .eq("app_id", app_id);
 
     alert("Sistema limpo com sucesso.");
     carregarRelatorio();
   }
 });
 
-carregarRelatorio();
+/* 🚀 INICIAR */
+document.addEventListener("DOMContentLoaded", async ()=>{
+  const ok = await validarSessao();
+  if(!ok) return;
+  carregarRelatorio();
+});
 </script>
 
 </body>
 </html>
+
 
