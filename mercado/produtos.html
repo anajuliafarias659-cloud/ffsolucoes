@@ -97,192 +97,136 @@ async function validarSessao(){
   return true;
 }
 
-/* ===== HELPERS ===== */
-function round2(v){ return Math.round(v*100)/100; }
-
 /* ===== DOM ===== */
+const nome = document.getElementById("nome");
 const codigo = document.getElementById("codigo");
-const quantidade = document.getElementById("quantidade");
-const listaBusca = document.getElementById("listaBusca");
-const previewProduto = document.getElementById("previewProduto");
-const prevNome = document.getElementById("prevNome");
-const prevPreco = document.getElementById("prevPreco");
-const prevEstoque = document.getElementById("prevEstoque");
-const carrinhoDiv = document.getElementById("carrinho");
-const totalSpan = document.getElementById("total");
-const valorPago = document.getElementById("valorPago");
-const infoPagamento = document.getElementById("infoPagamento");
-const formFiado = document.getElementById("formFiado");
+const preco = document.getElementById("preco");
+const estoque = document.getElementById("estoque");
+const preview = document.getElementById("preview");
+const box = document.getElementById("box");
+const lista = document.getElementById("lista");
+const cameraInput = document.getElementById("cameraInput");
+const galeriaInput = document.getElementById("galeriaInput");
 
-/* ===== ESTADO ===== */
-let carrinho = [];
-let produtoAtual = null;
-let total = 0;
-let timerBusca = null;
+/* ===== FOTOS ===== */
+let fotosTemp = [];
 
-/* ===== BUSCA INTELIGENTE ===== */
-function autoBuscar(){
-  clearTimeout(timerBusca);
-  const v = codigo.value.trim();
+function atualizarPreview(){
+  preview.innerHTML="";
+  fotosTemp.forEach(f=>{
+    const img=document.createElement("img");
+    img.src=URL.createObjectURL(f);
+    preview.appendChild(img);
+  });
+}
 
-  if(v === ""){
-    listaBusca.innerHTML = "";
+function abrirCamera(){
+  if(fotosTemp.length>=5) return alert("Máx. 5 fotos");
+  cameraInput.click();
+}
+
+function abrirGaleria(){
+  if(fotosTemp.length>=5) return alert("Máx. 5 fotos");
+  galeriaInput.click();
+}
+
+cameraInput.onchange=()=>{
+  if(cameraInput.files[0]){
+    fotosTemp.push(cameraInput.files[0]);
+    atualizarPreview();
+    cameraInput.value="";
+  }
+};
+
+galeriaInput.onchange=()=>{
+  [...galeriaInput.files].forEach(f=>{
+    if(fotosTemp.length<5) fotosTemp.push(f);
+  });
+  atualizarPreview();
+  galeriaInput.value="";
+};
+
+/* ===== TOGGLE ===== */
+function toggle(){
+  box.style.display = box.style.display==="none"?"block":"none";
+}
+
+/* ===== CADASTRAR ===== */
+async function cadastrar(){
+
+  if(!nome.value) return alert("Nome obrigatório");
+  if(!codigo.value) return alert("Código de barras obrigatório");
+
+  let fotosURLs=[];
+
+  for(const file of fotosTemp){
+    const ext=file.name.split(".").pop();
+    const path=`${app_id}/${crypto.randomUUID()}.${ext}`;
+
+    await supabaseClient.storage.from("produtos").upload(path,file);
+    const {data}=supabaseClient.storage.from("produtos").getPublicUrl(path);
+    fotosURLs.push(data.publicUrl);
+  }
+
+  const { error } = await supabaseClient.from("produtos").insert({
+    app_id: app_id,
+    nome: nome.value,
+    codigo_barras: codigo.value, // 👈 CORRETO
+    preco: Number(preco.value),
+    estoque: Number(estoque.value),
+    imagem: JSON.stringify(fotosURLs)
+  });
+
+  if(error){
+    console.error(error);
+    alert("Erro ao cadastrar");
     return;
   }
 
-  timerBusca = setTimeout(()=>{
-    buscarGeral(v);
-  }, 300);
+  nome.value="";
+  codigo.value="";
+  preco.value="";
+  estoque.value="";
+  fotosTemp=[];
+  preview.innerHTML="";
+  carregar();
 }
 
-async function buscarGeral(v){
-  const { data } = await supabaseClient
+/* ===== LISTAR ===== */
+async function carregar(){
+  const {data} = await supabaseClient
     .from("produtos")
     .select("*")
     .eq("app_id", app_id)
-    .or(`codigo_barra.eq.${v},nome.ilike.%${v}%`)
-    .limit(5);
+    .order("nome");
 
-  listaBusca.innerHTML = "";
+  lista.innerHTML="";
 
   data?.forEach(p=>{
-    listaBusca.innerHTML += `
-      <div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
-        ${p.nome} — R$ ${Number(p.preco).toFixed(2)}
-      </div>`;
+    let fotos=[];
+    try{fotos=JSON.parse(p.imagem||"[]")}catch{}
+
+    lista.innerHTML+=`
+      <div class="produto">
+        <b>${p.nome}</b><br>
+        Código: ${p.codigo_barras || "-"}<br>
+        Estoque: ${p.estoque}<br>
+        R$ ${Number(p.preco).toFixed(2)}<br>
+        ${fotos.map(f=>`<img src="${f}">`).join("")}
+      </div>
+    `;
   });
-}
-
-/* ===== PRODUTO ===== */
-function selecionarProduto(p){
-  produtoAtual = p;
-  prevNome.innerText = p.nome;
-  prevPreco.innerText = Number(p.preco).toFixed(2);
-  prevEstoque.innerText = p.estoque;
-  previewProduto.classList.remove("hidden");
-  listaBusca.innerHTML = "";
-}
-
-function confirmarAdicionar(){
-  const qtd = Number(quantidade.value);
-  carrinho.push({
-    id: produtoAtual.id,
-    nome: produtoAtual.nome,
-    qtd,
-    preco: Number(produtoAtual.preco),
-    estoque: produtoAtual.estoque,
-    subtotal: round2(qtd * Number(produtoAtual.preco))
-  });
-  atualizarCarrinho();
-  previewProduto.classList.add("hidden");
-  codigo.value = "";
-}
-
-/* ===== CARRINHO ===== */
-function atualizarCarrinho(){
-  carrinhoDiv.innerHTML = "";
-  total = 0;
-
-  carrinho.forEach(i=>{
-    total += i.subtotal;
-    carrinhoDiv.innerHTML += `${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
-  });
-
-  totalSpan.innerText = round2(total).toFixed(2);
-}
-
-/* ===== PAGAMENTO INFO ===== */
-function calcularPagamento(){
-  infoPagamento.innerText = "";
-  const pago = round2(Number(valorPago.value));
-  if(isNaN(pago) || pago <= 0) return;
-
-  if(pago < total)
-    infoPagamento.innerText = `Falta: R$ ${(total-pago).toFixed(2)}`;
-  else if(pago > total)
-    infoPagamento.innerText = `Troco: R$ ${(pago-total).toFixed(2)}`;
-  else
-    infoPagamento.innerText = "Pagamento exato";
-}
-
-/* ===== FINALIZAR VENDA ===== */
-async function finalizarVenda(tipo){
-  if(carrinho.length === 0){
-    alert("Carrinho vazio");
-    return;
-  }
-
-  const pago = round2(Number(valorPago.value));
-  if(isNaN(pago) || pago <= 0){
-    alert("Informe valor válido");
-    return;
-  }
-
-  for(const i of carrinho){
-    await supabaseClient.from("vendas").insert({
-      app_id: app_id,
-      produto_id: i.id,
-      quantidade: i.qtd,
-      valor_total: total,
-      valor_pago: pago,
-      valor_devido: 0,
-      forma_pagamento: tipo
-    });
-  }
-
-  carrinho = [];
-  valorPago.value = "";
-  atualizarCarrinho();
-  alert(`Venda finalizada em ${tipo}`);
-}
-
-/* ===== FIADO ===== */
-function abrirFiado(){
-  if(carrinho.length === 0){
-    alert("Carrinho vazio");
-    return;
-  }
-  formFiado.classList.remove("hidden");
-}
-
-async function confirmarFiado(){
-  const nome = document.getElementById("fiadoNome").value.trim();
-  const cpf = document.getElementById("fiadoCpf").value.replace(/\D/g,"");
-  const obs = document.getElementById("fiadoObs").value;
-  const pago = round2(Number(valorPago.value) || 0);
-  const devido = round2(total - pago);
-
-  if(!nome || cpf.length !== 11){
-    alert("Informe nome e CPF válido");
-    return;
-  }
-
-  for(const i of carrinho){
-    await supabaseClient.from("vendas").insert({
-      app_id: app_id,
-      produto_id: i.id,
-      quantidade: i.qtd,
-      valor_total: total,
-      valor_pago: pago,
-      valor_devido: devido,
-      forma_pagamento: "FIADO",
-      cliente_nome: nome,
-      cliente_cpf: cpf,
-      observacao: obs
-    });
-  }
-
-  alert(`Fiado salvo. Deve R$ ${devido.toFixed(2)}`);
-  location.reload();
 }
 
 /* ===== INICIAR ===== */
 document.addEventListener("DOMContentLoaded", async ()=>{
   const ok = await validarSessao();
   if(!ok) return;
+  carregar();
 });
 </script>
 </body>
 </html>
+
 
 
