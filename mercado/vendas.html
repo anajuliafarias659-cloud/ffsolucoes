@@ -96,211 +96,54 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
-const supabaseClient = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-let app_id = null;
-
-/* ===== VALIDAR SESSÃO ===== */
-async function validarSessao(){
-  const { data } = await supabaseClient.auth.getSession();
-
-  if(!data.session){
-    alert("Sessão inválida");
-    location.href="login.html";
-    return false;
-  }
-
-  app_id = data.session.user.id;
-  return true;
-}
-
-/* ===== HELPERS ===== */
-function round2(v){ return Math.round(v*100)/100; }
-
-/* ===== DOM ===== */
-const codigo = document.getElementById("codigo");
-const quantidade = document.getElementById("quantidade");
-const listaBusca = document.getElementById("listaBusca");
-const previewProduto = document.getElementById("previewProduto");
-const prevNome = document.getElementById("prevNome");
-const prevPreco = document.getElementById("prevPreco");
-const prevEstoque = document.getElementById("prevEstoque");
-const carrinhoDiv = document.getElementById("carrinho");
-const totalSpan = document.getElementById("total");
-const valorPago = document.getElementById("valorPago");
-const infoPagamento = document.getElementById("infoPagamento");
-const formFiado = document.getElementById("formFiado");
-
-/* ===== ESTADO ===== */
-let carrinho = [];
-let produtoAtual = null;
-let total = 0;
-let timerBusca = null;
-
 /* ===== BUSCA AUTOMÁTICA ===== */
 function autoBuscar(){
   clearTimeout(timerBusca);
   const v = codigo.value.trim();
+
   if(v === ""){
     listaBusca.innerHTML = "";
     return;
   }
 
   timerBusca = setTimeout(()=>{
-    if(/^\d+$/.test(v) && v.length >= 8){
-      buscarCodigo(v);
-    } else {
-      buscarNome(v);
-    }
+    buscarGeral(v);
   }, 300);
 }
 
-async function buscarNome(v){
-  const { data } = await supabaseClient
+async function buscarGeral(v){
+
+  const termo = v.trim();
+
+  const { data, error } = await supabaseClient
     .from("produtos")
     .select("*")
     .eq("app_id", app_id)
-    .ilike("nome", `%${v}%`)
+    .or(`codigo_barras.eq.${termo},nome.ilike.%${termo}%`)
     .limit(5);
 
   listaBusca.innerHTML = "";
-  data?.forEach(p=>{
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  if(!data || data.length === 0){
+    listaBusca.innerHTML = "<div class='lista-item'>Nenhum produto encontrado</div>";
+    return;
+  }
+
+  data.forEach(p=>{
     listaBusca.innerHTML += `
       <div class="lista-item" onclick='selecionarProduto(${JSON.stringify(p)})'>
         ${p.nome} — R$ ${Number(p.preco).toFixed(2)}
       </div>`;
   });
 }
-
-async function buscarCodigo(v){
-  const { data } = await supabaseClient
-    .from("produtos")
-    .select("*")
-    .eq("codigo_barra", v)
-    .eq("app_id", app_id)
-    .maybeSingle();
-  if(data) selecionarProduto(data);
-}
-
-/* ===== PRODUTO ===== */
-function selecionarProduto(p){
-  produtoAtual = p;
-  prevNome.innerText = p.nome;
-  prevPreco.innerText = Number(p.preco).toFixed(2);
-  prevEstoque.innerText = p.estoque;
-  previewProduto.classList.remove("hidden");
-  listaBusca.innerHTML = "";
-}
-
-function confirmarAdicionar(){
-  const qtd = Number(quantidade.value);
-  carrinho.push({
-    id: produtoAtual.id,
-    nome: produtoAtual.nome,
-    qtd,
-    preco: Number(produtoAtual.preco),
-    estoque: produtoAtual.estoque,
-    subtotal: round2(qtd * Number(produtoAtual.preco))
-  });
-  atualizarCarrinho();
-  previewProduto.classList.add("hidden");
-  codigo.value = "";
-}
-
-/* ===== CARRINHO ===== */
-function atualizarCarrinho(){
-  carrinhoDiv.innerHTML = "";
-  total = 0;
-  carrinho.forEach(i=>{
-    total += i.subtotal;
-    carrinhoDiv.innerHTML += `${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>`;
-  });
-  totalSpan.innerText = round2(total).toFixed(2);
-}
-
-/* ===== INFO PAGAMENTO ===== */
-function calcularPagamento(){
-  infoPagamento.innerText = "";
-  const pago = round2(Number(valorPago.value));
-  if(isNaN(pago) || pago <= 0) return;
-  if(pago < total) infoPagamento.innerText = `Falta: R$ ${(total-pago).toFixed(2)}`;
-  else if(pago > total) infoPagamento.innerText = `Troco: R$ ${(pago-total).toFixed(2)}`;
-  else infoPagamento.innerText = "Pagamento exato";
-}
-
-/* ===== FINALIZAR VENDA ===== */
-async function finalizarVenda(tipo){
-  if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
-
-  const pago = round2(Number(valorPago.value));
-  if(isNaN(pago) || pago <= 0){ alert("Informe valor válido"); return; }
-
-  for(const i of carrinho){
-    await supabaseClient.from("vendas").insert({
-      app_id: app_id,
-      produto_id: i.id,
-      quantidade: i.qtd,
-      valor_total: total,
-      valor_pago: pago,
-      valor_devido: 0,
-      forma_pagamento: tipo
-    });
-  }
-
-  carrinho = [];
-  valorPago.value = "";
-  atualizarCarrinho();
-  alert(`Venda finalizada em ${tipo}`);
-}
-
-/* ===== FIADO ===== */
-function abrirFiado(){
-  if(carrinho.length === 0){ alert("Carrinho vazio"); return; }
-  formFiado.classList.remove("hidden");
-}
-
-async function confirmarFiado(){
-  const nome = document.getElementById("fiadoNome").value.trim();
-  const cpf = document.getElementById("fiadoCpf").value.replace(/\D/g,"");
-  const obs = document.getElementById("fiadoObs").value;
-  const pago = round2(Number(valorPago.value) || 0);
-  const devido = round2(total - pago);
-
-  if(!nome || cpf.length !== 11){
-    alert("Informe nome e CPF válido");
-    return;
-  }
-
-  for(const i of carrinho){
-    await supabaseClient.from("vendas").insert({
-      app_id: app_id,
-      produto_id: i.id,
-      quantidade: i.qtd,
-      valor_total: total,
-      valor_pago: pago,
-      valor_devido: devido,
-      forma_pagamento: "FIADO",
-      cliente_nome: nome,
-      cliente_cpf: cpf,
-      observacao: obs
-    });
-  }
-
-  alert(`Fiado salvo. Deve R$ ${devido.toFixed(2)}`);
-  location.reload();
-}
-
-/* ===== INICIAR ===== */
-document.addEventListener("DOMContentLoaded", async ()=>{
-  const ok = await validarSessao();
-  if(!ok) return;
-});
 </script>
 
 </body>
 </html>
+
 
