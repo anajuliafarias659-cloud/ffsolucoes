@@ -110,6 +110,12 @@ input[type=date]{
 
 <script>
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
+
+if(!admin || !admin.app_id){
+  alert("Sessão inválida");
+  location.href="login.html";
+}
+
 const supabaseClient = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -117,22 +123,36 @@ const supabaseClient = supabase.createClient(
 
 const SENHA_APAGAR = "1234";
 
-/* data padrão = hoje */
 const inputData = document.getElementById("filtroData");
 inputData.valueAsDate = new Date();
 
 /* RELATÓRIO */
 async function carregarRelatorio(){
+
   const dataFiltro = inputData.value;
+  if(!dataFiltro) return;
 
   document.getElementById("dataLabel").innerText =
-    "📅 " + new Date(dataFiltro).toLocaleDateString("pt-BR");
+    "📅 " + new Date(dataFiltro+"T00:00:00").toLocaleDateString("pt-BR");
 
-  const { data } = await supabaseClient
+  const inicio = dataFiltro + "T00:00:00";
+  const fim = dataFiltro + "T23:59:59";
+
+  const { data, error } = await supabaseClient
     .from("vendas")
-    .select("*")
+    .select(`
+      *,
+      produtos ( nome )
+    `)
     .eq("app_id", admin.app_id)
+    .gte("created_at", inicio)
+    .lte("created_at", fim)
     .order("created_at", { ascending:false });
+
+  if(error){
+    console.error(error);
+    return;
+  }
 
   const lista = document.getElementById("lista");
   lista.innerHTML = "";
@@ -140,17 +160,16 @@ async function carregarRelatorio(){
   let totalVendido=0,totalRecebido=0,totalFiado=0;
   let dinheiro=0,pix=0,cartao=0;
 
-  const filtradas = (data||[]).filter(v =>
-    new Date(v.created_at).toISOString().slice(0,10) === dataFiltro
-  );
-
-  if(filtradas.length===0){
-    lista.innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:.7">
-      Nenhuma venda no dia
-    </td></tr>`;
+  if(!data || data.length===0){
+    lista.innerHTML = `<tr>
+      <td colspan="7" style="text-align:center;opacity:.7">
+        Nenhuma venda no dia
+      </td>
+    </tr>`;
   }
 
-  filtradas.forEach(v=>{
+  data?.forEach(v=>{
+
     totalVendido += Number(v.valor_total||0);
     totalRecebido += Number(v.valor_pago||0);
     totalFiado += Number(v.valor_devido||0);
@@ -161,10 +180,10 @@ async function carregarRelatorio(){
 
     lista.innerHTML+=`
       <tr>
-        <td>${v.produto_id}</td>
+        <td>${v.produtos?.nome || v.produto_id}</td>
         <td>${v.quantidade}</td>
         <td>${v.forma_pagamento}</td>
-        <td>R$ ${Number(v.valor_total).toFixed(2)}</td>
+        <td>R$ ${Number(v.valor_total||0).toFixed(2)}</td>
         <td>R$ ${Number(v.valor_pago||0).toFixed(2)}</td>
         <td class="fiado">R$ ${Number(v.valor_devido||0).toFixed(2)}</td>
         <td>${new Date(v.created_at).toLocaleString("pt-BR")}</td>
@@ -206,3 +225,4 @@ carregarRelatorio();
 
 </body>
 </html>
+
