@@ -87,7 +87,6 @@ small{opacity:.7}
 </div>
 
 <script>
-/* ===== SUPABASE ===== */
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -95,22 +94,7 @@ const sb = supabase.createClient(
 
 const BUCKET_BANNERS = "banners";
 
-/* ===== LOGIN ALTERADO AQUI ===== */
 let app_id = null;
-
-async function validarSessao(){
-  const { data } = await sb.auth.getSession();
-
-  if(!data.session){
-    alert("Sessão expirada");
-    location.href="login.html";
-    return;
-  }
-
-  app_id = data.session.user.id;
-}
-
-await validarSessao();
 
 /* ===== ELEMENTOS ===== */
 const nomeEl = document.getElementById("nome");
@@ -132,23 +116,44 @@ bannerInput.onchange = ()=>{
   }
 };
 
-/* ===== UPLOAD ===== */
-async function uploadBanner(file){
-  if(!file) return null;
+/* ===== VALIDAR SESSÃO ===== */
+async function validarSessao(){
+  const { data } = await sb.auth.getSession();
 
-  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-  const path = `${app_id}/${Date.now()}.${ext}`;
-
-  const { error } = await sb.storage
-    .from(BUCKET_BANNERS)
-    .upload(path, file, { upsert:true });
-
-  if(error){
-    console.error(error);
-    return null;
+  if(!data.session){
+    alert("Sessão expirada");
+    location.href="login.html";
+    return false;
   }
 
-  return sb.storage.from(BUCKET_BANNERS).getPublicUrl(path).data.publicUrl;
+  app_id = data.session.user.id;
+  return true;
+}
+
+/* ===== CARREGAR ===== */
+async function carregar(){
+  const { data } = await sb
+    .from("config_site")
+    .select("nome_site,descricao_site,sobre_site,whatsapp,tema_site,banner_url,beneficios")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!data) return;
+
+  nomeEl.value = data.nome_site || "";
+  descEl.value = data.descricao_site || "";
+  sobreEl.value = data.sobre_site || "";
+  whatsappEl.value = data.whatsapp || "";
+  temaEl.value = data.tema_site || "padrao";
+
+  if(Array.isArray(data.beneficios)){
+    beneficiosEl.value = data.beneficios.join("\n");
+  }
+
+  if(data.banner_url){
+    bannerPreview.src = data.banner_url;
+    bannerPreview.style.display = "block";
+  }
 }
 
 /* ===== SALVAR ===== */
@@ -157,7 +162,18 @@ async function salvar(){
 
   let banner_url = null;
   if(bannerInput.files[0]){
-    banner_url = await uploadBanner(bannerInput.files[0]);
+    const file = bannerInput.files[0];
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${app_id}/${Date.now()}.${ext}`;
+
+    const { error } = await sb.storage
+      .from(BUCKET_BANNERS)
+      .upload(path, file, { upsert:true });
+
+    if(!error){
+      banner_url = sb.storage.from(BUCKET_BANNERS)
+        .getPublicUrl(path).data.publicUrl;
+    }
   }
 
   const beneficiosArr = beneficiosEl.value
@@ -176,63 +192,32 @@ async function salvar(){
 
   if(banner_url) payload.banner_url = banner_url;
 
-  const { data: existente, error: errFind } = await sb
+  const { data: existente } = await sb
     .from("config_site")
     .select("id")
     .eq("app_id", app_id)
     .maybeSingle();
-
-  if(errFind){
-    console.error(errFind);
-    statusEl.innerText = "";
-    alert("Erro ao verificar registro");
-    return;
-  }
 
   const res = existente
     ? await sb.from("config_site").update(payload).eq("app_id", app_id)
     : await sb.from("config_site").insert(payload);
 
   if(res.error){
-    console.error(res.error);
-    statusEl.innerText = "";
-    alert("Erro ao salvar no banco");
+    alert("Erro ao salvar");
+    statusEl.innerText="";
     return;
   }
 
-  statusEl.innerText = "Salvo com sucesso 🔥";
+  statusEl.innerText="Salvo com sucesso 🔥";
 }
 
-/* ===== LOAD ===== */
-(async()=>{
-  const { data, error } = await sb
-    .from("config_site")
-    .select("nome_site,descricao_site,sobre_site,whatsapp,tema_site,banner_url,beneficios")
-    .eq("app_id", app_id)
-    .maybeSingle();
-
-  if(error){
-    console.error(error);
-    return;
+/* ===== INICIAR ===== */
+document.addEventListener("DOMContentLoaded", async () => {
+  const ok = await validarSessao();
+  if(ok){
+    await carregar();
   }
-
-  if(!data) return;
-
-  nomeEl.value = data.nome_site || "";
-  descEl.value = data.descricao_site || "";
-  sobreEl.value = data.sobre_site || "";
-  whatsappEl.value = data.whatsapp || "";
-  temaEl.value = data.tema_site || "padrao";
-
-  if(Array.isArray(data.beneficios)){
-    beneficiosEl.value = data.beneficios.join("\n");
-  }
-
-  if(data.banner_url){
-    bannerPreview.src = data.banner_url;
-    bannerPreview.style.display = "block";
-  }
-})();
+});
 </script>
 
 </body>
