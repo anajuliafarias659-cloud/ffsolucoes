@@ -91,10 +91,13 @@ const supabaseClient = supabase.createClient(
 );
 
 let app_id = null;
+let nomeEmpresa = "Minha Empresa";
 let carrinho = [];
 let produtoAtual = null;
 let total = 0;
 let timerBusca = null;
+
+/* ========= VALIDAR SESSÃO ========= */
 
 async function validarSessao(){
 const { data } = await supabaseClient.auth.getSession();
@@ -104,7 +107,20 @@ location.href="login.html";
 return false;
 }
 app_id = data.session.user.id;
+await carregarEmpresa();
 return true;
+}
+
+/* ========= BUSCAR EMPRESA ========= */
+
+async function carregarEmpresa(){
+const { data } = await supabaseClient
+.from("empresas") // se sua tabela tiver outro nome me fala
+.select("nome")
+.eq("app_id", app_id)
+.single();
+
+if(data) nomeEmpresa = data.nome;
 }
 
 function round2(v){ return Math.round(v*100)/100; }
@@ -121,6 +137,8 @@ const totalSpan = document.getElementById("total");
 const valorPago = document.getElementById("valorPago");
 const infoPagamento = document.getElementById("infoPagamento");
 const formFiado = document.getElementById("formFiado");
+
+/* ========= BUSCAR PRODUTO ========= */
 
 function autoBuscar(){
 clearTimeout(timerBusca);
@@ -152,7 +170,6 @@ data=res.data; error=res.error;
 }
 
 listaBusca.innerHTML="";
-
 if(error){ console.error(error); return; }
 
 if(!data || data.length===0){
@@ -191,7 +208,6 @@ id:produtoAtual.id,
 nome:produtoAtual.nome,
 qtd,
 preco:Number(produtoAtual.preco),
-estoque:produtoAtual.estoque,
 subtotal:round2(qtd*Number(produtoAtual.preco))
 });
 
@@ -199,6 +215,8 @@ atualizarCarrinho();
 previewProduto.classList.add("hidden");
 codigo.value="";
 }
+
+/* ========= CARRINHO ========= */
 
 function atualizarCarrinho(){
 carrinhoDiv.innerHTML="";
@@ -222,7 +240,7 @@ else if(pago>total) infoPagamento.innerText=`Troco: R$ ${(pago-total).toFixed(2)
 else infoPagamento.innerText="Pagamento exato";
 }
 
-/* ===== GERAR RECIBO ===== */
+/* ========= RECIBO ========= */
 
 function gerarRecibo(tipo, pago, devido = 0, cliente = null){
 
@@ -254,7 +272,8 @@ th,td{border-bottom:1px dashed #000;padding:4px;font-size:12px;text-align:left}
 </style>
 </head>
 <body>
-<h2>FF SOLUÇÕES</h2>
+
+<h2>${nomeEmpresa}</h2>
 <p>${data}</p>
 
 <table>
@@ -292,7 +311,7 @@ win.document.write(recibo);
 win.document.close();
 }
 
-/* ===== FINALIZAR VENDA ===== */
+/* ========= FINALIZAR VENDA ========= */
 
 async function finalizarVenda(tipo){
 
@@ -313,9 +332,12 @@ valor_devido:0,
 forma_pagamento:tipo
 });
 
-await supabaseClient.from("produtos")
-.update({ estoque:i.estoque-i.qtd })
-.eq("id",i.id);
+/* 🔥 BAIXA ESTOQUE SEGURA */
+await supabaseClient.rpc("baixar_estoque", {
+produto_id_input: i.id,
+quantidade_input: i.qtd
+});
+
 }
 
 gerarRecibo(tipo, pago, 0);
@@ -328,43 +350,7 @@ atualizarCarrinho();
 alert("Venda finalizada");
 }
 
-/* ===== FIADO ===== */
-
-async function confirmarFiado(){
-
-const nome=document.getElementById("fiadoNome").value.trim();
-const cpf=document.getElementById("fiadoCpf").value.replace(/\D/g,"");
-const obs=document.getElementById("fiadoObs").value;
-const pago=round2(Number(valorPago.value)||0);
-const devido=round2(total-pago);
-
-if(!nome||cpf.length!==11){ alert("CPF inválido"); return; }
-
-for(const i of carrinho){
-
-await supabaseClient.from("vendas").insert({
-app_id:app_id,
-produto_id:i.id,
-quantidade:i.qtd,
-valor_total:i.subtotal,
-valor_pago:pago,
-valor_devido:devido,
-forma_pagamento:"FIADO",
-cliente_nome:nome,
-cliente_cpf:cpf,
-observacao:obs
-});
-
-await supabaseClient.from("produtos")
-.update({ estoque:i.estoque-i.qtd })
-.eq("id",i.id);
-}
-
-gerarRecibo("FIADO", pago, devido, nome);
-
-localStorage.removeItem("carrinho_caixa");
-location.reload();
-}
+/* ========= INICIAR ========= */
 
 document.addEventListener("DOMContentLoaded",async()=>{
 const ok=await validarSessao();
@@ -378,7 +364,7 @@ atualizarCarrinho();
 });
 
 </script>
-
 </body>
 </html>
+
 
