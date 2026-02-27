@@ -20,6 +20,7 @@ body{
     font-family:'Segoe UI',Arial,sans-serif;
     background:var(--fundo);
     color:var(--texto);
+    overflow-x:hidden;
 }
 
 /* HEADER */
@@ -49,6 +50,7 @@ body{
     background:white;
     border-radius:8px;
     padding:5px;
+    object-fit:contain;
 }
 
 .nome-loja{
@@ -97,6 +99,7 @@ body{
 .card h4{
     font-size:14px;
     margin:10px 0 5px;
+    min-height:38px;
 }
 
 .preco{
@@ -105,7 +108,7 @@ body{
     font-size:16px;
 }
 
-/* CARRINHO */
+/* OVERLAY */
 #overlay{
     position:fixed;
     inset:0;
@@ -114,6 +117,7 @@ body{
     z-index:1998;
 }
 
+/* CARRINHO */
 .carrinho{
     position:fixed;
     top:0;
@@ -130,6 +134,12 @@ body{
 }
 
 .carrinho.open{transform:translateX(0)}
+
+.item{
+    border-bottom:1px solid #eee;
+    padding:10px 0;
+    font-size:14px;
+}
 
 input{
     width:100%;
@@ -165,6 +175,43 @@ body.tema-escuro{
     --card:#1e1e1e;
     --texto:#ffffff;
 }
+
+/* MODAL PRODUTO */
+#modalProduto{
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.6);
+    z-index:3000;
+    justify-content:center;
+    align-items:center;
+}
+
+#modalProduto > div{
+    background:white;
+    width:95%;
+    max-width:500px;
+    border-radius:12px;
+    padding:20px;
+    position:relative;
+}
+
+#modalProduto span{
+    position:absolute;
+    right:15px;
+    top:10px;
+    cursor:pointer;
+    font-size:20px;
+}
+
+#miniaturas img{
+    width:60px;
+    height:60px;
+    object-fit:contain;
+    cursor:pointer;
+    border:1px solid #ddd;
+    border-radius:6px;
+}
 </style>
 </head>
 
@@ -193,12 +240,30 @@ body.tema-escuro{
     <h4>Entrega</h4>
     <input id="nome" placeholder="Nome completo">
     <input id="cep" placeholder="CEP">
+    <input id="rua" placeholder="Rua">
+    <input id="numero" placeholder="Número">
+    <input id="bairro" placeholder="Bairro">
+    <input id="cidade" placeholder="Cidade">
+    <input id="estado" placeholder="Estado">
+    <input id="complemento" placeholder="Complemento">
 
     <button class="btn-frete" onclick="calcularFrete()">Calcular Frete</button>
     <div id="freteBox"></div>
     <div id="totalBox"></div>
 
     <button class="btn-finalizar" onclick="finalizar()">Finalizar Pedido</button>
+</div>
+
+<!-- MODAL PRODUTO -->
+<div id="modalProduto">
+    <div>
+        <span onclick="fecharModal()">✖</span>
+        <img id="imgPrincipal" style="width:100%;height:250px;object-fit:contain;margin-bottom:10px;">
+        <div id="miniaturas" style="display:flex;gap:10px;justify-content:center;margin-bottom:15px;"></div>
+        <h3 id="modalNome"></h3>
+        <p id="modalPreco" style="font-weight:bold;margin:10px 0;"></p>
+        <button onclick="adicionarModal()" class="btn-finalizar">Adicionar ao Carrinho</button>
+    </div>
 </div>
 
 <script type="module">
@@ -214,6 +279,11 @@ const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 let produtos=[];
 let carrinho=[];
 let frete=0;
+let produtoSelecionado=null;
+
+const cart=document.getElementById("cart");
+const overlay=document.getElementById("overlay");
+const logo=document.getElementById("logoLoja");
 
 window.toggleCart=function(){
     cart.classList.toggle("open");
@@ -227,8 +297,9 @@ function atualizarCarrinho(){
     carrinho.forEach((item,i)=>{
         total+=item.preco*item.qtd;
         cartItems.innerHTML+=`
-        <div>
-            ${item.nome} - R$ ${item.preco.toFixed(2)} x ${item.qtd}
+        <div class="item">
+            ${item.nome}<br>
+            R$ ${item.preco.toFixed(2)} x ${item.qtd}
             <button onclick="remover(${i})">❌</button>
         </div>`;
     });
@@ -242,67 +313,79 @@ window.remover=function(i){
     atualizarCarrinho();
 }
 
-window.adicionar=function(index){
-    const p=produtos[index];
-    const existe=carrinho.find(x=>x.id===p.id);
-    if(existe){existe.qtd++}
-    else{carrinho.push({...p,qtd:1})}
-    atualizarCarrinho();
-}
-
 window.calcularFrete=function(){
+    if(cep.value.length<8){
+        alert("CEP inválido");
+        return;
+    }
     frete=25;
     freteBox.innerHTML="Frete: R$ 25,00";
     atualizarCarrinho();
 }
 
 window.finalizar=function(){
+    if(!nome.value || carrinho.length==0){
+        alert("Preencha os dados");
+        return;
+    }
     alert("Pedido registrado (modelo pronto)");
 }
 
-function aplicarConfig(config){
+// GALERIA MODAL
+window.abrirModal=function(index){
+    produtoSelecionado = produtos[index];
+    let imagens=[];
+    try{imagens=JSON.parse(produtoSelecionado.imagens||"[]")}catch{}
+    if(imagens.length===0) imagens=["https://via.placeholder.com/300"];
 
-    if(config.tema==="escuro"){
-        document.body.classList.add("tema-escuro");
-    }
+    imgPrincipal.src = imagens[0];
+    modalNome.innerText = produtoSelecionado.nome;
+    modalPreco.innerText = "R$ "+Number(produtoSelecionado.preco).toFixed(2);
 
-    if(config.cor_primaria){
-        document.documentElement.style.setProperty('--cor-primaria', config.cor_primaria);
-    }
+    miniaturas.innerHTML="";
+    imagens.slice(0,3).forEach(img=>{
+        miniaturas.innerHTML += `<img src="${img}" onclick="trocarImagem('${img}')">`;
+    });
 
-    if(config.cor_secundaria){
-        document.documentElement.style.setProperty('--cor-secundaria', config.cor_secundaria);
-    }
+    modalProduto.style.display="flex";
 }
 
+window.trocarImagem=function(src){imgPrincipal.src=src}
+window.fecharModal=function(){modalProduto.style.display="none"}
+
+window.adicionarModal=function(){
+    const existe=carrinho.find(x=>x.id===produtoSelecionado.id);
+    if(existe){existe.qtd++}
+    else{carrinho.push({...produtoSelecionado,qtd:1})}
+    atualizarCarrinho();
+    fecharModal();
+}
+
+// CONFIGURAÇÃO TEMA E CORES
+function aplicarConfig(config){
+    document.body.classList.remove("tema-escuro");
+    if(config.tema==="escuro") document.body.classList.add("tema-escuro");
+    if(config.cor_primaria) document.documentElement.style.setProperty('--cor-primaria',config.cor_primaria);
+    if(config.cor_secundaria) document.documentElement.style.setProperty('--cor-secundaria',config.cor_secundaria);
+}
+
+// CARREGAR PRODUTOS E CONFIG
 async function carregar(){
-
-    const { data:config } = await supabase
-    .from("config")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .single();
-
+    const { data: config } = await supabase.from("config").select("*").eq("app_id",APP_ID).single();
     if(config){
-        if(config.logo_url) logoLoja.src=config.logo_url;
-        if(config.nome_loja) nomeLoja.innerText=config.nome_loja;
+        document.getElementById("nomeLoja").innerText=config.nome_loja||"Minha Loja";
+        logo.src=config.logo_url||"https://via.placeholder.com/150x60?text=LOGO";
         aplicarConfig(config);
     }
 
-    const { data } = await supabase
-    .from("produtos")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .eq("ativo",true);
-
+    const { data } = await supabase.from("produtos").select("*").eq("app_id",APP_ID).eq("ativo",true);
     produtos=data||[];
 
     produtos.forEach((p,i)=>{
         let imagens=[];
         try{imagens=JSON.parse(p.imagens||"[]")}catch{}
-
         listaProdutos.innerHTML+=`
-        <div class="card" onclick="adicionar(${i})">
+        <div class="card" onclick="abrirModal(${i})">
             <img src="${imagens[0]||''}">
             <h4>${p.nome}</h4>
             <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
@@ -312,6 +395,5 @@ async function carregar(){
 
 carregar();
 </script>
-
 </body>
 </html>
