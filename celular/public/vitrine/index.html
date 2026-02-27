@@ -354,23 +354,6 @@ function renderizarCarrinho(){
   calcularFrete(subtotal);
 }
 
-/* ================= LOCALIZAÇÃO ================= */
-
-btnPegarLocalizacao.addEventListener("click", ()=>{
-  if(!navigator.geolocation){
-    alert("Navegador não suporta localização");
-    return;
-  }
-
-  navigator.geolocation.getCurrentPosition(pos=>{
-    clienteLat=pos.coords.latitude;
-    clienteLng=pos.coords.longitude;
-    document.getElementById("localizacaoCliente").value=
-      `https://www.google.com/maps?q=${clienteLat},${clienteLng}`;
-    calcularFrete(Number(subtotalEl.innerText||0));
-  });
-});
-
 /* ================= FRETE ================= */
 
 function calcularFrete(subtotal){
@@ -407,10 +390,23 @@ btnFinalizar.addEventListener("click", async ()=>{
     return;
   }
 
-  if(!configGlobal){
-    alert("Configuração não carregada.");
+  // 🔥 SEMPRE RECARREGA CONFIG ANTES DE FINALIZAR
+  const { data: configAtual } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id",APP_ID)
+    .maybeSingle();
+
+  if(!configAtual){
+    alert("Configuração não encontrada.");
     return;
   }
+
+  configGlobal = configAtual;
+
+  const modo = (configGlobal.modo_venda || "").trim();
+
+  console.log("Modo venda atual:", modo);
 
   const total=totalEl.innerText;
 
@@ -432,7 +428,7 @@ btnFinalizar.addEventListener("click", async ()=>{
 
   try{
 
-    if(configGlobal.modo_venda==="sistema" || configGlobal.modo_venda==="ambos"){
+    if(modo==="sistema" || modo==="ambos"){
       const { error } = await supabase.from("pedidos").insert([pedido]);
       if(error){
         console.error(error);
@@ -441,13 +437,21 @@ btnFinalizar.addEventListener("click", async ()=>{
       }
     }
 
-    if(configGlobal.modo_venda==="whatsapp" || configGlobal.modo_venda==="ambos"){
-      const numero=configGlobal.whatsapp_numero||"";
+    if(modo==="whatsapp" || modo==="ambos"){
+
+      if(!configGlobal.whatsapp_numero){
+        alert("Número do WhatsApp não configurado.");
+        return;
+      }
+
+      const numero=configGlobal.whatsapp_numero;
+
       let msg=`*Novo Pedido*%0A`;
       msg+=`Cliente: ${pedido.cliente_nome}%0A`;
       msg+=`Telefone: ${pedido.telefone}%0A`;
       msg+=`Endereço: ${pedido.endereco}%0A`;
       msg+=`Total: R$ ${pedido.total}`;
+
       window.open(`https://wa.me/${numero}?text=${msg}`,"_blank");
     }
 
@@ -462,136 +466,6 @@ btnFinalizar.addEventListener("click", async ()=>{
   }
 
 });
-
-/* ================= MODAL PRODUTO ================= */
-
-function abrirProduto(p){
-
-  let imgs=[];
-  try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
-
-  let mini="";
-  imgs.forEach(img=>{
-    mini+=`<img src="${img}" style="width:60px;height:60px;object-fit:cover;cursor:pointer;border-radius:6px;margin-bottom:6px;">`;
-  });
-
-  conteudoProduto.innerHTML=`
-    <div style="display:flex;gap:20px;flex-wrap:wrap;">
-      <div style="display:flex;gap:12px;">
-        <div style="display:flex;flex-direction:column;">${mini}</div>
-        <div>${imgs[0]?`<img src="${imgs[0]}" class="imgPrincipalModal" style="width:320px;height:320px;object-fit:contain;">`:""}</div>
-      </div>
-      <div style="flex:1;min-width:250px;">
-        <h2>${p.nome}</h2>
-        <h3 style="color:#0071e3;">R$ ${Number(p.preco).toFixed(2)}</h3>
-        <p>${p.descricao || "Sem descrição."}</p>
-        <button id="addModalBtn" style="margin-top:15px;width:100%;padding:10px;background:#0071e3;color:white;border:none;border-radius:8px;">
-        Adicionar ao Carrinho
-        </button>
-      </div>
-    </div>
-  `;
-
-  const principal=document.querySelector(".imgPrincipalModal");
-
-  document.querySelectorAll("#conteudoProduto img").forEach(img=>{
-    img.addEventListener("click",()=>{
-      if(principal) principal.src=img.src;
-    });
-  });
-
-  document.getElementById("addModalBtn").addEventListener("click",()=>{
-    carrinho.push(p);
-    salvar();
-    alert("Adicionado!");
-  });
-
-  modalProduto.style.display="flex";
-}
-
-fecharProduto.addEventListener("click",()=>{
-  modalProduto.style.display="none";
-});
-
-modalProduto.addEventListener("click",(e)=>{
-  if(e.target===modalProduto){
-    modalProduto.style.display="none";
-  }
-});
-
-/* ================= CATEGORIAS ================= */
-
-function criarCategorias(produtos){
-
-  filtros.innerHTML="";
-
-  const categorias=[...new Set(produtos.map(p=>p.categoria).filter(Boolean))];
-
-  const btnTodos=document.createElement("button");
-  btnTodos.innerText="Todos";
-  btnTodos.className="filtro-btn ativo";
-
-  btnTodos.addEventListener("click",()=>{
-    document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo"));
-    btnTodos.classList.add("ativo");
-    renderizarProdutos(produtos);
-  });
-
-  filtros.appendChild(btnTodos);
-
-  categorias.forEach(cat=>{
-    const btn=document.createElement("button");
-    btn.innerText=cat;
-    btn.className="filtro-btn";
-
-    btn.addEventListener("click",()=>{
-      document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo"));
-      btn.classList.add("ativo");
-      renderizarProdutos(produtos.filter(p=>p.categoria===cat));
-    });
-
-    filtros.appendChild(btn);
-  });
-}
-
-/* ================= PRODUTOS ================= */
-
-function renderizarProdutos(lista){
-  listaProdutos.innerHTML="";
-
-  lista.forEach(p=>{
-
-    let imgs=[];
-    try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
-
-    const card=document.createElement("div");
-    card.className="card";
-
-    card.innerHTML=`
-      <div class="galeria">
-        <div class="miniaturas">${imgs.map(i=>`<img src="${i}">`).join("")}</div>
-        <div class="imagem-principal">${imgs[0]?`<img src="${imgs[0]}">`:""}</div>
-      </div>
-      <h4>${p.nome}</h4>
-      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-      <button class="btn-add">Adicionar</button>
-    `;
-
-    card.addEventListener("click",(e)=>{
-      if(!e.target.classList.contains("btn-add")){
-        abrirProduto(p);
-      }
-    });
-
-    card.querySelector(".btn-add").addEventListener("click",(e)=>{
-      e.stopPropagation();
-      carrinho.push(p);
-      salvar();
-    });
-
-    listaProdutos.appendChild(card);
-  });
-}
 
 /* ================= CARREGAR ================= */
 
@@ -618,9 +492,48 @@ async function carregar(){
     .eq("ativo",true);
 
   todosProdutos=produtos||[];
-
   criarCategorias(todosProdutos);
   renderizarProdutos(todosProdutos);
+}
+
+/* ================= PRODUTOS E CATEGORIA ================= */
+
+function criarCategorias(produtos){
+  filtros.innerHTML="";
+  const categorias=[...new Set(produtos.map(p=>p.categoria).filter(Boolean))];
+
+  const btnTodos=document.createElement("button");
+  btnTodos.innerText="Todos";
+  btnTodos.className="filtro-btn ativo";
+  btnTodos.onclick=()=>renderizarProdutos(produtos);
+  filtros.appendChild(btnTodos);
+
+  categorias.forEach(cat=>{
+    const btn=document.createElement("button");
+    btn.innerText=cat;
+    btn.className="filtro-btn";
+    btn.onclick=()=>renderizarProdutos(produtos.filter(p=>p.categoria===cat));
+    filtros.appendChild(btn);
+  });
+}
+
+function renderizarProdutos(lista){
+  listaProdutos.innerHTML="";
+  lista.forEach(p=>{
+    const card=document.createElement("div");
+    card.className="card";
+    card.innerHTML=`
+      <h4>${p.nome}</h4>
+      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+      <button class="btn-add">Adicionar</button>
+    `;
+    card.querySelector(".btn-add").onclick=(e)=>{
+      e.stopPropagation();
+      carrinho.push(p);
+      salvar();
+    };
+    listaProdutos.appendChild(card);
+  });
 }
 
 carregar();
@@ -629,6 +542,7 @@ salvar();
 
 </body>
 </html>
+
 
 
 
