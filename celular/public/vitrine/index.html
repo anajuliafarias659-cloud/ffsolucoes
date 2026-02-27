@@ -228,16 +228,12 @@ let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
 let todosProdutos = [];
 let clienteLat=null;
 let clienteLng=null;
+let configGlobal=null;
 
-/* LOCALIZAÇÃO */
-if(navigator.geolocation){
-  navigator.geolocation.getCurrentPosition(pos=>{
-    clienteLat=pos.coords.latitude;
-    clienteLng=pos.coords.longitude;
-  });
-}
+/* =======================
+   CARRINHO
+======================= */
 
-/* CARRINHO */
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
   document.getElementById("contadorCarrinho").innerText=carrinho.length;
@@ -245,6 +241,7 @@ function salvar(){
 
 document.getElementById("btnCarrinho").onclick=()=>{
   document.getElementById("modalCarrinho").style.display="flex";
+  pedirLocalizacao(); // 🔥 AGORA PEDE AQUI
   renderizarCarrinho();
 };
 
@@ -270,12 +267,37 @@ function renderizarCarrinho(){
   calcularFrete(subtotal);
 }
 
+/* =======================
+   LOCALIZAÇÃO (SÓ NO CARRINHO)
+======================= */
+
+function pedirLocalizacao(){
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(
+      pos=>{
+        clienteLat=pos.coords.latitude;
+        clienteLng=pos.coords.longitude;
+      },
+      ()=>{
+        console.log("Usuário negou localização");
+      }
+    );
+  }
+}
+
+/* =======================
+   FRETE
+======================= */
+
 function calcularFrete(subtotal){
+
   let frete=10;
+
   if(clienteLat && clienteLng){
     const dist=distancia(-9.015,-42.700,clienteLat,clienteLng);
     frete=dist*2;
   }
+
   document.getElementById("frete").innerText=frete.toFixed(2);
   document.getElementById("total").innerText=(subtotal+frete).toFixed(2);
 }
@@ -291,7 +313,78 @@ function distancia(lat1,lon1,lat2,lon2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-/* FILTROS */
+/* =======================
+   FINALIZAR PEDIDO
+======================= */
+
+document.getElementById("btnFinalizar").onclick = async ()=>{
+
+  if(configGlobal?.modo_cardapio === "vitrine"){
+    alert("Esta loja é apenas vitrine.");
+    return;
+  }
+
+  if(carrinho.length===0){
+    alert("Carrinho vazio!");
+    return;
+  }
+
+  const total=document.getElementById("total").innerText;
+
+  const pedido={
+    app_id:APP_ID,
+    cliente_nome:nomeCliente.value,
+    cliente_telefone:telefoneCliente.value,
+    endereco:enderecoCliente.value,
+    numero:numeroCliente.value,
+    bairro:bairroCliente.value,
+    cidade:cidadeCliente.value,
+    observacao:obsCliente.value,
+    itens:carrinho,
+    total:total,
+    status:"novo"
+  };
+
+  /* WHATSAPP */
+  if(configGlobal?.modo_venda==="whatsapp"
+     || configGlobal?.modo_venda==="ambos"){
+
+    const numero=configGlobal?.whatsapp_numero || "";
+
+    let msg=`*Novo Pedido*%0A`;
+    msg+=`Cliente: ${pedido.cliente_nome}%0A`;
+    msg+=`Telefone: ${pedido.cliente_telefone}%0A`;
+    msg+=`Endereço: ${pedido.endereco}, ${pedido.numero}%0A`;
+    msg+=`Bairro: ${pedido.bairro}%0A`;
+    msg+=`Cidade: ${pedido.cidade}%0A%0A`;
+    msg+=`*Itens:*%0A`;
+
+    carrinho.forEach(i=>{
+      msg+=`- ${i.nome} R$ ${Number(i.preco).toFixed(2)}%0A`;
+    });
+
+    msg+=`%0ATotal: R$ ${total}`;
+
+    window.open(`https://wa.me/${numero}?text=${msg}`);
+  }
+
+  /* SISTEMA */
+  if(configGlobal?.modo_venda==="sistema"
+     || configGlobal?.modo_venda==="ambos"){
+
+    await supabase.from("vendas").insert([pedido]);
+  }
+
+  alert("Pedido enviado!");
+  carrinho=[];
+  salvar();
+  document.getElementById("modalCarrinho").style.display="none";
+};
+
+/* =======================
+   FILTROS + PRODUTOS
+======================= */
+
 function criarFiltros(){
   const container=document.getElementById("filtros");
   container.innerHTML="";
@@ -313,7 +406,9 @@ function criarFiltros(){
     btn.className="filtro-btn";
     btn.onclick=()=>{
       ativar(btn);
-      renderizarProdutos(todosProdutos.filter(p=>(p.categoria||"Outros")==cat));
+      renderizarProdutos(
+        todosProdutos.filter(p=>(p.categoria||"Outros")==cat)
+      );
     };
     container.appendChild(btn);
   });
@@ -325,7 +420,6 @@ function ativar(btn){
   btn.classList.add("filtro-ativo");
 }
 
-/* PRODUTOS */
 function renderizarProdutos(lista){
   const container=document.getElementById("listaProdutos");
   container.innerHTML="";
@@ -348,18 +442,29 @@ function renderizarProdutos(lista){
   });
 }
 
+/* =======================
+   CARREGAR
+======================= */
+
 async function carregar(){
+
   const {data:config}=await supabase
     .from("config_site")
     .select("*")
     .eq("app_id",APP_ID)
     .maybeSingle();
 
+  configGlobal=config;
+
   if(config?.logo_url)
     document.getElementById("logoLoja").src=config.logo_url;
 
   if(config?.nome_site)
     document.getElementById("nomeLoja").innerText=config.nome_site;
+
+  if(config?.modo_cardapio==="vitrine"){
+    document.getElementById("btnCarrinho").style.display="none";
+  }
 
   const {data:produtos}=await supabase
     .from("produtos")
@@ -378,3 +483,4 @@ salvar();
 
 </body>
 </html>
+
