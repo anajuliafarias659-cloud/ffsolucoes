@@ -276,6 +276,7 @@ const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
 let clienteLat=null;
 let clienteLng=null;
+let configGlobal=null;
 
 /* SALVAR */
 function salvar(){
@@ -301,8 +302,6 @@ function renderizarCarrinho(){
       </div>`;
   });
 
-  subtotal=subtotal||0;
-  subtotal?0:0;
   document.getElementById("subtotal").innerText=subtotal.toFixed(2);
   calcularFrete(subtotal);
 }
@@ -315,128 +314,135 @@ window.removerItem=function(index){
 
 /* LOCALIZAÇÃO */
 btnPegarLocalizacao.onclick=()=>{
+  if(!navigator.geolocation){
+    alert("Navegador não suporta localização");
+    return;
+  }
+
   navigator.geolocation.getCurrentPosition(pos=>{
     clienteLat=pos.coords.latitude;
     clienteLng=pos.coords.longitude;
     localizacaoCliente.value=`https://www.google.com/maps?q=${clienteLat},${clienteLng}`;
-    calcularFrete(Number(subtotal.innerText||0));
+    calcularFrete(Number(document.getElementById("subtotal").innerText||0));
   });
 };
 
 /* FRETE */
 function calcularFrete(subtotal){
   let frete=10;
+
   if(clienteLat && clienteLng){
     const R=6371;
-    const dLat=(clienteLat+9.015)*Math.PI/180;
-    const dLon=(clienteLng+42.700)*Math.PI/180;
-    const a=Math.sin(dLat/2)**2+Math.sin(dLon/2)**2;
-    frete=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a))*2;
+    const latLoja=-9.015;
+    const lngLoja=-42.700;
+
+    const dLat=(clienteLat-latLoja)*Math.PI/180;
+    const dLon=(clienteLng-lngLoja)*Math.PI/180;
+
+    const a=
+      Math.sin(dLat/2)**2+
+      Math.cos(latLoja*Math.PI/180)*
+      Math.cos(clienteLat*Math.PI/180)*
+      Math.sin(dLon/2)**2;
+
+    const distancia=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    frete=distancia*2;
   }
-  frete=frete||0;
+
   document.getElementById("frete").innerText=frete.toFixed(2);
   document.getElementById("total").innerText=(subtotal+frete).toFixed(2);
 }
 
-/* PRODUTOS + MODAL */
-function abrirProduto(p){
-  let imgs=[];
-  try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
+/* FINALIZAR PEDIDO */
+btnFinalizar.onclick=async()=>{
 
-  let mini="";
-  imgs.forEach(img=> mini+=`<img src="${img}" style="width:60px;height:60px;object-fit:cover;cursor:pointer;border-radius:6px;margin-bottom:5px;">`);
-
-  conteudoProduto.innerHTML=`
-    <div style="display:flex;gap:20px;flex-wrap:wrap;">
-      <div style="display:flex;gap:10px;">
-        <div style="display:flex;flex-direction:column;">${mini}</div>
-        <div>${imgs[0]?`<img src="${imgs[0]}" class="imgPrincipalModal" style="width:300px;height:300px;object-fit:contain;">`:""}</div>
-      </div>
-      <div style="flex:1;min-width:250px;">
-        <h2>${p.nome}</h2>
-        <h3 style="color:#0071e3;">R$ ${Number(p.preco).toFixed(2)}</h3>
-        <p>${p.descricao||"Sem descrição."}</p>
-        <button onclick='addModal()'
-        style="margin-top:15px;width:100%;padding:10px;background:#0071e3;color:white;border:none;border-radius:8px;">
-        Adicionar ao Carrinho
-        </button>
-      </div>
-    </div>`;
-
-  window.addModal=function(){
-    carrinho.push(p);
-    salvar();
-    alert("Adicionado!");
+  if(carrinho.length===0){
+    alert("Carrinho vazio!");
+    return;
   }
 
-  document.querySelectorAll("#conteudoProduto img").forEach(img=>{
-    img.onclick=()=>{
-      const principal=document.querySelector(".imgPrincipalModal");
-      if(principal) principal.src=img.src;
-    };
-  });
+  if(!configGlobal){
+    alert("Configuração não carregada.");
+    return;
+  }
 
-  modalProduto.style.display="flex";
-}
+  const total=document.getElementById("total").innerText;
 
-fecharProduto.onclick=()=> modalProduto.style.display="none";
-modalProduto.onclick=e=>{ if(e.target===modalProduto) modalProduto.style.display="none"; };
+  const pedido={
+    app_id:APP_ID,
+    cliente_nome:nomeCliente.value||"",
+    telefone:telefoneCliente.value||"",
+    endereco:(enderecoCliente.value||"")+", "+(numeroCliente.value||""),
+    bairro:bairroCliente.value||"",
+    cidade:cidadeCliente.value||"",
+    observacao:obsCliente.value||"",
+    latitude:clienteLat,
+    longitude:clienteLng,
+    localizacao_link:localizacaoCliente.value||"",
+    total:total,
+    status:"novo",
+    itens:carrinho
+  };
+
+  try{
+
+    if(configGlobal.modo_venda==="sistema" || configGlobal.modo_venda==="ambos"){
+      const { error } = await supabase.from("pedidos").insert([pedido]);
+      if(error){
+        console.error(error);
+        alert("Erro ao salvar pedido.");
+        return;
+      }
+    }
+
+    if(configGlobal.modo_venda==="whatsapp" || configGlobal.modo_venda==="ambos"){
+      const numero=configGlobal.whatsapp_numero||"";
+
+      let msg=`*Novo Pedido*%0A`;
+      msg+=`Cliente: ${pedido.cliente_nome}%0A`;
+      msg+=`Telefone: ${pedido.telefone}%0A`;
+      msg+=`Endereço: ${pedido.endereco}%0A`;
+      msg+=`Bairro: ${pedido.bairro}%0A`;
+      msg+=`Cidade: ${pedido.cidade}%0A`;
+      msg+=`Localização: ${pedido.localizacao_link}%0A`;
+      msg+=`Total: R$ ${pedido.total}`;
+
+      window.open(`https://wa.me/${numero}?text=${msg}`,"_blank");
+    }
+
+    alert("Pedido enviado com sucesso!");
+    carrinho=[];
+    salvar();
+    modalCarrinho.style.display="none";
+
+  }catch(e){
+    console.error(e);
+    alert("Erro ao finalizar pedido.");
+  }
+
+};
 
 /* CARREGAR */
 async function carregar(){
-  const {data:config}=await supabase.from("config_site").select("*").eq("app_id",APP_ID).maybeSingle();
+  const {data:config}=await supabase.from("config_site")
+  .select("*")
+  .eq("app_id",APP_ID)
+  .maybeSingle();
+
+  configGlobal=config;
+
   if(config?.logo_url) logoLoja.src=config.logo_url;
   if(config?.nome_site) nomeLoja.innerText=config.nome_site;
 
-  const {data:produtos}=await supabase.from("produtos").select("*").eq("app_id",APP_ID).eq("ativo",true);
-  const lista=produtos||[];
+  const {data:produtos}=await supabase
+  .from("produtos")
+  .select("*")
+  .eq("app_id",APP_ID)
+  .eq("ativo",true);
 
+  const lista=produtos||[];
   criarCategorias(lista);
   renderizarProdutos(lista);
-}
-
-function criarCategorias(produtos){
-  filtros.innerHTML="";
-  const cats=[...new Set(produtos.map(p=>p.categoria).filter(Boolean))];
-
-  const btn=document.createElement("button");
-  btn.innerText="Todos";
-  btn.className="filtro-btn ativo";
-  btn.onclick=()=>{ renderizarProdutos(produtos); document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo")); btn.classList.add("ativo"); };
-  filtros.appendChild(btn);
-
-  cats.forEach(cat=>{
-    const b=document.createElement("button");
-    b.innerText=cat;
-    b.className="filtro-btn";
-    b.onclick=()=>{
-      document.querySelectorAll(".filtro-btn").forEach(x=>x.classList.remove("ativo"));
-      b.classList.add("ativo");
-      renderizarProdutos(produtos.filter(p=>p.categoria===cat));
-    };
-    filtros.appendChild(b);
-  });
-}
-
-function renderizarProdutos(lista){
-  listaProdutos.innerHTML="";
-  lista.forEach(p=>{
-    let imgs=[];
-    try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
-    const card=document.createElement("div");
-    card.className="card";
-    card.innerHTML=`
-      <div class="galeria">
-        <div class="miniaturas">${imgs.map(i=>`<img src="${i}">`).join("")}</div>
-        <div class="imagem-principal">${imgs[0]?`<img src="${imgs[0]}">`:""}</div>
-      </div>
-      <h4>${p.nome}</h4>
-      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-      <button class="btn-add">Adicionar</button>`;
-    card.onclick=e=>{ if(!e.target.classList.contains("btn-add")) abrirProduto(p); };
-    card.querySelector(".btn-add").onclick=e=>{ e.stopPropagation(); carrinho.push(p); salvar(); };
-    listaProdutos.appendChild(card);
-  });
 }
 
 carregar();
@@ -445,3 +451,4 @@ salvar();
 
 </body>
 </html>
+
