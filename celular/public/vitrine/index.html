@@ -42,6 +42,8 @@ body{
     color:white;
     text-align:center;
     padding:60px 20px;
+    background-size:cover;
+    background-position:center;
 }
 
 .banner h1{
@@ -91,6 +93,9 @@ body{
     cursor:pointer;
 }
 
+.tema-natal{ background:#400; }
+.tema-anonovo{ background:#002244; }
+
 footer{
     background:#111;
     color:white;
@@ -110,7 +115,7 @@ footer{
   </div>
 </header>
 
-<section class="banner">
+<section class="banner" id="banner">
     <h1>Ofertas da Loja</h1>
     <p>Parcelamos em até 12x • Aceitamos Troca</p>
 </section>
@@ -130,7 +135,6 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// 🔎 PEGAR APP_ID
 const params = new URLSearchParams(window.location.search);
 const APP_ID = params.get("app_id");
 
@@ -138,13 +142,28 @@ if(!APP_ID){
     document.body.innerHTML = "<h2 style='text-align:center'>Loja não encontrada</h2>";
 }
 
-// 🚀 CARREGAR LOJA
+// 🔥 VERIFICAR HORÁRIO
+function lojaAberta(config){
+  if(!config?.horario_abertura || !config?.horario_fechamento) return true;
+
+  const agora = new Date();
+  const horaAtual = agora.getHours() * 60 + agora.getMinutes();
+
+  const [ha, ma] = config.horario_abertura.split(":");
+  const [hf, mf] = config.horario_fechamento.split(":");
+
+  const inicio = parseInt(ha)*60 + parseInt(ma);
+  const fim = parseInt(hf)*60 + parseInt(mf);
+
+  return horaAtual >= inicio && horaAtual <= fim;
+}
+
 async function carregarLoja(){
 
-    // 🔹 Buscar dados da loja
+    // 🔹 BUSCAR APP
     const { data: app } = await supabase
       .from("apps")
-      .select("nome, logo")
+      .select("nome")
       .eq("id", APP_ID)
       .single();
 
@@ -153,12 +172,36 @@ async function carregarLoja(){
         return;
     }
 
-    document.getElementById("nomeLoja").innerText = app.nome;
+    // 🔹 BUSCAR CONFIG
+    const { data: config } = await supabase
+      .from("config_site")
+      .select("*")
+      .eq("app_id", APP_ID)
+      .maybeSingle();
 
-    if(app.logo){
-        document.getElementById("logoLoja").src = app.logo;
+    // 🔹 Nome
+    document.getElementById("nomeLoja").innerText =
+      config?.nome_site || app.nome;
+
+    // 🔹 Logo
+    if(config?.logo_url){
+      document.getElementById("logoLoja").src = config.logo_url;
     } else {
-        document.getElementById("logoLoja").style.display="none";
+      document.getElementById("logoLoja").style.display="none";
+    }
+
+    // 🔹 Banner
+    if(config?.banner_url){
+      const banner = document.getElementById("banner");
+      banner.style.backgroundImage = `url(${config.banner_url})`;
+    }
+
+    // 🔹 Tema
+    if(config?.tema_site === "natal"){
+      document.body.classList.add("tema-natal");
+    }
+    if(config?.tema_site === "anonovo"){
+      document.body.classList.add("tema-anonovo");
     }
 
     // 🔹 Buscar produtos
@@ -176,18 +219,36 @@ async function carregarLoja(){
         return;
     }
 
+    const aberta = lojaAberta(config);
+
     produtos.forEach(p=>{
 
-        const whatsapp = `https://wa.me/55SEUNUMERO?text=Olá, tenho interesse no produto ${p.name}`;
+        let botao = "";
+
+        if(config?.modo_cardapio === "vitrine"){
+            botao = "";
+        } else {
+
+            if(!aberta){
+              botao = `<button disabled>Loja Fechada</button>`;
+            } else {
+
+              if(config?.fluxo_pedido === "whatsapp" && config?.whatsapp){
+                const link = `https://wa.me/${config.whatsapp}?text=Olá, tenho interesse no produto ${p.name}`;
+                botao = `<button onclick="window.open('${link}','_blank')">Comprar</button>`;
+              } else {
+                botao = `<button>Comprar</button>`;
+              }
+
+            }
+        }
 
         lista.innerHTML += `
             <div class="card">
                 <img src="${p.imagem || 'https://via.placeholder.com/180'}">
                 <h3>${p.name}</h3>
                 <div class="preco">R$ ${p.preco}</div>
-                <button onclick="window.open('${whatsapp}','_blank')">
-                  Comprar
-                </button>
+                ${botao}
             </div>
         `;
     });
