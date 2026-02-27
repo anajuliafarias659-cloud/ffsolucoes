@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Painel de Pedidos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script type="module" src="../js/auth.js"></script>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial, sans-serif;
+  background:#f5f6f8;
+  color:#111;
+}
+
+/* TOPO */
+.topo{
+  background:#000;
+  color:#fff;
+  padding:18px 30px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.topo h2{
+  margin:0;
+  font-size:20px;
+}
+
+.topo button{
+  background:#00a650;
+  border:none;
+  padding:8px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  color:#fff;
+}
+
+/* CONTAINER */
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:30px;
+}
+
+/* CARD PEDIDO */
+.card{
+  background:#fff;
+  border-radius:16px;
+  padding:20px;
+  margin-bottom:20px;
+  box-shadow:0 5px 20px rgba(0,0,0,0.08);
+  border:1px solid #e5e7eb;
+}
+
+.card-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:15px;
+}
+
+/* STATUS BADGE */
+.badge{
+  padding:6px 10px;
+  border-radius:20px;
+  font-size:12px;
+  font-weight:bold;
+}
+
+.novo{background:#facc15;color:#000}
+.em_preparo{background:#3b82f6;color:#fff}
+.saiu_entrega{background:#6366f1;color:#fff}
+.finalizado{background:#16a34a;color:#fff}
+.cancelado{background:#ef4444;color:#fff}
+
+/* ITENS */
+.item{
+  display:flex;
+  justify-content:space-between;
+  padding:8px 0;
+  border-bottom:1px solid #eee;
+  font-size:14px;
+}
+
+/* TOTAL */
+.total{
+  margin-top:12px;
+  font-size:18px;
+  font-weight:bold;
+  color:#000;
+}
+
+/* INFO */
+.info{
+  font-size:13px;
+  color:#555;
+  margin-bottom:15px;
+  line-height:1.6;
+}
+
+/* BOTÕES */
+button{
+  border:none;
+  border-radius:8px;
+  padding:8px 12px;
+  cursor:pointer;
+  font-weight:bold;
+  margin-left:6px;
+  font-size:12px;
+}
+
+.btn-aceitar{background:#22c55e;color:#fff}
+.btn-entrega{background:#3b82f6;color:#fff}
+.btn-finalizar{background:#16a34a;color:#fff}
+.btn-cancel{background:#ef4444;color:#fff}
+
+.link{
+  color:#0071e3;
+  text-decoration:none;
+}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <h2>📱 Pedidos Loja de Celular</h2>
+  <button onclick="history.back()">Voltar</button>
+</div>
+
+<div class="container" id="lista">
+  Carregando pedidos...
+</div>
+
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+let APP_ID=null;
+
+async function iniciar(){
+
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    location.href="../auth/login.html";
+    return;
+  }
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  APP_ID = usuario.app_id;
+
+  carregarPedidos();
+
+  supabase
+  .channel('pedidos-channel')
+  .on(
+    'postgres_changes',
+    {
+      event: '*',
+      schema: 'public',
+      table: 'pedidos',
+      filter: `app_id=eq.${APP_ID}`
+    },
+    () => {
+      carregarPedidos();
+    }
+  )
+  .subscribe();
+}
+
+async function carregarPedidos(){
+
+  const { data: pedidos } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .not("status","in","(finalizado,cancelado)")
+    .order("created_at",{ascending:true});
+
+  const lista = document.getElementById("lista");
+  lista.innerHTML="";
+
+  if(!pedidos || pedidos.length===0){
+    lista.innerHTML="<p>Nenhum pedido ativo</p>";
+    return;
+  }
+
+  for(const p of pedidos){
+
+    const { data: itens } = await supabase
+      .from("pedido_itens")
+      .select("nome_produto, quantidade, preco")
+      .eq("pedido_id", p.id);
+
+    let htmlItens="";
+
+    if(itens){
+      itens.forEach(i=>{
+        const sub = Number(i.quantidade) * Number(i.preco);
+        htmlItens += `
+          <div class="item">
+            <span>${i.quantidade}x ${i.nome_produto}</span>
+            <span>R$ ${sub.toFixed(2)}</span>
+          </div>
+        `;
+      });
+    }
+
+    lista.innerHTML += `
+      <div class="card">
+
+        <div class="card-header">
+          <div>
+            <b>${p.cliente_nome}</b><br>
+            <small>${new Date(p.created_at).toLocaleString()}</small>
+          </div>
+
+          <div>
+            <span class="badge ${p.status}">
+              ${p.status.replace("_"," ")}
+            </span>
+          </div>
+        </div>
+
+        <div class="info">
+          📞 <a class="link" href="https://wa.me/55${(p.telefone||"").replace(/\D/g,"")}" target="_blank">
+            ${p.telefone || "-"}
+          </a><br>
+          🏠 ${p.endereco || "-"}<br>
+          💳 ${p.forma_pagamento || "-"}<br>
+          📝 ${p.observacao || "-"}
+        </div>
+
+        ${htmlItens}
+
+        <div class="total">
+          Total: R$ ${Number(p.total || 0).toFixed(2)}
+        </div>
+
+        <div style="margin-top:15px">
+
+          ${p.status==="novo"?`
+            <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
+            <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
+          `:""}
+
+          ${p.status==="em_preparo"?`
+            <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu para entrega</button>
+          `:""}
+
+          ${p.status==="saiu_entrega"?`
+            <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Finalizar</button>
+          `:""}
+
+        </div>
+
+      </div>
+    `;
+  }
+}
+
+window.mudarStatus = async function(id,status){
+
+  await supabase
+    .from("pedidos")
+    .update({ status })
+    .eq("id", id);
+
+  carregarPedidos();
+};
+
+iniciar();
+</script>
+
+</body>
+</html>
