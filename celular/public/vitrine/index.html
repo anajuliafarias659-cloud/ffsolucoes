@@ -10,10 +10,10 @@ body{
   margin:0;
   font-family:Arial, sans-serif;
   background:#f5f5f5;
-  padding-top:120px;
+  padding-top:160px;
 }
 
-/* HEADER */
+/* HEADER FIXO BLINDADO */
 .topo{
   background:#000;
   padding:15px 20px;
@@ -22,8 +22,10 @@ body{
   position:fixed;
   top:0;
   left:0;
+  right:0;
   width:100%;
-  z-index:999;
+  z-index:999999;
+  box-sizing:border-box;
 }
 
 .logo-box{
@@ -42,6 +44,23 @@ body{
 #nomeLoja{
   color:#fff;
   font-weight:bold;
+}
+
+/* BANNER */
+.banner{
+  position:fixed;
+  top:90px;
+  left:0;
+  width:100%;
+  height:120px;
+  overflow:hidden;
+  z-index:998;
+}
+
+.banner img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
 }
 
 /* PRODUTOS */
@@ -67,7 +86,8 @@ body{
 }
 
 .card.aberto{
-  grid-column: span 2;
+  grid-column:1 / -1;
+  transform:scale(1.02);
 }
 
 .descricao-produto{
@@ -79,7 +99,7 @@ body{
 }
 
 .card.aberto .descricao-produto{
-  max-height:200px;
+  max-height:300px;
   margin:10px 0;
 }
 
@@ -127,8 +147,8 @@ body{
 }
 
 .card.aberto .imagem-principal img{
-  width:180px;
-  height:180px;
+  width:220px;
+  height:220px;
 }
 
 .preco{
@@ -196,6 +216,10 @@ body{
   </div>
 </header>
 
+<div class="banner">
+  <img id="bannerLoja">
+</div>
+
 <section class="produtos" id="listaProdutos"></section>
 
 <button id="btnCarrinho">🛒 <span id="contadorCarrinho">0</span></button>
@@ -213,6 +237,8 @@ body{
     <input class="campo" id="enderecoCliente" placeholder="Endereço">
     <input class="campo" id="bairroCliente" placeholder="Bairro">
     <input class="campo" id="cidadeCliente" placeholder="Cidade">
+    <input class="campo" id="estadoCliente" placeholder="Estado">
+    <input class="campo" id="cepCliente" placeholder="CEP">
 
     <button type="button" id="btnLocalizacao" class="btn-add" style="margin-bottom:10px;">
       📍 Pegar Minha Localização
@@ -256,19 +282,13 @@ document.getElementById("btnLocalizacao").onclick = ()=>{
     alert("Geolocalização não suportada.");
     return;
   }
-
   navigator.geolocation.getCurrentPosition((pos)=>{
-    const lat = pos.coords.latitude;
-    const lng = pos.coords.longitude;
-    const link = `https://www.google.com/maps?q=${lat},${lng}`;
-    document.getElementById("enderecoCliente").value = link;
-  },
-  ()=>{
-    alert("Não foi possível obter localização.");
+    const link=`https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+    enderecoCliente.value=link;
   });
 };
 
-/* ABRIR CARRINHO */
+/* CARRINHO */
 document.getElementById("btnCarrinho").onclick=()=>{
   document.getElementById("modalCarrinho").style.display="flex";
   renderCarrinho();
@@ -298,88 +318,18 @@ function renderCarrinho(){
       </div>
     `;
 
-    div.querySelector(".mais").onclick=()=>{
-      item.qtd++;
-      salvar();
-      renderCarrinho();
-    };
-
+    div.querySelector(".mais").onclick=()=>{ item.qtd++; salvar(); renderCarrinho(); };
     div.querySelector(".menos").onclick=()=>{
       item.qtd--;
-      if(item.qtd<=0){
-        carrinho.splice(index,1);
-      }
-      salvar();
-      renderCarrinho();
+      if(item.qtd<=0) carrinho.splice(index,1);
+      salvar(); renderCarrinho();
     };
 
     itens.appendChild(div);
   });
 
-  document.getElementById("total").innerText=total.toFixed(2);
+  total.innerText=total.toFixed(2);
 }
-
-/* FINALIZAR */
-document.getElementById("btnFinalizar").onclick = async ()=>{
-  if(carrinho.length===0){
-    alert("Carrinho vazio!");
-    return;
-  }
-
-  const { data: configAtual } = await supabase
-    .from("config_site")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .maybeSingle();
-
-  if(!configAtual){
-    alert("Configuração não encontrada.");
-    return;
-  }
-
-  configGlobal=configAtual;
-  const modo=(configGlobal.modo_venda||"").trim();
-  const total=document.getElementById("total").innerText;
-
-  const pedido={
-    app_id:APP_ID,
-    cliente_nome:nomeCliente.value||"",
-    telefone:telefoneCliente.value||"",
-    endereco:enderecoCliente.value||"",
-    bairro:bairroCliente.value||"",
-    cidade:cidadeCliente.value||"",
-    observacao:obsCliente.value||"",
-    total:total,
-    status:"novo",
-    itens:carrinho
-  };
-
-  if(modo==="sistema"||modo==="ambos"){
-    await supabase.from("pedidos").insert([pedido]);
-  }
-
-  if(modo==="whatsapp"||modo==="ambos"){
-    let msg="🛒 *NOVO PEDIDO*\n\n";
-    msg+=`👤 ${pedido.cliente_nome}\n`;
-    msg+=`📞 ${pedido.telefone}\n`;
-    msg+=`📍 ${pedido.endereco} - ${pedido.bairro} - ${pedido.cidade}\n\n`;
-
-    carrinho.forEach(i=>{
-      msg+=`• ${i.nome} (${i.qtd}) - R$ ${(Number(i.preco)*i.qtd).toFixed(2)}\n`;
-    });
-
-    msg+=`\n💰 Total: R$ ${pedido.total}`;
-
-    window.open(
-      `https://wa.me/${configGlobal.whatsapp_numero}?text=${encodeURIComponent(msg)}`,
-      "_blank"
-    );
-  }
-
-  carrinho=[];
-  salvar();
-  document.getElementById("modalCarrinho").style.display="none";
-};
 
 /* CARREGAR */
 async function carregar(){
@@ -389,11 +339,11 @@ async function carregar(){
     .eq("app_id",APP_ID)
     .maybeSingle();
 
-  if(config?.logo_url)
-    document.getElementById("logoLoja").src=config.logo_url;
-
-  if(config?.nome_site)
-    document.getElementById("nomeLoja").innerText=config.nome_site;
+  if(config){
+    if(config.logo_url) logoLoja.src=config.logo_url;
+    if(config.nome_site) nomeLoja.innerText=config.nome_site;
+    if(config.banner_url) bannerLoja.src=config.banner_url;
+  }
 
   const {data:produtos}=await supabase
     .from("produtos")
@@ -406,12 +356,9 @@ async function carregar(){
 
 function renderizarProdutos(lista){
   listaProdutos.innerHTML="";
-
   lista.forEach(p=>{
     let imgs=[];
-    try{ imgs = JSON.parse(p.imagens || "[]"); }catch{}
-
-    const imagemPrincipal = imgs[0] || "";
+    try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
 
     const card=document.createElement("div");
     card.className="card";
@@ -419,47 +366,36 @@ function renderizarProdutos(lista){
     card.innerHTML=`
       <div class="galeria">
         <div class="miniaturas">
-          ${imgs.slice(0,3).map(img=>`
-            <img src="${img}" class="mini-img">
-          `).join("")}
+          ${imgs.slice(0,3).map(img=>`<img src="${img}" class="mini-img">`).join("")}
         </div>
         <div class="imagem-principal">
-          ${imagemPrincipal ? `<img src="${imagemPrincipal}" class="principal">` : ""}
+          ${imgs[0]?`<img src="${imgs[0]}" class="principal">`:""}
         </div>
       </div>
       <h4>${p.nome}</h4>
-      <div class="descricao-produto">
-        ${p.descricao || "Sem descrição disponível."}
-      </div>
+      <div class="descricao-produto">${p.descricao||"Sem descrição disponível."}</div>
       <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
       <button class="btn-add">Adicionar</button>
     `;
 
-    card.addEventListener("click",()=>{
-      card.classList.toggle("aberto");
-    });
+    card.addEventListener("click",()=> card.classList.toggle("aberto"));
 
-    const principal = card.querySelector(".principal");
+    const principal=card.querySelector(".principal");
 
     card.querySelectorAll(".mini-img").forEach(img=>{
-      img.addEventListener("click",(e)=>{
+      img.onclick=(e)=>{
         e.stopPropagation();
-        if(principal){
-          principal.src = img.src;
-        }
-      });
+        if(principal) principal.src=img.src;
+      };
     });
 
-    card.querySelector(".btn-add").addEventListener("click",(e)=>{
+    card.querySelector(".btn-add").onclick=(e)=>{
       e.stopPropagation();
-      const existe = carrinho.find(i=>i.id===p.id);
-      if(existe){
-        existe.qtd++;
-      }else{
-        carrinho.push({...p, qtd:1});
-      }
+      const existe=carrinho.find(i=>i.id===p.id);
+      if(existe) existe.qtd++;
+      else carrinho.push({...p,qtd:1});
       salvar();
-    });
+    };
 
     listaProdutos.appendChild(card);
   });
