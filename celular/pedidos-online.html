@@ -2,284 +2,222 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Painel de Pedidos</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script type="module" src="../js/auth.js"></script>
+<title>Configurar Vitrine</title>
 
 <style>
 body{
   margin:0;
-  font-family:Arial, sans-serif;
-  background:#f5f6f8;
-  color:#111;
-}
-
-.topo{
-  background:#000;
+  font-family:Arial;
+  background:#0f172a;
   color:#fff;
-  padding:18px 30px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
 }
 
 .container{
-  max-width:1100px;
-  margin:auto;
-  padding:30px;
+  max-width:500px;
+  margin:40px auto;
+  padding:25px;
+  background:#1e293b;
+  border-radius:15px;
 }
 
-.card{
-  background:#fff;
-  border-radius:16px;
-  padding:20px;
-  margin-bottom:20px;
-  box-shadow:0 5px 20px rgba(0,0,0,0.08);
-  border:1px solid #e5e7eb;
-}
-
-.card-header{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:15px;
-}
-
-.badge{
-  padding:6px 10px;
-  border-radius:20px;
-  font-size:12px;
-  font-weight:bold;
-}
-
-.novo{background:#facc15;color:#000}
-.em_preparo{background:#3b82f6;color:#fff}
-.saiu_entrega{background:#6366f1;color:#fff}
-.finalizado{background:#16a34a;color:#fff}
-.cancelado{background:#ef4444;color:#fff}
-
-.item{
-  display:flex;
-  justify-content:space-between;
-  padding:8px 0;
-  border-bottom:1px solid #eee;
+label{
+  display:block;
+  margin-top:15px;
   font-size:14px;
 }
 
-.total{
-  margin-top:12px;
-  font-size:18px;
-  font-weight:bold;
-}
-
-.info{
-  font-size:13px;
-  color:#555;
-  margin-bottom:15px;
-  line-height:1.6;
+input,select,textarea,button{
+  width:100%;
+  padding:12px;
+  margin-top:5px;
+  border-radius:8px;
+  border:none;
 }
 
 button{
-  border:none;
-  border-radius:8px;
-  padding:8px 12px;
-  cursor:pointer;
+  background:#22c55e;
+  color:#000;
   font-weight:bold;
-  margin-left:6px;
-  font-size:12px;
+  margin-top:20px;
+  cursor:pointer;
 }
 
-.btn-aceitar{background:#22c55e;color:#fff}
-.btn-entrega{background:#3b82f6;color:#fff}
-.btn-finalizar{background:#16a34a;color:#fff}
-.btn-cancel{background:#ef4444;color:#fff}
-
-.link{
-  color:#0071e3;
-  text-decoration:none;
+.preview{
+  margin-top:10px;
+  max-height:80px;
+  display:none;
+  background:#fff;
+  padding:5px;
+  border-radius:8px;
 }
 </style>
 </head>
 
 <body>
 
-<div class="topo">
-  <h2>📱 Pedidos Loja</h2>
-  <button onclick="history.back()">Voltar</button>
-</div>
+<div class="container">
 
-<div class="container" id="lista">
-  Carregando pedidos...
+<h2>⚙ Configurar Vitrine</h2>
+
+<label>Nome da Loja</label>
+<input id="nome_site">
+
+<label>Logo</label>
+<input type="file" id="logo_file" accept="image/*">
+<img id="logo_preview" class="preview">
+<label><input type="checkbox" id="remover_logo"> Remover logo</label>
+
+<label>Banner (Imagem opcional)</label>
+<input type="file" id="banner_file" accept="image/*">
+<img id="banner_preview" class="preview">
+<label><input type="checkbox" id="remover_banner"> Remover banner</label>
+
+<label>Descrição do Banner (se não usar imagem)</label>
+<textarea id="banner_descricao" rows="3"></textarea>
+
+<label>WhatsApp (somente números)</label>
+<input id="whatsapp_numero" placeholder="5598999999999">
+
+<label>Fluxo de Venda</label>
+<select id="modo_venda">
+  <option value="whatsapp">WhatsApp</option>
+  <option value="sistema">Sistema</option>
+  <option value="ambos">Ambos</option>
+</select>
+
+<label>Tema</label>
+<select id="tema_site">
+  <option value="padrao">Padrão</option>
+  <option value="natal">Natal</option>
+  <option value="anonovo">Ano Novo</option>
+</select>
+
+<button onclick="salvar()">Salvar</button>
+
 </div>
 
 <script type="module">
-import { supabase } from "../js/supabase.js";
+import { supabase } from "/js/supabase.js";
 
-let APP_ID=null;
-let ultimoPedidoNotificado=null;
-const audio = new Audio("https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg");
-
-/* ================= INICIAR ================= */
+let app_id=null;
 
 async function iniciar(){
-
   const { data:{ session } } = await supabase.auth.getSession();
   if(!session){
-    location.href="../auth/login.html";
+    window.location.href="/auth/login.html";
     return;
   }
 
-  const { data: usuario } = await supabase
+  const { data:usuario } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", session.user.id)
     .single();
 
-  APP_ID = usuario.app_id;
+  app_id = usuario.app_id;
 
-  carregarPedidos();
-
-  /* REALTIME */
-  supabase
-    .channel("pedidos-realtime")
-    .on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "pedidos",
-        filter: `app_id=eq.${APP_ID}`
-      },
-      (payload)=>{
-        const novoPedido = payload.new;
-
-        if(novoPedido.status==="novo"){
-          if(ultimoPedidoNotificado !== novoPedido.id){
-            ultimoPedidoNotificado = novoPedido.id;
-            audio.play();
-            mostrarNotificacao("Novo pedido recebido 🔥");
-            carregarPedidos();
-          }
-        }
-      }
-    )
-    .subscribe();
+  carregar();
 }
 
-/* ================= NOTIFICAÇÃO ================= */
-
-function mostrarNotificacao(msg){
-  const div=document.createElement("div");
-  div.innerText=msg;
-  div.style.position="fixed";
-  div.style.top="20px";
-  div.style.right="20px";
-  div.style.background="#16a34a";
-  div.style.color="#fff";
-  div.style.padding="15px 20px";
-  div.style.borderRadius="12px";
-  div.style.boxShadow="0 10px 25px rgba(0,0,0,0.3)";
-  div.style.zIndex="99999";
-  document.body.appendChild(div);
-  setTimeout(()=>div.remove(),4000);
+function limparNumero(n){
+  return n.replace(/\D/g,'');
 }
 
-/* ================= CARREGAR PEDIDOS ================= */
+async function upload(file,bucket){
+  const ext = file.name.split(".").pop();
+  const path = `${app_id}/${Date.now()}.${ext}`;
 
-async function carregarPedidos(){
+  const { error } = await supabase.storage
+    .from(bucket)
+    .upload(path,file,{ upsert:true });
 
-  const { data: pedidos } = await supabase
-    .from("pedidos")
-    .select("*")
-    .eq("app_id", APP_ID)
-    .not("status","in","(finalizado,cancelado)")
-    .order("created_at",{ascending:true});
+  if(error){
+    alert(error.message);
+    return null;
+  }
 
-  const lista = document.getElementById("lista");
-  lista.innerHTML="";
+  return supabase.storage.from(bucket)
+    .getPublicUrl(path).data.publicUrl;
+}
 
-  if(!pedidos || pedidos.length===0){
-    lista.innerHTML="<p>Nenhum pedido ativo</p>";
+window.salvar = async function(){
+
+  const payload = {
+    nome_site: nome_site.value.trim(),
+    whatsapp_numero: limparNumero(whatsapp_numero.value),
+    modo_venda: modo_venda.value,
+    tema_site: tema_site.value,
+    banner_descricao: banner_descricao.value.trim()
+  };
+
+  if(remover_logo.checked) payload.logo_url=null;
+  if(remover_banner.checked) payload.banner_url=null;
+
+  if(logo_file.files[0])
+    payload.logo_url = await upload(logo_file.files[0],"logos");
+
+  if(banner_file.files[0])
+    payload.banner_url = await upload(banner_file.files[0],"banners");
+
+  const { data:existe } = await supabase
+    .from("config_site")
+    .select("id")
+    .eq("app_id",app_id)
+    .maybeSingle();
+
+  const res = existe
+    ? await supabase.from("config_site").update(payload).eq("app_id",app_id)
+    : await supabase.from("config_site").insert({ ...payload, app_id });
+
+  if(res.error){
+    alert(res.error.message);
     return;
   }
 
-  for(const p of pedidos){
+  alert("Salvo com sucesso 🔥");
+};
 
-    let htmlItens="";
+async function carregar(){
+  const { data } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id",app_id)
+    .maybeSingle();
 
-    if(p.itens && Array.isArray(p.itens)){
-      p.itens.forEach(i=>{
-        const sub = Number(i.preco);
-        htmlItens += `
-          <div class="item">
-            <span>${i.nome}</span>
-            <span>R$ ${sub.toFixed(2)}</span>
-          </div>
-        `;
-      });
-    }
+  if(!data) return;
 
-    lista.innerHTML += `
-      <div class="card">
+  nome_site.value = data.nome_site || "";
+  whatsapp_numero.value = data.whatsapp_numero || "";
+  modo_venda.value = data.modo_venda || "whatsapp";
+  tema_site.value = data.tema_site || "padrao";
+  banner_descricao.value = data.banner_descricao || "";
 
-        <div class="card-header">
-          <div>
-            <b>${p.cliente_nome}</b><br>
-            <small>${new Date(p.created_at).toLocaleString()}</small>
-          </div>
-          <div>
-            <span class="badge ${p.status}">
-              ${p.status.replace("_"," ")}
-            </span>
-          </div>
-        </div>
+  if(data.logo_url){
+    logo_preview.src=data.logo_url;
+    logo_preview.style.display="block";
+  }
 
-        <div class="info">
-          📞 <a class="link" href="https://wa.me/55${(p.telefone||"").replace(/\D/g,"")}" target="_blank">
-            ${p.telefone || "-"}
-          </a><br>
-          🏠 ${p.endereco || "-"}<br>
-          📍 ${p.localizacao_link ? `<a class="link" href="${p.localizacao_link}" target="_blank">Ver localização</a>` : "-"}<br>
-          📝 ${p.observacao || "-"}
-        </div>
-
-        ${htmlItens}
-
-        <div class="total">
-          Total: R$ ${Number(p.total || 0).toFixed(2)}
-        </div>
-
-        <div style="margin-top:15px">
-
-          ${p.status==="novo"?`
-            <button class="btn-aceitar" onclick="mudarStatus('${p.id}','em_preparo')">Aceitar</button>
-            <button class="btn-cancel" onclick="mudarStatus('${p.id}','cancelado')">Cancelar</button>
-          `:""}
-
-          ${p.status==="em_preparo"?`
-            <button class="btn-entrega" onclick="mudarStatus('${p.id}','saiu_entrega')">Saiu para entrega</button>
-          `:""}
-
-          ${p.status==="saiu_entrega"?`
-            <button class="btn-finalizar" onclick="mudarStatus('${p.id}','finalizado')">Finalizar</button>
-          `:""}
-
-        </div>
-
-      </div>
-    `;
+  if(data.banner_url){
+    banner_preview.src=data.banner_url;
+    banner_preview.style.display="block";
   }
 }
 
-/* ================= MUDAR STATUS ================= */
+logo_file.onchange=()=>{
+  const f=logo_file.files[0];
+  if(f){
+    logo_preview.src=URL.createObjectURL(f);
+    logo_preview.style.display="block";
+  }
+};
 
-window.mudarStatus = async function(id,status){
-  await supabase
-    .from("pedidos")
-    .update({ status })
-    .eq("id", id);
-
-  carregarPedidos();
+banner_file.onchange=()=>{
+  const f=banner_file.files[0];
+  if(f){
+    banner_preview.src=URL.createObjectURL(f);
+    banner_preview.style.display="block";
+  }
 };
 
 iniciar();
