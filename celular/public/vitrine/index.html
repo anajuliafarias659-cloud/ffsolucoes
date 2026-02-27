@@ -204,42 +204,204 @@ const supabase = createClient(
 
 const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 
-let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
-let configGlobal=null;
+/* ================= ELEMENTOS ================= */
 
 const btnCarrinho = document.getElementById("btnCarrinho");
 const modalCarrinho = document.getElementById("modalCarrinho");
+const fecharCarrinho = document.getElementById("fecharCarrinho");
 const itensCarrinho = document.getElementById("itensCarrinho");
+const contadorCarrinho = document.getElementById("contadorCarrinho");
+const subtotalEl = document.getElementById("subtotal");
+const freteEl = document.getElementById("frete");
 const totalEl = document.getElementById("total");
 const btnFinalizar = document.getElementById("btnFinalizar");
 
+const filtros = document.getElementById("filtros");
+const listaProdutos = document.getElementById("listaProdutos");
+
+const modalProduto = document.getElementById("modalProduto");
+const conteudoProduto = document.getElementById("conteudoProduto");
+const fecharProduto = document.getElementById("fecharProduto");
+
+const btnPegarLocalizacao = document.getElementById("btnPegarLocalizacao");
+
+/* ================= VARIÁVEIS ================= */
+
+let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
+let clienteLat=null;
+let clienteLng=null;
+let configGlobal=null;
+let todosProdutos=[];
+
+/* ================= SALVAR ================= */
+
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
-  document.getElementById("contadorCarrinho").innerText=carrinho.length;
+  contadorCarrinho.innerText=carrinho.length;
 }
 
-btnCarrinho.onclick=()=>{
+/* ================= CARRINHO ================= */
+
+btnCarrinho.addEventListener("click", ()=>{
   modalCarrinho.style.display="flex";
-  renderCarrinho();
-};
+  renderizarCarrinho();
+});
 
-function renderCarrinho(){
+fecharCarrinho.addEventListener("click", ()=>{
+  modalCarrinho.style.display="none";
+});
+
+function renderizarCarrinho(){
   itensCarrinho.innerHTML="";
-  let total=0;
+  let subtotal=0;
 
-  carrinho.forEach((item,i)=>{
-    total+=Number(item.preco);
-    itensCarrinho.innerHTML+=`
-      <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
-        <span>${item.nome}</span>
-        <span>R$ ${Number(item.preco).toFixed(2)}</span>
-      </div>`;
+  carrinho.forEach((item,index)=>{
+    subtotal+=Number(item.preco);
+
+    const div=document.createElement("div");
+    div.style.display="flex";
+    div.style.justifyContent="space-between";
+    div.style.alignItems="center";
+    div.style.marginBottom="8px";
+
+    div.innerHTML=`
+      <div>
+        <strong>${item.nome}</strong><br>
+        R$ ${Number(item.preco).toFixed(2)}
+      </div>
+      <button style="background:#dc3545;color:white;border:none;border-radius:6px;padding:5px 8px;">❌</button>
+    `;
+
+    div.querySelector("button").addEventListener("click", ()=>{
+      carrinho.splice(index,1);
+      salvar();
+      renderizarCarrinho();
+    });
+
+    itensCarrinho.appendChild(div);
   });
 
-  totalEl.innerText=total.toFixed(2);
+  subtotalEl.innerText=subtotal.toFixed(2);
+  calcularFrete(subtotal);
 }
 
+/* ================= FRETE ================= */
+
+function calcularFrete(subtotal){
+  let frete=10;
+
+  if(clienteLat && clienteLng){
+    const R=6371;
+    const latLoja=-9.015;
+    const lngLoja=-42.700;
+
+    const dLat=(clienteLat-latLoja)*Math.PI/180;
+    const dLon=(clienteLng-lngLoja)*Math.PI/180;
+
+    const a=
+      Math.sin(dLat/2)**2+
+      Math.cos(latLoja*Math.PI/180)*
+      Math.cos(clienteLat*Math.PI/180)*
+      Math.sin(dLon/2)**2;
+
+    const distancia=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    frete=distancia*2;
+  }
+
+  freteEl.innerText=frete.toFixed(2);
+  totalEl.innerText=(subtotal+frete).toFixed(2);
+}
+
+/* ================= FINALIZAR ================= */
+
+btnFinalizar.addEventListener("click", async ()=>{
+
+  if(carrinho.length===0){
+    alert("Carrinho vazio!");
+    return;
+  }
+
+  // 🔥 SEMPRE RECARREGA CONFIG ANTES DE FINALIZAR
+  const { data: configAtual } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id",APP_ID)
+    .maybeSingle();
+
+  if(!configAtual){
+    alert("Configuração não encontrada.");
+    return;
+  }
+
+  configGlobal = configAtual;
+
+  const modo = (configGlobal.modo_venda || "").trim();
+
+  console.log("Modo venda atual:", modo);
+
+  const total=totalEl.innerText;
+
+  const pedido={
+    app_id:APP_ID,
+    cliente_nome: nomeCliente.value || "",
+    telefone: telefoneCliente.value || "",
+    endereco: (enderecoCliente.value || "")+", "+(numeroCliente.value || ""),
+    bairro: bairroCliente.value || "",
+    cidade: cidadeCliente.value || "",
+    observacao: obsCliente.value || "",
+    latitude: clienteLat,
+    longitude: clienteLng,
+    localizacao_link: localizacaoCliente.value || "",
+    total: total,
+    status:"novo",
+    itens:carrinho
+  };
+
+  try{
+
+    if(modo==="sistema" || modo==="ambos"){
+      const { error } = await supabase.from("pedidos").insert([pedido]);
+      if(error){
+        console.error(error);
+        alert("Erro ao salvar pedido.");
+        return;
+      }
+    }
+
+    if(modo==="whatsapp" || modo==="ambos"){
+
+      if(!configGlobal.whatsapp_numero){
+        alert("Número do WhatsApp não configurado.");
+        return;
+      }
+
+      const numero=configGlobal.whatsapp_numero;
+
+      let msg=`*Novo Pedido*%0A`;
+      msg+=`Cliente: ${pedido.cliente_nome}%0A`;
+      msg+=`Telefone: ${pedido.telefone}%0A`;
+      msg+=`Endereço: ${pedido.endereco}%0A`;
+      msg+=`Total: R$ ${pedido.total}`;
+
+      window.open(`https://wa.me/${numero}?text=${msg}`,"_blank");
+    }
+
+    alert("Pedido enviado!");
+    carrinho=[];
+    salvar();
+    modalCarrinho.style.display="none";
+
+  }catch(e){
+    console.error(e);
+    alert("Erro ao finalizar pedido.");
+  }
+
+});
+
+/* ================= CARREGAR ================= */
+
 async function carregar(){
+
   const {data:config}=await supabase
     .from("config_site")
     .select("*")
@@ -248,8 +410,11 @@ async function carregar(){
 
   configGlobal=config;
 
-  if(config?.logo_url) logoLoja.src=config.logo_url;
-  if(config?.nome_site) nomeLoja.innerText=config.nome_site;
+  if(config?.logo_url)
+    document.getElementById("logoLoja").src=config.logo_url;
+
+  if(config?.nome_site)
+    document.getElementById("nomeLoja").innerText=config.nome_site;
 
   const {data:produtos}=await supabase
     .from("produtos")
@@ -257,128 +422,54 @@ async function carregar(){
     .eq("app_id",APP_ID)
     .eq("ativo",true);
 
-  renderProdutos(produtos||[]);
+  todosProdutos=produtos||[];
+  criarCategorias(todosProdutos);
+  renderizarProdutos(todosProdutos);
 }
 
-function renderProdutos(lista){
-  const container=document.getElementById("listaProdutos");
-  container.innerHTML="";
+/* ================= PRODUTOS E CATEGORIA ================= */
 
+function criarCategorias(produtos){
+  filtros.innerHTML="";
+  const categorias=[...new Set(produtos.map(p=>p.categoria).filter(Boolean))];
+
+  const btnTodos=document.createElement("button");
+  btnTodos.innerText="Todos";
+  btnTodos.className="filtro-btn ativo";
+  btnTodos.onclick=()=>renderizarProdutos(produtos);
+  filtros.appendChild(btnTodos);
+
+  categorias.forEach(cat=>{
+    const btn=document.createElement("button");
+    btn.innerText=cat;
+    btn.className="filtro-btn";
+    btn.onclick=()=>renderizarProdutos(produtos.filter(p=>p.categoria===cat));
+    filtros.appendChild(btn);
+  });
+}
+
+function renderizarProdutos(lista){
+  listaProdutos.innerHTML="";
   lista.forEach(p=>{
-    let imgs=[];
-    try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
-
     const card=document.createElement("div");
     card.className="card";
-
     card.innerHTML=`
-      <div class="galeria">
-        <div class="miniaturas">
-          ${imgs.slice(0,3).map(img=>`<img src="${img}">`).join("")}
-        </div>
-        <div class="imagem-principal">
-          ${imgs[0]?`<img src="${imgs[0]}" class="principal">`:""}
-        </div>
-      </div>
       <h4>${p.nome}</h4>
       <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
       <button class="btn-add">Adicionar</button>
     `;
-
-    const principal=card.querySelector(".principal");
-
-    card.querySelectorAll(".miniaturas img").forEach(img=>{
-      img.addEventListener("click",(e)=>{
-        e.stopPropagation();
-        if(principal) principal.src=img.src;
-      });
-    });
-
-    card.addEventListener("click",(e)=>{
-      if(!e.target.classList.contains("btn-add")){
-        abrirProduto(p);
-      }
-    });
-
     card.querySelector(".btn-add").onclick=(e)=>{
       e.stopPropagation();
       carrinho.push(p);
       salvar();
     };
-
-    container.appendChild(card);
+    listaProdutos.appendChild(card);
   });
 }
-
-function abrirProduto(p){
-  let imgs=[];
-  try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
-
-  conteudoProduto.innerHTML=`
-    <h2>${p.nome}</h2>
-    <div style="display:flex;gap:20px;">
-      <div>
-        ${imgs.slice(0,3).map(img=>`<img src="${img}" style="width:60px;height:60px;display:block;margin-bottom:5px;cursor:pointer;">`).join("")}
-      </div>
-      <div>
-        ${imgs[0]?`<img src="${imgs[0]}" id="modalPrincipal" style="width:300px;height:300px;object-fit:contain;">`:""}
-      </div>
-    </div>
-    <button class="btn-add" id="addModal">Adicionar ao Carrinho</button>
-  `;
-
-  const principal=document.getElementById("modalPrincipal");
-
-  document.querySelectorAll("#conteudoProduto img").forEach(img=>{
-    img.addEventListener("click",()=>{
-      if(principal) principal.src=img.src;
-    });
-  });
-
-  document.getElementById("addModal").onclick=()=>{
-    carrinho.push(p);
-    salvar();
-    modalProduto.style.display="none";
-  };
-
-  modalProduto.style.display="flex";
-}
-
-document.getElementById("fecharProduto").onclick=()=>{
-  modalProduto.style.display="none";
-};
-
-btnFinalizar.onclick=()=>{
-  if(!configGlobal?.whatsapp_numero) return;
-
-  let total=0;
-  carrinho.forEach(i=> total+=Number(i.preco));
-
-  const nome=document.getElementById("nomeCliente").value;
-  const telefone=document.getElementById("telefoneCliente").value;
-  const endereco=document.getElementById("enderecoCliente").value;
-  const bairro=document.getElementById("bairroCliente").value;
-
-  let msg="🛒 *NOVO PEDIDO*\n\n";
-  msg+=`👤 Cliente: ${nome}\n`;
-  msg+=`📞 Telefone: ${telefone}\n`;
-  msg+=`📍 ${endereco} - ${bairro}\n\n`;
-
-  carrinho.forEach(i=>{
-    msg+=`• ${i.nome} - R$ ${Number(i.preco).toFixed(2)}\n`;
-  });
-
-  msg+=`\n💰 Total: R$ ${total.toFixed(2)}`;
-
-  window.open(`https://wa.me/${configGlobal.whatsapp_numero}?text=${encodeURIComponent(msg)}`,"_blank");
-
-  carrinho=[];
-  salvar();
-  modalCarrinho.style.display="none";
-};
 
 carregar();
 salvar();
 </script>
 </body>
 </html>
+
