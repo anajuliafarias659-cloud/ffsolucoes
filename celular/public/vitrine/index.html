@@ -58,22 +58,29 @@ body{
   padding:15px;
   box-shadow:0 8px 25px rgba(0,0,0,0.08);
   cursor:pointer;
-  transition:.2s;
+  transition:all .3s ease;
+  overflow:hidden;
 }
 
 .card:hover{
   transform:translateY(-4px);
 }
 
+.card.aberto{
+  grid-column: span 2;
+}
+
 .descricao-produto{
-  display:none;
+  max-height:0;
+  overflow:hidden;
   font-size:14px;
-  margin:8px 0;
   color:#555;
+  transition:max-height .4s ease;
 }
 
 .card.aberto .descricao-produto{
-  display:block;
+  max-height:200px;
+  margin:10px 0;
 }
 
 .galeria{
@@ -88,17 +95,22 @@ body{
   gap:6px;
 }
 
-.miniaturas img{
-  width:45px;
-  height:45px;
+.mini-img{
+  width:50px;
+  height:50px;
   object-fit:cover;
   border-radius:8px;
   cursor:pointer;
-  border:2px solid transparent;
+  transition:transform .2s;
 }
 
-.miniaturas img:hover{
-  border-color:#0071e3;
+.card.aberto .mini-img{
+  width:70px;
+  height:70px;
+}
+
+.mini-img:hover{
+  transform:scale(1.05);
 }
 
 .imagem-principal{
@@ -111,6 +123,12 @@ body{
   width:120px;
   height:120px;
   object-fit:contain;
+  transition:.3s;
+}
+
+.card.aberto .imagem-principal img{
+  width:180px;
+  height:180px;
 }
 
 .preco{
@@ -184,7 +202,9 @@ body{
 
 <div id="modalCarrinho">
   <div class="modal">
+    <button id="fecharModal" style="float:right;background:red;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;">X</button>
     <h2>Seu Pedido</h2>
+
     <div id="itensCarrinho"></div>
     <h3>Total: R$ <span id="total">0.00</span></h3>
 
@@ -222,10 +242,15 @@ let configGlobal=null;
 
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
-  contadorCarrinho.innerText=carrinho.length;
+  contadorCarrinho.innerText=carrinho.reduce((acc,i)=>acc+(i.qtd||1),0);
 }
 
-/* BOTÃO LOCALIZAÇÃO */
+/* FECHAR MODAL */
+document.getElementById("fecharModal").onclick=()=>{
+  document.getElementById("modalCarrinho").style.display="none";
+};
+
+/* LOCALIZAÇÃO */
 document.getElementById("btnLocalizacao").onclick = ()=>{
   if(!navigator.geolocation){
     alert("Geolocalização não suportada.");
@@ -243,8 +268,7 @@ document.getElementById("btnLocalizacao").onclick = ()=>{
   });
 };
 
-/* CARRINHO */
-
+/* ABRIR CARRINHO */
 document.getElementById("btnCarrinho").onclick=()=>{
   document.getElementById("modalCarrinho").style.display="flex";
   renderCarrinho();
@@ -256,20 +280,35 @@ function renderCarrinho(){
   let total=0;
 
   carrinho.forEach((item,index)=>{
-    total+=Number(item.preco);
+    const qtd=item.qtd||1;
+    total+=Number(item.preco)*qtd;
 
     const div=document.createElement("div");
-    div.style.display="flex";
-    div.style.justifyContent="space-between";
-    div.style.marginBottom="6px";
+    div.style.marginBottom="10px";
 
     div.innerHTML=`
-      <span>${item.nome}</span>
-      <span>R$ ${Number(item.preco).toFixed(2)}</span>
+      <div style="display:flex;justify-content:space-between;">
+        <span>${item.nome}</span>
+        <span>R$ ${(Number(item.preco)*qtd).toFixed(2)}</span>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:5px;">
+        <button class="menos">➖</button>
+        <span>${qtd}</span>
+        <button class="mais">➕</button>
+      </div>
     `;
 
-    div.onclick=()=>{
-      carrinho.splice(index,1);
+    div.querySelector(".mais").onclick=()=>{
+      item.qtd++;
+      salvar();
+      renderCarrinho();
+    };
+
+    div.querySelector(".menos").onclick=()=>{
+      item.qtd--;
+      if(item.qtd<=0){
+        carrinho.splice(index,1);
+      }
       salvar();
       renderCarrinho();
     };
@@ -281,9 +320,7 @@ function renderCarrinho(){
 }
 
 /* FINALIZAR */
-
 document.getElementById("btnFinalizar").onclick = async ()=>{
-
   if(carrinho.length===0){
     alert("Carrinho vazio!");
     return;
@@ -322,19 +359,13 @@ document.getElementById("btnFinalizar").onclick = async ()=>{
   }
 
   if(modo==="whatsapp"||modo==="ambos"){
-
-    if(!configGlobal.whatsapp_numero){
-      alert("WhatsApp não configurado.");
-      return;
-    }
-
     let msg="🛒 *NOVO PEDIDO*\n\n";
     msg+=`👤 ${pedido.cliente_nome}\n`;
     msg+=`📞 ${pedido.telefone}\n`;
     msg+=`📍 ${pedido.endereco} - ${pedido.bairro} - ${pedido.cidade}\n\n`;
 
     carrinho.forEach(i=>{
-      msg+=`• ${i.nome} - R$ ${Number(i.preco).toFixed(2)}\n`;
+      msg+=`• ${i.nome} (${i.qtd}) - R$ ${(Number(i.preco)*i.qtd).toFixed(2)}\n`;
     });
 
     msg+=`\n💰 Total: R$ ${pedido.total}`;
@@ -351,9 +382,7 @@ document.getElementById("btnFinalizar").onclick = async ()=>{
 };
 
 /* CARREGAR */
-
 async function carregar(){
-
   const {data:config}=await supabase
     .from("config_site")
     .select("*")
@@ -390,18 +419,18 @@ function renderizarProdutos(lista){
     card.innerHTML=`
       <div class="galeria">
         <div class="miniaturas">
-          ${imgs.slice(0,3).map(img=>`<img src="${img}">`).join("")}
+          ${imgs.slice(0,3).map(img=>`
+            <img src="${img}" class="mini-img">
+          `).join("")}
         </div>
         <div class="imagem-principal">
           ${imagemPrincipal ? `<img src="${imagemPrincipal}" class="principal">` : ""}
         </div>
       </div>
       <h4>${p.nome}</h4>
-
       <div class="descricao-produto">
         ${p.descricao || "Sem descrição disponível."}
       </div>
-
       <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
       <button class="btn-add">Adicionar</button>
     `;
@@ -412,7 +441,7 @@ function renderizarProdutos(lista){
 
     const principal = card.querySelector(".principal");
 
-    card.querySelectorAll(".miniaturas img").forEach(img=>{
+    card.querySelectorAll(".mini-img").forEach(img=>{
       img.addEventListener("click",(e)=>{
         e.stopPropagation();
         if(principal){
@@ -423,7 +452,12 @@ function renderizarProdutos(lista){
 
     card.querySelector(".btn-add").addEventListener("click",(e)=>{
       e.stopPropagation();
-      carrinho.push(p);
+      const existe = carrinho.find(i=>i.id===p.id);
+      if(existe){
+        existe.qtd++;
+      }else{
+        carrinho.push({...p, qtd:1});
+      }
       salvar();
     });
 
@@ -434,6 +468,5 @@ function renderizarProdutos(lista){
 carregar();
 salvar();
 </script>
-
 </body>
 </html>
