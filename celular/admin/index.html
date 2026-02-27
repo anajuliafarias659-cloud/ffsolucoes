@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Painel Loja de Celular</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#020617;
+  color:#fff;
+}
+
+.topo{
+  background:#0f172a;
+  padding:14px 16px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.sair{
+  background:#e53935;
+  color:#fff;
+  border:none;
+  padding:8px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.container{
+  padding:16px;
+  max-width:1100px;
+  margin:auto;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:14px;
+  margin-bottom:30px;
+}
+
+@media(min-width:768px){
+  .grid{
+    grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  }
+}
+
+.card{
+  background:#0f172a;
+  padding:16px;
+  border-radius:14px;
+  cursor:pointer;
+  transition:.2s;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  text-align:center;
+  position:relative;
+}
+
+.card:hover{
+  transform:translateY(-4px);
+  background:#1e293b;
+}
+
+.badge{
+  position:absolute;
+  top:8px;
+  right:8px;
+  background:#ef4444;
+  color:#fff;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:12px;
+  display:none;
+}
+
+@keyframes piscar {
+  0%{box-shadow:0 0 0 transparent;}
+  50%{box-shadow:0 0 20px rgba(239,68,68,.9);}
+  100%{box-shadow:0 0 0 transparent;}
+}
+
+.piscar{
+  animation:piscar 1s infinite;
+}
+
+select{
+  width:100%;
+  padding:10px;
+  border-radius:8px;
+  border:none;
+  background:#1e293b;
+  color:#fff;
+  margin-top:8px;
+}
+
+.botao-link{
+  margin-top:10px;
+  font-size:13px;
+  opacity:.8;
+  cursor:pointer;
+}
+
+.botao-link:hover{opacity:1}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <h2>📱 Painel Loja de Celular</h2>
+  <button class="sair" onclick="logout()">Sair</button>
+</div>
+
+<div class="container">
+
+  <p>
+    Bem-vindo, <b id="nome"></b><br>
+    <small style="opacity:.6">
+      ID da Loja: <span id="negocioId"></span>
+    </small>
+  </p>
+
+  <div class="grid">
+
+    <div class="card" onclick="irPara('produtos.html')">📦 Produtos</div>
+    <div class="card" onclick="irPara('categorias.html')">📂 Categorias</div>
+    <div class="card" onclick="irPara('estoque.html')">📊 Estoque</div>
+    <div class="card" onclick="irPara('vendas.html')">💰 Vendas</div>
+    <div class="card" onclick="irPara('assistencia.html')">🛠 Assistência Técnica</div>
+
+    <!-- 🔔 PEDIDOS ONLINE -->
+    <div class="card" id="cardPedidos" onclick="irPara('pedidos-online.html')">
+      🧾 Pedidos Online
+      <span class="badge" id="badgePedidos">0</span>
+    </div>
+
+    <div class="card" onclick="irPara('caixa.html')">💵 Caixa</div>
+    <div class="card" onclick="irPara('config-site.html')">🌐 Configurar Vitrine</div>
+    <div class="card" onclick="irPara('admins.html')">👤 Admins</div>
+
+    <div class="card">
+      <h3>🌍 Página Pública</h3>
+      <select id="modo_publico">
+        <option value="vitrine">🛒 Vitrine Online</option>
+        <option value="site">🌐 Site Completo</option>
+      </select>
+      <div class="botao-link" onclick="compartilharPagina()">
+        🔗 Compartilhar Página
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+let app_id = null;
+
+async function verificarSessao(){
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    window.location.href="/auth/login.html";
+    return null;
+  }
+  return session.user.id;
+}
+
+async function carregarUsuario(){
+
+  const userId = await verificarSessao();
+  if(!userId) return;
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("nome, app_id")
+    .eq("id", userId)
+    .single();
+
+  if(!usuario) return;
+
+  app_id = usuario.app_id;
+
+  nome.innerText = usuario.nome;
+  negocioId.innerText = usuario.app_id;
+
+  verificarPedidos();
+  setInterval(verificarPedidos,5000);
+}
+
+async function verificarPedidos(){
+
+  const { data } = await supabase
+    .from("pedidos")
+    .select("id")
+    .eq("app_id", app_id)
+    .eq("status","novo");
+
+  const badge = document.getElementById("badgePedidos");
+  const card = document.getElementById("cardPedidos");
+
+  if(data && data.length > 0){
+
+    badge.style.display="inline-block";
+    badge.innerText = data.length;
+    card.classList.add("piscar");
+
+  }else{
+
+    badge.style.display="none";
+    card.classList.remove("piscar");
+  }
+}
+
+window.compartilharPagina = function(){
+  const modo = document.getElementById("modo_publico").value;
+  const base = location.origin;
+
+  let url = modo==="vitrine"
+    ? `${base}/celular/public/vitrine/?app_id=${app_id}`
+    : `${base}/celular/public/site/?app_id=${app_id}`;
+
+  navigator.clipboard.writeText(url);
+  alert("Link copiado 🔥");
+};
+
+window.irPara = pagina => window.location.href = pagina;
+
+window.logout = async ()=>{
+  await supabase.auth.signOut();
+  window.location.href="/auth/login.html";
+};
+
+carregarUsuario();
+</script>
+
+</body>
+</html>
