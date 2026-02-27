@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Configurar Site Público</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+:root{
+  --bg:#020617;
+  --card:#0f172a;
+  --border:#1e293b;
+  --primary:#22c55e;
+  --text:#ffffff;
+  --muted:#94a3b8;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+.container{
+  max-width:500px;
+  margin:40px auto;
+  padding:28px;
+  background:var(--card);
+  border-radius:18px;
+  border:1px solid var(--border);
+}
+h2,h3{text-align:center}
+label{display:block;margin-top:14px;font-size:.9rem}
+input,select,button{
+  width:100%;
+  padding:14px;
+  margin-top:6px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:#020617;
+  color:#fff;
+}
+button{
+  background:var(--primary);
+  font-weight:bold;
+  border:none;
+  cursor:pointer;
+  margin-top:20px;
+}
+.preview{
+  margin-top:10px;
+  max-height:80px;
+  display:none;
+  background:#fff;
+  padding:6px;
+  border-radius:10px;
+}
+.link{
+  margin-top:20px;
+  font-size:.85rem;
+  word-break:break-all;
+  color:var(--muted);
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>⚙️ Configurar Site Público</h2>
+
+<label>Nome do site</label>
+<input id="nome_site">
+
+<label>Logo</label>
+<input type="file" id="logo_file" accept="image/*">
+<img id="logo_preview" class="preview">
+<label><input type="checkbox" id="remover_logo"> Remover logo</label>
+
+<label>Banner</label>
+<input type="file" id="banner_file" accept="image/*">
+<img id="banner_preview" class="preview">
+<label><input type="checkbox" id="remover_banner"> Remover banner</label>
+
+<label>WhatsApp</label>
+<input id="whatsapp">
+
+<h3>🛒 Funcionamento</h3>
+
+<select id="modo_cardapio">
+  <option value="venda">Permitir compras</option>
+  <option value="vitrine">Somente vitrine</option>
+</select>
+
+<h3>🚀 Fluxo de Pedido</h3>
+
+<select id="fluxo_pedido">
+  <option value="whatsapp">Enviar para WhatsApp</option>
+  <option value="sistema">Enviar para o Sistema</option>
+</select>
+
+<label>Horário abertura</label>
+<input type="time" id="horario_abertura">
+
+<label>Horário fechamento</label>
+<input type="time" id="horario_fechamento">
+
+<h3>🎨 Tema</h3>
+
+<select id="tema_site">
+  <option value="padrao">Padrão</option>
+  <option value="carnaval">Carnaval</option>
+  <option value="saojoao">São João</option>
+  <option value="natal">Natal</option>
+  <option value="anonovo">Ano Novo</option>
+</select>
+
+<button onclick="salvar()">Salvar configurações</button>
+
+<div class="link">
+<strong>Link do Cardápio:</strong><br>
+<span id="link_cardapio"></span>
+</div>
+
+<div class="link">
+<strong>Link do Site:</strong><br>
+<span id="link_site"></span>
+</div>
+
+</div>
+
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+let app_id = null;
+
+async function verificarSessao(){
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    window.location.href="/auth/login.html";
+    return null;
+  }
+  return session;
+}
+
+async function iniciar(){
+
+  const session = await verificarSessao();
+  if(!session) return;
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  app_id = usuario.app_id;
+
+  link_cardapio.innerText =
+    `${location.origin}/bar/public/cardapio/?app_id=${app_id}`;
+
+  link_site.innerText =
+    `${location.origin}/bar/public/site/?app_id=${app_id}`;
+
+  carregarDados();
+}
+
+/* FORMATA WHATS */
+function limparNumero(numero){
+  return numero.replace(/\D/g,'');
+}
+
+/* UPLOAD */
+async function uploadArquivo(file,bucket){
+  const ext = file.name.split(".").pop();
+  const path = `${app_id}/${Date.now()}.${ext}`;
+
+  const { error } = await supabase
+    .storage
+    .from(bucket)
+    .upload(path,file,{ upsert:true });
+
+  if(error){
+    alert(error.message);
+    return null;
+  }
+
+  return supabase
+    .storage
+    .from(bucket)
+    .getPublicUrl(path).data.publicUrl;
+}
+
+/* SALVAR */
+window.salvar = async function(){
+
+  const numeroWhats = limparNumero(whatsapp.value.trim());
+
+  /* VALIDAÇÃO */
+  if(fluxo_pedido.value === "whatsapp" && !numeroWhats){
+    alert("Informe o número do WhatsApp para usar esse fluxo.");
+    return;
+  }
+
+  const payload = {
+    nome_site: nome_site.value.trim(),
+    whatsapp: numeroWhats || null,
+    modo_cardapio: modo_cardapio.value,
+    fluxo_pedido: fluxo_pedido.value,
+    horario_abertura: horario_abertura.value || null,
+    horario_fechamento: horario_fechamento.value || null,
+    tema_site: tema_site.value
+  };
+
+  if(remover_logo.checked) payload.logo_url = null;
+  if(remover_banner.checked) payload.banner_url = null;
+
+  if(logo_file.files[0]){
+    payload.logo_url = await uploadArquivo(logo_file.files[0],"logos");
+  }
+
+  if(banner_file.files[0]){
+    payload.banner_url = await uploadArquivo(banner_file.files[0],"banners");
+  }
+
+  const { data: existente } = await supabase
+    .from("config_site")
+    .select("id")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  const res = existente
+    ? await supabase.from("config_site").update(payload).eq("app_id", app_id)
+    : await supabase.from("config_site").insert({ ...payload, app_id });
+
+  if(res.error){
+    alert(res.error.message);
+    return;
+  }
+
+  alert("Configurações salvas com sucesso 🔥");
+};
+
+/* CARREGAR */
+async function carregarDados(){
+
+  const { data } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!data) return;
+
+  nome_site.value = data.nome_site || "";
+  whatsapp.value = data.whatsapp || "";
+  modo_cardapio.value = data.modo_cardapio || "venda";
+  fluxo_pedido.value = data.fluxo_pedido || "whatsapp";
+  horario_abertura.value = data.horario_abertura || "";
+  horario_fechamento.value = data.horario_fechamento || "";
+  tema_site.value = data.tema_site || "padrao";
+
+  if(data.logo_url){
+    logo_preview.src = data.logo_url;
+    logo_preview.style.display="block";
+  }
+
+  if(data.banner_url){
+    banner_preview.src = data.banner_url;
+    banner_preview.style.display="block";
+  }
+}
+
+/* PREVIEW */
+logo_file.onchange = ()=>{
+  const f = logo_file.files[0];
+  if(f){
+    logo_preview.src = URL.createObjectURL(f);
+    logo_preview.style.display="block";
+  }
+};
+
+banner_file.onchange = ()=>{
+  const f = banner_file.files[0];
+  if(f){
+    banner_preview.src = URL.createObjectURL(f);
+    banner_preview.style.display="block";
+  }
+};
+
+iniciar();
+</script>
+
+
+</body>
+</html>
