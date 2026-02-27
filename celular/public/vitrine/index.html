@@ -282,183 +282,80 @@ let todosProdutos=[];
 /* ================= SALVAR ================= */
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
-  contadorCarrinho.innerText=carrinho.length;
+  document.getElementById("contadorCarrinho").innerText=carrinho.length;
 }
 
-/* ================= CARRINHO ================= */
-btnCarrinho.onclick=()=>{ 
-  modalCarrinho.style.display="flex"; 
-  renderizarCarrinho(); 
-};
+/* ================= MODAL PRODUTO ================= */
+function abrirProduto(p){
 
-fecharCarrinho.onclick=()=> modalCarrinho.style.display="none";
+  let imgs=[];
+  try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
 
-function renderizarCarrinho(){
-  itensCarrinho.innerHTML="";
-  let subtotal=0;
-
-  carrinho.forEach((item,index)=>{
-    subtotal+=Number(item.preco);
-    itensCarrinho.innerHTML+=`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div><strong>${item.nome}</strong><br>R$ ${Number(item.preco).toFixed(2)}</div>
-        <button onclick="removerItem(${index})"
-        style="background:#dc3545;color:white;border:none;border-radius:6px;padding:5px 8px;">❌</button>
-      </div>`;
+  let mini="";
+  imgs.forEach(img=>{
+    mini+=`<img src="${img}" 
+      style="width:60px;height:60px;object-fit:cover;
+      cursor:pointer;border-radius:6px;margin-bottom:6px;">`;
   });
 
-  document.getElementById("subtotal").innerText=subtotal.toFixed(2);
-  calcularFrete(subtotal);
-}
+  document.getElementById("conteudoProduto").innerHTML=`
+    <div style="display:flex;gap:20px;flex-wrap:wrap;">
+      <div style="display:flex;gap:12px;">
+        <div style="display:flex;flex-direction:column;">${mini}</div>
+        <div>
+          ${imgs[0]?`<img src="${imgs[0]}" class="imgPrincipalModal"
+          style="width:320px;height:320px;object-fit:contain;">`:""}
+        </div>
+      </div>
 
-window.removerItem=function(index){
-  carrinho.splice(index,1);
-  salvar();
-  renderizarCarrinho();
-}
+      <div style="flex:1;min-width:250px;">
+        <h2>${p.nome}</h2>
+        <h3 style="color:#0071e3;">R$ ${Number(p.preco).toFixed(2)}</h3>
+        <p>${p.descricao || "Sem descrição."}</p>
 
-/* ================= LOCALIZAÇÃO ================= */
-btnPegarLocalizacao.onclick=()=>{
-  if(!navigator.geolocation){
-    alert("Navegador não suporta localização");
-    return;
-  }
+        <button id="addModalBtn"
+        style="margin-top:15px;width:100%;padding:10px;
+        background:#0071e3;color:white;border:none;border-radius:8px;">
+        Adicionar ao Carrinho
+        </button>
+      </div>
+    </div>
+  `;
 
-  navigator.geolocation.getCurrentPosition(pos=>{
-    clienteLat=pos.coords.latitude;
-    clienteLng=pos.coords.longitude;
-    localizacaoCliente.value=`https://www.google.com/maps?q=${clienteLat},${clienteLng}`;
-    calcularFrete(Number(document.getElementById("subtotal").innerText||0));
+  const principal=document.querySelector(".imgPrincipalModal");
+
+  document.querySelectorAll("#conteudoProduto img").forEach(img=>{
+    img.onclick=()=>{
+      if(principal) principal.src=img.src;
+    };
   });
-};
 
-/* ================= FRETE ================= */
-function calcularFrete(subtotal){
-  let frete=10;
-
-  if(clienteLat && clienteLng){
-    const R=6371;
-    const latLoja=-9.015;
-    const lngLoja=-42.700;
-
-    const dLat=(clienteLat-latLoja)*Math.PI/180;
-    const dLon=(clienteLng-lngLoja)*Math.PI/180;
-
-    const a=
-      Math.sin(dLat/2)**2+
-      Math.cos(latLoja*Math.PI/180)*
-      Math.cos(clienteLat*Math.PI/180)*
-      Math.sin(dLon/2)**2;
-
-    const distancia=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-    frete=distancia*2;
-  }
-
-  document.getElementById("frete").innerText=frete.toFixed(2);
-  document.getElementById("total").innerText=(subtotal+frete).toFixed(2);
-}
-
-/* ================= FINALIZAR ================= */
-btnFinalizar.onclick=async()=>{
-
-  if(carrinho.length===0){
-    alert("Carrinho vazio!");
-    return;
-  }
-
-  if(!configGlobal){
-    alert("Configuração não carregada.");
-    return;
-  }
-
-  const total=document.getElementById("total").innerText;
-
-  const pedido={
-    app_id:APP_ID,
-    cliente_nome:nomeCliente.value||"",
-    telefone:telefoneCliente.value||"",
-    endereco:(enderecoCliente.value||"")+", "+(numeroCliente.value||""),
-    bairro:bairroCliente.value||"",
-    cidade:cidadeCliente.value||"",
-    observacao:obsCliente.value||"",
-    latitude:clienteLat,
-    longitude:clienteLng,
-    localizacao_link:localizacaoCliente.value||"",
-    total:total,
-    status:"novo",
-    itens:carrinho
+  document.getElementById("addModalBtn").onclick=()=>{
+    carrinho.push(p);
+    salvar();
+    alert("Adicionado ao carrinho!");
   };
 
-  try{
+  document.getElementById("modalProduto").style.display="flex";
+}
 
-    if(configGlobal.modo_venda==="sistema" || configGlobal.modo_venda==="ambos"){
-      const { error } = await supabase.from("pedidos").insert([pedido]);
-      if(error){
-        console.error(error);
-        alert("Erro ao salvar pedido.");
-        return;
-      }
-    }
+document.getElementById("fecharProduto").onclick=()=>{
+  document.getElementById("modalProduto").style.display="none";
+};
 
-    if(configGlobal.modo_venda==="whatsapp" || configGlobal.modo_venda==="ambos"){
-      const numero=configGlobal.whatsapp_numero||"";
-      let msg=`*Novo Pedido*%0A`;
-      msg+=`Cliente: ${pedido.cliente_nome}%0A`;
-      msg+=`Telefone: ${pedido.telefone}%0A`;
-      msg+=`Endereço: ${pedido.endereco}%0A`;
-      msg+=`Bairro: ${pedido.bairro}%0A`;
-      msg+=`Cidade: ${pedido.cidade}%0A`;
-      msg+=`Localização: ${pedido.localizacao_link}%0A`;
-      msg+=`Total: R$ ${pedido.total}`;
-      window.open(`https://wa.me/${numero}?text=${msg}`,"_blank");
-    }
-
-    alert("Pedido enviado!");
-    carrinho=[];
-    salvar();
-    modalCarrinho.style.display="none";
-
-  }catch(e){
-    console.error(e);
-    alert("Erro ao finalizar pedido.");
+document.getElementById("modalProduto").onclick=(e)=>{
+  if(e.target.id==="modalProduto"){
+    document.getElementById("modalProduto").style.display="none";
   }
-
 };
 
 /* ================= PRODUTOS ================= */
-
-function criarCategorias(produtos){
-  filtros.innerHTML="";
-
-  const categorias=[...new Set(produtos.map(p=>p.categoria).filter(Boolean))];
-
-  const btnTodos=document.createElement("button");
-  btnTodos.innerText="Todos";
-  btnTodos.className="filtro-btn ativo";
-  btnTodos.onclick=()=>{
-    document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo"));
-    btnTodos.classList.add("ativo");
-    renderizarProdutos(produtos);
-  };
-  filtros.appendChild(btnTodos);
-
-  categorias.forEach(cat=>{
-    const btn=document.createElement("button");
-    btn.innerText=cat;
-    btn.className="filtro-btn";
-    btn.onclick=()=>{
-      document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo"));
-      btn.classList.add("ativo");
-      const filtrados=produtos.filter(p=>p.categoria===cat);
-      renderizarProdutos(filtrados);
-    };
-    filtros.appendChild(btn);
-  });
-}
-
 function renderizarProdutos(lista){
-  listaProdutos.innerHTML="";
+  const container=document.getElementById("listaProdutos");
+  container.innerHTML="";
+
   lista.forEach(p=>{
+
     let imgs=[];
     try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
 
@@ -467,33 +364,72 @@ function renderizarProdutos(lista){
 
     card.innerHTML=`
       <div class="galeria">
-        <div class="miniaturas">${imgs.map(i=>`<img src="${i}">`).join("")}</div>
-        <div class="imagem-principal">${imgs[0]?`<img src="${imgs[0]}">`:""}</div>
+        <div class="miniaturas">
+          ${imgs.map(i=>`<img src="${i}">`).join("")}
+        </div>
+        <div class="imagem-principal">
+          ${imgs[0]?`<img src="${imgs[0]}">`:""}
+        </div>
       </div>
       <h4>${p.nome}</h4>
       <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
       <button class="btn-add">Adicionar</button>
     `;
 
-    card.onclick=e=>{
+    card.addEventListener("click",(e)=>{
       if(!e.target.classList.contains("btn-add")){
         abrirProduto(p);
       }
-    };
+    });
 
-    card.querySelector(".btn-add").onclick=e=>{
+    card.querySelector(".btn-add").addEventListener("click",(e)=>{
       e.stopPropagation();
       carrinho.push(p);
       salvar();
+    });
+
+    container.appendChild(card);
+  });
+}
+
+/* ================= CATEGORIAS ================= */
+function criarCategorias(produtos){
+
+  const filtros=document.getElementById("filtros");
+  filtros.innerHTML="";
+
+  const categorias=[...new Set(produtos.map(p=>p.categoria).filter(Boolean))];
+
+  const btnTodos=document.createElement("button");
+  btnTodos.innerText="Todos";
+  btnTodos.className="filtro-btn ativo";
+
+  btnTodos.onclick=()=>{
+    document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo"));
+    btnTodos.classList.add("ativo");
+    renderizarProdutos(produtos);
+  };
+
+  filtros.appendChild(btnTodos);
+
+  categorias.forEach(cat=>{
+    const btn=document.createElement("button");
+    btn.innerText=cat;
+    btn.className="filtro-btn";
+
+    btn.onclick=()=>{
+      document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo"));
+      btn.classList.add("ativo");
+      renderizarProdutos(produtos.filter(p=>p.categoria===cat));
     };
 
-    listaProdutos.appendChild(card);
+    filtros.appendChild(btn);
   });
 }
 
 /* ================= CARREGAR ================= */
-
 async function carregar(){
+
   const {data:config}=await supabase
     .from("config_site")
     .select("*")
@@ -502,8 +438,11 @@ async function carregar(){
 
   configGlobal=config;
 
-  if(config?.logo_url) logoLoja.src=config.logo_url;
-  if(config?.nome_site) nomeLoja.innerText=config.nome_site;
+  if(config?.logo_url)
+    document.getElementById("logoLoja").src=config.logo_url;
+
+  if(config?.nome_site)
+    document.getElementById("nomeLoja").innerText=config.nome_site;
 
   const {data:produtos}=await supabase
     .from("produtos")
@@ -523,5 +462,6 @@ salvar();
 
 </body>
 </html>
+
 
 
