@@ -10,12 +10,12 @@ body{
   margin:0;
   font-family: Arial, sans-serif;
   background:#f5f5f5;
-  padding-top:140px;
+  padding-top:130px;
 }
 
 /* HEADER */
 .topo{
-  background: rgba(0,0,0,0.9);
+  background:#000;
   padding:15px 20px;
   display:flex;
   align-items:center;
@@ -33,7 +33,7 @@ body{
 }
 
 .logo-box img{
-  height:80px;
+  height:70px;
   background:white;
   padding:8px;
   border-radius:15px;
@@ -45,7 +45,29 @@ body{
   font-weight:bold;
 }
 
-/* GRID PRODUTOS */
+/* CATEGORIAS */
+#filtros{
+  padding:20px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.filtro-btn{
+  padding:8px 15px;
+  border:none;
+  border-radius:20px;
+  background:#ddd;
+  cursor:pointer;
+  font-size:14px;
+}
+
+.filtro-btn.ativo{
+  background:#0071e3;
+  color:white;
+}
+
+/* PRODUTOS */
 .produtos{
   display:grid;
   grid-template-columns: repeat(2, 1fr);
@@ -66,6 +88,7 @@ body{
   border-radius:15px;
   box-shadow:0 5px 15px rgba(0,0,0,0.1);
   padding:15px;
+  cursor:pointer;
 }
 
 .galeria{
@@ -84,8 +107,8 @@ body{
   width:40px;
   height:40px;
   object-fit:cover;
-  cursor:pointer;
   border-radius:6px;
+  cursor:pointer;
   border:2px solid transparent;
 }
 
@@ -94,8 +117,8 @@ body{
 }
 
 .imagem-principal img{
-  width:120px;
-  height:120px;
+  width:110px;
+  height:110px;
   object-fit:contain;
 }
 
@@ -131,7 +154,8 @@ body{
   z-index:9999;
 }
 
-#modalCarrinho{
+#modalCarrinho,
+#modalProduto{
   display:none;
   position:fixed;
   top:0;
@@ -154,20 +178,23 @@ body{
   padding:20px;
 }
 
+.modal-produto{
+  background:white;
+  width:95%;
+  max-width:900px;
+  max-height:90vh;
+  overflow:auto;
+  border-radius:15px;
+  padding:20px;
+  position:relative;
+}
+
 .campo{
   width:100%;
   padding:10px;
   margin:5px 0;
   border:1px solid #ccc;
   border-radius:6px;
-}
-
-footer{
-  background:#111;
-  color:white;
-  text-align:center;
-  padding:20px;
-  margin-top:30px;
 }
 </style>
 </head>
@@ -181,12 +208,13 @@ footer{
   </div>
 </header>
 
-<section class="produtos" id="listaProdutos"></section>
+<div id="filtros"></div>
 
-<footer>© 2026 Sistema Multi Negócio</footer>
+<section class="produtos" id="listaProdutos"></section>
 
 <button id="btnCarrinho">🛒 <span id="contadorCarrinho">0</span></button>
 
+<!-- MODAL CARRINHO -->
 <div id="modalCarrinho">
   <div class="modal">
     <h2>Seu Pedido</h2>
@@ -224,6 +252,17 @@ footer{
   </div>
 </div>
 
+<!-- MODAL PRODUTO -->
+<div id="modalProduto">
+  <div class="modal-produto">
+    <button id="fecharProduto"
+    style="position:absolute;top:10px;right:15px;background:#dc3545;color:white;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;">
+    ✕
+    </button>
+    <div id="conteudoProduto"></div>
+  </div>
+</div>
+
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
 
@@ -237,165 +276,167 @@ const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
 let clienteLat=null;
 let clienteLng=null;
-let configGlobal=null;
 
 /* SALVAR */
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
-  document.getElementById("contadorCarrinho").innerText=carrinho.length;
+  contadorCarrinho.innerText=carrinho.length;
 }
 
-/* ABRIR CARRINHO */
-btnCarrinho.onclick=()=>{
-  modalCarrinho.style.display="flex";
-  renderizarCarrinho();
-};
+/* CARRINHO */
+btnCarrinho.onclick=()=>{ modalCarrinho.style.display="flex"; renderizarCarrinho(); };
+fecharCarrinho.onclick=()=> modalCarrinho.style.display="none";
 
-fecharCarrinho.onclick=()=>{
-  modalCarrinho.style.display="none";
-};
-
-/* REMOVER ITEM */
 function renderizarCarrinho(){
   itensCarrinho.innerHTML="";
   let subtotal=0;
 
   carrinho.forEach((item,index)=>{
     subtotal+=Number(item.preco);
-
-    const div=document.createElement("div");
-    div.style.display="flex";
-    div.style.justifyContent="space-between";
-    div.style.alignItems="center";
-    div.style.marginBottom="8px";
-
-    div.innerHTML=`
-      <div>
-        <strong>${item.nome}</strong><br>
-        R$ ${Number(item.preco).toFixed(2)}
-      </div>
-      <button style="background:#dc3545;color:white;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;">
-        ❌
-      </button>
-    `;
-
-    div.querySelector("button").onclick=()=>{
-      carrinho.splice(index,1);
-      salvar();
-      renderizarCarrinho();
-    };
-
-    itensCarrinho.appendChild(div);
+    itensCarrinho.innerHTML+=`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div><strong>${item.nome}</strong><br>R$ ${Number(item.preco).toFixed(2)}</div>
+        <button onclick="removerItem(${index})"
+        style="background:#dc3545;color:white;border:none;border-radius:6px;padding:5px 8px;">❌</button>
+      </div>`;
   });
 
-  subtotal = subtotal || 0;
+  subtotal=subtotal||0;
+  subtotal?0:0;
   document.getElementById("subtotal").innerText=subtotal.toFixed(2);
   calcularFrete(subtotal);
 }
 
-/* LOCALIZAÇÃO COM LINK */
+window.removerItem=function(index){
+  carrinho.splice(index,1);
+  salvar();
+  renderizarCarrinho();
+}
+
+/* LOCALIZAÇÃO */
 btnPegarLocalizacao.onclick=()=>{
-  if(!navigator.geolocation) return;
-
   navigator.geolocation.getCurrentPosition(pos=>{
-    clienteLat = pos.coords.latitude;
-    clienteLng = pos.coords.longitude;
-
-    const link = `https://www.google.com/maps?q=${clienteLat},${clienteLng}`;
-    localizacaoCliente.value = link;
-
-    const subtotal = Number(document.getElementById("subtotal").innerText || 0);
-    calcularFrete(subtotal);
+    clienteLat=pos.coords.latitude;
+    clienteLng=pos.coords.longitude;
+    localizacaoCliente.value=`https://www.google.com/maps?q=${clienteLat},${clienteLng}`;
+    calcularFrete(Number(subtotal.innerText||0));
   });
 };
 
 /* FRETE */
 function calcularFrete(subtotal){
-  let frete = 10;
-
+  let frete=10;
   if(clienteLat && clienteLng){
-    const dist = distancia(-9.015,-42.700,clienteLat,clienteLng);
-    frete = dist * 2;
+    const R=6371;
+    const dLat=(clienteLat+9.015)*Math.PI/180;
+    const dLon=(clienteLng+42.700)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2+Math.sin(dLon/2)**2;
+    frete=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a))*2;
+  }
+  frete=frete||0;
+  document.getElementById("frete").innerText=frete.toFixed(2);
+  document.getElementById("total").innerText=(subtotal+frete).toFixed(2);
+}
+
+/* PRODUTOS + MODAL */
+function abrirProduto(p){
+  let imgs=[];
+  try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
+
+  let mini="";
+  imgs.forEach(img=> mini+=`<img src="${img}" style="width:60px;height:60px;object-fit:cover;cursor:pointer;border-radius:6px;margin-bottom:5px;">`);
+
+  conteudoProduto.innerHTML=`
+    <div style="display:flex;gap:20px;flex-wrap:wrap;">
+      <div style="display:flex;gap:10px;">
+        <div style="display:flex;flex-direction:column;">${mini}</div>
+        <div>${imgs[0]?`<img src="${imgs[0]}" class="imgPrincipalModal" style="width:300px;height:300px;object-fit:contain;">`:""}</div>
+      </div>
+      <div style="flex:1;min-width:250px;">
+        <h2>${p.nome}</h2>
+        <h3 style="color:#0071e3;">R$ ${Number(p.preco).toFixed(2)}</h3>
+        <p>${p.descricao||"Sem descrição."}</p>
+        <button onclick='addModal()'
+        style="margin-top:15px;width:100%;padding:10px;background:#0071e3;color:white;border:none;border-radius:8px;">
+        Adicionar ao Carrinho
+        </button>
+      </div>
+    </div>`;
+
+  window.addModal=function(){
+    carrinho.push(p);
+    salvar();
+    alert("Adicionado!");
   }
 
-  frete = frete || 0;
-
-  document.getElementById("frete").innerText = frete.toFixed(2);
-  document.getElementById("total").innerText =
-    (subtotal + frete).toFixed(2);
-}
-
-function distancia(lat1,lon1,lat2,lon2){
-  const R=6371;
-  const dLat=(lat2-lat1)*Math.PI/180;
-  const dLon=(lon2-lon1)*Math.PI/180;
-  const a=Math.sin(dLat/2)**2+
-    Math.cos(lat1*Math.PI/180)*
-    Math.cos(lat2*Math.PI/180)*
-    Math.sin(dLon/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-}
-
-/* PRODUTOS */
-function renderizarProdutos(lista){
-  listaProdutos.innerHTML="";
-
-  lista.forEach(p=>{
-    let imgs=[];
-    try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
-
-    const card=document.createElement("div");
-    card.className="card";
-
-    let mini="";
-    imgs.forEach(img=> mini+=`<img src="${img}">`);
-
-    card.innerHTML=`
-      <div class="galeria">
-        <div class="miniaturas">${mini}</div>
-        <div class="imagem-principal">
-          ${imgs[0]?`<img src="${imgs[0]}" class="imgPrincipal">`:""}
-        </div>
-      </div>
-      <h4>${p.nome}</h4>
-      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-      <button class="btn-add">Adicionar</button>
-    `;
-
-    const principal=card.querySelector(".imgPrincipal");
-    card.querySelectorAll(".miniaturas img").forEach(min=>{
-      min.onclick=()=> principal.src=min.src;
-    });
-
-    card.querySelector(".btn-add").onclick=()=>{
-      carrinho.push(p);
-      salvar();
+  document.querySelectorAll("#conteudoProduto img").forEach(img=>{
+    img.onclick=()=>{
+      const principal=document.querySelector(".imgPrincipalModal");
+      if(principal) principal.src=img.src;
     };
-
-    listaProdutos.appendChild(card);
   });
+
+  modalProduto.style.display="flex";
 }
+
+fecharProduto.onclick=()=> modalProduto.style.display="none";
+modalProduto.onclick=e=>{ if(e.target===modalProduto) modalProduto.style.display="none"; };
 
 /* CARREGAR */
 async function carregar(){
-  const {data:config}=await supabase
-    .from("config_site")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .maybeSingle();
-
-  configGlobal=config;
-
+  const {data:config}=await supabase.from("config_site").select("*").eq("app_id",APP_ID).maybeSingle();
   if(config?.logo_url) logoLoja.src=config.logo_url;
   if(config?.nome_site) nomeLoja.innerText=config.nome_site;
 
-  const {data:produtos}=await supabase
-    .from("produtos")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .eq("ativo",true);
+  const {data:produtos}=await supabase.from("produtos").select("*").eq("app_id",APP_ID).eq("ativo",true);
+  const lista=produtos||[];
 
-  renderizarProdutos(produtos||[]);
+  criarCategorias(lista);
+  renderizarProdutos(lista);
+}
+
+function criarCategorias(produtos){
+  filtros.innerHTML="";
+  const cats=[...new Set(produtos.map(p=>p.categoria).filter(Boolean))];
+
+  const btn=document.createElement("button");
+  btn.innerText="Todos";
+  btn.className="filtro-btn ativo";
+  btn.onclick=()=>{ renderizarProdutos(produtos); document.querySelectorAll(".filtro-btn").forEach(b=>b.classList.remove("ativo")); btn.classList.add("ativo"); };
+  filtros.appendChild(btn);
+
+  cats.forEach(cat=>{
+    const b=document.createElement("button");
+    b.innerText=cat;
+    b.className="filtro-btn";
+    b.onclick=()=>{
+      document.querySelectorAll(".filtro-btn").forEach(x=>x.classList.remove("ativo"));
+      b.classList.add("ativo");
+      renderizarProdutos(produtos.filter(p=>p.categoria===cat));
+    };
+    filtros.appendChild(b);
+  });
+}
+
+function renderizarProdutos(lista){
+  listaProdutos.innerHTML="";
+  lista.forEach(p=>{
+    let imgs=[];
+    try{ imgs=JSON.parse(p.imagens||"[]"); }catch{}
+    const card=document.createElement("div");
+    card.className="card";
+    card.innerHTML=`
+      <div class="galeria">
+        <div class="miniaturas">${imgs.map(i=>`<img src="${i}">`).join("")}</div>
+        <div class="imagem-principal">${imgs[0]?`<img src="${imgs[0]}">`:""}</div>
+      </div>
+      <h4>${p.nome}</h4>
+      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+      <button class="btn-add">Adicionar</button>`;
+    card.onclick=e=>{ if(!e.target.classList.contains("btn-add")) abrirProduto(p); };
+    card.querySelector(".btn-add").onclick=e=>{ e.stopPropagation(); carrinho.push(p); salvar(); };
+    listaProdutos.appendChild(card);
+  });
 }
 
 carregar();
