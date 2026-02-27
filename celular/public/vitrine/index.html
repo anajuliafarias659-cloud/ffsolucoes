@@ -258,14 +258,32 @@ const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 const listaProdutos = document.getElementById("listaProdutos");
 const contadorCarrinho = document.getElementById("contadorCarrinho");
 
+const logoLoja = document.getElementById("logoLoja");
+const nomeLoja = document.getElementById("nomeLoja");
+const bannerLoja = document.getElementById("bannerLoja");
+
+const btnCarrinho = document.getElementById("btnCarrinho");
+const modalCarrinho = document.getElementById("modalCarrinho");
+const fecharModal = document.getElementById("fecharModal");
+const btnLocalizacao = document.getElementById("btnLocalizacao");
+const btnFinalizar = document.getElementById("btnFinalizar");
+
+const nomeCliente = document.getElementById("nomeCliente");
+const telefoneCliente = document.getElementById("telefoneCliente");
+const enderecoCliente = document.getElementById("enderecoCliente");
+const bairroCliente = document.getElementById("bairroCliente");
+const cidadeCliente = document.getElementById("cidadeCliente");
+const estadoCliente = document.getElementById("estadoCliente");
+const cepCliente = document.getElementById("cepCliente");
+const obsCliente = document.getElementById("obsCliente");
+
 let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
-let configGlobal=null;
 
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
-  contadorCarrinho.innerText=carrinho.reduce((acc,i)=>acc+(i.qtd||1),0);
+  contadorCarrinho.innerText =
+    carrinho.reduce((acc,i)=>acc+(i.qtd||1),0);
 }
-
 /* FECHAR MODAL */
 fecharModal.onclick=()=> modalCarrinho.style.display="none";
 
@@ -389,9 +407,93 @@ function renderizarProdutos(lista){
     listaProdutos.appendChild(card);
   });
 }
+  /* FINALIZAR PEDIDO - CONTROLADO PELO config_site */
+btnFinalizar.onclick = async ()=>{
+
+  if(carrinho.length === 0){
+    alert("Carrinho vazio!");
+    return;
+  }
+
+  // 🔹 Buscar config atual
+  const { data: configAtual, error } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .maybeSingle();
+
+  if(error || !configAtual){
+    alert("Erro ao carregar configuração.");
+    return;
+  }
+
+  const modo = (configAtual.modo_venda || "").trim().toLowerCase();
+  const total = document.getElementById("total").innerText;
+
+  const pedido = {
+    app_id: APP_ID,
+    cliente_nome: nomeCliente.value || "",
+    telefone: telefoneCliente.value || "",
+    endereco: enderecoCliente.value || "",
+    bairro: bairroCliente.value || "",
+    cidade: cidadeCliente.value || "",
+    estado: estadoCliente.value || "",
+    cep: cepCliente.value || "",
+    observacao: obsCliente.value || "",
+    total: total,
+    status: "novo",
+    itens: carrinho
+  };
+
+  /* ================= SISTEMA ================= */
+  if(modo === "sistema" || modo === "ambos"){
+    const { error: erroInsert } = await supabase
+      .from("pedidos")
+      .insert([pedido]);
+
+    if(erroInsert){
+      alert("Erro ao salvar no sistema.");
+      console.log(erroInsert);
+      return;
+    }
+  }
+
+  /* ================= WHATSAPP ================= */
+  if(modo === "whatsapp" || modo === "ambos"){
+
+    if(!configAtual.whatsapp_numero){
+      alert("WhatsApp não configurado no site config.");
+      return;
+    }
+
+    let msg = "🛒 *NOVO PEDIDO*\n\n";
+    msg += `👤 ${pedido.cliente_nome}\n`;
+    msg += `📞 ${pedido.telefone}\n`;
+    msg += `📍 ${pedido.endereco}\n`;
+    msg += `🏘 ${pedido.bairro} - ${pedido.cidade}/${pedido.estado}\n`;
+    msg += `📮 CEP: ${pedido.cep}\n\n`;
+
+    carrinho.forEach(i=>{
+      msg += `• ${i.nome} (${i.qtd}) - R$ ${(Number(i.preco)*i.qtd).toFixed(2)}\n`;
+    });
+
+    msg += `\n💰 Total: R$ ${pedido.total}`;
+
+    window.open(
+      `https://wa.me/${configAtual.whatsapp_numero}?text=${encodeURIComponent(msg)}`,
+      "_blank"
+    );
+  }
+
+  /* ================= FINALIZA ================= */
+  carrinho = [];
+  salvar();
+ modalCarrinho.style.display = "none";
+};
 
 carregar();
 salvar();
 </script>
 </body>
 </html>
+
