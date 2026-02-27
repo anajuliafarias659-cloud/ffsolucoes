@@ -83,13 +83,20 @@ button{
 <img id="banner_preview" class="preview">
 <label><input type="checkbox" id="remover_banner"> Remover banner</label>
 
-<label>WhatsApp</label>
-<input id="whatsapp" placeholder="Ex: 5598999999999">
+<label>WhatsApp (somente números)</label>
+<input id="whatsapp_numero" placeholder="Ex: 5598999999999">
 
-<h3>🛒 Modo da Loja</h3>
+<h3>🛒 Tipo de Exibição</h3>
 <select id="modo_cardapio">
   <option value="venda">Permitir compras</option>
   <option value="vitrine">Somente vitrine</option>
+</select>
+
+<h3>🚀 Fluxo de Venda</h3>
+<select id="modo_venda">
+  <option value="whatsapp">Enviar pedido pelo WhatsApp</option>
+  <option value="sistema">Salvar pedido no sistema</option>
+  <option value="ambos">Sistema + WhatsApp</option>
 </select>
 
 <h3>🎨 Tema</h3>
@@ -113,7 +120,6 @@ import { supabase } from "/js/supabase.js";
 
 let app_id = null;
 
-/* 🔐 SESSÃO */
 async function verificarSessao(){
   const { data:{ session } } = await supabase.auth.getSession();
   if(!session){
@@ -123,7 +129,6 @@ async function verificarSessao(){
   return session;
 }
 
-/* 🚀 INICIAR */
 async function iniciar(){
 
   const session = await verificarSessao();
@@ -137,36 +142,18 @@ async function iniciar(){
 
   app_id = usuario.app_id;
 
-  /* 🔒 VALIDA TIPO */
-  const { data: app } = await supabase
-    .from("apps")
-    .select("tipo")
-    .eq("id", app_id)
-    .single();
-
-  if(!app || app.tipo !== "celular"){
-    alert("Você não tem acesso a esta configuração.");
-    window.location.href="/painel.html";
-    return;
-  }
-
-  /* 🔥 AQUI ESTAVA O ERRO */
   link_vitrine.innerText =
     `${location.origin}/celular/public/?app_id=${app_id}`;
 
   carregarDados();
 }
 
-/* FORMATAR WHATS */
 function limparNumero(numero){
   return numero.replace(/\D/g,'');
 }
 
-/* UPLOAD */
 async function uploadArquivo(file,bucket){
   const ext = file.name.split(".").pop();
-
-  /* 🔥 AQUI ESTAVA O ERRO */
   const path = `${app_id}/${Date.now()}.${ext}`;
 
   const { error } = await supabase
@@ -185,28 +172,26 @@ async function uploadArquivo(file,bucket){
     .getPublicUrl(path).data.publicUrl;
 }
 
-/* SALVAR */
 window.salvar = async function(){
 
-  const numeroWhats = limparNumero(whatsapp.value.trim());
+  const numeroWhats = limparNumero(whatsapp_numero.value.trim());
 
   const payload = {
     nome_site: nome_site.value.trim(),
-    whatsapp: numeroWhats || null,
+    whatsapp_numero: numeroWhats || null,
     modo_cardapio: modo_cardapio.value,
+    modo_venda: modo_venda.value,
     tema_site: tema_site.value
   };
 
   if(remover_logo.checked) payload.logo_url = null;
   if(remover_banner.checked) payload.banner_url = null;
 
-  if(logo_file.files[0]){
+  if(logo_file.files[0])
     payload.logo_url = await uploadArquivo(logo_file.files[0],"logos");
-  }
 
-  if(banner_file.files[0]){
+  if(banner_file.files[0])
     payload.banner_url = await uploadArquivo(banner_file.files[0],"banners");
-  }
 
   const { data: existente } = await supabase
     .from("config_site")
@@ -226,7 +211,6 @@ window.salvar = async function(){
   alert("Configurações salvas com sucesso 🔥");
 };
 
-/* CARREGAR */
 async function carregarDados(){
 
   const { data } = await supabase
@@ -238,8 +222,9 @@ async function carregarDados(){
   if(!data) return;
 
   nome_site.value = data.nome_site || "";
-  whatsapp.value = data.whatsapp || "";
+  whatsapp_numero.value = data.whatsapp_numero || "";
   modo_cardapio.value = data.modo_cardapio || "venda";
+  modo_venda.value = data.modo_venda || "whatsapp";
   tema_site.value = data.tema_site || "padrao";
 
   if(data.logo_url){
@@ -253,7 +238,6 @@ async function carregarDados(){
   }
 }
 
-/* PREVIEW */
 logo_file.onchange = ()=>{
   const f = logo_file.files[0];
   if(f){
