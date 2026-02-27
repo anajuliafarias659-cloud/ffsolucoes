@@ -201,6 +201,7 @@ footer{
     <input class="campo" id="numeroCliente" placeholder="Número">
     <input class="campo" id="bairroCliente" placeholder="Bairro">
     <input class="campo" id="cidadeCliente" placeholder="Cidade">
+    <input class="campo" id="localizacaoCliente" placeholder="Localização automática" readonly>
     <textarea class="campo" id="obsCliente" placeholder="Observação"></textarea>
 
     <button id="btnFinalizar" style="width:100%;padding:12px;background:#28a745;color:white;border:none;border-radius:8px;">
@@ -230,9 +231,7 @@ let clienteLat=null;
 let clienteLng=null;
 let configGlobal=null;
 
-/* =======================
-   CARRINHO
-======================= */
+/* ================= CARRINHO ================= */
 
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
@@ -241,7 +240,7 @@ function salvar(){
 
 document.getElementById("btnCarrinho").onclick=()=>{
   document.getElementById("modalCarrinho").style.display="flex";
-  pedirLocalizacao(); // 🔥 AGORA PEDE AQUI
+  pedirLocalizacao();
   renderizarCarrinho();
 };
 
@@ -267,39 +266,51 @@ function renderizarCarrinho(){
   calcularFrete(subtotal);
 }
 
-/* =======================
-   LOCALIZAÇÃO (SÓ NO CARRINHO)
-======================= */
+/* ================= LOCALIZAÇÃO ================= */
 
 function pedirLocalizacao(){
-  if(navigator.geolocation){
-    navigator.geolocation.getCurrentPosition(
-      pos=>{
-        clienteLat=pos.coords.latitude;
-        clienteLng=pos.coords.longitude;
-      },
-      ()=>{
-        console.log("Usuário negou localização");
-      }
-    );
+
+  if(!navigator.geolocation){
+    return;
   }
+
+  navigator.geolocation.getCurrentPosition(
+
+    pos=>{
+      clienteLat = pos.coords.latitude;
+      clienteLng = pos.coords.longitude;
+
+      document.getElementById("localizacaoCliente").value =
+        `Lat: ${clienteLat.toFixed(6)} | Lng: ${clienteLng.toFixed(6)}`;
+
+      const subtotal = Number(document.getElementById("subtotal").innerText || 0);
+      calcularFrete(subtotal);
+    },
+
+    ()=>{
+      document.getElementById("localizacaoCliente").value =
+        "Localização não permitida";
+    },
+
+    { enableHighAccuracy:true }
+
+  );
 }
 
-/* =======================
-   FRETE
-======================= */
+/* ================= FRETE ================= */
 
 function calcularFrete(subtotal){
 
-  let frete=10;
+  let frete = 10;
 
-  if(clienteLat && clienteLng){
-    const dist=distancia(-9.015,-42.700,clienteLat,clienteLng);
-    frete=dist*2;
+  if(clienteLat !== null && clienteLng !== null){
+    const dist = distancia(-9.015,-42.700,clienteLat,clienteLng);
+    frete = dist * 2;
   }
 
-  document.getElementById("frete").innerText=frete.toFixed(2);
-  document.getElementById("total").innerText=(subtotal+frete).toFixed(2);
+  document.getElementById("frete").innerText = frete.toFixed(2);
+  document.getElementById("total").innerText =
+    (subtotal + frete).toFixed(2);
 }
 
 function distancia(lat1,lon1,lat2,lon2){
@@ -313,16 +324,9 @@ function distancia(lat1,lon1,lat2,lon2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-/* =======================
-   FINALIZAR PEDIDO
-======================= */
+/* ================= FINALIZAR ================= */
 
 document.getElementById("btnFinalizar").onclick = async ()=>{
-
-  if(configGlobal?.modo_cardapio === "vitrine"){
-    alert("Esta loja é apenas vitrine.");
-    return;
-  }
 
   if(carrinho.length===0){
     alert("Carrinho vazio!");
@@ -334,18 +338,24 @@ document.getElementById("btnFinalizar").onclick = async ()=>{
   const pedido={
     app_id:APP_ID,
     cliente_nome:nomeCliente.value,
-    cliente_telefone:telefoneCliente.value,
-    endereco:enderecoCliente.value,
-    numero:numeroCliente.value,
+    telefone:telefoneCliente.value,
+    endereco:enderecoCliente.value + ", " + numeroCliente.value,
     bairro:bairroCliente.value,
     cidade:cidadeCliente.value,
     observacao:obsCliente.value,
-    itens:carrinho,
+    latitude: clienteLat,
+    longitude: clienteLng,
     total:total,
-    status:"novo"
+    status:"novo",
+    itens:carrinho
   };
 
-  /* WHATSAPP */
+  if(configGlobal?.modo_venda==="sistema"
+     || configGlobal?.modo_venda==="ambos"){
+
+    await supabase.from("pedidos").insert([pedido]);
+  }
+
   if(configGlobal?.modo_venda==="whatsapp"
      || configGlobal?.modo_venda==="ambos"){
 
@@ -353,26 +363,13 @@ document.getElementById("btnFinalizar").onclick = async ()=>{
 
     let msg=`*Novo Pedido*%0A`;
     msg+=`Cliente: ${pedido.cliente_nome}%0A`;
-    msg+=`Telefone: ${pedido.cliente_telefone}%0A`;
-    msg+=`Endereço: ${pedido.endereco}, ${pedido.numero}%0A`;
+    msg+=`Telefone: ${pedido.telefone}%0A`;
+    msg+=`Endereço: ${pedido.endereco}%0A`;
     msg+=`Bairro: ${pedido.bairro}%0A`;
     msg+=`Cidade: ${pedido.cidade}%0A%0A`;
-    msg+=`*Itens:*%0A`;
-
-    carrinho.forEach(i=>{
-      msg+=`- ${i.nome} R$ ${Number(i.preco).toFixed(2)}%0A`;
-    });
-
-    msg+=`%0ATotal: R$ ${total}`;
+    msg+=`Total: R$ ${pedido.total}`;
 
     window.open(`https://wa.me/${numero}?text=${msg}`);
-  }
-
-  /* SISTEMA */
-  if(configGlobal?.modo_venda==="sistema"
-     || configGlobal?.modo_venda==="ambos"){
-
-    await supabase.from("vendas").insert([pedido]);
   }
 
   alert("Pedido enviado!");
@@ -381,43 +378,32 @@ document.getElementById("btnFinalizar").onclick = async ()=>{
   document.getElementById("modalCarrinho").style.display="none";
 };
 
-/* =======================
-   FILTROS + PRODUTOS
-======================= */
+/* ================= CARREGAR ================= */
 
-function criarFiltros(){
-  const container=document.getElementById("filtros");
-  container.innerHTML="";
+async function carregar(){
 
-  const categorias=[...new Set(todosProdutos.map(p=>p.categoria||"Outros"))];
+  const {data:config}=await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id",APP_ID)
+    .maybeSingle();
 
-  const btnTodos=document.createElement("button");
-  btnTodos.textContent="Todos";
-  btnTodos.className="filtro-btn filtro-ativo";
-  btnTodos.onclick=()=>{
-    ativar(btnTodos);
-    renderizarProdutos(todosProdutos);
-  };
-  container.appendChild(btnTodos);
+  configGlobal=config;
 
-  categorias.forEach(cat=>{
-    const btn=document.createElement("button");
-    btn.textContent=cat;
-    btn.className="filtro-btn";
-    btn.onclick=()=>{
-      ativar(btn);
-      renderizarProdutos(
-        todosProdutos.filter(p=>(p.categoria||"Outros")==cat)
-      );
-    };
-    container.appendChild(btn);
-  });
-}
+  if(config?.logo_url)
+    document.getElementById("logoLoja").src=config.logo_url;
 
-function ativar(btn){
-  document.querySelectorAll(".filtro-btn")
-  .forEach(b=>b.classList.remove("filtro-ativo"));
-  btn.classList.add("filtro-ativo");
+  if(config?.nome_site)
+    document.getElementById("nomeLoja").innerText=config.nome_site;
+
+  const {data:produtos}=await supabase
+    .from("produtos")
+    .select("*")
+    .eq("app_id",APP_ID)
+    .eq("ativo",true);
+
+  todosProdutos=produtos||[];
+  renderizarProdutos(todosProdutos);
 }
 
 function renderizarProdutos(lista){
@@ -442,45 +428,9 @@ function renderizarProdutos(lista){
   });
 }
 
-/* =======================
-   CARREGAR
-======================= */
-
-async function carregar(){
-
-  const {data:config}=await supabase
-    .from("config_site")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .maybeSingle();
-
-  configGlobal=config;
-
-  if(config?.logo_url)
-    document.getElementById("logoLoja").src=config.logo_url;
-
-  if(config?.nome_site)
-    document.getElementById("nomeLoja").innerText=config.nome_site;
-
-  if(config?.modo_cardapio==="vitrine"){
-    document.getElementById("btnCarrinho").style.display="none";
-  }
-
-  const {data:produtos}=await supabase
-    .from("produtos")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .eq("ativo",true);
-
-  todosProdutos=produtos||[];
-  criarFiltros();
-  renderizarProdutos(todosProdutos);
-}
-
 carregar();
 salvar();
 </script>
 
 </body>
 </html>
-
