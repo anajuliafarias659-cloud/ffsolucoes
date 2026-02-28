@@ -649,8 +649,8 @@ window.finalizarPedido = async function(){
 
   if(!carrinho.length) return;
 
-  const nome = document.getElementById("clienteNome").value.trim();
-  const telefone = document.getElementById("clienteTelefone").value.trim();
+  const nome = clienteNome.value.trim();
+  const telefone = clienteTelefone.value.trim();
 
   if(!nome || !telefone){
     alert("Preencha nome e telefone.");
@@ -659,79 +659,93 @@ window.finalizarPedido = async function(){
 
   let total = 0;
 
-  for(const item of carrinho){
+  try{
 
-    const { data:produtoBanco } = await supabase
-      .from("produtos")
-      .select("variacoes")
-      .eq("id",item.id)
-      .single();
+    for(const item of carrinho){
 
-    let variacoes = [];
-    try{ variacoes = JSON.parse(produtoBanco.variacoes || "[]"); }catch{}
+      const { data:produtoBanco, error:erroBusca } = await supabase
+        .from("produtos")
+        .select("variacoes")
+        .eq("id",item.id)
+        .single();
 
-    const index = variacoes.findIndex(v=>v.cor===item.cor);
+      if(erroBusca) throw erroBusca;
 
-    if(index === -1 || variacoes[index].estoque < item.qtd){
-      alert(`Estoque insuficiente para ${item.nome} (${item.cor})`);
-      return;
+      let variacoes = JSON.parse(produtoBanco.variacoes || "[]");
+
+      const index = variacoes.findIndex(v=>v.cor===item.cor);
+
+      if(index === -1 || variacoes[index].estoque < item.qtd){
+        alert(`Estoque insuficiente para ${item.nome}`);
+        return;
+      }
+
+      variacoes[index].estoque -= item.qtd;
+
+      const { error:erroUpdate } = await supabase
+        .from("produtos")
+        .update({ variacoes: JSON.stringify(variacoes) })
+        .eq("id", item.id);
+
+      if(erroUpdate) throw erroUpdate;
+
+      total += item.preco * item.qtd;
     }
 
-    variacoes[index].estoque -= item.qtd;
+    // ===== SALVAR PEDIDO =====
+    const { error:erroInsert } = await supabase
+      .from("pedidos")
+      .insert([{
+        app_id: APP_ID,
+        cliente_nome: nome,
+        cliente_telefone: telefone,
+        cliente_rua: clienteRua.value,
+        cliente_numero: clienteNumero.value,
+        cliente_bairro: clienteBairro.value,
+        cliente_cidade: clienteCidade.value,
+        cliente_estado: clienteEstado.value,
+        cliente_cep: clienteCep.value,
+        cliente_localizacao: clienteLocalizacao.value,
+        itens: carrinho,
+        total: total,
+        status: "novo"
+      }]);
 
-    await supabase.from("produtos")
-      .update({ variacoes: JSON.stringify(variacoes) })
-      .eq("id", item.id);
+    if(erroInsert) throw erroInsert;
 
-    total += item.preco * item.qtd;
+    // ===== WHATSAPP SE CONFIGURADO =====
+    if((modoVenda === "whatsapp" || modoVenda === "ambos") && numeroWhatsapp){
+
+      let texto = `🛒 *NOVO PEDIDO*\n\n`;
+      texto += `👤 ${nome}\n`;
+      texto += `📞 ${telefone}\n\n`;
+
+      carrinho.forEach(i=>{
+        texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
+      });
+
+      texto += `\n💰 Total: R$ ${total.toFixed(2)}`;
+
+      window.open(
+        `https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(texto)}`,
+        "_blank"
+      );
+    }
+
+    alert("Pedido enviado com sucesso!");
+
+    carrinho = [];
+    salvar();
+    fecharCarrinho();
+    carregar();
+
+  }catch(err){
+    console.log("ERRO FINALIZAR:", err);
+    alert("Erro ao finalizar pedido. Veja console.");
   }
-
-  await supabase.from("pedidos").insert([{
-  app_id: APP_ID,
-  cliente_nome: nome,
-  cliente_telefone: telefone,
-  cliente_rua: document.getElementById("clienteRua").value,
-  cliente_numero: document.getElementById("clienteNumero").value,
-  cliente_bairro: document.getElementById("clienteBairro").value,
-  cliente_cidade: document.getElementById("clienteCidade").value,
-  cliente_estado: document.getElementById("clienteEstado").value,
-  cliente_cep: document.getElementById("clienteCep").value,
-  cliente_localizacao: document.getElementById("clienteLocalizacao").value,
-  itens: carrinho,
-  total: total,
-  status: "novo"
-}]);
-
-  if(modoVenda==="whatsapp" && numeroWhatsapp){
-
-  let texto = `🛒 *NOVO PEDIDO*\n\n`;
-  texto += `👤 ${nome}\n`;
-  texto += `📞 ${telefone}\n\n`;
-
-  carrinho.forEach(i=>{
-    texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
-  });
-
-  texto += `\n💰 Total: R$ ${total.toFixed(2)}`;
-
-  if(chavePix){
-    texto += `\n\n💳 *PAGAMENTO VIA PIX*`;
-    texto += `\nChave: ${chavePix}`;
-  }
-
-  window.open(
-    `https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(texto)}`,
-    "_blank"
-  );
 }
 
-  carrinho = [];
-  salvar();
-  fecharCarrinho();
-  carregar();
-}
 
-carregar();
 </script>
 
 </body>
