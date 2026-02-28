@@ -272,11 +272,22 @@ input{
 <div class="modal-produto" id="modalCarrinho">
   <div class="modal-conteudo">
     <span class="fechar-modal" onclick="fecharCarrinho()">✖</span>
-    <h2>Finalizar Pedido</h2>
-    <div id="itensCarrinho"></div>
 
-    <input id="clienteNome" placeholder="Seu nome">
-    <input id="clienteTelefone" placeholder="Telefone">
+    <h2>Finalizar Pedido</h2>
+
+    <!-- ITENS -->
+    <div id="itensCarrinho" style="margin-bottom:15px;"></div>
+
+    <hr style="margin:10px 0;">
+
+    <h3>Dados do Cliente</h3>
+
+    <input id="clienteNome" placeholder="Seu nome" required>
+    <input id="clienteTelefone" placeholder="Telefone / WhatsApp" required>
+
+    <hr style="margin:10px 0;">
+
+    <h3>Endereço de Entrega</h3>
 
     <input id="clienteRua" placeholder="Rua">
     <input id="clienteNumero" placeholder="Número">
@@ -284,49 +295,57 @@ input{
     <input id="clienteCidade" placeholder="Cidade">
     <input id="clienteEstado" placeholder="Estado">
     <input id="clienteCep" placeholder="CEP">
-    <input id="clienteLocalizacao" placeholder="Link da localização">
 
-    <button class="btn-add" onclick="finalizarPedido()">Confirmar Pedido</button>
+    <input id="clienteLocalizacao" placeholder="Link da localização (Google Maps)">
+
+    <button 
+      type="button" 
+      class="btn-add" 
+      style="margin-top:8px;"
+      onclick="pegarLocalizacao()">
+      📍 Pegar minha localização
+    </button>
+
+    <hr style="margin:15px 0;">
+
+    <button 
+      class="btn-add" 
+      style="font-size:16px; padding:12px;"
+      onclick="finalizarPedido()">
+      Confirmar Pedido
+    </button>
   </div>
 </div>
 
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
 
-// 🔹 SUPABASE
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// 🔹 APP_ID vindo da URL
 const APP_ID = new URLSearchParams(window.location.search).get("app_id");
+if (!APP_ID) alert("APP_ID não informado.");
 
-if (!APP_ID) {
-  alert("APP_ID não informado na URL.\nUse: vitrine.html?app_id=SEU_ID");
-}
-
-// 🔹 ELEMENTOS
 const contadorCarrinho = document.getElementById("contadorCarrinho");
 
-// 🔹 ESTADOS
 let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
 let todosProdutos = [];
 let modoVenda = "whatsapp";
 let numeroWhatsapp = "";
+let chavePix = "";
+let corSelecionada = null;
+let produtoAtual = null;
 
-// 🔹 SALVAR CARRINHO
-function salvar() {
+function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
-  
-  if (contadorCarrinho) {
-    contadorCarrinho.innerText =
-      carrinho.reduce((acc, i) => acc + (i.qtd || 1), 0);
-  }
+  contadorCarrinho.innerText =
+    carrinho.reduce((acc,i)=>acc+(i.qtd||0),0);
 }
-
-// 🔹 Atualiza contador ao iniciar
 salvar();
+
+/* ================= CARREGAR ================= */
 
 async function carregar(){
   const { data:config } = await supabase
@@ -335,21 +354,58 @@ async function carregar(){
     .eq("app_id",APP_ID)
     .maybeSingle();
 
-  if(config){
-    nomeLoja.innerText = config.nome_site || "";
-    if(config.logo_url){
-      logoLoja.src = config.logo_url;
-      logoLoja.style.display="block";
-    }
-    if(config.banner_url){
-      bannerArea.innerHTML = `<img src="${config.banner_url}">`;
-    }
-    if(config.tema_site){
-      document.body.classList.add("tema-"+config.tema_site);
-    }
-    modoVenda = config.vendas_modo || "whatsapp";
-    numeroWhatsapp = config.whatsapp_numero || "";
+  if (config) {
+
+  // ===== NOME =====
+  nomeLoja.innerText = config.nome_site || "";
+
+  // ===== LOGO =====
+  if (config.logo_url) {
+    logoLoja.src = config.logo_url;
+    logoLoja.style.display = "block";
+  } else {
+    logoLoja.style.display = "none";
   }
+
+  // ===== BANNER =====
+  if (config.banner_url) {
+    bannerArea.innerHTML = `<img src="${config.banner_url}">`;
+  } else {
+    bannerArea.innerHTML = "";
+  }
+
+  // ===== TEMAS =====
+  document.body.classList.remove(
+    "tema-natal",
+    "tema-anonovo",
+    "tema-capivara"
+  );
+
+  if (config.tema_site) {
+    document.body.classList.add("tema-" + config.tema_site);
+  }
+
+  // ===== MODO DE VENDA =====
+  modoVenda = config.vendas_modo || "whatsapp";
+
+  // ===== WHATSAPP =====
+  numeroWhatsapp = config.whatsapp_numero || "";
+
+  // ===== PIX AUTOMÁTICO PELO CELULAR =====
+  chavePix = ""; // limpa antes
+
+  if (numeroWhatsapp) {
+    let numeroLimpo = numeroWhatsapp.replace(/\D/g, "");
+
+    // garante código do Brasil
+    if (!numeroLimpo.startsWith("55")) {
+      numeroLimpo = "55" + numeroLimpo;
+    }
+
+    chavePix = "+" + numeroLimpo;
+  }
+
+} // <-- FECHAMENTO CORRETO DO if(config)
 
   const { data:prods } = await supabase
     .from("produtos")
@@ -357,14 +413,16 @@ async function carregar(){
     .eq("app_id",APP_ID)
     .eq("ativo",true);
 
-  todosProdutos = prods || [];
+  todosProdutos=prods||[];
   criarCategorias();
   renderizar(todosProdutos);
 }
 
+/* ================= CATEGORIAS ================= */
+
 function criarCategorias(){
-  const categorias = ["Todas",...new Set(todosProdutos.map(p=>p.categoria).filter(Boolean))];
-  listaCategorias.innerHTML = categorias.map((cat,i)=>
+  const categorias=["Todas",...new Set(todosProdutos.map(p=>p.categoria).filter(Boolean))];
+  listaCategorias.innerHTML=categorias.map((cat,i)=>
     `<button class="${i===0?'ativo':''}" onclick="filtrarCategoria('${cat}')">${cat}</button>`
   ).join("");
 }
@@ -373,8 +431,11 @@ window.filtrarCategoria=function(cat){
   document.querySelectorAll(".categorias button").forEach(b=>b.classList.remove("ativo"));
   [...document.querySelectorAll(".categorias button")]
     .find(b=>b.innerText===cat)?.classList.add("ativo");
+
   renderizar(cat==="Todas"?todosProdutos:todosProdutos.filter(p=>p.categoria===cat));
 }
+
+/* ================= PRODUTOS ================= */
 
 function renderizar(lista){
   listaProdutos.innerHTML="";
@@ -397,22 +458,108 @@ function renderizar(lista){
       <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
       <button class="btn-add">Adicionar</button>
     `;
+
     card.querySelector(".btn-add").onclick=(e)=>{
       e.stopPropagation();
-      carrinho.push({...p,qtd:1});
-      salvar();
+      abrirModal(p,imgs);
     };
+
     card.onclick=()=>abrirModal(p,imgs);
+
     listaProdutos.appendChild(card);
   });
 }
 
+/* ================= MODAL PRODUTO ================= */
+
 function abrirModal(produto,imgs){
+  produtoAtual=produto;
+  corSelecionada=null;
+
   modalProduto.style.display="flex";
   modalNome.innerText=produto.nome;
   modalPreco.innerText="R$ "+Number(produto.preco).toFixed(2);
-  modalDescricao.innerText=produto.descricao||"";
-  modalImg.src=imgs[0]||"";
+  modalDescricao.innerHTML=produto.descricao||"";
+
+  let index=0;
+  modalImg.src=imgs[index]||"";
+
+  modalDots.innerHTML=imgs.map((_,i)=>
+    `<span style="height:10px;width:10px;margin:4px;background:${i===0?'#0071e3':'#ccc'};
+    border-radius:50%;display:inline-block;cursor:pointer"
+    onclick="trocarImg(${i})"></span>`
+  ).join("");
+
+  window.trocarImg=function(i){
+    index=i;
+    modalImg.src=imgs[i];
+    document.querySelectorAll("#modalDots span")
+      .forEach((d,di)=>d.style.background=di===i?'#0071e3':'#ccc');
+  }
+
+  /* ===== CORES ===== */
+  let variacoes=[];
+  try{ variacoes=JSON.parse(produto.variacoes||"[]"); }catch{}
+
+  if(variacoes.length){
+    modalDescricao.innerHTML+="<br><strong>Selecione a cor:</strong><br>";
+
+    modalDescricao.innerHTML += `<div id="coresArea" style="margin-top:10px;"></div>`;
+
+const coresArea = document.getElementById("coresArea");
+
+variacoes.forEach(v=>{
+  const btn = document.createElement("button");
+  btn.innerText = `${v.cor} (${v.estoque})`;
+  btn.style.margin = "5px";
+  btn.style.padding = "6px 12px";
+  btn.style.borderRadius = "6px";
+  btn.style.border = "1px solid #ccc";
+  btn.style.cursor = "pointer";
+
+  if(v.estoque <= 0){
+    btn.disabled = true;
+    btn.style.opacity = "0.5";
+  }
+
+  btn.onclick = () => {
+    corSelecionada = v.cor;
+    document.querySelectorAll("#coresArea button")
+      .forEach(b=>b.style.background="#fff");
+    btn.style.background="#0071e3";
+    btn.style.color="#fff";
+  };
+
+  coresArea.appendChild(btn);
+});
+
+  }
+
+  modalAdd.onclick=adicionarCarrinho;
+}
+
+window.selecionarCor=function(cor){
+  corSelecionada=cor;
+}
+
+/* ================= CARRINHO ================= */
+
+function adicionarCarrinho(){
+  if(!corSelecionada){
+    alert("Selecione uma cor.");
+    return;
+  }
+
+  const existente=carrinho.find(i=>i.id===produtoAtual.id && i.cor===corSelecionada);
+
+  if(existente){
+    existente.qtd++;
+  }else{
+    carrinho.push({...produtoAtual, qtd:1, cor:corSelecionada});
+  }
+
+  salvar();
+  fecharModal();
 }
 
 window.fecharModal=()=>modalProduto.style.display="none";
@@ -420,54 +567,152 @@ window.fecharModal=()=>modalProduto.style.display="none";
 btnCarrinho.onclick=()=>abrirCarrinho();
 
 function abrirCarrinho(){
-  if(!carrinho.length)return alert("Carrinho vazio");
-  itensCarrinho.innerHTML=carrinho.map(i=>`
-    <div>${i.nome} x${i.qtd} - R$ ${(i.preco*i.qtd).toFixed(2)}</div>
-  `).join("");
+  if(!carrinho.length) return alert("Carrinho vazio");
+
+  let total = 0;
+
+  itensCarrinho.innerHTML = carrinho.map((i,index)=>{
+    const subtotal = i.preco * i.qtd;
+    total += subtotal;
+
+    return `
+      <div style="margin-bottom:12px;border-bottom:1px solid #eee;padding-bottom:8px;">
+        <strong>${i.nome}</strong> (${i.cor})
+        <br>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:5px;">
+          <button onclick="diminuirQtd(${index})">➖</button>
+          <strong>${i.qtd}</strong>
+          <button onclick="aumentarQtd(${index})">➕</button>
+          <button onclick="removerItem(${index})" style="color:red;">❌</button>
+        </div>
+        <div style="margin-top:5px;">
+          Subtotal: R$ ${subtotal.toFixed(2)}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  itensCarrinho.innerHTML += `
+    <hr>
+    <h3>Total: R$ ${total.toFixed(2)}</h3>
+  `;
+
   modalCarrinho.style.display="flex";
 }
+window.aumentarQtd = function(index){
+  carrinho[index].qtd++;
+  salvar();
+  abrirCarrinho();
+}
 
+window.diminuirQtd = function(index){
+  if(carrinho[index].qtd > 1){
+    carrinho[index].qtd--;
+  }else{
+    carrinho.splice(index,1);
+  }
+  salvar();
+  abrirCarrinho();
+}
+
+window.removerItem = function(index){
+  carrinho.splice(index,1);
+  salvar();
+  abrirCarrinho();
+}
 window.fecharCarrinho=()=>modalCarrinho.style.display="none";
 
-window.finalizarPedido=async function(){
-  if(!carrinho.length)return;
+/* ================= GEOLOCALIZAÇÃO ================= */
 
-  const nome=clienteNome.value;
-  const telefone=clienteTelefone.value;
-
-  if(!nome||!telefone)return alert("Preencha nome e telefone");
-
-  let total=0;
-  let texto=`🛒 NOVO PEDIDO\n\n👤 ${nome}\n📞 ${telefone}\n\n`;
-
-  carrinho.forEach(i=>{
-    total+=i.preco*i.qtd;
-    texto+=`${i.nome} x${i.qtd} = R$ ${(i.preco*i.qtd).toFixed(2)}\n`;
+window.pegarLocalizacao=function(){
+  navigator.geolocation.getCurrentPosition(pos=>{
+    clienteLocalizacao.value=
+      `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
   });
+}
 
-  texto+=`\nTotal: R$ ${total.toFixed(2)}`;
+/* ================= FINALIZAR ================= */
 
-  if(modoVenda==="whatsapp"){
-    window.open(`https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(texto)}`,"_blank");
-  }else{
-    await supabase.from("pedidos").insert([{
-      app_id:APP_ID,
-      cliente_nome:nome,
-      cliente_telefone:telefone,
-      itens:carrinho,
-      total:total,
-      status:"novo"
-    }]);
-    alert("Pedido enviado!");
+window.finalizarPedido = async function(){
+
+  if(!carrinho.length) return;
+
+  const nome = document.getElementById("clienteNome").value.trim();
+  const telefone = document.getElementById("clienteTelefone").value.trim();
+
+  if(!nome || !telefone){
+    alert("Preencha nome e telefone.");
+    return;
   }
 
-  carrinho=[];
+  let total = 0;
+
+  for(const item of carrinho){
+
+    const { data:produtoBanco } = await supabase
+      .from("produtos")
+      .select("variacoes")
+      .eq("id",item.id)
+      .single();
+
+    let variacoes = [];
+    try{ variacoes = JSON.parse(produtoBanco.variacoes || "[]"); }catch{}
+
+    const index = variacoes.findIndex(v=>v.cor===item.cor);
+
+    if(index === -1 || variacoes[index].estoque < item.qtd){
+      alert(`Estoque insuficiente para ${item.nome} (${item.cor})`);
+      return;
+    }
+
+    variacoes[index].estoque -= item.qtd;
+
+    await supabase.from("produtos")
+      .update({ variacoes: JSON.stringify(variacoes) })
+      .eq("id", item.id);
+
+    total += item.preco * item.qtd;
+  }
+
+  await supabase.from("pedidos").insert([{
+    app_id:APP_ID,
+    cliente_nome:nome,
+    cliente_telefone:telefone,
+    itens:carrinho,
+    total:total,
+    status:"novo"
+  }]);
+
+  if(modoVenda==="whatsapp" && numeroWhatsapp){
+
+  let texto = `🛒 *NOVO PEDIDO*\n\n`;
+  texto += `👤 ${nome}\n`;
+  texto += `📞 ${telefone}\n\n`;
+
+  carrinho.forEach(i=>{
+    texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
+  });
+
+  texto += `\n💰 Total: R$ ${total.toFixed(2)}`;
+
+  if(chavePix){
+    texto += `\n\n💳 *PAGAMENTO VIA PIX*`;
+    texto += `\nChave: ${chavePix}`;
+  }
+
+  window.open(
+    `https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(texto)}`,
+    "_blank"
+  );
+}
+
+  carrinho = [];
   salvar();
   fecharCarrinho();
+  carregar();
 }
 
 carregar();
-salvar();
 </script>
 
 </body>
