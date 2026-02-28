@@ -18,6 +18,7 @@ body{
 
 h2{
   text-align:center;
+  margin-top:40px;
 }
 
 .pedido{
@@ -35,26 +36,29 @@ h2{
 
 .novo{ color:#22c55e; }
 .aceito{ color:#facc15; }
+.historico{ color:#94a3b8; }
 
 button{
-  padding:8px 12px;
+  padding:6px 10px;
   border:none;
   border-radius:6px;
   cursor:pointer;
-  margin-top:8px;
+  margin-top:6px;
+  margin-right:5px;
 }
 
-.btn-aceitar{
-  background:#22c55e;
-  color:#000;
-}
+.btn-aceitar{ background:#22c55e; color:#000; }
+.btn-historico{ background:#3b82f6; color:#fff; }
+.btn-excluir{ background:#ef4444; color:#fff; }
 </style>
 </head>
 <body>
 
-<h2>📦 Pedidos Online</h2>
-
+<h2>📦 Pedidos Ativos</h2>
 <div id="listaPedidos"></div>
+
+<h2>📁 Histórico</h2>
+<div id="listaHistorico"></div>
 
 <script type="module">
 
@@ -95,6 +99,7 @@ async function carregarPedidos(){
     .order("created_at",{ascending:false});
 
   listaPedidos.innerHTML="";
+  listaHistorico.innerHTML="";
 
   data.forEach(p=>{
 
@@ -102,7 +107,7 @@ async function carregarPedidos(){
       `• ${i.nome} (${i.cor}) x${i.qtd}`
     ).join("<br>");
 
-    listaPedidos.innerHTML += `
+    const card = `
       <div class="pedido">
         <div class="status ${p.status}">
           Status: ${p.status.toUpperCase()}
@@ -126,16 +131,27 @@ async function carregarPedidos(){
         <hr>
         <strong>Total:</strong> R$ ${Number(p.total).toFixed(2)}
 
-        ${p.status === "novo"
-          ? `<br><button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">
-              Aceitar Pedido
-            </button>`
-          : ""}
+        <br><br>
+
+        ${p.status !== "historico" ? `
+          <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Aceitar</button>
+          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
+        ` : ""}
+
+        <button class="btn-excluir" onclick="excluirPedido('${p.id}')">Excluir</button>
       </div>
     `;
+
+    if(p.status === "historico"){
+      listaHistorico.innerHTML += card;
+    } else {
+      listaPedidos.innerHTML += card;
+    }
+
   });
 }
 
+/* ===== ACEITAR ===== */
 window.aceitarPedido = async function(id){
 
   const { data:pedido } = await supabase
@@ -144,13 +160,11 @@ window.aceitarPedido = async function(id){
     .eq("id",id)
     .single();
 
-  // Atualiza status
   await supabase
     .from("pedidos")
     .update({ status:"aceito" })
     .eq("id",id);
 
-  // Monta mensagem WhatsApp
   let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
   texto += `Olá ${pedido.cliente_nome}!\n\n`;
   texto += `Seu pedido foi aceito ✅\n\n`;
@@ -172,6 +186,30 @@ window.aceitarPedido = async function(id){
     `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
     "_blank"
   );
+
+  carregarPedidos();
+}
+
+/* ===== HISTÓRICO ===== */
+window.moverHistorico = async function(id){
+
+  await supabase
+    .from("pedidos")
+    .update({ status:"historico" })
+    .eq("id",id);
+
+  carregarPedidos();
+}
+
+/* ===== EXCLUIR ===== */
+window.excluirPedido = async function(id){
+
+  if(!confirm("Tem certeza que deseja excluir este pedido?")) return;
+
+  await supabase
+    .from("pedidos")
+    .delete()
+    .eq("id",id);
 
   carregarPedidos();
 }
