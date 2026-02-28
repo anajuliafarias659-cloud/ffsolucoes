@@ -15,12 +15,10 @@ body{
   color:#fff;
   padding:20px;
 }
-
 h2{
   text-align:center;
   margin-top:40px;
 }
-
 .pedido{
   background:#0f172a;
   border:1px solid #1e293b;
@@ -28,16 +26,13 @@ h2{
   border-radius:15px;
   margin-bottom:15px;
 }
-
 .status{
   font-weight:bold;
   margin-bottom:10px;
 }
-
 .novo{ color:#22c55e; }
 .aceito{ color:#facc15; }
 .historico{ color:#94a3b8; }
-
 button{
   padding:6px 10px;
   border:none;
@@ -46,7 +41,6 @@ button{
   margin-top:6px;
   margin-right:5px;
 }
-
 .btn-aceitar{ background:#22c55e; color:#000; }
 .btn-historico{ background:#3b82f6; color:#fff; }
 .btn-excluir{ background:#ef4444; color:#fff; }
@@ -74,29 +68,42 @@ let app_id = null;
 async function iniciar(){
 
   const { data:{ session } } = await supabase.auth.getSession();
+
   if(!session){
     alert("Faça login");
+    window.location.href="/auth/login.html";
     return;
   }
 
-  const { data:user } = await supabase
+  const { data:user, error } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", session.user.id)
     .single();
 
-  app_id = user.app_id;
+  if(error || !user){
+    alert("Usuário não encontrado na tabela usuarios");
+    console.error(error);
+    return;
+  }
 
+  app_id = user.app_id;
   carregarPedidos();
 }
 
 async function carregarPedidos(){
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("pedidos")
     .select("*")
     .eq("app_id", app_id)
     .order("created_at",{ascending:false});
+
+  if(error){
+    console.error(error);
+    alert("Erro ao carregar pedidos");
+    return;
+  }
 
   listaPedidos.innerHTML="";
   listaHistorico.innerHTML="";
@@ -105,37 +112,37 @@ async function carregarPedidos(){
 
     const itens = (p.itens || []).map(i => {
 
-  const nome = i.nome || i.nome_produto || "Produto";
-  const cor = i.cor || "";
-  const qtd = i.qtd || i.quantidade || 1;
+      const nome = i.nome || i.nome_produto || "Produto";
+      const cor = i.cor || "";
+      const qtd = i.qtd || i.quantidade || 1;
 
-  return `• ${nome} ${cor ? "(" + cor + ")" : ""} x${qtd}`;
+      return `• ${nome} ${cor ? "(" + cor + ")" : ""} x${qtd}`;
 
-}).join("<br>");
+    }).join("<br>");
 
     const card = `
       <div class="pedido">
-        <div class="status ${p.status}">
-          Status: ${p.status.toUpperCase()}
+        <div class="status ${p.status || "novo"}">
+          Status: ${(p.status || "novo").toUpperCase()}
         </div>
 
-        <strong>Cliente:</strong> ${p.cliente_nome}<br>
-        <strong>Telefone:</strong> ${p.cliente_telefone}<br>
+        <strong>Cliente:</strong> ${p.cliente_nome || "-"}<br>
+        <strong>Telefone:</strong> ${p.cliente_telefone || "-"}<br>
 
         <hr>
 
         <strong>Endereço:</strong><br>
-${p.cliente_rua || "-"}, ${p.cliente_numero || "-"}<br>
-${p.cliente_bairro || "-"} - ${p.cliente_cidade || "-"}/${p.cliente_estado || "-"}<br>
-CEP: ${p.cliente_cep || "-"}<br>
+        ${p.cliente_rua || "-"}, ${p.cliente_numero || "-"}<br>
+        ${p.cliente_bairro || "-"} - ${p.cliente_cidade || "-"}/${p.cliente_estado || "-"}<br>
+        CEP: ${p.cliente_cep || "-"}<br>
 
         <hr>
 
         <strong>Itens:</strong><br>
-        ${itens}
+        ${itens || "-"}
 
         <hr>
-        <strong>Total:</strong> R$ ${Number(p.total).toFixed(2)}
+        <strong>Total:</strong> R$ ${Number(p.total || 0).toFixed(2)}
 
         <br><br>
 
@@ -171,29 +178,31 @@ window.aceitarPedido = async function(id){
     .update({ status:"aceito" })
     .eq("id",id);
 
+  if(!pedido.cliente_telefone){
+    alert("Cliente não tem telefone cadastrado");
+    carregarPedidos();
+    return;
+  }
+
   let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
-  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Olá ${pedido.cliente_nome || "Cliente"}!\n\n`;
   texto += `Seu pedido foi aceito ✅\n\n`;
 
-  pedido.itens.forEach(i=>{
-    texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
+  (pedido.itens || []).forEach(i=>{
+    const nome = i.nome || i.nome_produto || "Produto";
+    const cor = i.cor || "";
+    const qtd = i.qtd || i.quantidade || 1;
+    texto += `• ${nome} ${cor ? "(" + cor + ")" : ""} x${qtd}\n`;
   });
 
-  texto += `\n💰 Total: R$ ${Number(pedido.total).toFixed(2)}`;
+  texto += `\n💰 Total: R$ ${Number(pedido.total || 0).toFixed(2)}`;
   texto += `\n\n⏳ Estamos aguardando o pagamento.`;
 
-  
-if(!pedido.cliente_telefone){
-  alert("Cliente não tem telefone cadastrado");
-  return;
-}
+  let numero = pedido.cliente_telefone.replace(/\D/g,'');
 
-let numero = pedido.cliente_telefone.replace(/\D/g,'');
-
-if(!numero.startsWith("55")){
-  numero = "55" + numero;
-}
-  
+  if(!numero.startsWith("55")){
+    numero = "55"+numero;
+  }
 
   window.open(
     `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
@@ -205,18 +214,15 @@ if(!numero.startsWith("55")){
 
 /* ===== HISTÓRICO ===== */
 window.moverHistorico = async function(id){
-
   await supabase
     .from("pedidos")
     .update({ status:"historico" })
     .eq("id",id);
-
   carregarPedidos();
 }
 
 /* ===== EXCLUIR ===== */
 window.excluirPedido = async function(id){
-
   if(!confirm("Tem certeza que deseja excluir este pedido?")) return;
 
   await supabase
