@@ -13,15 +13,36 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const app_id = new URLSearchParams(window.location.search).get("app_id");
+let app_id = null;
 
-if(!app_id){
-  alert("APP_ID não informado na URL");
+window.addEventListener("DOMContentLoaded", iniciar);
+
+async function iniciar(){
+
+  const { data, error } = await supabase.auth.getUser();
+
+  if(error || !data.user){
+    console.log("Usuário não autenticado");
+    alert("Faça login primeiro");
+    window.location.href = "/auth/login.html";
+    return;
+  }
+
+  const { data:usuario, error:erroUsuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", data.user.id)
+    .single();
+
+  if(erroUsuario || !usuario){
+    alert("Erro ao buscar app_id");
+    return;
+  }
+
+  app_id = usuario.app_id;
+
+  carregarPedidos();
 }
-
-window.addEventListener("DOMContentLoaded", ()=>{
-  if(app_id) carregarPedidos();
-});
 
 async function carregarPedidos(){
 
@@ -91,75 +112,6 @@ async function carregarPedidos(){
     }
 
   });
-}
-
-window.aceitarPedido = async function(id){
-
-  const { data:pedido } = await supabase
-    .from("pedidos")
-    .select("*")
-    .eq("id",id)
-    .single();
-
-  if(!pedido) return;
-
-  await supabase
-    .from("pedidos")
-    .update({ status:"aceito" })
-    .eq("id",id);
-
-  if(!pedido.cliente_telefone){
-    alert("Cliente não tem telefone");
-    carregarPedidos();
-    return;
-  }
-
-  let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
-  texto += `Olá ${pedido.cliente_nome || "Cliente"}!\n\n`;
-  texto += `Seu pedido foi aceito ✅\n\n`;
-
-  (pedido.itens || []).forEach(i=>{
-    const nome = i.nome || i.nome_produto || "Produto";
-    const cor = i.cor || "";
-    const qtd = i.qtd || i.quantidade || 1;
-    texto += `• ${nome} ${cor ? "(" + cor + ")" : ""} x${qtd}\n`;
-  });
-
-  texto += `\n💰 Total: R$ ${Number(pedido.total || 0).toFixed(2)}`;
-  texto += `\n\n⏳ Estamos aguardando o pagamento.`;
-
-  let numero = pedido.cliente_telefone.replace(/\D/g,'');
-
-  if(!numero.startsWith("55")){
-    numero = "55" + numero;
-  }
-
-  window.open(
-    `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
-    "_blank"
-  );
-
-  carregarPedidos();
-}
-
-window.moverHistorico = async function(id){
-  await supabase
-    .from("pedidos")
-    .update({ status:"historico" })
-    .eq("id",id);
-
-  carregarPedidos();
-}
-
-window.excluirPedido = async function(id){
-  if(!confirm("Deseja excluir este pedido?")) return;
-
-  await supabase
-    .from("pedidos")
-    .delete()
-    .eq("id",id);
-
-  carregarPedidos();
 }
 </script>
 
