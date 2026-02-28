@@ -114,21 +114,10 @@ body{
   transition:.3s;
 }
 
-.card.aberto{
-  grid-column:1/-1;
-  transform:scale(1.02);
-}
-
 .img-produto{
   width:120px;
   height:120px;
   object-fit:contain;
-  transition:.3s;
-}
-
-.card.aberto .img-produto{
-  width:220px;
-  height:220px;
 }
 
 .preco{
@@ -138,7 +127,7 @@ body{
 
 .btn-add{
   width:100%;
-  padding:6px;
+  padding:8px;
   border:none;
   border-radius:6px;
   background:#0071e3;
@@ -159,42 +148,47 @@ body{
   cursor:pointer;
 }
 
-/* ===== TEMAS ===== */
-
-/* Natal */
-.tema-natal{ background:#8b0000; }
-.tema-natal .topo{ background:#006400; }
-.tema-natal .card{ border:2px solid #00ff88; }
-.tema-natal .preco{ color:#00ff88; }
-.tema-natal .btn-add,
-.tema-natal #btnCarrinho,
-.tema-natal .categorias button.ativo{
-  background:#006400;
-  color:#fff;
+/* ===== MODAL PRODUTO ===== */
+.modal-produto{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.6);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:10000;
 }
 
-/* Ano Novo */
-.tema-anonovo{ background:linear-gradient(135deg,#000,#1e3a8a); }
-.tema-anonovo .topo{ background:#111827; }
-.tema-anonovo .card{ border:2px solid #facc15; }
-.tema-anonovo .preco{ color:#facc15; }
-.tema-anonovo .btn-add,
-.tema-anonovo #btnCarrinho,
-.tema-anonovo .categorias button.ativo{
-  background:#facc15;
-  color:#000;
+.modal-conteudo{
+  background:#fff;
+  width:95%;
+  max-width:500px;
+  max-height:90vh;
+  overflow:auto;
+  border-radius:20px;
+  padding:20px;
+  position:relative;
+  animation:fadeIn .3s ease;
 }
 
-/* Capivara */
-.tema-capivara{ background:#f4b400; }
-.tema-capivara .topo{ background:#6b2e1a; }
-.tema-capivara .card{ border:2px solid #f4b400; }
-.tema-capivara .preco{ color:#e5391b; }
-.tema-capivara .btn-add{ background:#e5391b; }
-.tema-capivara #btnCarrinho{ background:#6b2e1a; }
-.tema-capivara .categorias button.ativo{
-  background:#e5391b;
-  color:#fff;
+@keyframes fadeIn{
+  from{ transform:scale(.9); opacity:0; }
+  to{ transform:scale(1); opacity:1; }
+}
+
+.modal-conteudo img{
+  width:100%;
+  max-height:300px;
+  object-fit:contain;
+  margin-bottom:15px;
+}
+
+.fechar-modal{
+  position:absolute;
+  top:10px;
+  right:15px;
+  font-size:22px;
+  cursor:pointer;
 }
 </style>
 </head>
@@ -212,6 +206,18 @@ body{
 <div class="categorias" id="listaCategorias"></div>
 <section class="produtos" id="listaProdutos"></section>
 <button id="btnCarrinho">🛒 <span id="contadorCarrinho">0</span></button>
+
+<!-- MODAL -->
+<div class="modal-produto" id="modalProduto">
+  <div class="modal-conteudo">
+    <span class="fechar-modal" onclick="fecharModal()">✖</span>
+    <img id="modalImg">
+    <h2 id="modalNome"></h2>
+    <div class="preco" id="modalPreco"></div>
+    <p id="modalDescricao"></p>
+    <button class="btn-add" id="modalAdd">Adicionar ao Carrinho</button>
+  </div>
+</div>
 
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
@@ -256,17 +262,7 @@ async function carregar(){
       bannerArea.innerHTML =
         `<div>${config.banner_descricao}</div>`;
     } else {
-      bannerArea.style.background="#111";
       bannerArea.innerHTML="";
-    }
-
-    if(config.tema_site){
-      document.body.classList.remove(
-        "tema-natal",
-        "tema-anonovo",
-        "tema-capivara"
-      );
-      document.body.classList.add("tema-" + config.tema_site);
     }
   }
 
@@ -296,40 +292,44 @@ function renderizar(lista){
     card.className="card";
 
     card.innerHTML=`
-      <div style="display:flex;gap:8px;">
-        <div style="display:flex;flex-direction:column;gap:5px;">
-          ${imagens.slice(0,3).map(img=>
-            `<img src="${img}" class="mini-img"
-             style="width:50px;height:50px;object-fit:cover;border-radius:6px;cursor:pointer;">`
-          ).join("")}
-        </div>
-        <div style="flex:1;display:flex;justify-content:center;align-items:center;">
-          ${imagens[0] ? `<img src="${imagens[0]}" class="principal img-produto">` : ""}
-        </div>
+      <div style="text-align:center">
+        ${imagens[0] ? `<img src="${imagens[0]}" class="img-produto">` : ""}
       </div>
-
       <h4>${p.nome}</h4>
       <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
       <button class="btn-add">Adicionar</button>
     `;
 
-    const principal = card.querySelector(".principal");
-
-    card.querySelectorAll(".mini-img").forEach(img=>{
-      img.onclick=(e)=>{
-        e.stopPropagation();
-        if(principal) principal.src = img.src;
-      };
-    });
+    card.querySelector(".btn-add").onclick=(e)=>{
+      e.stopPropagation();
+      carrinho.push({ ...p, qtd:1 });
+      salvar();
+    };
 
     card.onclick=()=>{
-      document.querySelectorAll(".card")
-        .forEach(c=>c.classList.remove("aberto"));
-      card.classList.add("aberto");
+      abrirModal(p, imagens);
     };
 
     listaProdutos.appendChild(card);
   });
+}
+
+window.abrirModal = function(produto, imagens){
+  modalProduto.style.display="flex";
+  modalImg.src = imagens[0] || "";
+  modalNome.innerText = produto.nome;
+  modalPreco.innerText = "R$ " + Number(produto.preco).toFixed(2);
+  modalDescricao.innerText = produto.descricao || "Sem descrição disponível.";
+
+  modalAdd.onclick=()=>{
+    carrinho.push({ ...produto, qtd:1 });
+    salvar();
+    fecharModal();
+  };
+}
+
+window.fecharModal = function(){
+  modalProduto.style.display="none";
 }
 
 carregar();
