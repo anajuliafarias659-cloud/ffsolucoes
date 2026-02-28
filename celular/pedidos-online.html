@@ -2,226 +2,182 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Configurar Vitrine</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
 body{
   margin:0;
   font-family:Arial;
-  background:#0f172a;
+  background:#020617;
   color:#fff;
+  padding:20px;
 }
 
-.container{
-  max-width:500px;
-  margin:40px auto;
-  padding:25px;
-  background:#1e293b;
+h2{
+  text-align:center;
+}
+
+.pedido{
+  background:#0f172a;
+  border:1px solid #1e293b;
+  padding:15px;
   border-radius:15px;
+  margin-bottom:15px;
 }
 
-label{
-  display:block;
-  margin-top:15px;
-  font-size:14px;
+.status{
+  font-weight:bold;
+  margin-bottom:10px;
 }
 
-input,select,textarea,button{
-  width:100%;
-  padding:12px;
-  margin-top:5px;
-  border-radius:8px;
-  border:none;
-}
+.novo{ color:#22c55e; }
+.aceito{ color:#facc15; }
 
 button{
-  background:#22c55e;
-  color:#000;
-  font-weight:bold;
-  margin-top:20px;
+  padding:8px 12px;
+  border:none;
+  border-radius:6px;
   cursor:pointer;
+  margin-top:8px;
 }
 
-.preview{
-  margin-top:10px;
-  max-height:80px;
-  display:none;
-  background:#fff;
-  padding:5px;
-  border-radius:8px;
+.btn-aceitar{
+  background:#22c55e;
+  color:#000;
 }
 </style>
 </head>
-
 <body>
 
-<div class="container">
+<h2>📦 Pedidos Online</h2>
 
-<h2>⚙ Configurar Vitrine</h2>
-
-<label>Nome da Loja</label>
-<input id="nome_site">
-
-<label>Logo</label>
-<input type="file" id="logo_file" accept="image/*">
-<img id="logo_preview" class="preview">
-<label><input type="checkbox" id="remover_logo"> Remover logo</label>
-
-<label>Banner (Imagem opcional)</label>
-<input type="file" id="banner_file" accept="image/*">
-<img id="banner_preview" class="preview">
-<label><input type="checkbox" id="remover_banner"> Remover banner</label>
-
-<label>Descrição do Banner (se não usar imagem)</label>
-<textarea id="banner_descricao" rows="3"></textarea>
-
-<label>WhatsApp (somente números)</label>
-<input id="whatsapp_numero" placeholder="5598999999999">
-
-<label>Fluxo de Venda</label>
-<select id="modo_venda">
-  <option value="whatsapp">WhatsApp</option>
-  <option value="sistema">Sistema</option>
-  <option value="ambos">Ambos</option>
-</select>
-
-<label>Tema</label>
-<select id="tema_site">
-  <option value="padrao">Padrão</option>
-  <option value="natal">Natal</option>
-  <option value="anonovo">Ano Novo</option>
-</select>
-
-<button onclick="salvar()">Salvar</button>
-
-</div>
+<div id="listaPedidos"></div>
 
 <script type="module">
-import { supabase } from "/js/supabase.js";
 
-let app_id=null;
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
+
+const supabase = createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "SUA_CHAVE_PUBLICA"
+);
+
+let app_id = null;
 
 async function iniciar(){
+
   const { data:{ session } } = await supabase.auth.getSession();
   if(!session){
-    window.location.href="/auth/login.html";
+    alert("Faça login");
     return;
   }
 
-  const { data:usuario } = await supabase
+  const { data:user } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", session.user.id)
     .single();
 
-  app_id = usuario.app_id;
+  app_id = user.app_id;
 
-  carregar();
+  carregarPedidos();
 }
 
-function limparNumero(n){
-  return n.replace(/\D/g,'');
-}
+async function carregarPedidos(){
 
-async function upload(file,bucket){
-  const ext = file.name.split(".").pop();
-  const path = `${app_id}/${Date.now()}.${ext}`;
-
-  const { error } = await supabase.storage
-    .from(bucket)
-    .upload(path,file,{ upsert:true });
-
-  if(error){
-    alert(error.message);
-    return null;
-  }
-
-  return supabase.storage.from(bucket)
-    .getPublicUrl(path).data.publicUrl;
-}
-
-window.salvar = async function(){
-
-  const payload = {
-    nome_site: nome_site.value.trim(),
-    whatsapp_numero: limparNumero(whatsapp_numero.value),
-    modo_venda: modo_venda.value,
-    tema_site: tema_site.value,
-    banner_descricao: banner_descricao.value.trim()
-  };
-
-  if(remover_logo.checked) payload.logo_url=null;
-  if(remover_banner.checked) payload.banner_url=null;
-
-  if(logo_file.files[0])
-    payload.logo_url = await upload(logo_file.files[0],"logos");
-
-  if(banner_file.files[0])
-    payload.banner_url = await upload(banner_file.files[0],"banners");
-
-  const { data:existe } = await supabase
-    .from("config_site")
-    .select("id")
-    .eq("app_id",app_id)
-    .maybeSingle();
-
-  const res = existe
-    ? await supabase.from("config_site").update(payload).eq("app_id",app_id)
-    : await supabase.from("config_site").insert({ ...payload, app_id });
-
-  if(res.error){
-    alert(res.error.message);
-    return;
-  }
-
-  alert("Salvo com sucesso 🔥");
-};
-
-async function carregar(){
   const { data } = await supabase
-    .from("config_site")
+    .from("pedidos")
     .select("*")
-    .eq("app_id",app_id)
-    .maybeSingle();
+    .eq("app_id", app_id)
+    .order("created_at",{ascending:false});
 
-  if(!data) return;
+  listaPedidos.innerHTML="";
 
-  nome_site.value = data.nome_site || "";
-  whatsapp_numero.value = data.whatsapp_numero || "";
-  modo_venda.value = data.modo_venda || "whatsapp";
-  tema_site.value = data.tema_site || "padrao";
-  banner_descricao.value = data.banner_descricao || "";
+  data.forEach(p=>{
 
-  if(data.logo_url){
-    logo_preview.src=data.logo_url;
-    logo_preview.style.display="block";
-  }
+    const itens = p.itens.map(i=>
+      `• ${i.nome} (${i.cor}) x${i.qtd}`
+    ).join("<br>");
 
-  if(data.banner_url){
-    banner_preview.src=data.banner_url;
-    banner_preview.style.display="block";
-  }
+    listaPedidos.innerHTML += `
+      <div class="pedido">
+        <div class="status ${p.status}">
+          Status: ${p.status.toUpperCase()}
+        </div>
+
+        <strong>Cliente:</strong> ${p.cliente_nome}<br>
+        <strong>Telefone:</strong> ${p.cliente_telefone}<br>
+
+        <hr>
+
+        <strong>Endereço:</strong><br>
+        ${p.cliente_rua}, ${p.cliente_numero}<br>
+        ${p.cliente_bairro} - ${p.cliente_cidade}/${p.cliente_estado}<br>
+        CEP: ${p.cliente_cep}<br>
+
+        <hr>
+
+        <strong>Itens:</strong><br>
+        ${itens}
+
+        <hr>
+        <strong>Total:</strong> R$ ${Number(p.total).toFixed(2)}
+
+        ${p.status === "novo"
+          ? `<br><button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">
+              Aceitar Pedido
+            </button>`
+          : ""}
+      </div>
+    `;
+  });
 }
 
-logo_file.onchange=()=>{
-  const f=logo_file.files[0];
-  if(f){
-    logo_preview.src=URL.createObjectURL(f);
-    logo_preview.style.display="block";
-  }
-};
+window.aceitarPedido = async function(id){
 
-banner_file.onchange=()=>{
-  const f=banner_file.files[0];
-  if(f){
-    banner_preview.src=URL.createObjectURL(f);
-    banner_preview.style.display="block";
+  const { data:pedido } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("id",id)
+    .single();
+
+  // Atualiza status
+  await supabase
+    .from("pedidos")
+    .update({ status:"aceito" })
+    .eq("id",id);
+
+  // Monta mensagem WhatsApp
+  let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido foi aceito ✅\n\n`;
+
+  pedido.itens.forEach(i=>{
+    texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
+  });
+
+  texto += `\n💰 Total: R$ ${Number(pedido.total).toFixed(2)}`;
+  texto += `\n\n⏳ Estamos aguardando o pagamento.`;
+
+  let numero = pedido.cliente_telefone.replace(/\D/g,'');
+
+  if(!numero.startsWith("55")){
+    numero = "55"+numero;
   }
-};
+
+  window.open(
+    `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
+    "_blank"
+  );
+
+  carregarPedidos();
+}
 
 iniciar();
-</script>
 
+</script>
 </body>
 </html>
