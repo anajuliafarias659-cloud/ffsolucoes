@@ -5,57 +5,7 @@
 <title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<style>
-body{
-  margin:0;
-  font-family:Arial;
-  background:#020617;
-  color:#fff;
-  padding:20px;
-}
-h2{
-  text-align:center;
-  margin-top:40px;
-}
-.pedido{
-  background:#0f172a;
-  border:1px solid #1e293b;
-  padding:15px;
-  border-radius:15px;
-  margin-bottom:15px;
-}
-.status{
-  font-weight:bold;
-  margin-bottom:10px;
-}
-.novo{ color:#22c55e; }
-.aceito{ color:#facc15; }
-.historico{ color:#94a3b8; }
-button{
-  padding:6px 10px;
-  border:none;
-  border-radius:6px;
-  cursor:pointer;
-  margin-top:6px;
-  margin-right:5px;
-}
-.btn-aceitar{ background:#22c55e; color:#000; }
-.btn-historico{ background:#3b82f6; color:#fff; }
-.btn-excluir{ background:#ef4444; color:#fff; }
-</style>
-</head>
-<body>
-
-<h2>📦 Pedidos Ativos</h2>
-<div id="listaPedidos"></div>
-
-<h2>📁 Histórico</h2>
-<div id="listaHistorico"></div>
-
 <script type="module">
-
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
 
 const supabase = createClient(
@@ -63,33 +13,15 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let app_id = null;
+const app_id = new URLSearchParams(window.location.search).get("app_id");
 
-async function iniciar(){
-
-  const { data:{ session } } = await supabase.auth.getSession();
-
-  if(!session){
-    alert("Faça login");
-    window.location.href="/auth/login.html";
-    return;
-  }
-
-  const { data:user, error } = await supabase
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", session.user.id)
-    .single();
-
-  if(error || !user){
-    alert("Usuário não encontrado na tabela usuarios");
-    console.error(error);
-    return;
-  }
-
-  app_id = user.app_id;
-  carregarPedidos();
+if(!app_id){
+  alert("APP_ID não informado na URL");
 }
+
+window.addEventListener("DOMContentLoaded", ()=>{
+  if(app_id) carregarPedidos();
+});
 
 async function carregarPedidos(){
 
@@ -110,20 +42,17 @@ async function carregarPedidos(){
 
   (data || []).forEach(p=>{
 
-    const itens = (p.itens || []).map(i => {
-
+    const itens = (p.itens || []).map(i=>{
       const nome = i.nome || i.nome_produto || "Produto";
       const cor = i.cor || "";
       const qtd = i.qtd || i.quantidade || 1;
-
       return `• ${nome} ${cor ? "(" + cor + ")" : ""} x${qtd}`;
-
     }).join("<br>");
 
     const card = `
       <div class="pedido">
-        <div class="status ${p.status || "novo"}">
-          Status: ${(p.status || "novo").toUpperCase()}
+        <div class="status ${p.status}">
+          Status: ${p.status?.toUpperCase() || "NOVO"}
         </div>
 
         <strong>Cliente:</strong> ${p.cliente_nome || "-"}<br>
@@ -139,7 +68,7 @@ async function carregarPedidos(){
         <hr>
 
         <strong>Itens:</strong><br>
-        ${itens || "-"}
+        ${itens}
 
         <hr>
         <strong>Total:</strong> R$ ${Number(p.total || 0).toFixed(2)}
@@ -164,7 +93,6 @@ async function carregarPedidos(){
   });
 }
 
-/* ===== ACEITAR ===== */
 window.aceitarPedido = async function(id){
 
   const { data:pedido } = await supabase
@@ -173,13 +101,15 @@ window.aceitarPedido = async function(id){
     .eq("id",id)
     .single();
 
+  if(!pedido) return;
+
   await supabase
     .from("pedidos")
     .update({ status:"aceito" })
     .eq("id",id);
 
   if(!pedido.cliente_telefone){
-    alert("Cliente não tem telefone cadastrado");
+    alert("Cliente não tem telefone");
     carregarPedidos();
     return;
   }
@@ -201,7 +131,7 @@ window.aceitarPedido = async function(id){
   let numero = pedido.cliente_telefone.replace(/\D/g,'');
 
   if(!numero.startsWith("55")){
-    numero = "55"+numero;
+    numero = "55" + numero;
   }
 
   window.open(
@@ -212,18 +142,17 @@ window.aceitarPedido = async function(id){
   carregarPedidos();
 }
 
-/* ===== HISTÓRICO ===== */
 window.moverHistorico = async function(id){
   await supabase
     .from("pedidos")
     .update({ status:"historico" })
     .eq("id",id);
+
   carregarPedidos();
 }
 
-/* ===== EXCLUIR ===== */
 window.excluirPedido = async function(id){
-  if(!confirm("Tem certeza que deseja excluir este pedido?")) return;
+  if(!confirm("Deseja excluir este pedido?")) return;
 
   await supabase
     .from("pedidos")
@@ -232,9 +161,60 @@ window.excluirPedido = async function(id){
 
   carregarPedidos();
 }
-
-iniciar();
-
 </script>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial;
+  background:#020617;
+  color:#fff;
+  padding:20px;
+}
+
+h2{
+  margin-top:40px;
+}
+
+.pedido{
+  background:#0f172a;
+  border:1px solid #1e293b;
+  padding:15px;
+  border-radius:15px;
+  margin-bottom:15px;
+}
+
+.status{
+  font-weight:bold;
+  margin-bottom:10px;
+}
+
+.novo{ color:#22c55e; }
+.aceito{ color:#facc15; }
+.historico{ color:#94a3b8; }
+
+button{
+  padding:6px 10px;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+  margin-top:6px;
+  margin-right:5px;
+}
+
+.btn-aceitar{ background:#22c55e; color:#000; }
+.btn-historico{ background:#3b82f6; color:#fff; }
+.btn-excluir{ background:#ef4444; color:#fff; }
+</style>
+</head>
+
+<body>
+
+<h2>📦 Pedidos Ativos</h2>
+<div id="listaPedidos"></div>
+
+<h2>📁 Histórico</h2>
+<div id="listaHistorico"></div>
+
 </body>
 </html>
