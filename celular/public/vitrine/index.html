@@ -461,8 +461,7 @@ body{
   </div>
 </div>
     
-
- <script type="module">
+<script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
 
 const supabase = createClient(
@@ -473,14 +472,20 @@ const supabase = createClient(
 const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 
 let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
-let todosProdutos=[];
+let todosProdutos = [];
 
+/* =============================
+   SALVAR CARRINHO
+============================= */
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
-  contadorCarrinho.innerText =
+  document.getElementById("contadorCarrinho").innerText =
     carrinho.reduce((acc,i)=>acc+(i.qtd||1),0);
 }
 
+/* =============================
+   CARREGAR DADOS
+============================= */
 async function carregar(){
 
   const { data:config } = await supabase
@@ -490,14 +495,14 @@ async function carregar(){
     .maybeSingle();
 
   if(config){
-    nomeLoja.innerText = config.nome_site || "";
-    if(config.logo_url) logoLoja.src = config.logo_url;
+    document.getElementById("nomeLoja").innerText = config.nome_site || "";
+    if(config.logo_url) document.getElementById("logoLoja").src = config.logo_url;
 
     if(config.banner_url){
-      bannerArea.innerHTML =
+      document.getElementById("bannerArea").innerHTML =
         `<img src="${config.banner_url}">`;
     } else if(config.banner_descricao){
-      bannerArea.innerHTML =
+      document.getElementById("bannerArea").innerHTML =
         `<div class="banner-text">${config.banner_descricao}</div>`;
     }
   }
@@ -508,9 +513,9 @@ async function carregar(){
     .eq("app_id",APP_ID)
     .eq("ativo",true);
 
-  listaCategorias.innerHTML =
+  document.getElementById("listaCategorias").innerHTML =
     `<button class="ativo" onclick="filtrar('todos',this)">Todos</button>` +
-    cats.map(c =>
+    (cats || []).map(c =>
       `<button onclick="filtrar('${c.nome}',this)">${c.nome}</button>`
     ).join("");
 
@@ -524,6 +529,9 @@ async function carregar(){
   renderizar(todosProdutos);
 }
 
+/* =============================
+   FILTRO
+============================= */
 window.filtrar = function(cat,btn){
   document.querySelectorAll(".categorias button")
     .forEach(b=>b.classList.remove("ativo"));
@@ -538,17 +546,18 @@ window.filtrar = function(cat,btn){
   }
 }
 
+/* =============================
+   RENDERIZAR PRODUTOS
+============================= */
 function renderizar(lista){
+  const listaProdutos = document.getElementById("listaProdutos");
   listaProdutos.innerHTML="";
 
   lista.forEach(p=>{
 
     let imagens=[];
-    try{
-      imagens = JSON.parse(p.imagens || "[]");
-    }catch{
-      imagens=[];
-    }
+    try{ imagens = JSON.parse(p.imagens || "[]"); }
+    catch{ imagens=[]; }
 
     const card=document.createElement("div");
     card.className="card";
@@ -556,7 +565,7 @@ function renderizar(lista){
     card.innerHTML = `
       <div class="galeria">
         <div class="slider">
-          ${imagens.length ? imagens.map((img,i)=>`
+          ${imagens.length ? imagens.map(img=>`
             <div class="slide">
               <img src="${img}" class="img-produto">
             </div>
@@ -566,72 +575,13 @@ function renderizar(lista){
             </div>
           `}
         </div>
-
-        ${imagens.length > 1 ? `
-        <div class="bolinhas">
-          ${imagens.map((_,i)=>`
-            <span class="dot ${i===0?'ativa':''}" data-index="${i}"></span>
-          `).join("")}
-        </div>
-        ` : ``}
       </div>
 
       <h4>${p.nome}</h4>
-
-      <div class="descricao-produto">
-        ${p.descricao || ""}
-      </div>
-
-      <div class="preco">
-        R$ ${Number(p.preco).toFixed(2)}
-      </div>
-
+      <div class="descricao-produto">${p.descricao || ""}</div>
+      <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
       <button class="btn-add">Adicionar</button>
     `;
-
-    card.onclick=()=>{
-      document.querySelectorAll(".card")
-        .forEach(c=>c.classList.remove("aberto"));
-
-      card.classList.add("aberto");
-
-      setTimeout(()=>{
-        card.scrollIntoView({
-          behavior:"smooth",
-          block:"start"
-        });
-      },150);
-    };
-
-    // ===== SLIDER FUNCIONAMENTO =====
-    const slider = card.querySelector(".slider");
-    const dots = card.querySelectorAll(".dot");
-
-    if(slider && dots.length){
-
-      slider.addEventListener("scroll", ()=>{
-        const index = Math.round(
-          slider.scrollLeft / slider.clientWidth
-        );
-
-        dots.forEach(d=>d.classList.remove("ativa"));
-        if(dots[index]) dots[index].classList.add("ativa");
-      });
-// ===== ABRIR IMAGEM FULLSCREEN =====
-
-
-      dots.forEach(dot=>{
-        dot.onclick=(e)=>{
-          e.stopPropagation();
-          const index = dot.dataset.index;
-
-          slider.scrollTo({
-            left: slider.clientWidth * index,
-            behavior: "smooth"
-          });
-        };
-      });
-    }
 
     card.querySelector(".btn-add").onclick=(e)=>{
       e.stopPropagation();
@@ -640,97 +590,14 @@ function renderizar(lista){
       else carrinho.push({...p,qtd:1});
       salvar();
     };
-// ABRIR FULLSCREEN VIEWER
-card.querySelectorAll(".img-produto").forEach((img,i)=>{
-  img.onclick=(e)=>{
-    e.stopPropagation();
-    abrirViewer(imagens, i);
-  };
-});
+
     listaProdutos.appendChild(card);
   });
 }
 
-
- let viewer, viewerSlider, viewerDots;
-
-window.addEventListener("DOMContentLoaded", ()=>{
-
-  viewer = document.getElementById("viewer");
-  viewerSlider = document.querySelector(".viewer-slider");
-  viewerDots = document.querySelector(".viewer-dots");
-
-});
-
-function abrirViewer(imagens, indexInicial=0){
-
-  viewerSlider.innerHTML="";
-  viewerDots.innerHTML="";
-
-  imagens.forEach((img,i)=>{
-
-    const slide = document.createElement("div");
-    slide.className="viewer-slide";
-    slide.innerHTML=`<img src="${img}">`;
-    viewerSlider.appendChild(slide);
-
-    const dot = document.createElement("div");
-    dot.className="viewer-dot" + (i===indexInicial?" ativa":"");
-    viewerDots.appendChild(dot);
-
-  });
-
-  viewer.style.display="flex";
-
-  setTimeout(()=>{
-    viewerSlider.scrollLeft =
-      viewerSlider.clientWidth * indexInicial;
-  },50);
-
-  viewerSlider.onscroll = ()=>{
-    const index = Math.round(
-      viewerSlider.scrollLeft / viewerSlider.clientWidth
-    );
-
-    document.querySelectorAll(".viewer-dot")
-      .forEach(d=>d.classList.remove("ativa"));
-
-    if(document.querySelectorAll(".viewer-dot")[index]){
-      document.querySelectorAll(".viewer-dot")[index]
-        .classList.add("ativa");
-    }
-  };
-}
-
-window.addEventListener("DOMContentLoaded", ()=>{
-
-  viewer.onclick=(e)=>{
-    if(e.target===viewer){
-      viewer.style.display="none";
-    }
-  };
-
-});
-// BOTÃO FECHAR VIEWER
-document.querySelector(".viewer-close").onclick = ()=>{
-  viewer.style.display = "none";
-};
- 
-  
-  
-    nome: clienteNome.value,
-    telefone: clienteTelefone.value,
-    endereco: clienteEndereco.value,
-    numero: clienteNumero.value,
-    bairro: clienteBairro.value,
-    cep: clienteCep.value,
-    cidade: clienteCidade.value,
-    estado: clienteEstado.value
-  };
- 
-// =============================
-// ABRIR CARRINHO
-// =============================
+/* =============================
+   ABRIR CARRINHO
+============================= */
 document.getElementById("btnCarrinho").onclick = () => {
 
   if(!carrinho.length){
@@ -738,12 +605,10 @@ document.getElementById("btnCarrinho").onclick = () => {
     return;
   }
 
-  const modal = document.getElementById("modalCarrinho");
   const lista = document.getElementById("itensCarrinho");
   const totalSpan = document.getElementById("total");
 
   lista.innerHTML = "";
-
   let total = 0;
 
   carrinho.forEach(item=>{
@@ -759,13 +624,12 @@ document.getElementById("btnCarrinho").onclick = () => {
   });
 
   totalSpan.innerText = total.toFixed(2);
-
-  modal.style.display = "flex";
+  document.getElementById("modalCarrinho").style.display = "flex";
 };
-carregar();
-salvar();
 
-// PEGAR LOCALIZAÇÃO
+/* =============================
+   LOCALIZAÇÃO
+============================= */
 document.getElementById("btnLocalizacao").onclick = ()=>{
 
   if(!navigator.geolocation){
@@ -780,15 +644,15 @@ document.getElementById("btnLocalizacao").onclick = ()=>{
     document.getElementById("clienteLat").value = lat;
     document.getElementById("clienteLng").value = lng;
 
-    alert("Localização capturada com sucesso!");
+    alert("Localização capturada!");
   },()=>{
     alert("Não foi possível obter localização");
   });
-
 };
-// =============================
-// FINALIZAR PEDIDO
-// =============================
+
+/* =============================
+   FINALIZAR PEDIDO
+============================= */
 document.getElementById("btnFinalizarPedido").onclick = async ()=>{
 
   if(!carrinho.length){
@@ -804,7 +668,9 @@ document.getElementById("btnFinalizarPedido").onclick = async ()=>{
     bairro: clienteBairro.value,
     cep: clienteCep.value,
     cidade: clienteCidade.value,
-    estado: clienteEstado.value
+    estado: clienteEstado.value,
+    lat: document.getElementById("clienteLat")?.value || null,
+    lng: document.getElementById("clienteLng")?.value || null
   };
 
   if(!dados.nome || !dados.telefone){
@@ -828,14 +694,17 @@ document.getElementById("btnFinalizarPedido").onclick = async ()=>{
 
   if(error){
     alert("Erro ao salvar pedido");
+    console.log(error);
   }else{
     alert("Pedido enviado com sucesso!");
     carrinho = [];
     salvar();
     document.getElementById("modalCarrinho").style.display="none";
   }
-
 };
+
+carregar();
+salvar();
 </script>
 
 </body>
