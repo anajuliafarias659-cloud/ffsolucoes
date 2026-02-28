@@ -5,115 +5,7 @@
 <title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
-
-const supabase = createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-let app_id = null;
-
-window.addEventListener("DOMContentLoaded", iniciar);
-
-async function iniciar(){
-
-  const { data, error } = await supabase.auth.getUser();
-
-  if(error || !data.user){
-    console.log("Usuário não autenticado");
-    alert("Faça login primeiro");
-    window.location.href = "/auth/login.html";
-    return;
-  }
-
-  const { data:usuario, error:erroUsuario } = await supabase
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", data.user.id)
-    .single();
-
-  if(erroUsuario || !usuario){
-    alert("Erro ao buscar app_id");
-    return;
-  }
-
-  app_id = usuario.app_id;
-
-  carregarPedidos();
-}
-
-async function carregarPedidos(){
-
-  const { data, error } = await supabase
-    .from("pedidos")
-    .select("*")
-    .eq("app_id", app_id)
-    .order("created_at",{ascending:false});
-
-  if(error){
-    console.error(error);
-    alert("Erro ao carregar pedidos");
-    return;
-  }
-
-  listaPedidos.innerHTML="";
-  listaHistorico.innerHTML="";
-
-  (data || []).forEach(p=>{
-
-    const itens = (p.itens || []).map(i=>{
-      const nome = i.nome || i.nome_produto || "Produto";
-      const cor = i.cor || "";
-      const qtd = i.qtd || i.quantidade || 1;
-      return `• ${nome} ${cor ? "(" + cor + ")" : ""} x${qtd}`;
-    }).join("<br>");
-
-    const card = `
-      <div class="pedido">
-        <div class="status ${p.status}">
-          Status: ${p.status?.toUpperCase() || "NOVO"}
-        </div>
-
-        <strong>Cliente:</strong> ${p.cliente_nome || "-"}<br>
-        <strong>Telefone:</strong> ${p.cliente_telefone || "-"}<br>
-
-        <hr>
-
-        <strong>Endereço:</strong><br>
-        ${p.cliente_rua || "-"}, ${p.cliente_numero || "-"}<br>
-        ${p.cliente_bairro || "-"} - ${p.cliente_cidade || "-"}/${p.cliente_estado || "-"}<br>
-        CEP: ${p.cliente_cep || "-"}<br>
-
-        <hr>
-
-        <strong>Itens:</strong><br>
-        ${itens}
-
-        <hr>
-        <strong>Total:</strong> R$ ${Number(p.total || 0).toFixed(2)}
-
-        <br><br>
-
-        ${p.status !== "historico" ? `
-          <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Aceitar</button>
-          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
-        ` : ""}
-
-        <button class="btn-excluir" onclick="excluirPedido('${p.id}')">Excluir</button>
-      </div>
-    `;
-
-    if(p.status === "historico"){
-      listaHistorico.innerHTML += card;
-    } else {
-      listaPedidos.innerHTML += card;
-    }
-
-  });
-}
-</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
 body{
@@ -125,7 +17,7 @@ body{
 }
 
 h2{
-  margin-top:40px;
+  text-align:center;
 }
 
 .pedido{
@@ -143,30 +35,149 @@ h2{
 
 .novo{ color:#22c55e; }
 .aceito{ color:#facc15; }
-.historico{ color:#94a3b8; }
 
 button{
-  padding:6px 10px;
+  padding:8px 12px;
   border:none;
   border-radius:6px;
   cursor:pointer;
-  margin-top:6px;
-  margin-right:5px;
+  margin-top:8px;
 }
 
-.btn-aceitar{ background:#22c55e; color:#000; }
-.btn-historico{ background:#3b82f6; color:#fff; }
-.btn-excluir{ background:#ef4444; color:#fff; }
+.btn-aceitar{
+  background:#22c55e;
+  color:#000;
+}
 </style>
 </head>
-
 <body>
 
-<h2>📦 Pedidos Ativos</h2>
+<h2>📦 Pedidos Online</h2>
+
 <div id="listaPedidos"></div>
 
-<h2>📁 Histórico</h2>
-<div id="listaHistorico"></div>
+<script type="module">
 
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
+
+const supabase = createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let app_id = null;
+
+async function iniciar(){
+
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session){
+    alert("Faça login");
+    return;
+  }
+
+  const { data:user } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  app_id = user.app_id;
+
+  carregarPedidos();
+}
+
+async function carregarPedidos(){
+
+  const { data } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("created_at",{ascending:false});
+
+  listaPedidos.innerHTML="";
+
+  data.forEach(p=>{
+
+    const itens = p.itens.map(i=>
+      `• ${i.nome} (${i.cor}) x${i.qtd}`
+    ).join("<br>");
+
+    listaPedidos.innerHTML += `
+      <div class="pedido">
+        <div class="status ${p.status}">
+          Status: ${p.status.toUpperCase()}
+        </div>
+
+        <strong>Cliente:</strong> ${p.cliente_nome}<br>
+        <strong>Telefone:</strong> ${p.cliente_telefone}<br>
+
+        <hr>
+
+        <strong>Endereço:</strong><br>
+        ${p.cliente_rua}, ${p.cliente_numero}<br>
+        ${p.cliente_bairro} - ${p.cliente_cidade}/${p.cliente_estado}<br>
+        CEP: ${p.cliente_cep}<br>
+
+        <hr>
+
+        <strong>Itens:</strong><br>
+        ${itens}
+
+        <hr>
+        <strong>Total:</strong> R$ ${Number(p.total).toFixed(2)}
+
+        ${p.status === "novo"
+          ? `<br><button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">
+              Aceitar Pedido
+            </button>`
+          : ""}
+      </div>
+    `;
+  });
+}
+
+window.aceitarPedido = async function(id){
+
+  const { data:pedido } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("id",id)
+    .single();
+
+  // Atualiza status
+  await supabase
+    .from("pedidos")
+    .update({ status:"aceito" })
+    .eq("id",id);
+
+  // Monta mensagem WhatsApp
+  let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido foi aceito ✅\n\n`;
+
+  pedido.itens.forEach(i=>{
+    texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
+  });
+
+  texto += `\n💰 Total: R$ ${Number(pedido.total).toFixed(2)}`;
+  texto += `\n\n⏳ Estamos aguardando o pagamento.`;
+
+  let numero = pedido.cliente_telefone.replace(/\D/g,'');
+
+  if(!numero.startsWith("55")){
+    numero = "55"+numero;
+  }
+
+  window.open(
+    `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
+    "_blank"
+  );
+
+  carregarPedidos();
+}
+
+iniciar();
+
+</script>
 </body>
 </html>
