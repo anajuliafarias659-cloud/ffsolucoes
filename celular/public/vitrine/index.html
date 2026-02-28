@@ -148,8 +148,7 @@ body{
   cursor:pointer;
 }
 
-/* ===== TEMAS ===== */
-
+/* TEMAS (mantido igual) */
 .tema-natal{ background:#8b0000; }
 .tema-natal .topo{ background:#006400; }
 .tema-natal .card{ border:2px solid #00ff88; }
@@ -184,7 +183,6 @@ body{
 }
 
 /* ===== MODAL ===== */
-
 .modal-produto{
   position:fixed;
   inset:0;
@@ -220,6 +218,26 @@ body{
   font-size:22px;
   cursor:pointer;
 }
+
+.cores-box{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+
+.cor-item{
+  border:1px solid #ccc;
+  border-radius:8px;
+  padding:6px 10px;
+  cursor:pointer;
+  font-size:13px;
+}
+
+.cor-item.ativa{
+  border-color:#0071e3;
+  background:#eef5ff;
+}
 </style>
 </head>
 
@@ -237,14 +255,18 @@ body{
 <section class="produtos" id="listaProdutos"></section>
 <button id="btnCarrinho">🛒 <span id="contadorCarrinho">0</span></button>
 
-<!-- MODAL -->
 <div class="modal-produto" id="modalProduto">
   <div class="modal-conteudo">
     <span class="fechar-modal" onclick="fecharModal()">✖</span>
     <img id="modalImg">
     <h2 id="modalNome"></h2>
     <div class="preco" id="modalPreco"></div>
+    <div id="modalCategoria"></div>
     <p id="modalDescricao"></p>
+
+    <div id="modalCores"></div>
+    <div id="modalEstoque"></div>
+
     <button class="btn-add" id="modalAdd">Adicionar ao Carrinho</button>
   </div>
 </div>
@@ -261,6 +283,8 @@ const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 
 let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
 let todosProdutos=[];
+let corSelecionada=null;
+let produtoAtual=null;
 
 function salvar(){
   localStorage.setItem("carrinho", JSON.stringify(carrinho));
@@ -319,11 +343,7 @@ function renderizar(lista){
   lista.forEach(p=>{
 
     let imagens=[];
-    try{
-      imagens = JSON.parse(p.imagens || "[]");
-    }catch{
-      imagens=[];
-    }
+    try{ imagens=JSON.parse(p.imagens||"[]"); }catch{}
 
     const card=document.createElement("div");
     card.className="card";
@@ -346,44 +366,81 @@ function renderizar(lista){
       <button class="btn-add">Adicionar</button>
     `;
 
-    const principal = card.querySelector(".principal");
-
-    card.querySelectorAll(".mini-img").forEach(img=>{
-      img.onclick=(e)=>{
-        e.stopPropagation();
-        if(principal) principal.src = img.src;
-      };
-    });
-
     card.querySelector(".btn-add").onclick=(e)=>{
       e.stopPropagation();
       carrinho.push({ ...p, qtd:1 });
       salvar();
     };
 
-    card.onclick=()=>{
-      abrirModal(p, imagens);
-    };
+    card.onclick=()=> abrirModal(p, imagens);
 
     listaProdutos.appendChild(card);
   });
 }
 
-window.abrirModal = function(produto, imagens){
+function abrirModal(produto, imagens){
+  produtoAtual=produto;
   modalProduto.style.display="flex";
-  modalImg.src = imagens[0] || "";
-  modalNome.innerText = produto.nome;
-  modalPreco.innerText = "R$ " + Number(produto.preco).toFixed(2);
-  modalDescricao.innerText = produto.descricao || "Sem descrição disponível.";
+
+  modalImg.src=imagens[0]||"";
+  modalNome.innerText=produto.nome;
+  modalPreco.innerText="R$ "+Number(produto.preco).toFixed(2);
+  modalDescricao.innerText=produto.descricao||"Sem descrição disponível.";
+  modalCategoria.innerText="Categoria: "+(produto.categoria||"");
+
+  renderizarCores(produto);
 
   modalAdd.onclick=()=>{
-    carrinho.push({ ...produto, qtd:1 });
+    carrinho.push({
+      ...produto,
+      cor: corSelecionada?.cor || null,
+      qtd:1
+    });
     salvar();
     fecharModal();
   };
 }
 
-window.fecharModal = function(){
+function renderizarCores(produto){
+  let variacoes=[];
+  try{ variacoes=JSON.parse(produto.variacoes||"[]"); }catch{}
+
+  if(!variacoes.length){
+    modalCores.innerHTML="";
+    modalEstoque.innerText="";
+    corSelecionada=null;
+    return;
+  }
+
+  modalCores.innerHTML="<b>Cores:</b><div class='cores-box'>" +
+    variacoes.map((v,i)=>`
+      <div class="cor-item" onclick="selecionarCor(${i})">
+        ${v.cor}
+      </div>
+    `).join("") + "</div>";
+
+  selecionarCor(0);
+}
+
+window.selecionarCor=function(i){
+  let variacoes=JSON.parse(produtoAtual.variacoes||"[]");
+  corSelecionada=variacoes[i];
+
+  document.querySelectorAll(".cor-item").forEach(el=>el.classList.remove("ativa"));
+  document.querySelectorAll(".cor-item")[i].classList.add("ativa");
+
+  modalEstoque.innerText="Disponível: "+corSelecionada.estoque;
+
+  if(corSelecionada.estoque<=0){
+    modalAdd.disabled=true;
+    modalAdd.innerText="Indisponível";
+  }else{
+    modalAdd.disabled=false;
+    modalAdd.innerText="Adicionar ao Carrinho";
+  }
+}
+
+function fecharModal(){
   modalProduto.style.display="none";
 }
 
