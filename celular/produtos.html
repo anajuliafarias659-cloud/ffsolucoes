@@ -24,11 +24,6 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 .preco{color:#22c55e;font-weight:bold;font-size:16px}
 small{opacity:.7}
 .sem-foto{height:110px;display:flex;align-items:center;justify-content:center;opacity:.3}
-#preview{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
-.preview-item{position:relative}
-.preview-item img{width:90px;height:90px;object-fit:cover;border-radius:10px}
-.preview-item button{position:absolute;top:-6px;right:-6px;background:red;color:#fff;border:none;border-radius:50%;width:22px;height:22px}
-.cor-box{background:#111;padding:6px;border-radius:6px;margin-top:6px;font-size:13px}
 </style>
 </head>
 
@@ -48,18 +43,7 @@ small{opacity:.7}
   <input id="preco" type="number" step="0.01" placeholder="Preço">
   <input id="estoque" type="number" placeholder="Estoque geral">
   <textarea id="descricao" placeholder="Descrição do produto"></textarea>
-
   <select id="categoria"></select>
-
-  <input id="corInput" placeholder="Cor (ex: Preto)">
-  <input id="estoqueCorInput" type="number" placeholder="Estoque dessa cor">
-  <button type="button" onclick="adicionarCor()">Adicionar cor</button>
-  <div id="listaCores"></div>
-
-  <input id="camera" type="file" accept="image/*" hidden>
-  <button type="button" onclick="tirarFoto()">📷 Adicionar foto (até 3)</button>
-
-  <div id="preview"></div>
 
   <button id="btnSalvar" type="button" onclick="salvar()">Cadastrar celular</button>
 </div>
@@ -79,14 +63,10 @@ const sb = supabase.createClient(
 );
 
 let admin = null;
-let fotosTemp = [];
-let fotosExistentes = [];
-let variacoes = [];
-const LIMITE = 3;
 let editando = false;
 let produtoEditandoId = null;
 
-/* ========= FORMATAR REAL ========= */
+/* ================= FORMATAR REAL ================= */
 function formatarReal(valor){
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -94,30 +74,112 @@ function formatarReal(valor){
   }).format(Number(valor));
 }
 
-/* ========= RESTANTE DO SEU CÓDIGO ORIGINAL ========= */
-/* (NÃO FOI ALTERADO NADA NA LÓGICA, SOMENTE EXIBIÇÃO DE PREÇO) */
+/* ================= SESSÃO ================= */
+async function verificarSessao(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){
+    window.location.href="/auth/login.html";
+    return null;
+  }
+  return session.user.id;
+}
 
-/* ===== LISTAR ===== */
+async function carregarAdmin(){
+  const userId = await verificarSessao();
+  if(!userId) return;
+
+  const { data: usuario } = await sb
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  admin = usuario;
+}
+
+/* ================= SALVAR ================= */
+async function salvar(){
+
+  if(!nome.value || preco.value<=0){
+    alert("Nome e preço obrigatórios");
+    return;
+  }
+
+  const payload = {
+    nome:nome.value,
+    preco:Number(preco.value),
+    estoque:Number(estoque.value||0),
+    descricao:descricao.value,
+    categoria:categoria.value
+  };
+
+  if(editando){
+    await sb.from("produtos").update(payload).eq("id",produtoEditandoId);
+  }else{
+    await sb.from("produtos").insert({
+      ...payload,
+      app_id:admin.app_id,
+      ativo:true
+    });
+  }
+
+  limpar();
+  carregar();
+  alert("✅ Produto salvo");
+}
+
+/* ================= LISTAR ================= */
 async function carregar(){
   const {data}=await sb
     .from("produtos")
     .select("*")
     .eq("app_id",admin.app_id);
 
-  lista.innerHTML=(data||[]).map(p=>{
-    const imgs=JSON.parse(p.imagens||"[]");
-    return `
+  lista.innerHTML=(data||[]).map(p=>`
       <div class="produto">
-        ${imgs[0]?`<img src="${imgs[0]}">`:`<div class="sem-foto">Sem foto</div>`}
         <b>${p.nome}</b>
         <div class="preco">${formatarReal(p.preco)}</div>
         <small>Estoque geral: ${p.estoque}</small><br>
         <small>${p.descricao||""}</small><br><br>
         <button onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
         <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
-      </div>`;
-  }).join("");
+      </div>
+  `).join("");
 }
+
+/* ================= EDITAR ================= */
+function editar(p){
+  editando=true;
+  produtoEditandoId=p.id;
+  nome.value=p.nome;
+  preco.value=p.preco;
+  estoque.value=p.estoque;
+  descricao.value=p.descricao||"";
+  categoria.value=p.categoria;
+  btnSalvar.innerText="💾 Salvar alterações";
+}
+
+/* ================= EXCLUIR ================= */
+async function excluir(id){
+  if(confirm("Excluir produto?")){
+    await sb.from("produtos").delete().eq("id",id);
+    carregar();
+  }
+}
+
+function limpar(){
+  editando=false;
+  produtoEditandoId=null;
+  nome.value=preco.value=estoque.value=descricao.value="";
+  btnSalvar.innerText="Cadastrar celular";
+}
+
+/* ================= INIT ================= */
+carregarAdmin().then(()=>{
+  if(admin){
+    carregar();
+  }
+});
 
 </script>
 
