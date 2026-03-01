@@ -95,6 +95,47 @@ function formatarReal(valor){
   });
 }
 
+/* ===== SESSÃO ===== */
+async function verificarSessao(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){
+    window.location.href="/auth/login.html";
+    return null;
+  }
+  return session.user.id;
+}
+
+async function carregarAdmin(){
+  const userId = await verificarSessao();
+  if(!userId) return;
+
+  const { data: usuario } = await sb
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  admin = usuario;
+}
+
+/* ===== CATEGORIAS ===== */
+async function carregarCategorias(){
+  const { data } = await sb
+    .from("categorias")
+    .select("*")
+    .eq("app_id", admin.app_id)
+    .order("nome");
+
+  if(!data || data.length === 0){
+    categoria.innerHTML = "<option value=''>Nenhuma categoria cadastrada</option>";
+    return;
+  }
+
+  categoria.innerHTML = data.map(c =>
+    `<option value="${c.nome}">${c.nome}</option>`
+  ).join("");
+}
+
 /* ===== FOTO ===== */
 function tirarFoto(){
   if(fotosTemp.length + fotosExistentes.length >= LIMITE){
@@ -140,6 +181,37 @@ function removerTemp(i){
   atualizarPreview();
 }
 
+/* ===== VARIAÇÕES ===== */
+function adicionarCor(){
+  if(!corInput.value || estoqueCorInput.value < 0){
+    alert("Informe cor e estoque");
+    return;
+  }
+
+  variacoes.push({
+    cor: corInput.value,
+    estoque: Number(estoqueCorInput.value)
+  });
+
+  corInput.value="";
+  estoqueCorInput.value="";
+  atualizarCores();
+}
+
+function atualizarCores(){
+  listaCores.innerHTML = variacoes.map((v,i)=>`
+    <div class="cor-box">
+      ${v.cor} - ${v.estoque} unidades
+      <button onclick="removerCor(${i})">x</button>
+    </div>
+  `).join("");
+}
+
+function removerCor(i){
+  variacoes.splice(i,1);
+  atualizarCores();
+}
+
 /* ===== SALVAR ===== */
 async function salvar(){
 
@@ -152,7 +224,9 @@ async function salvar(){
 
   for(const foto of fotosTemp){
     const path=`${admin.app_id}/${Date.now()}_${Math.random()}.jpg`;
+
     await sb.storage.from("produtos").upload(path,foto,{upsert:true});
+
     imagens.push(
       sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
     );
@@ -183,6 +257,27 @@ async function salvar(){
   alert("✅ Produto salvo");
 }
 
+/* ===== EDITAR ===== */
+function editar(p){
+  editando=true;
+  produtoEditandoId=p.id;
+
+  nome.value=p.nome;
+  preco.value=p.preco;
+  estoque.value=p.estoque;
+  descricao.value=p.descricao||"";
+  categoria.value=p.categoria;
+
+  try{ fotosExistentes=JSON.parse(p.imagens||"[]"); }catch{ fotosExistentes=[]; }
+  try{ variacoes=JSON.parse(p.variacoes||"[]"); }catch{ variacoes=[]; }
+
+  fotosTemp=[];
+  atualizarPreview();
+  atualizarCores();
+
+  btnSalvar.innerText="💾 Salvar alterações";
+}
+
 /* ===== LISTAR ===== */
 async function carregar(){
   const {data}=await sb
@@ -207,6 +302,14 @@ async function carregar(){
   }).join("");
 }
 
+/* ===== EXCLUIR ===== */
+async function excluir(id){
+  if(confirm("Excluir produto?")){
+    await sb.from("produtos").delete().eq("id",id);
+    carregar();
+  }
+}
+
 /* ===== LIMPAR ===== */
 function limpar(){
   editando=false;
@@ -223,6 +326,7 @@ function limpar(){
 /* ===== INIT ===== */
 carregarAdmin().then(()=>{
   if(admin){
+    carregarCategorias();
     carregar();
   }
 });
