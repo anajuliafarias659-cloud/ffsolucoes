@@ -53,6 +53,11 @@ small{opacity:.7}
 <option value="">Carregando categorias...</option>
 </select>
 
+<input id="corInput" placeholder="Cor (ex: Preto)">
+<input id="estoqueCorInput" type="number" placeholder="Estoque dessa cor">
+<button type="button" onclick="adicionarCor()">Adicionar cor</button>
+<div id="listaCores"></div>
+
 <input id="camera" type="file" accept="image/*" hidden>
 <button type="button" onclick="tirarFoto()">📷 Adicionar foto (até 3)</button>
 <div id="preview"></div>
@@ -75,8 +80,14 @@ const sb = supabase.createClient(
 );
 
 let admin = null;
+let fotosTemp = [];
+let fotosExistentes = [];
+let variacoes = [];
+const LIMITE = 3;
+let editando = false;
+let produtoEditandoId = null;
 
-/* ===== FUNÇÃO FORMATAR EM REAL ===== */
+/* ===== FORMATAR REAL ===== */
 function formatarReal(valor){
   return Number(valor).toLocaleString("pt-BR", {
     style: "currency",
@@ -84,34 +95,67 @@ function formatarReal(valor){
   });
 }
 
-/* ===== SESSÃO ===== */
-async function verificarSessao(){
-  const { data:{ session } } = await sb.auth.getSession();
-  if(!session){
-    window.location.href="/auth/login.html";
-    return null;
+/* ===== FOTO ===== */
+function tirarFoto(){
+  if(fotosTemp.length + fotosExistentes.length >= LIMITE){
+    alert("Máximo de 3 fotos por produto");
+    return;
   }
-  return session.user.id;
+  camera.click();
 }
 
-async function carregarAdmin(){
-  const userId = await verificarSessao();
-  if(!userId) return;
+camera.onchange = ()=>{
+  const file = camera.files[0];
+  if(!file) return;
+  fotosTemp.push(file);
+  camera.value="";
+  atualizarPreview();
+};
 
-  const { data: usuario } = await sb
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", userId)
-    .single();
+function atualizarPreview(){
+  preview.innerHTML="";
+  fotosExistentes.forEach((url,i)=>{
+    preview.innerHTML+=`
+      <div class="preview-item">
+        <img src="${url}">
+        <button onclick="removerExistente(${i})">×</button>
+      </div>`;
+  });
+  fotosTemp.forEach((f,i)=>{
+    preview.innerHTML+=`
+      <div class="preview-item">
+        <img src="${URL.createObjectURL(f)}">
+        <button onclick="removerTemp(${i})">×</button>
+      </div>`;
+  });
+}
 
-  admin = usuario;
+function removerExistente(i){
+  fotosExistentes.splice(i,1);
+  atualizarPreview();
+}
+
+function removerTemp(i){
+  fotosTemp.splice(i,1);
+  atualizarPreview();
 }
 
 /* ===== SALVAR ===== */
 async function salvar(){
+
   if(!nome.value || preco.value<=0){
     alert("Nome e preço obrigatórios");
     return;
+  }
+
+  let imagens=[...fotosExistentes];
+
+  for(const foto of fotosTemp){
+    const path=`${admin.app_id}/${Date.now()}_${Math.random()}.jpg`;
+    await sb.storage.from("produtos").upload(path,foto,{upsert:true});
+    imagens.push(
+      sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
+    );
   }
 
   const payload = {
@@ -119,14 +163,20 @@ async function salvar(){
     preco:Number(preco.value),
     estoque:Number(estoque.value||0),
     descricao:descricao.value,
-    categoria:categoria.value
+    categoria:categoria.value,
+    variacoes:JSON.stringify(variacoes),
+    imagens:JSON.stringify(imagens)
   };
 
-  await sb.from("produtos").insert({
-    ...payload,
-    app_id:admin.app_id,
-    ativo:true
-  });
+  if(editando){
+    await sb.from("produtos").update(payload).eq("id",produtoEditandoId);
+  }else{
+    await sb.from("produtos").insert({
+      ...payload,
+      app_id:admin.app_id,
+      ativo:true
+    });
+  }
 
   limpar();
   carregar();
@@ -141,26 +191,33 @@ async function carregar(){
     .eq("app_id",admin.app_id);
 
   lista.innerHTML=(data||[]).map(p=>{
+    const imgs=JSON.parse(p.imagens||"[]");
 
     return `
       <div class="produto">
-        <div class="sem-foto">Sem foto</div>
+        ${imgs[0]?`<img src="${imgs[0]}">`:`<div class="sem-foto">Sem foto</div>`}
         <b>${p.nome}</b>
         <div class="preco">${formatarReal(p.preco)}</div>
         <small>Estoque geral: ${p.estoque}</small><br>
-        <small>${p.descricao||""}</small>
+        <small>${p.descricao||""}</small><br><br>
+        <button onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
+        <button class="excluir" onclick="excluir('${p.id}')">Excluir</button>
       </div>
     `;
-
   }).join("");
 }
 
 /* ===== LIMPAR ===== */
 function limpar(){
-  nome.value="";
-  preco.value="";
-  estoque.value="";
-  descricao.value="";
+  editando=false;
+  produtoEditandoId=null;
+  nome.value=preco.value=estoque.value=descricao.value="";
+  variacoes=[];
+  fotosTemp=[];
+  fotosExistentes=[];
+  preview.innerHTML="";
+  listaCores.innerHTML="";
+  btnSalvar.innerText="Cadastrar celular";
 }
 
 /* ===== INIT ===== */
