@@ -19,6 +19,7 @@ body{
   padding:40px;
   border-radius:20px;
   width:400px;
+  max-width:92vw;
 }
 .codigo{
   font-size:22px;
@@ -26,6 +27,12 @@ body{
   background:#111827;
   padding:15px;
   border-radius:12px;
+  word-break:break-word;
+}
+.status{
+  color:#94a3b8;
+  font-size:14px;
+  min-height:18px;
 }
 button{
   padding:12px;
@@ -38,6 +45,12 @@ button{
 }
 .copiar{ background:#22c55e; }
 .ir{ background:#2563eb; }
+.atualizar{ background:#334155; }
+
+button:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
 </style>
 </head>
 
@@ -47,9 +60,11 @@ button{
   <h2>Pagamento Aprovado ✅</h2>
   <p>Seu código de renovação:</p>
 
-  <div class="codigo" id="codigoBox">Carregando...</div>
+  <div class="codigo" id="codigoBox">Aguardando...</div>
+  <div class="status" id="statusBox"></div>
 
-  <button class="copiar" onclick="copiarCodigo()">Copiar Código</button>
+  <button class="copiar" id="btnCopiar" onclick="copiarCodigo()" disabled>Copiar Código</button>
+  <button class="atualizar" onclick="buscarCodigo(true)">Atualizar agora</button>
   <button class="ir" onclick="irParaRenovar()">Ir para Renovar</button>
 </div>
 
@@ -59,30 +74,71 @@ import { supabase } from "../js/supabase.js";
 const params = new URLSearchParams(window.location.search);
 const payment_id = params.get("payment_id");
 
-async function buscarCodigo(){
+const codigoBox = document.getElementById("codigoBox");
+const statusBox = document.getElementById("statusBox");
+const btnCopiar = document.getElementById("btnCopiar");
 
+let codigoAtual = "";
+let tentativas = 0;
+let timer = null;
+
+function setStatus(msg){
+  statusBox.innerText = msg || "";
+}
+
+async function buscarCodigo(manual = false){
   if(!payment_id){
-    document.getElementById("codigoBox").innerText = "Pagamento não identificado.";
+    codigoBox.innerText = "Pagamento não identificado.";
+    setStatus("Faltou payment_id na URL.");
+    btnCopiar.disabled = true;
     return;
   }
+
+  if(manual){
+    setStatus("Atualizando...");
+  }
+
+  tentativas++;
 
   const { data, error } = await supabase
     .from("codigos_renovacao")
     .select("codigo")
     .eq("payment_id", payment_id)
-    .single();
+    .maybeSingle();
 
-  if(error || !data){
-    document.getElementById("codigoBox").innerText = "Aguardando geração do código...";
+  if(error){
+    console.log("Erro buscar código:", error);
+    codigoBox.innerText = "Aguardando...";
+    setStatus("Erro ao consultar. Tentando novamente...");
+    btnCopiar.disabled = true;
     return;
   }
 
-  document.getElementById("codigoBox").innerText = data.codigo;
+  if(!data?.codigo){
+    codigoBox.innerText = "Aguardando geração do código...";
+    setStatus(`Tentativa ${tentativas}... (o webhook pode levar alguns segundos)`);
+    btnCopiar.disabled = true;
+    return;
+  }
+
+  // achou
+  codigoAtual = data.codigo;
+  codigoBox.innerText = codigoAtual;
+  setStatus("Código gerado! Copie e cole na renovação.");
+  btnCopiar.disabled = false;
+
+  if(timer){
+    clearInterval(timer);
+    timer = null;
+  }
 }
 
 function copiarCodigo(){
-  const texto = document.getElementById("codigoBox").innerText;
-  navigator.clipboard.writeText(texto);
+  if(!codigoAtual){
+    alert("Ainda não gerou o código.");
+    return;
+  }
+  navigator.clipboard.writeText(codigoAtual);
   alert("Código copiado!");
 }
 
@@ -92,8 +148,22 @@ function irParaRenovar(){
 
 window.copiarCodigo = copiarCodigo;
 window.irParaRenovar = irParaRenovar;
+window.buscarCodigo = buscarCodigo;
 
+// primeira busca
 buscarCodigo();
+
+// auto retry: a cada 2s, por até 2 minutos (60 tentativas)
+timer = setInterval(async () => {
+  if(codigoAtual) return;
+  if(tentativas >= 60){
+    clearInterval(timer);
+    timer = null;
+    setStatus("Demorou demais. Clique em 'Atualizar agora' ou confira o pagamento.");
+    return;
+  }
+  await buscarCodigo();
+}, 2000);
 </script>
 
 </body>
