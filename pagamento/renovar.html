@@ -2,11 +2,11 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Plano Expirado</title>
+<title>Renovar Plano</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-body {
+body{
   margin:0;
   height:100vh;
   display:flex;
@@ -17,141 +17,111 @@ body {
   color:#fff;
   text-align:center;
 }
-.box {
+
+.box{
   background:#0f172a;
   padding:40px;
   border-radius:20px;
-  max-width:400px;
-  width:100%;
+  width:350px;
 }
-input, button {
+
+input,button{
   width:100%;
-  padding:14px;
-  margin-top:15px;
-  border-radius:12px;
+  padding:12px;
+  margin-top:12px;
   border:none;
+  border-radius:10px;
 }
-.btn-pagar{
-  background:#2563eb;
-  font-weight:bold;
-  cursor:pointer;
-}
-.btn-codigo{
-  background:#22c55e;
-  font-weight:bold;
-  cursor:pointer;
-}
-.divisor{
-  margin:20px 0;
-  opacity:0.5;
-}
+
+.btn-pagar{background:#2563eb;color:#fff;font-weight:bold;}
+.btn-codigo{background:#22c55e;color:#fff;font-weight:bold;}
+
 </style>
 </head>
 
 <body>
 
 <div class="box">
-  <h2>⚠️ Seu plano expirou</h2>
 
-  <!-- 🔵 BOTÃO PAGAR -->
-  <button class="btn-pagar" onclick="renovarPlano()">
-    Renovar Plano Agora
-  </button>
+<h2>⚠️ Plano Expirado</h2>
 
-  <div class="divisor">ou</div>
+<button class="btn-pagar" onclick="gerarPagamento()">Renovar Plano</button>
 
-  <!-- 🟢 USAR CÓDIGO -->
-  <p>Digite seu código de renovação:</p>
-  <input type="text" id="codigo" placeholder="Digite seu código">
-  <button class="btn-codigo" onclick="ativarCodigo()">
-    Ativar Código
-  </button>
+<p style="margin-top:20px">ou</p>
+
+<input id="codigo" placeholder="Digite seu código">
+<button class="btn-codigo" onclick="ativarCodigo()">Ativar Código</button>
+
 </div>
 
 <script type="module">
 
 import { supabase } from "../js/supabase.js";
 
-/* ============================= */
-/* 🔵 GERAR PAGAMENTO */
-/* ============================= */
-async function renovarPlano(){
+/* GERAR PAGAMENTO */
 
-  const appId = localStorage.getItem("app_id");
+async function gerarPagamento(){
 
-  if(!appId){
-    alert("Erro: app_id não encontrado. Faça login novamente.");
-    return;
-  }
+  const { data:{user} } = await supabase.auth.getUser();
 
-  const res = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/create-payment", {
-    method: "POST",
-    headers: { 
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ appId })
+  const { data:usuario } = await supabase
+  .from("usuarios")
+  .select("app_id")
+  .eq("id", user.id)
+  .single();
+
+  const resp = await fetch(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/create-payment",
+  {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({ appId:usuario.app_id })
   });
 
-  if(!res.ok){
-    alert("Erro ao conectar com servidor.");
-    return;
-  }
-
-  const data = await res.json();
+  const data = await resp.json();
 
   if(data.init_point){
     window.location.href = data.init_point;
-  } else {
-    alert("Erro ao gerar pagamento.");
+  }else{
+    alert("Erro ao gerar pagamento");
   }
 }
 
 
-/* ============================= */
-/* 🟢 ATIVAR CÓDIGO */
-/* ============================= */
-async function ativarCodigo() {
+/* ATIVAR CODIGO */
 
-  const codigoDigitado = document.getElementById("codigo").value.trim();
+async function ativarCodigo(){
 
-  if(!codigoDigitado){
-    alert("Digite o código");
-    return;
-  }
+  const codigo = document.getElementById("codigo").value.trim();
 
   const { data, error } = await supabase
-    .from("codigos_renovacao")
-    .select("*")
-    .eq("codigo", codigoDigitado)
-    .eq("usado", false)
-    .single();
+  .from("codigos_renovacao")
+  .select("*")
+  .eq("codigo",codigo)
+  .eq("usado",false)
+  .single();
 
-  if(error || !data){
-    alert("Código inválido ou já utilizado");
+  if(error){
+    alert("Código inválido");
     return;
   }
 
-  const dias = data.dias || 30;
-  const novaData = new Date(Date.now() + dias * 24 * 60 * 60 * 1000);
+  await supabase
+  .from("codigos_renovacao")
+  .update({ usado:true })
+  .eq("id",data.id);
 
   await supabase
-    .from("clientes")
-    .update({
-      status: "ativo",
-      vencimento: novaData
-    })
-    .eq("app_id", data.app_id);
+  .from("apps")
+  .update({ ativo:true })
+  .eq("id",data.app_id);
 
-  await supabase
-    .from("codigos_renovacao")
-    .update({ usado: true })
-    .eq("codigo", codigoDigitado);
+  alert("Plano renovado!");
 
-  alert("Plano renovado com sucesso!");
-  window.location.href = "/dashboard.html";
+  location.href="/";
 }
 
-window.renovarPlano = renovarPlano;
+window.gerarPagamento = gerarPagamento;
 window.ativarCodigo = ativarCodigo;
 
 </script>
