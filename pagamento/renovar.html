@@ -52,102 +52,46 @@ button {
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
-async function ativarCodigo(){
+async function renovar() {
 
-  const codigoDigitado = document.getElementById("codigo")
-    .value
-    .trim()
-    .toUpperCase();
+  const codigoDigitado = document.getElementById("codigo").value.trim();
 
   if(!codigoDigitado){
-    alert("Digite um código válido");
+    alert("Digite o código");
     return;
   }
 
-  // 🔐 Usuário logado
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if(!user){
-    alert("Usuário não autenticado.");
-    return;
-  }
-
-  // 🔎 Busca vínculo
-  const { data: usuarioSistema, error: erroUsuario } = await supabase
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", user.id)
-    .single();
-
-  if(erroUsuario || !usuarioSistema){
-    alert("Usuário não vinculado ao sistema.");
-    return;
-  }
-
-  // 🔎 Verifica código
-  const { data: codigo, error: erroCodigo } = await supabase
+  const { data, error } = await supabase
     .from("codigos_renovacao")
     .select("*")
     .eq("codigo", codigoDigitado)
     .eq("usado", false)
     .single();
 
-  if(erroCodigo || !codigo){
-    alert("Código inválido ou já utilizado.");
+  if(error || !data){
+    alert("Código inválido ou já utilizado");
     return;
   }
 
-  // 🔄 Busca app
-  const { data: app, error: erroApp } = await supabase
-    .from("apps")
-    .select("data_expiracao")
-    .eq("id", usuarioSistema.app_id)
-    .single();
-
-  if(erroApp || !app){
-    alert("Erro ao localizar aplicação.");
-    return;
-  }
-
-  // 📅 Calcula nova data
-  const hoje = new Date();
-  const dataBase = new Date(app.data_expiracao);
-
-  // Se já venceu, começa de hoje
-  if(dataBase < hoje){
-    dataBase.setTime(hoje.getTime());
-  }
-
-  dataBase.setDate(dataBase.getDate() + codigo.dias);
-
-  // ✅ Atualiza app
+  // libera cliente (exemplo)
   await supabase
-    .from("apps")
-    .update({ 
-      data_expiracao: dataBase.toISOString(),
-      ativo: true
+    .from("clientes")
+    .update({
+      status: "ativo"
     })
-    .eq("id", usuarioSistema.app_id);
+    .eq("app_id", data.app_id);
 
-  // ✅ Marca código como usado
+  // marca código como usado
   await supabase
     .from("codigos_renovacao")
-    .update({
-      usado: true,
-      usado_em: new Date().toISOString()
-    })
-    .eq("id", codigo.id);
+    .update({ usado: true })
+    .eq("codigo", codigoDigitado);
 
   alert("Plano renovado com sucesso!");
-
-  // 🔁 Redireciona para admin correto
-  const basePath = location.pathname.split("/pagamento")[0];
-  window.location.href = basePath + "/";
+  window.location.href = "/dashboard.html";
 }
 
-// ⚠️ Necessário por causa do type="module"
-window.ativarCodigo = ativarCodigo;
-
+window.renovar = renovar;
 </script>
 
 </body>
