@@ -4,78 +4,127 @@
 <meta charset="UTF-8">
 <title>Plano Expirado</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <style>
-body { margin:0; height:100vh; display:flex; justify-content:center; align-items:center; background:#020617; font-family:Arial; color:#fff; text-align:center; }
-.box { background:#0f172a; padding:40px; border-radius:20px; max-width:400px; }
-button { margin-top:20px; padding:14px; width:100%; border:none; border-radius:12px; background:#22c55e; font-weight:bold; cursor:pointer; }
+body {
+  margin:0;
+  height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:#020617;
+  font-family:Arial;
+  color:#fff;
+  text-align:center;
+}
+.box {
+  background:#0f172a;
+  padding:40px;
+  border-radius:20px;
+  max-width:400px;
+  width:100%;
+}
+input, button {
+  width:100%;
+  padding:14px;
+  margin-top:15px;
+  border-radius:12px;
+  border:none;
+}
+button {
+  background:#22c55e;
+  font-weight:bold;
+  cursor:pointer;
+}
 </style>
 </head>
+
 <body>
 
 <div class="box">
   <h2>⚠️ Seu plano expirou</h2>
-  <p>Para continuar usando o sistema, renove agora.</p>
-  <button onclick="gerarPagamento()">Gerar Pagamento</button>
+  <p>Digite seu código de renovação para continuar.</p>
+
+  <input type="text" id="codigo" placeholder="Digite seu código">
+  <button onclick="ativarCodigo()">Ativar Código</button>
+</div>
 
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
 async function ativarCodigo(){
 
-  const codigoDigitado = document.getElementById("codigo").value.trim().toUpperCase();
+  const codigoDigitado = document.getElementById("codigo")
+    .value
+    .trim()
+    .toUpperCase();
 
   if(!codigoDigitado){
     alert("Digite um código válido");
     return;
   }
 
-  // 🔐 Pega usuário logado
+  // 🔐 Usuário logado
   const { data: { user } } = await supabase.auth.getUser();
 
   if(!user){
-    alert("Usuário não autenticado");
+    alert("Usuário não autenticado.");
     return;
   }
 
-  // 🔎 Busca vínculo do usuário
-  const { data: usuarioSistema } = await supabase
+  // 🔎 Busca vínculo
+  const { data: usuarioSistema, error: erroUsuario } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", user.id)
     .single();
 
-  if(!usuarioSistema){
-    alert("Usuário não vinculado.");
+  if(erroUsuario || !usuarioSistema){
+    alert("Usuário não vinculado ao sistema.");
     return;
   }
 
   // 🔎 Verifica código
-  const { data: codigo } = await supabase
+  const { data: codigo, error: erroCodigo } = await supabase
     .from("codigos_renovacao")
     .select("*")
     .eq("codigo", codigoDigitado)
     .eq("usado", false)
     .single();
 
-  if(!codigo){
+  if(erroCodigo || !codigo){
     alert("Código inválido ou já utilizado.");
     return;
   }
 
-  // 🔄 Atualiza data de expiração
-  const { data: app } = await supabase
+  // 🔄 Busca app
+  const { data: app, error: erroApp } = await supabase
     .from("apps")
     .select("data_expiracao")
     .eq("id", usuarioSistema.app_id)
     .single();
 
-  const novaData = new Date(app.data_expiracao);
-  novaData.setDate(novaData.getDate() + codigo.dias);
+  if(erroApp || !app){
+    alert("Erro ao localizar aplicação.");
+    return;
+  }
 
+  // 📅 Calcula nova data
+  const hoje = new Date();
+  const dataBase = new Date(app.data_expiracao);
+
+  // Se já venceu, começa de hoje
+  if(dataBase < hoje){
+    dataBase.setTime(hoje.getTime());
+  }
+
+  dataBase.setDate(dataBase.getDate() + codigo.dias);
+
+  // ✅ Atualiza app
   await supabase
     .from("apps")
     .update({ 
-      data_expiracao: novaData,
+      data_expiracao: dataBase.toISOString(),
       ativo: true
     })
     .eq("id", usuarioSistema.app_id);
@@ -85,17 +134,20 @@ async function ativarCodigo(){
     .from("codigos_renovacao")
     .update({
       usado: true,
-      usado_em: new Date()
+      usado_em: new Date().toISOString()
     })
     .eq("id", codigo.id);
 
   alert("Plano renovado com sucesso!");
 
+  // 🔁 Redireciona para admin correto
   const basePath = location.pathname.split("/pagamento")[0];
   window.location.href = basePath + "/";
 }
 
+// ⚠️ Necessário por causa do type="module"
 window.ativarCodigo = ativarCodigo;
+
 </script>
 
 </body>
