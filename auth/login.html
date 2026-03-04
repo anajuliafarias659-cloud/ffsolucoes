@@ -58,6 +58,57 @@ button{
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
+function getBasePath(){
+  return location.pathname.split("/auth")[0];
+}
+
+function mostrarAvisoPlano(dias, basePath){
+  // evita duplicar
+  if(document.getElementById("avisoPlano")) return;
+
+  const box = document.createElement("div");
+  box.id = "avisoPlano";
+  box.style.cssText = `
+    margin-top:14px;
+    background:#111827;
+    border:1px solid #1e293b;
+    padding:12px;
+    border-radius:12px;
+    text-align:left;
+    color:#fff;
+    font-size:14px;
+    line-height:1.35;
+  `;
+
+  const cor = dias <= 3 ? "#f59e0b" : "#38bdf8";
+
+  box.innerHTML = `
+    <div style="font-weight:bold; margin-bottom:6px; color:${cor}">
+      ⚠️ Seu plano vence em ${dias} dia(s)
+    </div>
+    <div style="color:#94a3b8; margin-bottom:10px">
+      Para evitar bloqueio, renove agora. Após o pagamento você recebe um código para ativar.
+    </div>
+    <button id="btnRenovarAgora" style="
+      width:100%;
+      padding:12px;
+      border:none;
+      border-radius:10px;
+      background:#2563eb;
+      color:#fff;
+      font-weight:bold;
+      cursor:pointer;
+    ">Renovar agora</button>
+  `;
+
+  const card = document.querySelector(".card");
+  card.appendChild(box);
+
+  document.getElementById("btnRenovarAgora").onclick = () => {
+    window.location.href = basePath + "/pagamento/renovar.html";
+  };
+}
+
 async function login(){
 
   const email = document.getElementById("usuario").value.trim().toLowerCase();
@@ -82,49 +133,58 @@ async function login(){
   const userId = data.user.id;
 
   // 🔎 Busca vínculo do usuário
-  const { data: usuarioSistema } = await supabase
+  const { data: usuarioSistema, error: uErr } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", userId)
     .single();
 
-  if(!usuarioSistema){
+  if(uErr || !usuarioSistema?.app_id){
     alert("Usuário não vinculado ao sistema.");
     return;
   }
 
-  // 🔎 Busca dados do app
-const { data: app } = await supabase
-  .from("apps")
-  .select("tipo, data_expiracao, ativo")
-  .eq("id", usuarioSistema.app_id)
-  .single();
+  // 🔎 Busca dados do app (vale para mercado/bar/restaurante/locadora/etc)
+  const { data: app, error: aErr } = await supabase
+    .from("apps")
+    .select("tipo, data_expiracao, ativo")
+    .eq("id", usuarioSistema.app_id)
+    .single();
 
-if(!app){
-  alert("Aplicação não encontrada.");
-  return;
-}
+  if(aErr || !app){
+    alert("Aplicação não encontrada.");
+    return;
+  }
 
-// 🔐 Verificação de plano
-const hoje = new Date();
-const expiracao = new Date(app.data_expiracao);
+  const basePath = getBasePath();
 
-if(expiracao < hoje || app.ativo === false){
+  // 🔐 Verificação de plano
+  const hoje = new Date();
+  const expiracao = app.data_expiracao ? new Date(app.data_expiracao) : null;
 
-  const basePath = location.pathname.split("/auth")[0];
-  window.location.href = basePath + "/pagamento/renovar.html";
-  return;
-}
+  // se não tiver data_expiracao, trata como expirado (mais seguro)
+  if(!expiracao || expiracao.getTime() <= hoje.getTime() || app.ativo === false){
+    window.location.href = basePath + "/pagamento/renovar.html";
+    return;
+  }
 
-  /*
-   🚀 Redirecionamento inteligente
-   Funciona em:
-   - raiz do domínio
-   - subpasta
-   - GitHub Pages
-  */
+  // ✅ Aviso se estiver perto de vencer (7 dias)
+  const diffMs = expiracao.getTime() - hoje.getTime();
+  const dias = Math.ceil(diffMs / (1000*60*60*24));
 
-  const basePath = location.pathname.split("/auth")[0];
+  if(dias <= 7){
+    // Mostra aviso e NÃO impede entrar (só avisa)
+    mostrarAvisoPlano(dias, basePath);
+
+    // opcional: dá 1s pro usuário ver o aviso e depois segue
+    setTimeout(() => {
+      window.location.href = basePath + "/" + app.tipo + "/admin.html";
+    }, 900);
+
+    return;
+  }
+
+  // 🚀 Redirecionamento normal
   window.location.href = basePath + "/" + app.tipo + "/admin.html";
 }
 
@@ -141,7 +201,7 @@ async function resetSenha(){
     redirectTo: location.origin + "/auth/update-password.html"
   });
 
-  alert("E-mail de recuperação enviado verifique sua caixa de entrada ou spam.");
+  alert("E-mail de recuperação enviado. Verifique sua caixa de entrada ou spam.");
 }
 
 window.login = login;
@@ -150,5 +210,6 @@ window.resetSenha = resetSenha;
 
 </body>
 </html>
+
 
 
