@@ -63,75 +63,63 @@ function setStatus(msg){ statusEl.textContent = msg || ""; }
 
 /* GERAR PAGAMENTO */
 async function gerarPagamento(){
+
   try{
+
     setStatus("Gerando pagamento...");
 
-    // sessão (mais confiável que getUser sozinho)
-    const { data: { session }, error: sessErr } = await supabase.auth.getSession();
-    if(sessErr || !session?.user){
-      setStatus("");
-      alert("Você precisa estar logado. Faça login novamente.");
-      location.href = "/auth/login.html";
+    const { data:{ session } } = await supabase.auth.getSession();
+
+    if(!session?.user){
+      alert("Você precisa fazer login.");
+      location.href="/auth/login.html";
       return;
     }
 
     const user = session.user;
 
-    const { data: usuario, error: userErr } = await supabase
+    const { data:usuario } = await supabase
       .from("usuarios")
       .select("app_id")
-      .eq("id", user.id)
+      .eq("id",user.id)
       .single();
 
-    if(userErr || !usuario?.app_id){
-      setStatus("");
-      alert("Não encontrei seu app_id. Verifique a tabela usuarios.");
+    if(!usuario?.app_id){
+      alert("App não encontrado.");
       return;
     }
 
-    // IMPORTANTE: URL do fetch precisa estar entre aspas
-    const url = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento";
-
-    // IMPORTANTE: Edge Function geralmente exige Authorization (JWT do usuário)
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${session.access_token}`
-      },
-      body: JSON.stringify({ appId: usuario.app_id })
-    });
-
-    // se der erro, tenta mostrar o texto pra tu debugar
-    if(!resp.ok){
-      const txt = await resp.text().catch(()=> "");
-      setStatus("");
-      console.error("Erro criar-pagamento:", resp.status, txt);
-      alert("Erro ao gerar pagamento (função). Veja o console.");
-      return;
-    }
+    const resp = await fetch(
+      "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento",
+      {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "Authorization":`Bearer ${session.access_token}`
+        },
+        body:JSON.stringify({ appId:usuario.app_id })
+      }
+    );
 
     const data = await resp.json();
 
     if(data?.init_point){
-      setStatus("Redirecionando...");
       window.location.href = data.init_point;
     }else{
-      setStatus("");
-      console.error("Resposta sem init_point:", data);
-      alert("Erro: resposta sem link de pagamento (init_point).");
+      alert("Erro ao gerar pagamento.");
     }
 
   }catch(e){
-    setStatus("");
     console.error(e);
-    alert("Erro inesperado ao gerar pagamento.");
+    alert("Erro ao gerar pagamento.");
   }
 }
 
 /* ATIVAR CODIGO */
 async function ativarCodigo(){
+
   try{
+
     const codigo = document.getElementById("codigo").value.trim();
 
     if(!codigo){
@@ -141,58 +129,87 @@ async function ativarCodigo(){
 
     setStatus("Validando código...");
 
-    const { data, error } = await supabase
+    const { data:cod, error } = await supabase
       .from("codigos_renovacao")
       .select("*")
-      .eq("codigo", codigo)
-      .eq("usado", false)
+      .eq("codigo",codigo)
+      .eq("usado",false)
       .single();
 
-    if(error || !data){
+    if(error || !cod){
       setStatus("");
       alert("Código inválido ou já usado.");
       return;
     }
 
-    // marca como usado
-    const { error: up1 } = await supabase
-      .from("codigos_renovacao")
-      .update({ usado: true, usado_em: new Date().toISOString() })
-      .eq("id", data.id);
+    /* BUSCAR DATA ATUAL DO APP */
 
-    if(up1){
-      setStatus("");
-      console.error(up1);
-      alert("Falha ao marcar código como usado.");
-      return;
-    }
-
-    // ativa o app
-    const { error: up2 } = await supabase
+    const { data:app } = await supabase
       .from("apps")
-      .update({ ativo: true })
-      .eq("id", data.app_id);
+      .select("data_expiracao")
+      .eq("id",cod.app_id)
+      .single();
 
-    if(up2){
-      setStatus("");
-      console.error(up2);
-      alert("Falha ao ativar o app.");
-      return;
-    }
+    const agora = new Date();
+
+    const atual = app?.data_expiracao
+      ? new Date(app.data_expiracao)
+      : null;
+
+    /* DEFINIR BASE */
+
+    const base = (atual && atual > agora)
+      ? atual
+      : agora;
+
+    /* SOMAR DIAS DO CODIGO */
+
+    const novaExp = new Date(
+      base.getTime() + (Number(cod.dias) * 86400000)
+    ).toISOString();
+
+    /* MARCAR CODIGO USADO */
+
+    await supabase
+      .from("codigos_renovacao")
+      .update({
+        usado:true,
+        usado_em:new Date().toISOString()
+      })
+      .eq("id",cod.id);
+
+    /* ATUALIZAR APP */
+
+    await supabase
+      .from("apps")
+      .update({
+        ativo:true,
+        plano:"pago",
+        data_expiracao:novaExp
+      })
+      .eq("id",cod.app_id);
 
     setStatus("");
-    alert("Plano renovado!");
-    location.href = "/";
+
+    alert("Plano renovado com sucesso!");
+
+    location.href="/";
 
   }catch(e){
+
     setStatus("");
+
     console.error(e);
-    alert("Erro inesperado ao ativar código.");
+
+    alert("Erro ao ativar código.");
+
   }
+
 }
 
 window.gerarPagamento = gerarPagamento;
 window.ativarCodigo = ativarCodigo;
+
 </script>
 
 </body>
