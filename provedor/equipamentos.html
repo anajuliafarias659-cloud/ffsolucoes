@@ -39,6 +39,24 @@ function normalizarTexto(texto){
     .toLowerCase();
 }
 
+function limparHtmlTexto(texto){
+  if(!texto) return "";
+  return String(texto)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizarIp(ip){
+  if(!ip) return "";
+  return String(ip)
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .trim();
+}
+
 function abrirModalEdicao(){
   document.getElementById("modalEditar").style.display = "flex";
 }
@@ -67,6 +85,16 @@ function textoStatusPRTG(status){
   return "Desconhecido";
 }
 
+function textoStatusPRTG(status){
+  const s = normalizarTexto(status);
+
+  if(s.includes("down") || s.includes("offline") || s.includes("error")) return "Offline";
+  if(s.includes("warning") || s.includes("alarme") || s.includes("alerta")) return "Alerta";
+  if(s.includes("up") || s.includes("online") || s.includes("ok")) return "Online";
+
+  return "Desconhecido";
+}
+
 /* ========================
    PRTG
 ======================== */
@@ -75,7 +103,6 @@ async function carregarStatusPRTG(){
     const url = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/PRTG";
 
     const resposta = await fetch(url);
-
     const textoBruto = await resposta.text();
 
     let dados = {};
@@ -95,23 +122,31 @@ async function carregarStatusPRTG(){
     const mapaPorNome = {};
 
     devices.forEach(item => {
-      const host = String(item.host || "").trim();
+      const hostOriginal = String(item.host || "").trim();
+      const hostNormalizado = normalizarIp(hostOriginal);
+
       const nomeDevice = String(item.device || "").trim();
+      const nomeNormalizado = normalizarTexto(nomeDevice);
 
       const statusInfo = {
         status: item.status || "",
-        message: item.message || "",
-        device: nomeDevice || ""
+        message: limparHtmlTexto(item.message || ""),
+        device: nomeDevice || "",
+        host: hostNormalizado || hostOriginal || ""
       };
 
-      if(host){
-        mapaPorIp[host] = statusInfo;
+      if(hostNormalizado){
+        mapaPorIp[hostNormalizado] = statusInfo;
       }
 
-      if(nomeDevice){
-        mapaPorNome[normalizarTexto(nomeDevice)] = statusInfo;
+      if(nomeNormalizado){
+        mapaPorNome[nomeNormalizado] = statusInfo;
       }
     });
+
+    console.log("PRTG devices:", devices);
+    console.log("Mapa por IP:", mapaPorIp);
+    console.log("Mapa por nome:", mapaPorNome);
 
     return {
       ok: true,
