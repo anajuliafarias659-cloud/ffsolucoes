@@ -16,7 +16,7 @@ const supabase = createClient(
 let appId = null;
 
 /* ========================
-   AUXILIAR
+   AUXILIARES
 ======================== */
 function escaparHtml(texto){
   if(texto === null || texto === undefined) return "";
@@ -26,6 +26,14 @@ function escaparHtml(texto){
     .replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;")
     .replace(/'/g,"&#39;");
+}
+
+function abrirModalEdicao(){
+  document.getElementById("modalEditar").style.display = "flex";
+}
+
+function fecharModalEdicao(){
+  document.getElementById("modalEditar").style.display = "none";
 }
 
 /* ========================
@@ -42,7 +50,7 @@ async function iniciar(){
     }
 
     if(!session){
-      location.href="/auth/login.html";
+      location.href = "/auth/login.html";
       return;
     }
 
@@ -93,11 +101,17 @@ async function carregarPops(){
       return;
     }
 
-    const select = document.getElementById("filtroPop");
-    select.innerHTML = `<option value="">Todos os POPs</option>`;
+    const filtro = document.getElementById("filtroPop");
+    const selectEditar = document.getElementById("editarPop");
+
+    filtro.innerHTML = `<option value="">Todos os POPs</option>`;
+    selectEditar.innerHTML = `<option value="">Selecione o POP</option>`;
 
     (pops || []).forEach(p => {
-      select.innerHTML += `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nome)}</option>`;
+      const id = escaparHtml(p.id);
+      const nome = escaparHtml(p.nome);
+      filtro.innerHTML += `<option value="${id}">${nome}</option>`;
+      selectEditar.innerHTML += `<option value="${id}">${nome}</option>`;
     });
 
   }catch(erro){
@@ -176,6 +190,11 @@ async function carregarEquipamentos(){
       const localizacao = pop?.localizacao || "";
       const ipsEquip = mapaIpsPorEquipamento[String(e.id)] || [];
 
+      const nomeSeguro = escaparHtml(e.nome || "");
+      const modeloSeguro = escaparHtml(e.modelo || "");
+      const popSeguro = escaparHtml(nomePop);
+      const localizacaoSegura = escaparHtml(localizacao);
+
       const htmlIps = ipsEquip.length
         ? ipsEquip.map(ip => {
             const ipSeguro = escaparHtml(ip);
@@ -185,16 +204,27 @@ async function carregarEquipamentos(){
 
       const htmlLocalizacao = localizacao
         ? `<a href="https://www.google.com/maps/search/${encodeURIComponent(localizacao)}" target="_blank" class="btn-localizacao">📍 Ver localização</a>
-           <div class="texto-localizacao">${escaparHtml(localizacao)}</div>`
+           <div class="texto-localizacao">${localizacaoSegura}</div>`
         : `<span class="muted">Sem localização</span>`;
+
+      const idJs = JSON.stringify(String(e.id));
+      const nomeJs = JSON.stringify(String(e.nome || ""));
+      const modeloJs = JSON.stringify(String(e.modelo || ""));
+      const popJs = JSON.stringify(String(e.pop_id || ""));
 
       tabela.innerHTML += `
         <tr>
-          <td>${escaparHtml(e.nome || "")}</td>
-          <td>${escaparHtml(e.modelo || "")}</td>
-          <td>${escaparHtml(nomePop)}</td>
+          <td>${nomeSeguro}</td>
+          <td>${modeloSeguro}</td>
+          <td>${popSeguro}</td>
           <td>${htmlIps}</td>
           <td>${htmlLocalizacao}</td>
+          <td>
+            <div class="acoes-linha">
+              <button class="btn-editar" onclick='abrirEditarEquipamento(${idJs}, ${nomeJs}, ${modeloJs}, ${popJs})'>Editar</button>
+              <button class="btn-excluir" onclick='excluirEquipamento(${idJs}, ${nomeJs})'>Excluir</button>
+            </div>
+          </td>
         </tr>
       `;
     });
@@ -202,7 +232,7 @@ async function carregarEquipamentos(){
     if(!(equip || []).length){
       tabela.innerHTML = `
         <tr>
-          <td colspan="5" class="muted center">Nenhum equipamento encontrado</td>
+          <td colspan="6" class="muted center">Nenhum equipamento encontrado</td>
         </tr>
       `;
     }
@@ -213,7 +243,106 @@ async function carregarEquipamentos(){
   }
 }
 
+/* ========================
+   EDITAR EQUIPAMENTO
+======================== */
+function abrirEditarEquipamento(id, nome, modelo, popId){
+  document.getElementById("editarId").value = id || "";
+  document.getElementById("editarNome").value = nome || "";
+  document.getElementById("editarModelo").value = modelo || "";
+  document.getElementById("editarPop").value = popId || "";
+  abrirModalEdicao();
+}
+
+async function salvarEdicaoEquipamento(){
+  try{
+    const id = document.getElementById("editarId").value;
+    const nome = document.getElementById("editarNome").value.trim();
+    const modelo = document.getElementById("editarModelo").value.trim();
+    const popId = document.getElementById("editarPop").value;
+
+    if(!id || !nome || !modelo || !popId){
+      alert("Preencha todos os campos");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("equipamentos_provedor")
+      .update({
+        nome,
+        modelo,
+        pop_id: popId
+      })
+      .eq("id", id)
+      .eq("app_id", appId);
+
+    if(error){
+      console.error("Erro ao editar equipamento:", error);
+      alert("Erro ao editar equipamento: " + error.message);
+      return;
+    }
+
+    alert("Equipamento atualizado com sucesso");
+    fecharModalEdicao();
+    await carregarEquipamentos();
+
+  }catch(erro){
+    console.error("Erro geral ao editar equipamento:", erro);
+    alert("Erro ao editar equipamento");
+  }
+}
+
+/* ========================
+   EXCLUIR EQUIPAMENTO
+======================== */
+async function excluirEquipamento(id, nome){
+  try{
+    const confirmar = confirm(`Deseja excluir o equipamento "${nome}"?`);
+    if(!confirmar) return;
+
+    const { data: ipsVinculados, error: erroIps } = await supabase
+      .from("ips_provedor")
+      .select("id")
+      .eq("app_id", appId)
+      .eq("equipamento", id);
+
+    if(erroIps){
+      console.error("Erro ao verificar IPs vinculados:", erroIps);
+      alert("Erro ao verificar IPs vinculados");
+      return;
+    }
+
+    if(ipsVinculados && ipsVinculados.length > 0){
+      alert("Não é possível excluir este equipamento porque existem IPs vinculados a ele.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("equipamentos_provedor")
+      .delete()
+      .eq("id", id)
+      .eq("app_id", appId);
+
+    if(error){
+      console.error("Erro ao excluir equipamento:", error);
+      alert("Erro ao excluir equipamento: " + error.message);
+      return;
+    }
+
+    alert("Equipamento excluído com sucesso");
+    await carregarEquipamentos();
+
+  }catch(erro){
+    console.error("Erro geral ao excluir equipamento:", erro);
+    alert("Erro ao excluir equipamento");
+  }
+}
+
 window.carregarEquipamentos = carregarEquipamentos;
+window.abrirEditarEquipamento = abrirEditarEquipamento;
+window.salvarEdicaoEquipamento = salvarEdicaoEquipamento;
+window.excluirEquipamento = excluirEquipamento;
+window.fecharModalEdicao = fecharModalEdicao;
 
 iniciar();
 </script>
@@ -244,7 +373,7 @@ h2{
   margin-bottom:20px;
 }
 
-select{
+select,input{
   padding:10px;
   border-radius:8px;
   border:none;
@@ -312,6 +441,82 @@ tr:hover{
   text-align:center;
 }
 
+.acoes-linha{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.btn-editar{
+  background:#f59e0b;
+  color:#000;
+  border:none;
+  padding:8px 12px;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btn-excluir{
+  background:#ef4444;
+  color:#fff;
+  border:none;
+  padding:8px 12px;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.65);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+}
+
+.modal-box{
+  width:100%;
+  max-width:500px;
+  background:#0f172a;
+  border:1px solid #1e293b;
+  border-radius:14px;
+  padding:20px;
+}
+
+.modal-box h3{
+  margin-top:0;
+}
+
+.modal-acoes{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+
+.btn-salvar{
+  background:#22c55e;
+  color:#000;
+  border:none;
+  padding:10px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btn-cancelar{
+  background:#475569;
+  color:#fff;
+  border:none;
+  padding:10px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
 @media(max-width:700px){
   body{
     padding:15px;
@@ -322,7 +527,7 @@ tr:hover{
     align-items:stretch;
   }
 
-  select{
+  select,input{
     width:100%;
   }
 
@@ -353,11 +558,39 @@ tr:hover{
       <th>POP</th>
       <th>IP</th>
       <th>Localização</th>
+      <th>Ações</th>
     </tr>
   </thead>
 
   <tbody id="lista"></tbody>
 </table>
+
+<div class="modal" id="modalEditar">
+  <div class="modal-box">
+    <h3>Editar equipamento</h3>
+
+    <input type="hidden" id="editarId">
+
+    <div style="margin-bottom:10px;">
+      <input id="editarNome" placeholder="Nome do equipamento">
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <input id="editarModelo" placeholder="Modelo">
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <select id="editarPop">
+        <option value="">Selecione o POP</option>
+      </select>
+    </div>
+
+    <div class="modal-acoes">
+      <button class="btn-salvar" onclick="salvarEdicaoEquipamento()">Salvar</button>
+      <button class="btn-cancelar" onclick="fecharModalEdicao()">Cancelar</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
