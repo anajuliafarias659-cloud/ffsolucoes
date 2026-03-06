@@ -6,322 +6,470 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module">
-
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm"
 
 const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* 🔐 VERIFICA LOGIN */
+let appId = null;
 
-const { data:{session} } = await supabase.auth.getSession()
+/* =========================
+   VERIFICAR LOGIN + APP_ID
+========================= */
+async function carregarApp() {
+  try {
+    const { data: sessaoData, error: sessaoError } = await supabase.auth.getSession();
 
-if(!session){
- location.href="/auth/login.html"
+    if (sessaoError) {
+      console.error("Erro ao verificar sessão:", sessaoError);
+      alert("Erro ao verificar login");
+      return;
+    }
+
+    const session = sessaoData.session;
+
+    if (!session) {
+      window.location.href = "/auth/login.html";
+      return;
+    }
+
+    const userId = session.user.id;
+    console.log("Usuário logado:", userId);
+
+    const { data: usuario, error: usuarioError } = await supabase
+      .from("usuarios")
+      .select("app_id")
+      .eq("id", userId)
+      .single();
+
+    if (usuarioError) {
+      console.error("Erro ao buscar app_id:", usuarioError);
+      alert("Não foi possível localizar o app do usuário: " + usuarioError.message);
+      return;
+    }
+
+    if (!usuario || !usuario.app_id) {
+      alert("Usuário sem APP vinculado");
+      return;
+    }
+
+    appId = usuario.app_id;
+
+    await dashboard();
+    await carregarTabela();
+    await carregarSelects();
+
+  } catch (erro) {
+    console.error("Erro geral ao carregar app:", erro);
+    alert("Erro ao carregar painel");
+  }
 }
 
-let appId = null
+/* =========================
+   DASHBOARD
+========================= */
+async function dashboard() {
+  try {
+    const { count: pops } = await supabase
+      .from("pops_provedor")
+      .select("*", { count: "exact", head: true })
+      .eq("app_id", appId);
 
-async function carregarApp(){
+    const { count: equip } = await supabase
+      .from("equipamentos_provedor")
+      .select("*", { count: "exact", head: true })
+      .eq("app_id", appId);
 
- const { data: { session } } = await supabase.auth.getSession()
+    const { count: ips } = await supabase
+      .from("ips_provedor")
+      .select("*", { count: "exact", head: true })
+      .eq("app_id", appId);
 
- if(!session){
-  window.location.href="/auth/login.html"
-  return
- }
+    document.getElementById("totalPops").innerText = pops || 0;
+    document.getElementById("totalEquip").innerText = equip || 0;
+    document.getElementById("totalIps").innerText = ips || 0;
 
- const userId = session.user.id
-
- const { data } = await supabase
- .from("users_app")
- .select("app_id")
- .eq("user_id",userId)
- .single()
-
- if(!data){
-  alert("Usuário sem APP")
-  return
- }
-
- appId = data.app_id
-
- dashboard()
- carregarTabela()
- carregarSelects()
-
+  } catch (erro) {
+    console.error("Erro no dashboard:", erro);
+  }
 }
 
-/* DASHBOARD */
+/* =========================
+   CARREGAR TABELA
+========================= */
+async function carregarTabela() {
+  try {
+    const { data, error } = await supabase
+      .from("ips_provedor")
+      .select(`
+        id,
+        ip,
+        equipamentos_provedor (
+          nome,
+          modelo,
+          pops_provedor (
+            nome,
+            localizacao
+          )
+        )
+      `)
+      .eq("app_id", appId)
+      .order("ip");
 
-async function dashboard(){
+    if (error) {
+      console.error("Erro ao carregar tabela:", error);
+      alert("Erro ao carregar tabela");
+      return;
+    }
 
- const { count:pops } = await supabase
- .from("pops_provedor")
- .select("*",{count:"exact",head:true})
- .eq("app_id",appId)
+    const tabela = document.getElementById("lista");
+    tabela.innerHTML = "";
 
- const { count:equip } = await supabase
- .from("equipamentos_provedor")
- .select("*",{count:"exact",head:true})
- .eq("app_id",appId)
+    (data || []).forEach(l => {
+      const eq = l.equipamentos_provedor || {};
+      const pop = eq.pops_provedor || {};
 
- const { count:ips } = await supabase
- .from("ips_provedor")
- .select("*",{count:"exact",head:true})
- .eq("app_id",appId)
+      tabela.innerHTML += `
+        <tr>
+          <td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
+          <td>${eq.nome || ""}</td>
+          <td>${eq.modelo || ""}</td>
+          <td>${pop.nome || ""}</td>
+          <td>${pop.localizacao || ""}</td>
+        </tr>
+      `;
+    });
 
- document.getElementById("totalPops").innerText=pops
- document.getElementById("totalEquip").innerText=equip
- document.getElementById("totalIps").innerText=ips
+  } catch (erro) {
+    console.error("Erro geral ao carregar tabela:", erro);
+  }
 }
 
-/* TABELA */
+/* =========================
+   CADASTRAR POP
+========================= */
+async function cadastrarPop() {
+  try {
+    const nome = document.getElementById("popNome").value.trim();
+    const local = document.getElementById("popLocal").value.trim();
 
-async function carregarTabela(){
+    if (!nome || !local) {
+      alert("Preencha nome e localização");
+      return;
+    }
 
- const { data } = await supabase
- .from("ips_provedor")
- .select(`
-  ip,
-  equipamentos_provedor (
-    nome,
-    modelo,
-    pops_provedor (
-      nome,
-      localizacao
-    )
-  )
- `)
- .eq("app_id",appId)
- .order("ip")
+    const { error } = await supabase
+      .from("pops_provedor")
+      .insert({
+        nome: nome,
+        localizacao: local,
+        app_id: appId
+      });
 
- const tabela=document.getElementById("lista")
- tabela.innerHTML=""
+    if (error) {
+      console.error("Erro ao cadastrar POP:", error);
+      alert("Erro ao cadastrar POP: " + error.message);
+      return;
+    }
 
- data.forEach(l=>{
+    document.getElementById("popNome").value = "";
+    document.getElementById("popLocal").value = "";
 
- const eq=l.equipamentos_provedor
- const pop=eq.pops_provedor
+    alert("POP cadastrado com sucesso");
 
- tabela.innerHTML+=`
- <tr>
- <td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
- <td>${eq.nome}</td>
- <td>${eq.modelo}</td>
- <td>${pop.nome}</td>
- <td>${pop.localizacao}</td>
- </tr>
- `
- })
+    await carregarSelects();
+    await dashboard();
 
+  } catch (erro) {
+    console.error("Erro geral ao cadastrar POP:", erro);
+  }
 }
 
-/* CADASTRAR POP */
+/* =========================
+   CADASTRAR EQUIPAMENTO
+========================= */
+async function cadastrarEquip() {
+  try {
+    const nome = document.getElementById("equipNome").value.trim();
+    const modelo = document.getElementById("equipModelo").value.trim();
+    const pop = document.getElementById("equipPop").value;
 
-async function cadastrarPop(){
+    if (!nome || !modelo || !pop) {
+      alert("Preencha todos os campos do equipamento");
+      return;
+    }
 
- const nome=document.getElementById("popNome").value
- const local=document.getElementById("popLocal").value
+    const { error } = await supabase
+      .from("equipamentos_provedor")
+      .insert({
+        nome: nome,
+        modelo: modelo,
+        pop_id: pop,
+        app_id: appId
+      });
 
- await supabase
- .from("pops_provedor")
- .insert({
-  nome:nome,
-  localizacao:local,
-  app_id:appId
- })
+    if (error) {
+      console.error("Erro ao cadastrar equipamento:", error);
+      alert("Erro ao cadastrar equipamento: " + error.message);
+      return;
+    }
 
- alert("POP cadastrado")
+    document.getElementById("equipNome").value = "";
+    document.getElementById("equipModelo").value = "";
 
- carregarSelects()
- dashboard()
+    alert("Equipamento cadastrado com sucesso");
+
+    await carregarSelects();
+    await dashboard();
+
+  } catch (erro) {
+    console.error("Erro geral ao cadastrar equipamento:", erro);
+  }
 }
 
-/* CADASTRAR EQUIPAMENTO */
+/* =========================
+   CADASTRAR IP
+========================= */
+async function cadastrarIp() {
+  try {
+    const ip = document.getElementById("ip").value.trim();
+    const equip = document.getElementById("equipIp").value;
 
-async function cadastrarEquip(){
+    if (!ip || !equip) {
+      alert("Preencha IP e equipamento");
+      return;
+    }
 
- const nome=document.getElementById("equipNome").value
- const modelo=document.getElementById("equipModelo").value
- const pop=document.getElementById("equipPop").value
+    const { error } = await supabase
+      .from("ips_provedor")
+      .insert({
+        ip: ip,
+        equipamento_id: equip,
+        app_id: appId
+      });
 
- await supabase
- .from("equipamentos_provedor")
- .insert({
-  nome:nome,
-  modelo:modelo,
-  pop_id:pop,
-  app_id:appId
- })
+    if (error) {
+      console.error("Erro ao cadastrar IP:", error);
+      alert("Erro ao cadastrar IP: " + error.message);
+      return;
+    }
 
- alert("Equipamento cadastrado")
+    document.getElementById("ip").value = "";
 
- carregarSelects()
- dashboard()
+    alert("IP cadastrado com sucesso");
+
+    await carregarTabela();
+    await dashboard();
+
+  } catch (erro) {
+    console.error("Erro geral ao cadastrar IP:", erro);
+  }
 }
 
-/* CADASTRAR IP */
+/* =========================
+   CARREGAR SELECTS
+========================= */
+async function carregarSelects() {
+  try {
+    const popSelect = document.getElementById("equipPop");
+    popSelect.innerHTML = `<option value="">Selecione o POP</option>`;
 
-async function cadastrarIp(){
+    const { data: pops, error: popError } = await supabase
+      .from("pops_provedor")
+      .select("id,nome")
+      .eq("app_id", appId)
+      .order("nome");
 
- const ip=document.getElementById("ip").value
- const equip=document.getElementById("equipIp").value
+    if (popError) {
+      console.error("Erro ao carregar POPs:", popError);
+      return;
+    }
 
- await supabase
- .from("ips_provedor")
- .insert({
-  ip:ip,
-  equipamento_id:equip,
-  app_id:appId
- })
+    (pops || []).forEach(p => {
+      popSelect.innerHTML += `<option value="${p.id}">${p.nome}</option>`;
+    });
 
- carregarTabela()
- dashboard()
+    const equipSelect = document.getElementById("equipIp");
+    equipSelect.innerHTML = `<option value="">Selecione o equipamento</option>`;
+
+    const { data: equip, error: equipError } = await supabase
+      .from("equipamentos_provedor")
+      .select("id,nome")
+      .eq("app_id", appId)
+      .order("nome");
+
+    if (equipError) {
+      console.error("Erro ao carregar equipamentos:", equipError);
+      return;
+    }
+
+    (equip || []).forEach(e => {
+      equipSelect.innerHTML += `<option value="${e.id}">${e.nome}</option>`;
+    });
+
+  } catch (erro) {
+    console.error("Erro geral ao carregar selects:", erro);
+  }
 }
 
-/* CARREGAR SELECTS */
+/* =========================
+   BUSCAR
+========================= */
+async function buscar() {
+  try {
+    const busca = document.getElementById("busca").value.trim();
+    const tabela = document.getElementById("lista");
+    tabela.innerHTML = "";
 
-async function carregarSelects(){
+    let query = supabase
+      .from("ips_provedor")
+      .select(`
+        id,
+        ip,
+        equipamentos_provedor (
+          nome,
+          modelo,
+          pops_provedor (
+            nome,
+            localizacao
+          )
+        )
+      `)
+      .eq("app_id", appId)
+      .order("ip");
 
- const popSelect=document.getElementById("equipPop")
- popSelect.innerHTML=""
+    if (busca) {
+      query = query.ilike("ip", `%${busca}%`);
+    }
 
- const { data:pops } = await supabase
- .from("pops_provedor")
- .select("*")
- .eq("app_id",appId)
+    const { data, error } = await query;
 
- pops.forEach(p=>{
- popSelect.innerHTML+=`<option value="${p.id}">${p.nome}</option>`
- })
+    if (error) {
+      console.error("Erro ao buscar IP:", error);
+      alert("Erro ao buscar IP");
+      return;
+    }
 
+    (data || []).forEach(l => {
+      const eq = l.equipamentos_provedor || {};
+      const pop = eq.pops_provedor || {};
 
- const equipSelect=document.getElementById("equipIp")
- equipSelect.innerHTML=""
+      tabela.innerHTML += `
+        <tr>
+          <td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
+          <td>${eq.nome || ""}</td>
+          <td>${eq.modelo || ""}</td>
+          <td>${pop.nome || ""}</td>
+          <td>${pop.localizacao || ""}</td>
+        </tr>
+      `;
+    });
 
- const { data:equip } = await supabase
- .from("equipamentos_provedor")
- .select("*")
- .eq("app_id",appId)
-
- equip.forEach(e=>{
- equipSelect.innerHTML+=`<option value="${e.id}">${e.nome}</option>`
- })
-
+  } catch (erro) {
+    console.error("Erro geral na busca:", erro);
+  }
 }
 
-/* BUSCA */
+window.cadastrarPop = cadastrarPop;
+window.cadastrarEquip = cadastrarEquip;
+window.cadastrarIp = cadastrarIp;
+window.buscar = buscar;
 
-async function buscar(){
-
- const busca=document.getElementById("busca").value
-
- const { data } = await supabase
- .from("ips_provedor")
- .select(`
- ip,
- equipamentos_provedor (
-   nome,
-   modelo,
-   pops_provedor (
-     nome,
-     localizacao
-   )
- )
- `)
- .ilike("ip",`%${busca}%`)
- .eq("app_id",appId)
-
- const tabela=document.getElementById("lista")
- tabela.innerHTML=""
-
- data.forEach(l=>{
-
- tabela.innerHTML+=`
- <tr>
- <td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
- <td>${l.equipamentos_provedor.nome}</td>
- <td>${l.equipamentos_provedor.modelo}</td>
- <td>${l.equipamentos_provedor.pops_provedor.nome}</td>
- <td>${l.equipamentos_provedor.pops_provedor.localizacao}</td>
- </tr>
- `
- })
-
-}
-
-window.cadastrarPop=cadastrarPop
-window.cadastrarEquip=cadastrarEquip
-window.cadastrarIp=cadastrarIp
-window.buscar=buscar
-
-carregarApp()
-
+carregarApp();
 </script>
 
 <style>
-
 body{
-background:#020617;
-color:white;
-font-family:Arial;
-padding:30px;
+  background:#020617;
+  color:#fff;
+  font-family:Arial;
+  padding:30px;
+  margin:0;
+}
+
+h2{
+  margin-top:0;
 }
 
 .dashboard{
-display:flex;
-gap:20px;
-margin-bottom:30px;
+  display:flex;
+  gap:20px;
+  margin-bottom:30px;
+  flex-wrap:wrap;
 }
 
 .card{
-background:#0f172a;
-padding:20px;
-border-radius:10px;
-flex:1;
-text-align:center;
+  background:#0f172a;
+  padding:20px;
+  border-radius:10px;
+  flex:1;
+  min-width:180px;
+  text-align:center;
 }
 
 .section{
-background:#0f172a;
-padding:20px;
-border-radius:10px;
-margin-bottom:20px;
+  background:#0f172a;
+  padding:20px;
+  border-radius:10px;
+  margin-bottom:20px;
 }
 
 input,select,button{
-padding:10px;
-margin:5px;
-border-radius:6px;
-border:none;
+  padding:10px;
+  margin:5px;
+  border-radius:6px;
+  border:none;
+}
+
+input,select{
+  min-width:220px;
 }
 
 button{
-background:#22c55e;
-cursor:pointer;
+  background:#22c55e;
+  color:#000;
+  font-weight:bold;
+  cursor:pointer;
 }
 
 table{
-width:100%;
-margin-top:20px;
-border-collapse:collapse;
+  width:100%;
+  margin-top:20px;
+  border-collapse:collapse;
 }
 
 td,th{
-padding:10px;
-border-bottom:1px solid #333;
+  padding:10px;
+  border-bottom:1px solid #333;
+  text-align:left;
 }
 
 a{
-color:#38bdf8;
-text-decoration:none;
+  color:#38bdf8;
+  text-decoration:none;
 }
 
-</style>
+@media(max-width:700px){
+  body{
+    padding:15px;
+  }
 
+  input,select,button{
+    width:100%;
+    margin:5px 0;
+  }
+
+  .dashboard{
+    flex-direction:column;
+  }
+
+  table{
+    font-size:14px;
+  }
+}
+</style>
 </head>
 
 <body>
@@ -329,83 +477,61 @@ text-decoration:none;
 <h2>📡 NOC Provedor</h2>
 
 <div class="dashboard">
+  <div class="card">
+    <h3>POPs</h3>
+    <h1 id="totalPops">0</h1>
+  </div>
 
-<div class="card">
-<h3>POPs</h3>
-<h1 id="totalPops">0</h1>
-</div>
+  <div class="card">
+    <h3>Equipamentos</h3>
+    <h1 id="totalEquip">0</h1>
+  </div>
 
-<div class="card">
-<h3>Equipamentos</h3>
-<h1 id="totalEquip">0</h1>
-</div>
-
-<div class="card">
-<h3>IPs</h3>
-<h1 id="totalIps">0</h1>
-</div>
-
-</div>
-
-<div class="section">
-
-<h3>Cadastrar POP</h3>
-
-<input id="popNome" placeholder="Nome do POP">
-<input id="popLocal" placeholder="Localização">
-
-<button onclick="cadastrarPop()">Salvar</button>
-
+  <div class="card">
+    <h3>IPs</h3>
+    <h1 id="totalIps">0</h1>
+  </div>
 </div>
 
 <div class="section">
-
-<h3>Cadastrar Equipamento</h3>
-
-<input id="equipNome" placeholder="Nome do equipamento">
-<input id="equipModelo" placeholder="Modelo (Mikrotik / Intelbras / STC / etc)">
-
-<select id="equipPop"></select>
-
-<button onclick="cadastrarEquip()">Salvar</button>
-
+  <h3>Cadastrar POP</h3>
+  <input id="popNome" placeholder="Nome do POP">
+  <input id="popLocal" placeholder="Localização">
+  <button onclick="cadastrarPop()">Salvar</button>
 </div>
 
 <div class="section">
-
-<h3>Cadastrar IP</h3>
-
-<input id="ip" placeholder="IP do equipamento">
-
-<select id="equipIp"></select>
-
-<button onclick="cadastrarIp()">Salvar</button>
-
+  <h3>Cadastrar Equipamento</h3>
+  <input id="equipNome" placeholder="Nome do equipamento">
+  <input id="equipModelo" placeholder="Modelo (Mikrotik / Intelbras / STC / etc)">
+  <select id="equipPop"></select>
+  <button onclick="cadastrarEquip()">Salvar</button>
 </div>
 
 <div class="section">
+  <h3>Cadastrar IP</h3>
+  <input id="ip" placeholder="IP do equipamento">
+  <select id="equipIp"></select>
+  <button onclick="cadastrarIp()">Salvar</button>
+</div>
 
-<h3>Buscar IP</h3>
+<div class="section">
+  <h3>Buscar IP</h3>
+  <input id="busca" placeholder="Buscar IP">
+  <button onclick="buscar()">Buscar</button>
 
-<input id="busca" placeholder="Buscar IP">
-<button onclick="buscar()">Buscar</button>
-
-<table>
-
-<thead>
-<tr>
-<th>IP</th>
-<th>Equipamento</th>
-<th>Modelo</th>
-<th>POP</th>
-<th>Localização</th>
-</tr>
-</thead>
-
-<tbody id="lista"></tbody>
-
-</table>
-
+  <table>
+    <thead>
+      <tr>
+        <th>IP</th>
+        <th>Equipamento</th>
+        <th>Modelo</th>
+        <th>POP</th>
+        <th>Localização</th>
+      </tr>
+    </thead>
+    <tbody id="lista"></tbody>
+  </table>
 </div>
 
 </body>
