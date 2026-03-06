@@ -5,8 +5,6 @@
 <title>Pedidos Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <style>
 body{
   margin:0;
@@ -21,35 +19,76 @@ h2{
   margin-top:40px;
 }
 
+.topo-filtro{
+  max-width:900px;
+  margin:0 auto 20px auto;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:center;
+}
+
+select{
+  padding:10px;
+  border:none;
+  border-radius:8px;
+  background:#0f172a;
+  color:#fff;
+  border:1px solid #1e293b;
+}
+
 .pedido{
   background:#0f172a;
   border:1px solid #1e293b;
   padding:15px;
   border-radius:15px;
   margin-bottom:15px;
+  max-width:900px;
+  margin-left:auto;
+  margin-right:auto;
 }
 
 .status{
   font-weight:bold;
   margin-bottom:10px;
+  font-size:15px;
 }
 
 .novo{ color:#22c55e; }
+.pago{ color:#38bdf8; }
 .aceito{ color:#facc15; }
 .historico{ color:#94a3b8; }
+.cancelado{ color:#ef4444; }
 
 button{
-  padding:6px 10px;
+  padding:8px 12px;
   border:none;
-  border-radius:6px;
+  border-radius:8px;
   cursor:pointer;
   margin-top:6px;
   margin-right:5px;
+  font-weight:bold;
 }
 
+.btn-pago{ background:#38bdf8; color:#000; }
 .btn-aceitar{ background:#22c55e; color:#000; }
-.btn-historico{ background:#3b82f6; color:#fff; }
+.btn-historico{ background:#64748b; color:#fff; }
 .btn-excluir{ background:#ef4444; color:#fff; }
+.btn-cancelar{ background:#f97316; color:#fff; }
+
+.linha-botoes{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:10px;
+}
+
+.vazio{
+  text-align:center;
+  color:#94a3b8;
+  margin-top:20px;
+}
 </style>
 </head>
 <body>
@@ -58,10 +97,21 @@ button{
 <div id="listaPedidos"></div>
 
 <h2>📁 Histórico</h2>
+
+<div class="topo-filtro">
+  <label for="filtroHistorico">Filtrar histórico:</label>
+  <select id="filtroHistorico">
+    <option value="todos">Todos</option>
+    <option value="pago">Pago</option>
+    <option value="aceito">Aceito</option>
+    <option value="historico">Histórico</option>
+    <option value="cancelado">Cancelado</option>
+  </select>
+</div>
+
 <div id="listaHistorico"></div>
 
 <script type="module">
-
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
 
 const supabase = createClient(
@@ -70,160 +120,299 @@ const supabase = createClient(
 );
 
 let app_id = null;
+let pedidosCache = [];
+
+const listaPedidos = document.getElementById("listaPedidos");
+const listaHistorico = document.getElementById("listaHistorico");
+const filtroHistorico = document.getElementById("filtroHistorico");
+
+function formatarReal(valor){
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
+function escapeHtml(texto){
+  return String(texto || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function montarItens(itens){
+  if (!Array.isArray(itens) || !itens.length) return "Sem itens";
+
+  return itens.map(i =>
+    `• ${escapeHtml(i.nome)} (${escapeHtml(i.cor || "Sem cor")}) x${Number(i.qtd || 0)}`
+  ).join("<br>");
+}
+
+function statusBonito(status){
+  switch(status){
+    case "novo": return "NOVO";
+    case "pago": return "PAGO";
+    case "aceito": return "ACEITO";
+    case "historico": return "HISTÓRICO";
+    case "cancelado": return "CANCELADO";
+    default: return String(status || "").toUpperCase();
+  }
+}
+
+function renderizarPedidos(){
+  listaPedidos.innerHTML = "";
+  listaHistorico.innerHTML = "";
+
+  const filtro = filtroHistorico.value;
+
+  const ativos = pedidosCache.filter(p => !["historico", "cancelado"].includes(p.status));
+  const historico = pedidosCache.filter(p => {
+    if (filtro === "todos") {
+      return ["historico", "aceito", "pago", "cancelado"].includes(p.status);
+    }
+    return p.status === filtro;
+  });
+
+  if (!ativos.length) {
+    listaPedidos.innerHTML = `<div class="vazio">Nenhum pedido ativo.</div>`;
+  }
+
+  if (!historico.length) {
+    listaHistorico.innerHTML = `<div class="vazio">Nenhum pedido no histórico com esse filtro.</div>`;
+  }
+
+  ativos.forEach(p => {
+    listaPedidos.innerHTML += montarCardPedido(p, false);
+  });
+
+  historico.forEach(p => {
+    listaHistorico.innerHTML += montarCardPedido(p, true);
+  });
+}
+
+function montarCardPedido(p, isHistorico){
+  const itens = montarItens(p.itens);
+
+  return `
+    <div class="pedido">
+      <div class="status ${escapeHtml(p.status)}">
+        Status: ${statusBonito(p.status)}
+      </div>
+
+      <strong>Cliente:</strong> ${escapeHtml(p.cliente_nome)}<br>
+      <strong>Telefone:</strong> ${escapeHtml(p.cliente_telefone)}<br>
+
+      <hr>
+
+      <strong>Endereço:</strong><br>
+      ${escapeHtml(p.cliente_rua || "")}, ${escapeHtml(p.cliente_numero || "")}<br>
+      ${escapeHtml(p.cliente_bairro || "")} - ${escapeHtml(p.cliente_cidade || "")}/${escapeHtml(p.cliente_estado || "")}<br>
+      CEP: ${escapeHtml(p.cliente_cep || "")}<br>
+
+      ${p.cliente_localizacao ? `
+        <br>
+        <strong>Localização:</strong><br>
+        <a href="${escapeHtml(p.cliente_localizacao)}" target="_blank" style="color:#22c55e;">
+          📍 Abrir no Google Maps
+        </a>
+      ` : ""}
+
+      <hr>
+
+      <strong>Itens:</strong><br>
+      ${itens}
+
+      <hr>
+
+      <strong>Total:</strong> ${formatarReal(p.total)}
+
+      ${p.pagamento_modo ? `<br><strong>Pagamento:</strong> ${escapeHtml(p.pagamento_modo)}` : ""}
+      ${p.pix_chave ? `<br><strong>Chave PIX:</strong> ${escapeHtml(p.pix_chave)}` : ""}
+      ${p.pix_comprovante_url ? `<br><a href="${escapeHtml(p.pix_comprovante_url)}" target="_blank" style="color:#38bdf8;">🔗 Ver comprovante (link)</a>` : ""}
+      ${p.pix_comprovante_arquivo_url ? `<br><a href="${escapeHtml(p.pix_comprovante_arquivo_url)}" target="_blank" style="color:#38bdf8;">📎 Ver comprovante (arquivo)</a>` : ""}
+
+      <div class="linha-botoes">
+        ${!isHistorico && p.status === "novo" ? `
+          <button class="btn-pago" onclick="marcarPago('${p.id}')">Marcar Pago</button>
+          <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Aceitar</button>
+          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
+          <button class="btn-cancelar" onclick="cancelarPedido('${p.id}')">Cancelar</button>
+        ` : ""}
+
+        ${!isHistorico && p.status === "pago" ? `
+          <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Confirmar dinheiro e aceitar</button>
+          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
+          <button class="btn-cancelar" onclick="cancelarPedido('${p.id}')">Cancelar</button>
+        ` : ""}
+
+        ${!isHistorico && p.status === "aceito" ? `
+          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Mover para Histórico</button>
+        ` : ""}
+
+        <button class="btn-excluir" onclick="excluirPedido('${p.id}')">Excluir</button>
+      </div>
+    </div>
+  `;
+}
 
 async function iniciar(){
-
   const { data:{ session } } = await supabase.auth.getSession();
+
   if(!session){
     alert("Faça login");
     return;
   }
 
-  const { data:user } = await supabase
+  const { data:user, error:userErr } = await supabase
     .from("usuarios")
     .select("app_id")
     .eq("id", session.user.id)
     .single();
 
-  app_id = user.app_id;
+  if (userErr || !user?.app_id) {
+    alert("Não foi possível carregar o app_id.");
+    return;
+  }
 
-  carregarPedidos();
+  app_id = user.app_id;
+  await carregarPedidos();
 }
 
 async function carregarPedidos(){
-
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("pedidos")
     .select("*")
     .eq("app_id", app_id)
-    .order("created_at",{ascending:false});
+    .order("created_at", { ascending:false });
 
-  listaPedidos.innerHTML="";
-  listaHistorico.innerHTML="";
+  if (error) {
+    console.error(error);
+    alert("Erro ao carregar pedidos.");
+    return;
+  }
 
-  data.forEach(p=>{
-
-    const itens = p.itens.map(i=>
-      `• ${i.nome} (${i.cor}) x${i.qtd}`
-    ).join("<br>");
-
-    const card = `
-      <div class="pedido">
-        <div class="status ${p.status}">
-          Status: ${p.status.toUpperCase()}
-        </div>
-
-        <strong>Cliente:</strong> ${p.cliente_nome}<br>
-        <strong>Telefone:</strong> ${p.cliente_telefone}<br>
-
-        <hr>
-
-        <strong>Endereço:</strong><br>
-        ${p.cliente_rua}, ${p.cliente_numero}<br>
-        ${p.cliente_bairro} - ${p.cliente_cidade}/${p.cliente_estado}<br>
-        CEP: ${p.cliente_cep}<br>
-
-        <hr>
-        ${p.cliente_localizacao ? `
-<br>
-<strong>Localização:</strong><br>
-<a href="${p.cliente_localizacao}" target="_blank" style="color:#22c55e;">
-📍 Abrir no Google Maps
-</a>
-` : ""}
-        <hr>
-
-        <strong>Itens:</strong><br>
-        ${itens}
-
-        <hr>
-        <strong>Total:</strong> R$ ${Number(p.total).toFixed(2)}
-
-        <br><br>
-
-        ${p.status !== "historico" ? `
-          <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Aceitar</button>
-          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
-        ` : ""}
-
-        <button class="btn-excluir" onclick="excluirPedido('${p.id}')">Excluir</button>
-      </div>
-    `;
-
-    if(p.status === "historico"){
-      listaHistorico.innerHTML += card;
-    } else {
-      listaPedidos.innerHTML += card;
-    }
-
-  });
+  pedidosCache = data || [];
+  renderizarPedidos();
 }
 
-/* ===== ACEITAR ===== */
-window.aceitarPedido = async function(id){
+window.marcarPago = async function(id){
+  const { error } = await supabase
+    .from("pedidos")
+    .update({ status:"pago" })
+    .eq("id", id);
 
-  const { data:pedido } = await supabase
+  if (error) {
+    console.error(error);
+    alert("Erro ao marcar como pago.");
+    return;
+  }
+
+  carregarPedidos();
+}
+
+window.aceitarPedido = async function(id){
+  const { data:pedido, error:pedidoErr } = await supabase
     .from("pedidos")
     .select("*")
-    .eq("id",id)
+    .eq("id", id)
     .single();
 
-  await supabase
+  if (pedidoErr || !pedido) {
+    console.error(pedidoErr);
+    alert("Erro ao carregar pedido.");
+    return;
+  }
+
+  const { error } = await supabase
     .from("pedidos")
     .update({ status:"aceito" })
-    .eq("id",id);
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao aceitar pedido.");
+    return;
+  }
 
   let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
   texto += `Olá ${pedido.cliente_nome}!\n\n`;
-  texto += `Seu pedido foi aceito ✅\n\n`;
+  texto += `Seu pedido foi confirmado e aceito ✅\n\n`;
 
-  pedido.itens.forEach(i=>{
-    texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
+  (pedido.itens || []).forEach(i => {
+    texto += `• ${i.nome} (${i.cor || "Sem cor"}) x${i.qtd}\n`;
   });
 
-  texto += `\n💰 Total: R$ ${Number(pedido.total).toFixed(2)}`;
-  texto += `\n\n⏳ Estamos aguardando o pagamento.`;
+  texto += `\n💰 Total: ${formatarReal(pedido.total)}`;
+  texto += `\n\n🚚 Em breve daremos andamento ao seu pedido.`;
 
-  let numero = pedido.cliente_telefone.replace(/\D/g,'');
+  let numero = String(pedido.cliente_telefone || "").replace(/\D/g,'');
 
-  if(!numero.startsWith("55")){
-    numero = "55"+numero;
+  if(numero && !numero.startsWith("55")){
+    numero = "55" + numero;
   }
 
-  window.open(
-    `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
-    "_blank"
-  );
+  if (numero) {
+    window.open(
+      `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
+      "_blank"
+    );
+  }
 
   carregarPedidos();
 }
 
-/* ===== HISTÓRICO ===== */
 window.moverHistorico = async function(id){
-
-  await supabase
+  const { error } = await supabase
     .from("pedidos")
     .update({ status:"historico" })
-    .eq("id",id);
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao mover para histórico.");
+    return;
+  }
 
   carregarPedidos();
 }
 
-/* ===== EXCLUIR ===== */
-window.excluirPedido = async function(id){
+window.cancelarPedido = async function(id){
+  const { error } = await supabase
+    .from("pedidos")
+    .update({ status:"cancelado" })
+    .eq("id", id);
 
+  if (error) {
+    console.error(error);
+    alert("Erro ao cancelar pedido.");
+    return;
+  }
+
+  carregarPedidos();
+}
+
+window.excluirPedido = async function(id){
   if(!confirm("Tem certeza que deseja excluir este pedido?")) return;
 
-  await supabase
+  const { error } = await supabase
     .from("pedidos")
     .delete()
-    .eq("id",id);
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao excluir pedido.");
+    return;
+  }
 
   carregarPedidos();
 }
 
-iniciar();
+filtroHistorico.addEventListener("change", renderizarPedidos);
 
+iniciar();
 </script>
 </body>
 </html>
