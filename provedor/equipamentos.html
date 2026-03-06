@@ -15,6 +15,13 @@ const supabase = createClient(
 
 const COLUNA_EQUIPAMENTO_IP = "equipamento";
 
+/* ========================
+   CONFIG PRTG
+======================== */
+const PRTG_URL = "https://143.255.52.85:49151";
+const PRTG_USERNAME = "prtgadmin";
+const PRTG_PASSHASH = "97625101";
+
 let appId = null;
 
 /* ========================
@@ -30,12 +37,98 @@ function escaparHtml(texto){
     .replace(/'/g,"&#39;");
 }
 
+function normalizarTexto(texto){
+  if(!texto) return "";
+  return String(texto)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 function abrirModalEdicao(){
   document.getElementById("modalEditar").style.display = "flex";
 }
 
 function fecharModalEdicao(){
   document.getElementById("modalEditar").style.display = "none";
+}
+
+function classeStatusPRTG(status){
+  const s = normalizarTexto(status);
+
+  if(s.includes("down") || s.includes("offline") || s.includes("error")) return "status-offline";
+  if(s.includes("warning") || s.includes("alarme") || s.includes("alerta")) return "status-alerta";
+  if(s.includes("up") || s.includes("online") || s.includes("ok")) return "status-online";
+
+  return "status-desconhecido";
+}
+
+function textoStatusPRTG(status){
+  const s = normalizarTexto(status);
+
+  if(s.includes("down") || s.includes("offline") || s.includes("error")) return "Offline";
+  if(s.includes("warning") || s.includes("alarme") || s.includes("alerta")) return "Alerta";
+  if(s.includes("up") || s.includes("online") || s.includes("ok")) return "Online";
+
+  return "Desconhecido";
+}
+
+/* ========================
+   PRTG
+======================== */
+async function carregarStatusPRTG(){
+  try{
+    const url = `${PRTG_URL}/api/table.json?content=devices&columns=device,host,status,message&username=${encodeURIComponent(PRTG_USERNAME)}&passhash=${encodeURIComponent(PRTG_PASSHASH)}`;
+
+    const resposta = await fetch(url, {
+      method: "GET"
+    });
+
+    if(!resposta.ok){
+      throw new Error("PRTG respondeu com status " + resposta.status);
+    }
+
+    const dados = await resposta.json();
+    const devices = dados.devices || [];
+
+    const mapaPorIp = {};
+    const mapaPorNome = {};
+
+    devices.forEach(item => {
+      const host = String(item.host || "").trim();
+      const nomeDevice = String(item.device || "").trim();
+
+      const statusInfo = {
+        status: item.status || "",
+        message: item.message || "",
+        device: nomeDevice || ""
+      };
+
+      if(host){
+        mapaPorIp[host] = statusInfo;
+      }
+
+      if(nomeDevice){
+        mapaPorNome[normalizarTexto(nomeDevice)] = statusInfo;
+      }
+    });
+
+    return {
+      ok: true,
+      porIp: mapaPorIp,
+      porNome: mapaPorNome
+    };
+
+  }catch(erro){
+    console.error("Erro ao buscar status no PRTG:", erro);
+    return {
+      ok: false,
+      porIp: {},
+      porNome: {},
+      erro: erro.message || "Erro ao consultar PRTG"
+    };
+  }
 }
 
 /* ========================
@@ -169,6 +262,8 @@ async function carregarEquipamentos(){
       return;
     }
 
+    const statusPRTG = await carregarStatusPRTG();
+
     const mapaPop = {};
     (pops || []).forEach(p => {
       mapaPop[String(p.id)] = p;
@@ -204,6 +299,43 @@ async function carregarEquipamentos(){
       const modeloSeguro = escaparHtml(e.modelo || "");
       const popSeguro = escaparHtml(nomePop);
       const localizacaoSegura = escaparHtml(localizacao);
+
+      let infoStatus = null;
+
+      for(const item of ipsEquip){
+        const ipBase = String(item.ip || "").trim();
+        if(ipBase && statusPRTG.porIp[ipBase]){
+          infoStatus = statusPRTG.porIp[ipBase];
+          break;
+        }
+      }
+
+      if(!infoStatus){
+        const nomeNormalizado = normalizarTexto(e.nome || "");
+        if(nomeNormalizado && statusPRTG.porNome[nomeNormalizado]){
+          infoStatus = statusPRTG.porNome[nomeNormalizado];
+        }
+      }
+
+      let htmlStatus = `<span class="status-badge status-desconhecido">Desconhecido</span>`;
+
+      if(statusPRTG.ok && infoStatus){
+        htmlStatus = `
+          <div class="status-box">
+            <span class="status-badge ${classeStatusPRTG(infoStatus.status)}">
+              ${escaparHtml(textoStatusPRTG(infoStatus.status))}
+            </span>
+            <div class="status-msg">${escaparHtml(infoStatus.message || infoStatus.device || "")}</div>
+          </div>
+        `;
+      }else if(!statusPRTG.ok){
+        htmlStatus = `
+          <div class="status-box">
+            <span class="status-badge status-desconhecido">Sem conexão</span>
+            <div class="status-msg">${escaparHtml(statusPRTG.erro || "Não foi possível consultar o PRTG")}</div>
+          </div>
+        `;
+      }
 
       const htmlIps = ipsEquip.length
         ? ipsEquip.map(item => {
@@ -243,6 +375,7 @@ async function carregarEquipamentos(){
           <td data-label="Nome">${nomeSeguro}</td>
           <td data-label="Modelo">${modeloSeguro}</td>
           <td data-label="POP">${popSeguro}</td>
+          <td data-label="Status">${htmlStatus}</td>
           <td data-label="IP">${htmlIps}</td>
           <td data-label="Localização">${htmlLocalizacao}</td>
           <td data-label="Ações">
@@ -258,7 +391,7 @@ async function carregarEquipamentos(){
     if(!(equip || []).length){
       tabela.innerHTML = `
         <tr>
-          <td colspan="6" class="muted center">Nenhum equipamento encontrado</td>
+          <td colspan="7" class="muted center">Nenhum equipamento encontrado</td>
         </tr>
       `;
     }
@@ -681,6 +814,50 @@ tr:hover{
   flex-shrink:0;
 }
 
+.status-box{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.status-badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:max-content;
+  min-width:92px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:bold;
+}
+
+.status-online{
+  background:#22c55e;
+  color:#052e16;
+}
+
+.status-alerta{
+  background:#f59e0b;
+  color:#111827;
+}
+
+.status-offline{
+  background:#ef4444;
+  color:#fff;
+}
+
+.status-desconhecido{
+  background:#475569;
+  color:#fff;
+}
+
+.status-msg{
+  font-size:12px;
+  color:#94a3b8;
+  line-height:1.4;
+}
+
 @media(max-width:700px){
   body{
     padding:15px;
@@ -745,13 +922,13 @@ tr:hover{
     text-transform:uppercase;
   }
 
-  td:nth-child(3){
+  td:nth-child(4){
     padding-bottom:12px;
     border-bottom:1px solid #1e293b;
     margin-bottom:8px;
   }
 
-  td:nth-child(4){
+  td:nth-child(5){
     padding-top:12px;
   }
 
@@ -807,6 +984,7 @@ tr:hover{
       <th>Nome</th>
       <th>Modelo</th>
       <th>POP</th>
+      <th>Status</th>
       <th>IP</th>
       <th>Localização</th>
       <th>Ações</th>
