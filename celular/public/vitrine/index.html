@@ -810,16 +810,36 @@ window.copiarPix = async function () {
 
 async function uploadComprovantePix(file, pedidoId) {
   const BUCKET = "comprovantes";
+  const MAX_MB = 5;
+  const MAX_BYTES = MAX_MB * 1024 * 1024;
+
+  if (!file) {
+    throw new Error("Arquivo não enviado.");
+  }
+
+  if (file.size > MAX_BYTES) {
+    throw new Error(`Arquivo muito grande. Envie no máximo ${MAX_MB}MB.`);
+  }
 
   const ext = (file.name.split(".").pop() || "bin").toLowerCase();
-  const path = `${APP_ID}/${pedidoId}_${Date.now()}.${ext}`;
+  const nomeLimpo = (file.name || "arquivo")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "_");
+
+  const path = `${APP_ID}/${pedidoId}_${Date.now()}_${nomeLimpo}`;
 
   const { error: upErr } = await supabase
     .storage
     .from(BUCKET)
-    .upload(path, file, { upsert: true });
+    .upload(path, file, {
+      upsert: true,
+      contentType: file.type || undefined
+    });
 
-  if (upErr) throw upErr;
+  if (upErr) {
+    throw new Error(upErr.message || "Erro ao enviar arquivo.");
+  }
 
   const { data } = supabase
     .storage
