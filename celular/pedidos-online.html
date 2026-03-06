@@ -142,6 +142,24 @@ function escapeHtml(texto){
     .replaceAll("'", "&#039;");
 }
 
+/* ===== NORMALIZAR STATUS ===== */
+function statusEfetivo(p){
+  const status = String(p.status || "").toLowerCase();
+  const pagamentoStatus = String(p.pagamento_status || p.mp_status || "").toLowerCase();
+
+  if (pagamentoStatus === "approved") return "pago";
+  if (status === "approved") return "pago";
+  if (status === "aguardando_confirmacao_pix") return "pago";
+
+  if (status === "novo") return "novo";
+  if (status === "pago") return "pago";
+  if (status === "aceito") return "aceito";
+  if (status === "historico") return "historico";
+  if (status === "cancelado") return "cancelado";
+
+  return status || "novo";
+}
+
 function montarItens(itens){
   if (!Array.isArray(itens) || !itens.length) return "Sem itens";
 
@@ -167,12 +185,18 @@ function renderizarPedidos(){
 
   const filtro = filtroHistorico.value;
 
-  const ativos = pedidosCache.filter(p => !["historico", "cancelado"].includes(p.status));
+  const ativos = pedidosCache.filter(p => {
+    const s = statusEfetivo(p);
+    return !["historico", "cancelado"].includes(s);
+  });
+
   const historico = pedidosCache.filter(p => {
+    const s = statusEfetivo(p);
+
     if (filtro === "todos") {
-      return ["historico", "aceito", "pago", "cancelado"].includes(p.status);
+      return ["historico", "aceito", "pago", "cancelado"].includes(s);
     }
-    return p.status === filtro;
+    return s === filtro;
   });
 
   if (!ativos.length) {
@@ -194,11 +218,12 @@ function renderizarPedidos(){
 
 function montarCardPedido(p, isHistorico){
   const itens = montarItens(p.itens);
+  const status = statusEfetivo(p);
 
   return `
     <div class="pedido">
-      <div class="status ${escapeHtml(p.status)}">
-        Status: ${statusBonito(p.status)}
+      <div class="status ${escapeHtml(status)}">
+        Status: ${statusBonito(status)}
       </div>
 
       <strong>Cliente:</strong> ${escapeHtml(p.cliente_nome)}<br>
@@ -229,25 +254,27 @@ function montarCardPedido(p, isHistorico){
       <strong>Total:</strong> ${formatarReal(p.total)}
 
       ${p.pagamento_modo ? `<br><strong>Pagamento:</strong> ${escapeHtml(p.pagamento_modo)}` : ""}
+      ${p.pagamento_status ? `<br><strong>Status pagamento:</strong> ${escapeHtml(p.pagamento_status)}` : ""}
+      ${p.mp_status ? `<br><strong>MP status:</strong> ${escapeHtml(p.mp_status)}` : ""}
       ${p.pix_chave ? `<br><strong>Chave PIX:</strong> ${escapeHtml(p.pix_chave)}` : ""}
       ${p.pix_comprovante_url ? `<br><a href="${escapeHtml(p.pix_comprovante_url)}" target="_blank" style="color:#38bdf8;">🔗 Ver comprovante (link)</a>` : ""}
       ${p.pix_comprovante_arquivo_url ? `<br><a href="${escapeHtml(p.pix_comprovante_arquivo_url)}" target="_blank" style="color:#38bdf8;">📎 Ver comprovante (arquivo)</a>` : ""}
 
       <div class="linha-botoes">
-        ${!isHistorico && p.status === "novo" ? `
+        ${!isHistorico && status === "novo" ? `
           <button class="btn-pago" onclick="marcarPago('${p.id}')">Marcar Pago</button>
           <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Aceitar</button>
           <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
           <button class="btn-cancelar" onclick="cancelarPedido('${p.id}')">Cancelar</button>
         ` : ""}
 
-        ${!isHistorico && p.status === "pago" ? `
+        ${!isHistorico && status === "pago" ? `
           <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Confirmar dinheiro e aceitar</button>
           <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
           <button class="btn-cancelar" onclick="cancelarPedido('${p.id}')">Cancelar</button>
         ` : ""}
 
-        ${!isHistorico && p.status === "aceito" ? `
+        ${!isHistorico && status === "aceito" ? `
           <button class="btn-historico" onclick="moverHistorico('${p.id}')">Mover para Histórico</button>
         ` : ""}
 
@@ -278,6 +305,9 @@ async function iniciar(){
 
   app_id = user.app_id;
   await carregarPedidos();
+
+  /* atualização automática da tela */
+  setInterval(carregarPedidos, 5000);
 }
 
 async function carregarPedidos(){
