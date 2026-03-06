@@ -334,12 +334,58 @@ input{
 
     <hr style="margin:15px 0;">
 
-    <button 
-      class="btn-add" 
-      style="font-size:16px; padding:12px;"
-      onclick="finalizarPedido()">
-      Confirmar Pedido
-    </button>
+    <hr style="margin:15px 0;">
+
+<h3>Pagamento</h3>
+
+<div style="display:flex; gap:10px; margin-top:10px;">
+  <button type="button" class="btn-add" style="flex:1; background:#16a34a;" onclick="selecionarPagamento('pix')">
+    PIX
+  </button>
+
+  <button type="button" class="btn-add" style="flex:1;" onclick="selecionarPagamento('mercadopago')">
+    Mercado Pago
+  </button>
+</div>
+
+<!-- Área PIX -->
+<div id="areaPix" style="display:none; margin-top:12px; padding:12px; border:1px solid #ddd; border-radius:10px;">
+
+  <div style="font-weight:bold; margin-bottom:6px;">Chave PIX</div>
+
+  <input id="pixChave" readonly style="width:100%;" />
+
+  <button type="button" class="btn-add" style="margin-top:10px; background:#16a34a;" onclick="copiarPix()">
+    📋 Copiar chave PIX
+  </button>
+
+  <hr style="margin:12px 0;">
+
+  <div style="font-weight:bold; margin-bottom:6px;">Comprovante PIX</div>
+
+  <input id="pixComprovanteLink" placeholder="Cole aqui o link do comprovante (Google Drive / Foto / PDF)" />
+
+  <input id="pixComprovanteArquivo" type="file" accept="image/*,application/pdf" />
+
+  <small style="display:block;margin-top:6px;color:#666;">
+    Você pode colar um link OU enviar um arquivo.
+  </small>
+
+  <div style="font-size:12px; color:#555; margin-top:8px;">
+    Depois de pagar no PIX, envie o comprovante no WhatsApp.
+  </div>
+
+  <button type="button" class="btn-add" style="margin-top:10px; background:#111827;" onclick="finalizarPedido('pix')">
+    ✅ Confirmar Pedido (PIX)
+  </button>
+
+</div>
+
+<!-- Botão MP (fica simples) -->
+<button id="btnConfirmarMP" class="btn-add" style="display:none; font-size:16px; padding:12px; margin-top:12px;"
+  onclick="finalizarPedido('mercadopago')">
+  ✅ Confirmar e pagar no Mercado Pago
+</button>
   </div>
 </div>
 
@@ -352,11 +398,13 @@ const supabase = createClient(
 );
 
 const APP_ID = new URLSearchParams(window.location.search).get("app_id");
+const URL_PAGAMENTO = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento-loja";
 if (!APP_ID) alert("APP_ID não informado.");
 
 const contadorCarrinho = document.getElementById("contadorCarrinho");
 
-let carrinho = JSON.parse(localStorage.getItem("carrinho")) || [];
+const CARRINHO_KEY = `carrinho_${APP_ID}`;
+let carrinho = JSON.parse(localStorage.getItem(CARRINHO_KEY)) || [];
 let todosProdutos = [];
 let modoVenda = "whatsapp";
 let numeroWhatsapp = "";
@@ -371,7 +419,7 @@ function formatarReal(valor){
   });
 }
 function salvar(){
-  localStorage.setItem("carrinho", JSON.stringify(carrinho));
+  localStorage.setItem(CARRINHO_KEY, JSON.stringify(carrinho));
   contadorCarrinho.innerText =
     carrinho.reduce((acc,i)=>acc+(i.qtd||0),0);
 }
@@ -629,17 +677,24 @@ window.selecionarCor=function(cor){
 /* ================= CARRINHO ================= */
 
 function adicionarCarrinho(){
-  if(!corSelecionada){
+  let variacoes = [];
+  try { variacoes = JSON.parse(produtoAtual.variacoes || "[]"); } catch {}
+
+  const precisaCor = variacoes.length > 0;
+
+  if(precisaCor && !corSelecionada){
     alert("Selecione uma cor.");
     return;
   }
 
-  const existente=carrinho.find(i=>i.id===produtoAtual.id && i.cor===corSelecionada);
+  const corFinal = corSelecionada || "Sem cor";
+
+  const existente = carrinho.find(i => i.id === produtoAtual.id && i.cor === corFinal);
 
   if(existente){
     existente.qtd++;
-  }else{
-    carrinho.push({...produtoAtual, qtd:1, cor:corSelecionada});
+  } else {
+    carrinho.push({ ...produtoAtual, qtd: 1, cor: corFinal });
   }
 
   salvar();
@@ -683,6 +738,7 @@ function abrirCarrinho(){
 
   modalCarrinho.style.display="flex";
 }
+
 window.aumentarQtd = function(index){
   carrinho[index].qtd++;
   salvar();
@@ -704,6 +760,7 @@ window.removerItem = function(index){
   salvar();
   abrirCarrinho();
 }
+
 window.fecharCarrinho=()=>modalCarrinho.style.display="none";
 
 /* ================= GEOLOCALIZAÇÃO ================= */
@@ -714,51 +771,146 @@ window.pegarLocalizacao=function(){
       `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
   });
 }
+window.selecionarPagamento = function(modo){
+  // mostra/esconde blocos
+  const areaPix = document.getElementById("areaPix");
+  const btnMP = document.getElementById("btnConfirmarMP");
+
+  if(modo === "pix"){
+    // aqui você decide qual chave pix mostrar:
+    // se você quer usar "chavePix" (que hoje é o whatsapp em formato +55...),
+    // melhor criar uma coluna "pix_chave" no config_site.
+    // por enquanto vou usar "chavePix" que você já calcula.
+    document.getElementById("pixChave").value = chavePix || "";
+    areaPix.style.display = "block";
+    btnMP.style.display = "none";
+
+    if(!chavePix){
+      alert("Chave PIX não configurada.");
+    }
+  }
+
+  if(modo === "mercadopago"){
+    areaPix.style.display = "none";
+    btnMP.style.display = "block";
+  }
+};
+
+window.copiarPix = async function () {
+  const chave = document.getElementById("pixChave").value || "";
+  if (!chave) {
+    alert("Sem chave PIX.");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(chave);
+    alert("✅ Chave PIX copiada!");
+  } catch (e) {
+    // fallback
+    const inp = document.getElementById("pixChave");
+    inp.focus();
+    inp.select();
+    document.execCommand("copy");
+    alert("✅ Chave PIX copiada!");
+  }
+};
+
+async function uploadComprovantePix(file, pedidoId) {
+  const BUCKET = "comprovantes";
+
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+  const path = `${APP_ID}/${pedidoId}_${Date.now()}.${ext}`;
+
+  const { error: upErr } = await supabase
+    .storage
+    .from(BUCKET)
+    .upload(path, file, { upsert: true });
+
+  if (upErr) throw upErr;
+
+  const { data } = supabase
+    .storage
+    .from(BUCKET)
+    .getPublicUrl(path);
+
+  return data.publicUrl;
+}
+
 
 /* ================= FINALIZAR ================= */
+async function criarPagamentoMP(pedidoId, itens) {
+  const payload = {
+    appId: APP_ID,
+    pedidoId,
+    items: itens.map(i => ({
+      title: `${i.nome} (${i.cor})`,
+      quantity: Number(i.qtd || 1),
+      unit_price: Number(i.preco || 0)
+    }))
+  };
 
-window.finalizarPedido = async function(){
+  const res = await fetch(URL_PAGAMENTO, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 
-  if(!carrinho.length) return;
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.erro || "Falha ao criar pagamento");
+
+  return json; // { init_point, preference_id }
+}
+
+window.finalizarPedido = async function (modoEscolhido) {
+  if (!carrinho.length) return;
 
   const nome = document.getElementById("clienteNome").value.trim();
   const telefone = document.getElementById("clienteTelefone").value.trim();
 
-  if(!nome || !telefone){
+  if (!nome || !telefone) {
     alert("Preencha nome e telefone.");
     return;
   }
 
   let total = 0;
 
-  for(const item of carrinho){
-
-    const { data:produtoBanco } = await supabase
+  // ✅ valida estoque e soma total
+  for (const item of carrinho) {
+    const { data: produtoBanco, error: prodErr } = await supabase
       .from("produtos")
       .select("variacoes")
-      .eq("id",item.id)
+      .eq("id", item.id)
       .single();
 
-    let variacoes = [];
-    try{ variacoes = JSON.parse(produtoBanco.variacoes || "[]"); }catch{}
-
-    const index = variacoes.findIndex(v=>v.cor===item.cor);
-
-    if(index === -1 || variacoes[index].estoque < item.qtd){
-      alert(`Estoque insuficiente para ${item.nome} (${item.cor})`);
+    if (prodErr || !produtoBanco) {
+      alert(`Erro ao consultar produto: ${item.nome}`);
       return;
     }
 
-    variacoes[index].estoque -= item.qtd;
+    let variacoes = [];
+    try { variacoes = JSON.parse(produtoBanco.variacoes || "[]"); } catch {}
 
-    await supabase.from("produtos")
-      .update({ variacoes: JSON.stringify(variacoes) })
-      .eq("id", item.id);
+    // se o item tiver "Sem cor", não valida estoque por cor
+    if (item.cor && item.cor !== "Sem cor") {
+      const idx = variacoes.findIndex(v => v.cor === item.cor);
 
-    total += item.preco * item.qtd;
+      if (idx === -1 || Number(variacoes[idx].estoque) < Number(item.qtd)) {
+        alert(`Estoque insuficiente para ${item.nome} (${item.cor})`);
+        return;
+      }
+    }
+
+    total += Number(item.preco || 0) * Number(item.qtd || 1);
   }
 
-  const { data, error } = await supabase
+  // ✅ cria o pedido 1 vez (fora do for)
+  const statusInicial =
+  (modoEscolhido === "pix")
+    ? "aguardando_comprovante_pix"
+    : "novo";
+
+const { data: pedidoCriado, error } = await supabase
   .from("pedidos")
   .insert([{
     app_id: APP_ID,
@@ -773,48 +925,125 @@ window.finalizarPedido = async function(){
     cliente_localizacao: document.getElementById("clienteLocalizacao").value,
     itens: carrinho,
     total: total,
-    status: "novo"
-  }]);
+    status: statusInicial
+  }])
+  .select("id")
+  .single();
 
-if(error){
-  console.error("ERRO AO SALVAR PEDIDO:", error);
-  alert("Erro ao salvar pedido. Veja o console.");
-  return;
-}
-
-  if(modoVenda==="whatsapp" && numeroWhatsapp){
-
-  let texto = `🛒 *NOVO PEDIDO*\n\n`;
-  texto += `👤 ${nome}\n`;
-  texto += `📞 ${telefone}\n\n`;
-
-  carrinho.forEach(i=>{
-    texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
-  });
-
-  texto += `\n💰 Total: ${formatarReal(total)}`;
-
-  if(chavePix){
-    texto += `\n\n💳 *PAGAMENTO VIA PIX*`;
-    texto += `\nChave: ${chavePix}`;
+  if (error || !pedidoCriado) {
+    console.error("ERRO AO SALVAR PEDIDO:", error);
+    alert("Erro ao salvar pedido. Veja o console.");
+    return;
   }
 
-  window.open(
-    `https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(texto)}`,
-    "_blank"
-  );
+  const pedidoId = pedidoCriado.id;
+  // ✅ se for PIX, pega comprovante (link ou arquivo) e salva no pedido
+// variáveis que vamos usar depois no WhatsApp
+let pixLinkFinal = "";
+let pixArquivoFinal = "";
+
+if (modoEscolhido === "pix") {
+  const link = document.getElementById("pixComprovanteLink")?.value?.trim() || "";
+  const fileInput = document.getElementById("pixComprovanteArquivo");
+  const file = fileInput?.files?.[0];
+
+  if (!link && !file) {
+    alert("Envie o comprovante: cole um link ou faça upload do arquivo.");
+    return;
+  }
+
+  let arquivoUrl = "";
+
+  if (file) {
+    try {
+      arquivoUrl = await uploadComprovantePix(file, pedidoId);
+    } catch (e) {
+      console.error(e);
+
+      await supabase
+        .from("pedidos")
+        .update({ status: "erro_upload_comprovante_pix" })
+        .eq("id", pedidoId);
+
+      alert("Falha ao enviar comprovante. Verifique o bucket/policies do Storage.");
+      return;
+    }
+  }
+
+  const { error: upPedidoErr } = await supabase
+    .from("pedidos")
+    .update({
+      pagamento_modo: "pix",
+      pix_chave: chavePix,
+      pix_comprovante_url: link || null,
+      pix_comprovante_arquivo_url: arquivoUrl || null,
+      status: "aguardando_confirmacao_pix"
+    })
+    .eq("id", pedidoId);
+
+  if (upPedidoErr) {
+    console.error(upPedidoErr);
+    alert("Não consegui salvar o comprovante no pedido.");
+    return;
+  }
+
+  // guarda pra mandar no WhatsApp
+  pixLinkFinal = link;
+  pixArquivoFinal = arquivoUrl;
 }
+
+
+  // ✅ MERCADO PAGO
+  if (modoEscolhido === "mercadopago") {
+    try {
+      const pagamento = await criarPagamentoMP(pedidoId, carrinho);
+      window.location.href = pagamento.init_point;
+      return;
+    } catch (e) {
+      alert("Erro ao gerar pagamento: " + e.message);
+      console.error(e);
+      return;
+    }
+  }
+
+  // ✅ WHATSAPP (igual você já tinha)
+  if ((modoEscolhido === "pix" || modoEscolhido === "whatsapp") && numeroWhatsapp) {
+    let texto = `🛒 *NOVO PEDIDO*\n\n`;
+    texto += `👤 ${nome}\n`;
+    texto += `📞 ${telefone}\n\n`;
+
+    carrinho.forEach(i => {
+      texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
+    });
+
+    texto += `\n💰 Total: ${formatarReal(total)}`;
+
+if (pixLinkFinal) texto += `\n\n🧾 Comprovante (link): ${pixLinkFinal}`;
+if (pixArquivoFinal) texto += `\n📎 Comprovante (arquivo): ${pixArquivoFinal}`;
+
+if (chavePix) {
+  texto += `\n\n💳 *PAGAMENTO VIA PIX*`;
+  texto += `\nChave: ${chavePix}`;
+}
+    
+
+    window.open(
+      `https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(texto)}`,
+      "_blank"
+    );
+  }
 
   carrinho = [];
-salvar();
-fecharCarrinho();
-carregar();
+  salvar();
+  fecharCarrinho();
+  carregar();
 
-  if(modoVenda !== "whatsapp"){
-    alert("✅ Pedido enviado com sucesso!\n\nEm breve entraremos em contato para finalizar a compra.");
+  if (modoVenda !== "whatsapp") {
+    alert("✅ Pedido enviado com sucesso!");
   }
+};
 
-} // ← FECHA A FUNÇÃO finalizarPedido
+
 
 carregar();
 </script>
