@@ -14,49 +14,126 @@ const supabase = createClient(
 
 let appId = localStorage.getItem("app_id")
 
-async function carregarIps(){
+async function carregar(){
 
  const { data } = await supabase
-   .from("ips_provedor")
-   .select("*")
-   .eq("app_id", appId)
-   .order("ip")
+ .from("ips_provedor")
+ .select(`
+   id,
+   ip,
+   equipamentos_provedor (
+      nome,
+      modelo,
+      pops_provedor (
+         nome,
+         localizacao
+      )
+   )
+ `)
+ .eq("app_id", appId)
+ .order("ip")
 
  const tabela = document.getElementById("lista")
- tabela.innerHTML = ""
+ tabela.innerHTML=""
 
- data.forEach(ip=>{
+ data.forEach(l=>{
 
-  tabela.innerHTML += `
-  <tr>
-    <td>${ip.ip}</td>
-    <td>${ip.equipamento}</td>
-    <td>${ip.pop}</td>
-    <td>${ip.cliente}</td>
-  </tr>
-  `
+ const eq = l.equipamentos_provedor
+ const pop = eq.pops_provedor
+
+ tabela.innerHTML+=`
+ <tr>
+  <td>
+   <a href="http://${l.ip}" target="_blank">${l.ip}</a>
+  </td>
+  <td>${eq.nome}</td>
+  <td>${eq.modelo}</td>
+  <td>${pop.nome}</td>
+  <td>${pop.localizacao}</td>
+ </tr>
+ `
+
  })
 
 }
 
-async function cadastrar(){
+async function cadastrarPop(){
+
+ const nome = document.getElementById("popNome").value
+ const localizacao = document.getElementById("popLocal").value
+
+ await supabase
+ .from("pops_provedor")
+ .insert({
+   nome,
+   localizacao,
+   app_id: appId
+ })
+
+ alert("POP cadastrado")
+
+}
+
+async function cadastrarEquipamento(){
+
+ const nome = document.getElementById("equipNome").value
+ const modelo = document.getElementById("equipModelo").value
+ const pop = document.getElementById("equipPop").value
+
+ await supabase
+ .from("equipamentos_provedor")
+ .insert({
+   nome,
+   modelo,
+   pop_id: pop,
+   app_id: appId
+ })
+
+ alert("Equipamento cadastrado")
+
+}
+
+async function cadastrarIp(){
 
  const ip = document.getElementById("ip").value
- const equipamento = document.getElementById("equipamento").value
- const pop = document.getElementById("pop").value
- const cliente = document.getElementById("cliente").value
+ const equipamento = document.getElementById("equipamentoIp").value
 
  await supabase
  .from("ips_provedor")
  .insert({
    ip,
-   equipamento,
-   pop,
-   cliente,
+   equipamento_id: equipamento,
    app_id: appId
  })
 
- carregarIps()
+ carregar()
+
+}
+
+async function carregarSelects(){
+
+ const { data:pops } = await supabase
+ .from("pops_provedor")
+ .select("*")
+ .eq("app_id", appId)
+
+ const popSelect = document.getElementById("equipPop")
+
+ pops.forEach(p=>{
+  popSelect.innerHTML+=`<option value="${p.id}">${p.nome}</option>`
+ })
+
+
+ const { data:equip } = await supabase
+ .from("equipamentos_provedor")
+ .select("*")
+ .eq("app_id", appId)
+
+ const equipSelect = document.getElementById("equipamentoIp")
+
+ equip.forEach(e=>{
+  equipSelect.innerHTML+=`<option value="${e.id}">${e.nome}</option>`
+ })
 
 }
 
@@ -65,31 +142,53 @@ async function buscar(){
  const busca = document.getElementById("busca").value
 
  const { data } = await supabase
-   .from("ips_provedor")
-   .select("*")
-   .ilike("ip", `%${busca}%`)
+ .from("ips_provedor")
+ .select(`
+   id,
+   ip,
+   equipamentos_provedor (
+      nome,
+      modelo,
+      pops_provedor (
+         nome,
+         localizacao
+      )
+   )
+ `)
+ .ilike("ip", `%${busca}%`)
+ .eq("app_id", appId)
 
  const tabela = document.getElementById("lista")
  tabela.innerHTML=""
 
- data.forEach(ip=>{
+ data.forEach(l=>{
+
+ const eq = l.equipamentos_provedor
+ const pop = eq.pops_provedor
 
  tabela.innerHTML+=`
  <tr>
-   <td>${ip.ip}</td>
-   <td>${ip.equipamento}</td>
-   <td>${ip.pop}</td>
-   <td>${ip.cliente}</td>
+  <td>
+   <a href="http://${l.ip}" target="_blank">${l.ip}</a>
+  </td>
+  <td>${eq.nome}</td>
+  <td>${eq.modelo}</td>
+  <td>${pop.nome}</td>
+  <td>${pop.localizacao}</td>
  </tr>
  `
+
  })
 
 }
 
-window.cadastrar = cadastrar
+window.cadastrarPop = cadastrarPop
+window.cadastrarEquipamento = cadastrarEquipamento
+window.cadastrarIp = cadastrarIp
 window.buscar = buscar
 
-carregarIps()
+carregar()
+carregarSelects()
 
 </script>
 
@@ -102,7 +201,7 @@ color:white;
 padding:40px;
 }
 
-input,button{
+input,select,button{
 padding:10px;
 margin:5px;
 border-radius:6px;
@@ -125,28 +224,57 @@ padding:10px;
 border-bottom:1px solid #333;
 }
 
+a{
+color:#38bdf8;
+text-decoration:none;
+}
+
 </style>
 
 </head>
 
 <body>
 
-<h2>📡 Documentação de IPs</h2>
+<h2>📡 Documentação de Rede</h2>
+
+<h3>Cadastrar POP</h3>
+
+<input id="popNome" placeholder="Nome do POP">
+<input id="popLocal" placeholder="Localização">
+
+<button onclick="cadastrarPop()">Salvar POP</button>
+
+<hr>
+
+<h3>Cadastrar Equipamento</h3>
+
+<input id="equipNome" placeholder="Nome equipamento">
+
+<select id="equipModelo">
+<option>Mikrotik</option>
+<option>Intelbras</option>
+<option>STC</option>
+</select>
+
+<select id="equipPop"></select>
+
+<button onclick="cadastrarEquipamento()">Salvar Equipamento</button>
+
+<hr>
 
 <h3>Cadastrar IP</h3>
 
 <input id="ip" placeholder="IP">
-<input id="equipamento" placeholder="Equipamento">
-<input id="pop" placeholder="POP / Torre">
-<input id="cliente" placeholder="Cliente">
 
-<button onclick="cadastrar()">Salvar</button>
+<select id="equipamentoIp"></select>
+
+<button onclick="cadastrarIp()">Salvar IP</button>
 
 <hr>
 
 <h3>Buscar</h3>
 
-<input id="busca" placeholder="Buscar IP ou equipamento">
+<input id="busca" placeholder="Buscar IP">
 <button onclick="buscar()">Buscar</button>
 
 <table>
@@ -155,8 +283,9 @@ border-bottom:1px solid #333;
 <tr>
 <th>IP</th>
 <th>Equipamento</th>
+<th>Modelo</th>
 <th>POP</th>
-<th>Cliente</th>
+<th>Localização</th>
 </tr>
 </thead>
 
