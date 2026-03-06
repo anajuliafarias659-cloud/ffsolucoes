@@ -16,75 +16,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const COLUNA_EQUIPAMENTO_IP = "equipamento";
 
 let appId = null;
-let appValidade = null;
-
-/* =========================
-   AUXILIAR
-========================= */
-function escaparHtml(texto) {
-  if (texto === null || texto === undefined) return "";
-  return String(texto)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function formatarDataBR(dataStr) {
-  if (!dataStr) return "";
-  const d = new Date(dataStr);
-  if (isNaN(d.getTime())) return dataStr;
-  return d.toLocaleDateString("pt-BR");
-}
-
-function diasRestantes(dataStr) {
-  if (!dataStr) return null;
-
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
-
-  const venc = new Date(dataStr);
-  venc.setHours(0, 0, 0, 0);
-
-  const diff = venc.getTime() - hoje.getTime();
-  return Math.ceil(diff / 86400000);
-}
-
-function mostrarAvisoRenovacao(validade) {
-  const faixa = document.getElementById("faixaRenovacao");
-  if (!faixa) return;
-
-  if (!validade) {
-    faixa.innerHTML = "";
-    return;
-  }
-
-  const dias = diasRestantes(validade);
-  const dataFormatada = formatarDataBR(validade);
-
-  if (dias < 0) {
-    faixa.innerHTML = `
-      <div class="aviso-renovacao">
-        ⚠️ Seu plano expirou em ${dataFormatada}.
-        <a href="/renovar.html">Clique aqui para renovar</a>
-      </div>
-    `;
-    return;
-  }
-
-  if (dias <= 8) {
-    faixa.innerHTML = `
-      <div class="aviso-alerta">
-        ⏳ Seu plano vence em ${dataFormatada}.
-        <a href="/renovar.html">Renovar agora</a>
-      </div>
-    `;
-    return;
-  }
-
-  faixa.innerHTML = "";
-}
+let popSelecionadoTopo = "";
 
 /* =========================
    LOGIN + APP
@@ -107,6 +39,7 @@ async function carregarApp() {
     }
 
     const userId = session.user.id;
+    console.log("Usuário logado:", userId);
 
     const { data: usuario, error: usuarioError } = await supabase
       .from("usuarios")
@@ -126,17 +59,6 @@ async function carregarApp() {
     }
 
     appId = usuario.app_id;
-
-    const { data: appData, error: appError } = await supabase
-      .from("apps")
-      .select("data_expiracao")
-      .eq("id", appId)
-      .single();
-
-    if (!appError && appData) {
-      appValidade = appData.data_expiracao;
-      mostrarAvisoRenovacao(appValidade);
-    }
 
     await dashboard();
     await carregarTabela();
@@ -179,7 +101,20 @@ async function dashboard() {
 }
 
 /* =========================
-   TOGGLE
+   AUXILIAR PARA ESCAPAR TEXTO
+========================= */
+function escaparHtml(texto) {
+  if (texto === null || texto === undefined) return "";
+  return String(texto)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/* =========================
+   TOGGLE FORM/LISTA EQUIP
 ========================= */
 function toggleFormEquip() {
   const box = document.getElementById("boxFormEquip");
@@ -192,7 +127,56 @@ function toggleListaEquip() {
 
   if (box.style.display === "block") {
     listarEquipamentos();
-    box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+/* =========================
+   POPS NO TOPO
+========================= */
+async function renderizarPopsTopo() {
+  try {
+    const box = document.getElementById("popsTopo");
+    if (!box) return;
+
+    const { data: pops, error } = await supabase
+      .from("pops_provedor")
+      .select("id,nome")
+      .eq("app_id", appId)
+      .order("nome", { ascending: true });
+
+    if (error) {
+      console.error("Erro ao carregar POPs do topo:", error);
+      return;
+    }
+
+    box.innerHTML = `
+      <button class="chip-pop ativo" onclick="selecionarPopTopo('', this)">
+        Todos
+      </button>
+    `;
+
+    (pops || []).forEach(pop => {
+      box.innerHTML += `
+        <button class="chip-pop" onclick="selecionarPopTopo('${pop.id}', this)">
+          ${escaparHtml(pop.nome)}
+        </button>
+      `;
+    });
+
+  } catch (erro) {
+    console.error("Erro ao renderizar POPs do topo:", erro);
+  }
+}
+
+function selecionarPopTopo(popId, botao) {
+  popSelecionadoTopo = popId || "";
+
+  document.querySelectorAll(".chip-pop").forEach(b => {
+    b.classList.remove("ativo");
+  });
+
+  if (botao) {
+    botao.classList.add("ativo");
   }
 }
 
@@ -211,21 +195,28 @@ async function buscarDadosCompletos(filtroIp = "") {
   }
 
   const { data: ips, error: erroIps } = await queryIps;
-  if (erroIps) throw new Error("Erro ao buscar IPs: " + erroIps.message);
+
+  if (erroIps) {
+    throw new Error("Erro ao buscar IPs: " + erroIps.message);
+  }
 
   const { data: equipamentos, error: erroEquip } = await supabase
     .from("equipamentos_provedor")
     .select("*")
     .eq("app_id", appId);
 
-  if (erroEquip) throw new Error("Erro ao buscar equipamentos: " + erroEquip.message);
+  if (erroEquip) {
+    throw new Error("Erro ao buscar equipamentos: " + erroEquip.message);
+  }
 
   const { data: pops, error: erroPops } = await supabase
     .from("pops_provedor")
     .select("*")
     .eq("app_id", appId);
 
-  if (erroPops) throw new Error("Erro ao buscar POPs: " + erroPops.message);
+  if (erroPops) {
+    throw new Error("Erro ao buscar POPs: " + erroPops.message);
+  }
 
   const mapaEquip = {};
   (equipamentos || []).forEach(e => {
@@ -237,7 +228,7 @@ async function buscarDadosCompletos(filtroIp = "") {
     mapaPop[String(p.id)] = p;
   });
 
-  return (ips || []).map(item => {
+  const linhas = (ips || []).map(item => {
     const idEquip = String(item[COLUNA_EQUIPAMENTO_IP] || "");
     const equip = mapaEquip[idEquip] || null;
     const pop = equip ? (mapaPop[String(equip.pop_id)] || null) : null;
@@ -250,14 +241,17 @@ async function buscarDadosCompletos(filtroIp = "") {
       popLocalizacao: pop?.localizacao || ""
     };
   });
+
+  return linhas;
 }
 
 /* =========================
-   TABELA DE IPs
+   CARREGAR TABELA IPs
 ========================= */
 async function carregarTabela() {
   try {
     const linhas = await buscarDadosCompletos();
+
     const tabela = document.getElementById("lista");
     tabela.innerHTML = "";
 
@@ -272,11 +266,11 @@ async function carregarTabela() {
 
       tabela.innerHTML += `
         <tr>
-          <td data-label="IP"><a href="http://${ipSeguro}" target="_blank">${ipSeguro}</a></td>
-          <td data-label="Equipamento">${nomeEquip}</td>
-          <td data-label="Modelo">${modeloEquip}</td>
-          <td data-label="POP">${nomePop}</td>
-          <td data-label="Localização">
+          <td><a href="http://${ipSeguro}" target="_blank">${ipSeguro}</a></td>
+          <td>${nomeEquip}</td>
+          <td>${modeloEquip}</td>
+          <td>${nomePop}</td>
+          <td>
             ${localizacao
               ? `<a href="${linkMapa}" target="_blank" class="btn-mapa-link">
                    <button type="button" class="btn-mapa">📍 Ver localização</button>
@@ -288,14 +282,6 @@ async function carregarTabela() {
         </tr>
       `;
     });
-
-    if (!linhas.length) {
-      tabela.innerHTML = `
-        <tr>
-          <td colspan="5" class="muted">Nenhum IP cadastrado</td>
-        </tr>
-      `;
-    }
 
   } catch (erro) {
     console.error("Erro ao carregar tabela:", erro);
@@ -325,6 +311,7 @@ async function cadastrarPop() {
       });
 
     if (error) {
+      console.error("Erro ao cadastrar POP:", error);
       alert("Erro ao cadastrar POP: " + error.message);
       return;
     }
@@ -368,6 +355,7 @@ async function cadastrarEquip() {
       });
 
     if (error) {
+      console.error("Erro ao cadastrar equipamento:", error);
       alert("Erro ao cadastrar equipamento: " + error.message);
       return;
     }
@@ -412,6 +400,7 @@ async function cadastrarIp() {
       .insert(objetoInsert);
 
     if (error) {
+      console.error("Erro ao cadastrar IP:", error);
       alert("Erro ao cadastrar IP: " + error.message);
       return;
     }
@@ -438,7 +427,9 @@ async function carregarSelects() {
     popSelect.innerHTML = `<option value="">Selecione o POP</option>`;
 
     const filtroPopEquip = document.getElementById("filtroPopEquip");
-    filtroPopEquip.innerHTML = `<option value="">Todos os POPs</option>`;
+    if (filtroPopEquip) {
+      filtroPopEquip.innerHTML = `<option value="">Todos os POPs</option>`;
+    }
 
     const { data: pops, error: popError } = await supabase
       .from("pops_provedor")
@@ -446,11 +437,17 @@ async function carregarSelects() {
       .eq("app_id", appId)
       .order("nome", { ascending: true });
 
-    if (popError) return;
+    if (popError) {
+      console.error("Erro ao carregar POPs:", popError);
+      return;
+    }
 
     (pops || []).forEach(p => {
       popSelect.innerHTML += `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nome)}</option>`;
-      filtroPopEquip.innerHTML += `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nome)}</option>`;
+
+      if (filtroPopEquip) {
+        filtroPopEquip.innerHTML += `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nome)}</option>`;
+      }
     });
 
     const equipSelect = document.getElementById("equipIp");
@@ -462,7 +459,10 @@ async function carregarSelects() {
       .eq("app_id", appId)
       .order("nome", { ascending: true });
 
-    if (equipError) return;
+    if (equipError) {
+      console.error("Erro ao carregar equipamentos:", equipError);
+      return;
+    }
 
     (equip || []).forEach(e => {
       equipSelect.innerHTML += `<option value="${escaparHtml(e.id)}">${escaparHtml(e.nome)}</option>`;
@@ -476,17 +476,10 @@ async function carregarSelects() {
 /* =========================
    LISTAR EQUIPAMENTOS
 ========================= */
-async function listarEquipamentos(popId = "") {
+async function listarEquipamentos() {
   try {
-    const box = document.getElementById("boxListaEquip");
-    box.style.display = "block";
-
-    if (popId !== undefined) {
-      document.getElementById("filtroPopEquip").value = popId;
-      marcarPopAtivo(popId);
-    }
-
-    const filtroPop = document.getElementById("filtroPopEquip").value;
+    const filtro = document.getElementById("filtroPopEquip");
+    const filtroPop = filtro ? filtro.value : "";
 
     const { data: equipamentos, error: erroEquip } = await supabase
       .from("equipamentos_provedor")
@@ -515,6 +508,8 @@ async function listarEquipamentos(popId = "") {
     });
 
     const tbody = document.getElementById("listaEquipamentos");
+    if (!tbody) return;
+
     tbody.innerHTML = "";
 
     (equipamentos || [])
@@ -526,10 +521,10 @@ async function listarEquipamentos(popId = "") {
         const popNome = escaparHtml(mapaPop[String(e.pop_id)] || "");
 
         tbody.innerHTML += `
-          <tr class="linha-click" onclick="selecionarEquipamento('${id}', '${nome.replace(/'/g, "\\'")}')">
-            <td data-label="Nome">${nome}</td>
-            <td data-label="Modelo">${modelo}</td>
-            <td data-label="POP">${popNome}</td>
+          <tr class="linha-click" onclick="selecionarEquipamento('${id}', '${nome}')">
+            <td>${nome}</td>
+            <td>${modelo}</td>
+            <td>${popNome}</td>
           </tr>
         `;
       });
@@ -542,63 +537,9 @@ async function listarEquipamentos(popId = "") {
       `;
     }
 
-    box.scrollIntoView({ behavior: "smooth", block: "start" });
-
   } catch (erro) {
     console.error("Erro ao listar equipamentos:", erro);
   }
-}
-
-/* =========================
-   POPS NO TOPO
-========================= */
-async function renderizarPopsTopo() {
-  try {
-    const box = document.getElementById("popsTopo");
-    box.innerHTML = `
-      <button class="chip-pop ativo" onclick="abrirEquipamentos()">
-        Todos
-      </button>
-    `;
-
-    const { data: pops, error } = await supabase
-      .from("pops_provedor")
-      .select("id,nome")
-      .eq("app_id", appId)
-      .order("nome", { ascending: true });
-
-    if (error) {
-      console.error("Erro ao carregar POPs do topo:", error);
-      return;
-    }
-
-    (pops || []).forEach(pop => {
-      box.innerHTML += `
-        <button
-          class="chip-pop"
-          onclick="abrirEquipamentosPorPop('${pop.id}')">
-          ${escaparHtml(pop.nome)}
-        </button>
-      `;
-    });
-
-  } catch (erro) {
-    console.error("Erro ao renderizar POPs:", erro);
-  }
-}
-
-function abrirEquipamentos() {
-  window.location.href = "/equipamentos.html";
-}
-
-function abrirEquipamentosPorPop(popId) {
-  window.location.href = "/equipamentos.html?pop_id=" + encodeURIComponent(popId);
-}
-
-function verTodosEquipamentos() {
-  document.getElementById("filtroPopEquip").value = "";
-  marcarPopAtivo("");
-  listarEquipamentos("");
 }
 
 /* =========================
@@ -607,7 +548,6 @@ function verTodosEquipamentos() {
 function selecionarEquipamento(id, nome) {
   document.getElementById("equipIp").value = id;
   alert("Equipamento selecionado: " + nome);
-  document.getElementById("ip").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 /* =========================
@@ -632,11 +572,11 @@ async function buscar() {
 
       tabela.innerHTML += `
         <tr>
-          <td data-label="IP"><a href="http://${ipSeguro}" target="_blank">${ipSeguro}</a></td>
-          <td data-label="Equipamento">${nomeEquip}</td>
-          <td data-label="Modelo">${modeloEquip}</td>
-          <td data-label="POP">${nomePop}</td>
-          <td data-label="Localização">
+          <td><a href="http://${ipSeguro}" target="_blank">${ipSeguro}</a></td>
+          <td>${nomeEquip}</td>
+          <td>${modeloEquip}</td>
+          <td>${nomePop}</td>
+          <td>
             ${localizacao
               ? `<a href="${linkMapa}" target="_blank" class="btn-mapa-link">
                    <button type="button" class="btn-mapa">📍 Ver localização</button>
@@ -649,18 +589,81 @@ async function buscar() {
       `;
     });
 
-    if (!linhas.length) {
-      tabela.innerHTML = `
-        <tr>
-          <td colspan="5" class="muted">Nenhum resultado encontrado</td>
-        </tr>
-      `;
-    }
-
   } catch (erro) {
     console.error("Erro ao buscar:", erro);
     alert(erro.message || "Erro ao buscar");
   }
+}
+
+/* =========================
+   ABRIR EQUIPAMENTOS
+========================= */
+function abrirEquipamentos() {
+  let url = "equipamentos.html";
+
+  if (popSelecionadoTopo) {
+    url += "?pop_id=" + encodeURIComponent(popSelecionadoTopo);
+  }
+
+  window.open(url, "_blank");
+}
+
+/* =========================
+   AVISO RENOVAÇÃO
+========================= */
+function formatarDataBR(dataStr) {
+  if (!dataStr) return "";
+  const d = new Date(dataStr + "T00:00:00");
+  if (isNaN(d.getTime())) return dataStr;
+  return d.toLocaleDateString("pt-BR");
+}
+
+function diasRestantes(dataStr) {
+  if (!dataStr) return null;
+
+  const hoje = new Date();
+  hoje.setHours(0,0,0,0);
+
+  const venc = new Date(dataStr + "T00:00:00");
+  venc.setHours(0,0,0,0);
+
+  const diff = venc.getTime() - hoje.getTime();
+  return Math.ceil(diff / 86400000);
+}
+
+function mostrarAvisoRenovacao(validade) {
+  const faixa = document.getElementById("faixaRenovacao");
+  if (!faixa) return;
+
+  if (!validade) {
+    faixa.innerHTML = "";
+    return;
+  }
+
+  const dias = diasRestantes(validade);
+  const dataFormatada = formatarDataBR(validade);
+
+  if (dias < 0) {
+    faixa.innerHTML = `
+      <div class="aviso-renovacao">
+        ⚠️ Seu plano expirou em ${dataFormatada}.
+        <a href="/renovar.html">Clique aqui para renovar</a>
+      </div>
+    `;
+    return;
+  }
+
+  if (dias <= 8) {
+    faixa.innerHTML = `
+      <div class="aviso-alerta">
+        ⏳ Seu plano vence em ${dataFormatada}.
+        <a href="/renovar.html">Renovar agora</a>
+      </div>
+    `;
+    return;
+  }
+
+  faixa.innerHTML = "";
 }
 
 window.cadastrarPop = cadastrarPop;
@@ -670,9 +673,8 @@ window.buscar = buscar;
 window.toggleFormEquip = toggleFormEquip;
 window.toggleListaEquip = toggleListaEquip;
 window.listarEquipamentos = listarEquipamentos;
-window.selecionarEquipamento = selecionarEquipamento;
-window.abrirEquipamentosPorPop = abrirEquipamentosPorPop;
-window.verTodosEquipamentos = verTodosEquipamentos;
+window.abrirEquipamentos = abrirEquipamentos;
+window.selecionarPopTopo = selecionarPopTopo;
 
 carregarApp();
 </script>
@@ -686,12 +688,13 @@ body{
   background:#020617;
   color:#fff;
   font-family:Arial, sans-serif;
-  padding:16px;
+  padding:30px;
   margin:0;
 }
 
 h2{
-  margin:0 0 16px 0;
+  margin-top:0;
+  margin-bottom:20px;
 }
 
 h3{
@@ -699,29 +702,27 @@ h3{
 }
 
 .dashboard{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:12px;
-  margin-bottom:20px;
+  display:flex;
+  gap:20px;
+  margin-bottom:30px;
+  flex-wrap:wrap;
 }
 
 .card{
   background:#0f172a;
-  padding:16px;
+  padding:20px;
   border-radius:12px;
+  flex:1;
+  min-width:180px;
   text-align:center;
   border:1px solid #1e293b;
 }
 
-.card h1{
-  margin:10px 0 0 0;
-}
-
 .section{
   background:#0f172a;
-  padding:16px;
+  padding:20px;
   border-radius:12px;
-  margin-bottom:16px;
+  margin-bottom:20px;
   border:1px solid #1e293b;
 }
 
@@ -740,14 +741,14 @@ h3{
 }
 
 input,select,button{
-  padding:12px;
-  margin:6px 0;
-  border-radius:10px;
+  padding:10px;
+  margin:5px;
+  border-radius:8px;
   border:none;
-  width:100%;
 }
 
 input,select{
+  min-width:220px;
   background:#fff;
   color:#000;
 }
@@ -765,7 +766,7 @@ button:hover{
 
 table{
   width:100%;
-  margin-top:12px;
+  margin-top:15px;
   border-collapse:collapse;
 }
 
@@ -785,12 +786,15 @@ a{
   background:#2563eb;
   color:#fff;
   border:none;
-  padding:8px 10px;
+  padding:6px 10px;
   border-radius:6px;
   cursor:pointer;
   font-size:12px;
   margin:0;
-  width:auto;
+}
+
+.btn-mapa:hover{
+  background:#1d4ed8;
 }
 
 .btn-mapa-link{
@@ -819,23 +823,18 @@ a{
 .pops-topo{
   display:flex;
   gap:10px;
-  overflow-x:auto;
-  padding-bottom:6px;
-  margin:10px 0 0 0;
-}
-
-.pops-topo::-webkit-scrollbar{
-  height:6px;
+  flex-wrap:wrap;
+  margin-top:10px;
 }
 
 .chip-pop{
-  min-width:max-content;
   background:#1e293b;
   color:#fff;
   border:1px solid #334155;
   border-radius:999px;
   padding:10px 14px;
-  font-size:14px;
+  cursor:pointer;
+  font-weight:bold;
 }
 
 .chip-pop.ativo{
@@ -850,7 +849,6 @@ a{
   padding:14px 16px;
   text-align:center;
   font-weight:bold;
-  margin:-16px -16px 16px -16px;
 }
 
 .aviso-renovacao a{
@@ -865,7 +863,6 @@ a{
   padding:14px 16px;
   text-align:center;
   font-weight:bold;
-  margin:-16px -16px 16px -16px;
 }
 
 .aviso-alerta a{
@@ -876,53 +873,40 @@ a{
 
 @media(max-width:700px){
   body{
-    padding:12px;
+    padding:15px;
+  }
+
+  input,select,button{
+    width:100%;
+    margin:5px 0;
   }
 
   .dashboard{
-    grid-template-columns:1fr;
-  }
-
-  .topo-secao,
-  .acoes-topo{
     flex-direction:column;
-    align-items:stretch;
   }
 
-  table,
-  thead,
-  tbody,
-  th,
-  td,
-  tr{
-    display:block;
+  .acoes-topo{
     width:100%;
   }
 
-  thead{
-    display:none;
+  .acoes-topo button{
+    width:100%;
   }
 
-  tr{
-    background:#0b1220;
-    border:1px solid #1e293b;
-    border-radius:12px;
-    padding:10px;
-    margin-bottom:10px;
+  .pops-topo{
+    overflow-x:auto;
+    flex-wrap:nowrap;
+    padding-bottom:4px;
   }
 
-  td{
-    border:none;
-    padding:8px 0;
+  .chip-pop{
+    white-space:nowrap;
   }
 
-  td::before{
-    content:attr(data-label);
+  table{
+    font-size:14px;
     display:block;
-    font-size:12px;
-    color:#94a3b8;
-    margin-bottom:4px;
-    font-weight:bold;
+    overflow-x:auto;
   }
 }
 </style>
@@ -952,9 +936,15 @@ a{
 </div>
 
 <div class="section">
-  <div class="section">
-  <h3>POPs cadastrados</h3>
+  <h3>Escolher POP</h3>
   <div id="popsTopo" class="pops-topo"></div>
+</div>
+
+<div class="section">
+  <h3>Cadastrar POP</h3>
+  <input id="popNome" placeholder="Nome do POP">
+  <input id="popLocal" placeholder="Localização">
+  <button onclick="cadastrarPop()">Salvar</button>
 </div>
 
 <div class="section">
@@ -963,24 +953,6 @@ a{
     <div class="acoes-topo">
       <button type="button" onclick="toggleFormEquip()">+ Novo equipamento</button>
       <button type="button" onclick="abrirEquipamentos()">Ver equipamentos</button>
-    </div>
-  </div>
-
-  <div id="boxFormEquip" style="display:none; margin-top:15px;">
-    <input id="equipNome" placeholder="Nome do equipamento">
-    <input id="equipModelo" placeholder="Modelo (Mikrotik / Intelbras / STC / etc)">
-    <select id="equipPop"></select>
-    <button onclick="cadastrarEquip()">Salvar</button>
-  </div>
-</div>
-
-<div class="section">
-  <div class="topo-secao">
-    <h3>Equipamentos</h3>
-    <div class="acoes-topo">
-      <button type="button" onclick="toggleFormEquip()">+ Novo equipamento</button>
-      <button type="button" onclick="toggleListaEquip()">Ver equipamentos</button>
-      <button type="button" onclick="verTodosEquipamentos()">Ver todos</button>
     </div>
   </div>
 
