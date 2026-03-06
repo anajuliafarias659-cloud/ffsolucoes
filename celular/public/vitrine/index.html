@@ -937,8 +937,23 @@ window.finalizarPedido = async function (modoEscolhido) {
   // ✅ cria o pedido 1 vez (fora do for)
   const statusInicial =
   (modoEscolhido === "pix")
-    ? "aguardando_comprovante_pix"
-    : "novo";
+    ? "aguardando_confirmacao_pix"
+    : "aguardando_pagamento";
+
+const pagamentoModoInicial =
+  (modoEscolhido === "pix")
+    ? "pix_manual"
+    : "mercadopago";
+
+const pagamentoTipoInicial =
+  (modoEscolhido === "pix")
+    ? "pix"
+    : "checkout_online";
+
+const pagamentoStatusInicial =
+  (modoEscolhido === "pix")
+    ? "aguardando_comprovante"
+    : "pending";
 
 const { data: pedidoCriado, error } = await supabase
   .from("pedidos")
@@ -955,7 +970,10 @@ const { data: pedidoCriado, error } = await supabase
     cliente_localizacao: document.getElementById("clienteLocalizacao").value,
     itens: carrinho,
     total: total,
-    status: statusInicial
+    status: statusInicial,
+    pagamento_modo: pagamentoModoInicial,
+    pagamento_tipo: pagamentoTipoInicial,
+    pagamento_status: pagamentoStatusInicial
   }])
   .select("id")
   .single();
@@ -1001,15 +1019,17 @@ if (modoEscolhido === "pix") {
   }
 
   const { error: upPedidoErr } = await supabase
-    .from("pedidos")
-    .update({
-      pagamento_modo: "pix",
-      pix_chave: chavePix,
-      pix_comprovante_url: link || null,
-      pix_comprovante_arquivo_url: arquivoUrl || null,
-      status: "aguardando_confirmacao_pix"
-    })
-    .eq("id", pedidoId);
+  .from("pedidos")
+  .update({
+    pagamento_modo: "pix_manual",
+    pagamento_tipo: "pix",
+    pagamento_status: "aguardando_comprovante",
+    pix_chave: chavePix,
+    pix_comprovante_url: link || null,
+    pix_comprovante_arquivo_url: arquivoUrl || null,
+    status: "aguardando_confirmacao_pix"
+  })
+  .eq("id", pedidoId);
 
   if (upPedidoErr) {
     console.error(upPedidoErr);
@@ -1026,10 +1046,20 @@ if (modoEscolhido === "pix") {
  // ✅ MERCADO PAGO
 if (modoEscolhido === "mercadopago") {
   try {
-
     const pagamento = await criarPagamentoMP(pedidoId, carrinho);
 
     console.log("RESPOSTA PAGAMENTO:", pagamento);
+
+    await supabase
+      .from("pedidos")
+      .update({
+        pagamento_modo: "mercadopago",
+        pagamento_tipo: "checkout_online",
+        pagamento_status: "pending",
+        mp_preference_id: pagamento.id || null,
+        status: "aguardando_pagamento"
+      })
+      .eq("id", pedidoId);
 
     const linkPagamento =
       pagamento.init_point ||
