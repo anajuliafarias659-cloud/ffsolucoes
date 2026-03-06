@@ -43,7 +43,7 @@ async function carregarApp() {
 
     const { data: usuario, error: usuarioError } = await supabase
       .from("usuarios")
-      .select("app_id")
+      .select("app_id, validade")
       .eq("id", userId)
       .single();
 
@@ -59,6 +59,8 @@ async function carregarApp() {
     }
 
     appId = usuario.app_id;
+
+    mostrarAvisoRenovacao(usuario.validade);
 
     await dashboard();
     await carregarTabela();
@@ -76,23 +78,35 @@ async function carregarApp() {
 ========================= */
 async function dashboard() {
   try {
-    const { data: pops } = await supabase
-  .from("pops_provedor")
-  .select("*")
-  .eq("app_id", appId);
+    const { data: pops, error: erroPops } = await supabase
+      .from("pops_provedor")
+      .select("id")
+      .eq("app_id", appId);
 
-const { data: popsEquip } = await supabase
-  .from("pops_provedor")
-  .select("*")
-  .eq("app_id", appId);
+    const { data: equipamentos, error: erroEquip } = await supabase
+      .from("equipamentos_provedor")
+      .select("id")
+      .eq("app_id", appId);
 
-    const { count: ips } = await supabase
+    const { count: ips, error: erroIps } = await supabase
       .from("ips_provedor")
       .select("*", { count: "exact", head: true })
       .eq("app_id", appId);
 
-    document.getElementById("totalPops").innerText = pops || 0;
-    document.getElementById("totalEquip").innerText = equip || 0;
+    if (erroPops) {
+      console.error("Erro ao contar POPs:", erroPops);
+    }
+
+    if (erroEquip) {
+      console.error("Erro ao contar equipamentos:", erroEquip);
+    }
+
+    if (erroIps) {
+      console.error("Erro ao contar IPs:", erroIps);
+    }
+
+    document.getElementById("totalPops").innerText = (pops || []).length;
+    document.getElementById("totalEquip").innerText = (equipamentos || []).length;
     document.getElementById("totalIps").innerText = ips || 0;
 
   } catch (erro) {
@@ -211,10 +225,8 @@ async function buscarDadosCompletos(filtroIp = "") {
 
   const { data: pops, error: erroPops } = await supabase
     .from("pops_provedor")
-    const { data: pops, error: erroPops } = await supabase
-  .from("pops_provedor")
-  .select("*")
-  .eq("app_id", appId);
+    .select("*")
+    .eq("app_id", appId);
 
   if (erroPops) {
     throw new Error("Erro ao buscar POPs: " + erroPops.message);
@@ -237,6 +249,9 @@ async function buscarDadosCompletos(filtroIp = "") {
 
     return {
       ip: item.ip || "",
+      cidr: item.cidr || "",
+      porta: item.porta || "",
+      tipo: item.tipo || "",
       equipamentoNome: equip?.nome || "",
       equipamentoModelo: equip?.modelo || "",
       popNome: pop?.nome || "",
@@ -251,37 +266,40 @@ async function buscarDadosCompletos(filtroIp = "") {
    CARREGAR TABELA IPs
 ========================= */
 async function carregarTabela() {
-
   try {
-
     const linhas = await buscarDadosCompletos();
 
     const tabela = document.getElementById("lista");
     tabela.innerHTML = "";
 
     linhas.forEach(l => {
-
       const ipFormatado = l.cidr ? `${l.ip}/${l.cidr}` : l.ip;
+      const localizacao = l.popLocalizacao || "";
+      const linkMapa = "https://www.google.com/maps/search/" + encodeURIComponent(localizacao);
 
       tabela.innerHTML += `
-      <tr>
-        <td><a href="http://${ipFormatado}" target="_blank">${ipFormatado}</a></td>
-        <td>${escaparHtml(l.equipamentoNome)}</td>
-        <td>${escaparHtml(l.equipamentoModelo)}</td>
-        <td>${escaparHtml(l.popNome)}</td>
-        <td>${escaparHtml(l.popLocalizacao)}</td>
-        <td>${escaparHtml(l.porta || "-")}</td>
-      </tr>
+        <tr>
+          <td><a href="http://${escaparHtml(l.ip)}" target="_blank">${escaparHtml(ipFormatado)}</a></td>
+          <td>${escaparHtml(l.equipamentoNome)}</td>
+          <td>${escaparHtml(l.equipamentoModelo)}</td>
+          <td>${escaparHtml(l.popNome)}</td>
+          <td>
+            ${localizacao
+              ? `<a href="${linkMapa}" target="_blank" class="btn-mapa-link">
+                   <button type="button" class="btn-mapa">📍 Ver localização</button>
+                 </a>
+                 <div class="texto-localizacao">${escaparHtml(localizacao)}</div>`
+              : `<span class="muted">Sem localização</span>`
+            }
+          </td>
+          <td>${escaparHtml(l.porta || "-")}</td>
+        </tr>
       `;
-
     });
 
   } catch (erro) {
-
     console.error("Erro ao carregar tabela:", erro);
-
   }
-
 }
 
 /* =========================
@@ -374,9 +392,7 @@ async function cadastrarEquip() {
    CADASTRAR IP
 ========================= */
 async function cadastrarIp() {
-
   try {
-
     const ip = document.getElementById("ip").value.trim();
     const cidr = document.getElementById("cidr").value.trim();
     const porta = document.getElementById("porta").value.trim();
@@ -411,35 +427,7 @@ async function cadastrarIp() {
     document.getElementById("ip").value = "";
     document.getElementById("cidr").value = "";
     document.getElementById("porta").value = "";
-    document.getElementById("equipIp").value = "";
-
-    alert("IP cadastrado com sucesso");
-
-    await carregarTabela();
-    await dashboard();
-
-  } catch (erro) {
-    console.error("Erro geral ao cadastrar IP:", erro);
-  }
-
-}
-
-    document.getElementById("ip").value = "";
-    document.getElementById("cidr").value = "";
-    document.getElementById("porta").value = "";
-
-    alert("IP cadastrado com sucesso");
-
-    await carregarTabela();
-    await dashboard();
-
-  } catch (erro) {
-    console.error("Erro geral ao cadastrar IP:", erro);
-  }
-
-}
-
-    document.getElementById("ip").value = "";
+    document.getElementById("tipoIp").value = "host";
     document.getElementById("equipIp").value = "";
 
     alert("IP cadastrado com sucesso");
@@ -596,22 +584,17 @@ async function buscar() {
     tabela.innerHTML = "";
 
     linhas.forEach(l => {
-      const ipSeguro = escaparHtml(
-  l.cidr ? `${l.ip}/${l.cidr}` : l.ip
-);
-      const nomeEquip = escaparHtml(l.equipamentoNome);
-      const modeloEquip = escaparHtml(l.equipamentoModelo);
-      const nomePop = escaparHtml(l.popNome);
+      const ipFormatado = l.cidr ? `${l.ip}/${l.cidr}` : l.ip;
       const localizacao = l.popLocalizacao || "";
       const localizacaoSegura = escaparHtml(localizacao);
       const linkMapa = "https://www.google.com/maps/search/" + encodeURIComponent(localizacao);
 
       tabela.innerHTML += `
         <tr>
-          <td><a href="http://${ipSeguro}" target="_blank">${ipSeguro}</a></td>
-          <td>${nomeEquip}</td>
-          <td>${modeloEquip}</td>
-          <td>${nomePop}</td>
+          <td><a href="http://${escaparHtml(l.ip)}" target="_blank">${escaparHtml(ipFormatado)}</a></td>
+          <td>${escaparHtml(l.equipamentoNome)}</td>
+          <td>${escaparHtml(l.equipamentoModelo)}</td>
+          <td>${escaparHtml(l.popNome)}</td>
           <td>
             ${localizacao
               ? `<a href="${linkMapa}" target="_blank" class="btn-mapa-link">
@@ -621,6 +604,7 @@ async function buscar() {
             }
             ${localizacao ? `<div class="texto-localizacao">${localizacaoSegura}</div>` : ``}
           </td>
+          <td>${escaparHtml(l.porta || "-")}</td>
         </tr>
       `;
     });
@@ -711,6 +695,7 @@ window.toggleListaEquip = toggleListaEquip;
 window.listarEquipamentos = listarEquipamentos;
 window.abrirEquipamentos = abrirEquipamentos;
 window.selecionarPopTopo = selecionarPopTopo;
+window.selecionarEquipamento = selecionarEquipamento;
 
 carregarApp();
 </script>
@@ -988,7 +973,8 @@ a{
     <h3>Equipamentos</h3>
     <div class="acoes-topo">
       <button type="button" onclick="toggleFormEquip()">+ Novo equipamento</button>
-      <button type="button" onclick="abrirEquipamentos()">Ver equipamentos</button>
+      <button type="button" onclick="toggleListaEquip()">Ver lista</button>
+      <button type="button" onclick="abrirEquipamentos()">Abrir página</button>
     </div>
   </div>
 
@@ -1022,17 +1008,19 @@ a{
 <div class="section">
   <h3>Cadastrar IP</h3>
   <input id="ip" placeholder="IP (ex: 10.0.0.1)">
-<input id="cidr" placeholder="CIDR (30 / 24)">
-<input id="porta" placeholder="Porta (ex: ether1 / sfp1)">
-<select id="tipoIp">
-<option value="host">Host</option>
-<option value="link">Link /30</option>
-<option value="rede">Rede /24</option>
-</select>
+  <input id="cidr" placeholder="CIDR (30 / 24)">
+  <input id="porta" placeholder="Porta (ex: ether1 / sfp1)">
 
-<select id="equipIp"></select>
+  <select id="tipoIp">
+    <option value="host">Host</option>
+    <option value="link">Link /30</option>
+    <option value="rede">Rede /24</option>
+  </select>
 
-<button onclick="cadastrarIp()">Salvar</button>
+  <select id="equipIp"></select>
+
+  <button onclick="cadastrarIp()">Salvar</button>
+</div>
 
 <div class="section">
   <h3>Buscar IP</h3>
@@ -1041,15 +1029,15 @@ a{
 
   <table>
     <thead>
-<tr>
-<th>IP</th>
-<th>Equipamento</th>
-<th>Modelo</th>
-<th>POP</th>
-<th>Localização</th>
-<th>Porta</th>
-</tr>
-</thead>
+      <tr>
+        <th>IP</th>
+        <th>Equipamento</th>
+        <th>Modelo</th>
+        <th>POP</th>
+        <th>Localização</th>
+        <th>Porta</th>
+      </tr>
+    </thead>
     <tbody id="lista"></tbody>
   </table>
 </div>
