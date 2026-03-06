@@ -13,10 +13,16 @@ const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+/*
+  IMPORTANTE:
+  TROQUE AQUI SE O NOME DA COLUNA FOR OUTRO
+*/
+const COLUNA_EQUIPAMENTO_IP = "equipamento_id";
+
 let appId = null;
 
 /* =========================
-   VERIFICAR LOGIN + APP_ID
+   LOGIN + APP
 ========================= */
 async function carregarApp() {
   try {
@@ -97,53 +103,95 @@ async function dashboard() {
 }
 
 /* =========================
+   BUSCA DADOS E MONTA MAPA
+========================= */
+async function buscarDadosCompletos(filtroIp = "") {
+  let queryIps = supabase
+    .from("ips_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("ip", { ascending: true });
+
+  if (filtroIp) {
+    queryIps = queryIps.ilike("ip", `%${filtroIp}%`);
+  }
+
+  const { data: ips, error: erroIps } = await queryIps;
+
+  if (erroIps) {
+    throw new Error("Erro ao buscar IPs: " + erroIps.message);
+  }
+
+  const { data: equipamentos, error: erroEquip } = await supabase
+    .from("equipamentos_provedor")
+    .select("*")
+    .eq("app_id", appId);
+
+  if (erroEquip) {
+    throw new Error("Erro ao buscar equipamentos: " + erroEquip.message);
+  }
+
+  const { data: pops, error: erroPops } = await supabase
+    .from("pops_provedor")
+    .select("*")
+    .eq("app_id", appId);
+
+  if (erroPops) {
+    throw new Error("Erro ao buscar POPs: " + erroPops.message);
+  }
+
+  const mapaEquip = {};
+  (equipamentos || []).forEach(e => {
+    mapaEquip[e.id] = e;
+  });
+
+  const mapaPop = {};
+  (pops || []).forEach(p => {
+    mapaPop[p.id] = p;
+  });
+
+  const linhas = (ips || []).map(item => {
+    const idEquip = item[COLUNA_EQUIPAMENTO_IP];
+    const equip = mapaEquip[idEquip] || null;
+    const pop = equip ? (mapaPop[equip.pop_id] || null) : null;
+
+    return {
+      ip: item.ip || "",
+      equipamentoNome: equip?.nome || "",
+      equipamentoModelo: equip?.modelo || "",
+      popNome: pop?.nome || "",
+      popLocalizacao: pop?.localizacao || ""
+    };
+  });
+
+  return linhas;
+}
+
+/* =========================
    CARREGAR TABELA
 ========================= */
 async function carregarTabela() {
   try {
-    const { data, error } = await supabase
-      .from("ips_provedor")
-      .select(`
-        id,
-        ip,
-        equipamentos_provedor (
-          nome,
-          modelo,
-          pops_provedor (
-            nome,
-            localizacao
-          )
-        )
-      `)
-      .eq("app_id", appId)
-      .order("ip");
-
-    if (error) {
-      console.error("Erro ao carregar tabela:", error);
-      alert("Erro ao carregar tabela");
-      return;
-    }
+    const linhas = await buscarDadosCompletos();
 
     const tabela = document.getElementById("lista");
     tabela.innerHTML = "";
 
-    (data || []).forEach(l => {
-      const eq = l.equipamentos_provedor || {};
-      const pop = eq.pops_provedor || {};
-
+    linhas.forEach(l => {
       tabela.innerHTML += `
         <tr>
           <td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
-          <td>${eq.nome || ""}</td>
-          <td>${eq.modelo || ""}</td>
-          <td>${pop.nome || ""}</td>
-          <td>${pop.localizacao || ""}</td>
+          <td>${l.equipamentoNome}</td>
+          <td>${l.equipamentoModelo}</td>
+          <td>${l.popNome}</td>
+          <td>${l.popLocalizacao}</td>
         </tr>
       `;
     });
 
   } catch (erro) {
-    console.error("Erro geral ao carregar tabela:", erro);
+    console.error("Erro ao carregar tabela:", erro);
+    alert(erro.message || "Erro ao carregar tabela");
   }
 }
 
@@ -163,7 +211,7 @@ async function cadastrarPop() {
     const { error } = await supabase
       .from("pops_provedor")
       .insert({
-        nome: nome,
+        nome,
         localizacao: local,
         app_id: appId
       });
@@ -181,7 +229,6 @@ async function cadastrarPop() {
 
     await carregarSelects();
     await dashboard();
-
   } catch (erro) {
     console.error("Erro geral ao cadastrar POP:", erro);
   }
@@ -204,8 +251,8 @@ async function cadastrarEquip() {
     const { error } = await supabase
       .from("equipamentos_provedor")
       .insert({
-        nome: nome,
-        modelo: modelo,
+        nome,
+        modelo,
         pop_id: pop,
         app_id: appId
       });
@@ -223,7 +270,6 @@ async function cadastrarEquip() {
 
     await carregarSelects();
     await dashboard();
-
   } catch (erro) {
     console.error("Erro geral ao cadastrar equipamento:", erro);
   }
@@ -242,13 +288,16 @@ async function cadastrarIp() {
       return;
     }
 
+    const objetoInsert = {
+      ip: ip,
+      app_id: appId
+    };
+
+    objetoInsert[COLUNA_EQUIPAMENTO_IP] = equip;
+
     const { error } = await supabase
       .from("ips_provedor")
-      .insert({
-        ip: ip,
-        equipamento_id: equip,
-        app_id: appId
-      });
+      .insert(objetoInsert);
 
     if (error) {
       console.error("Erro ao cadastrar IP:", error);
@@ -262,7 +311,6 @@ async function cadastrarIp() {
 
     await carregarTabela();
     await dashboard();
-
   } catch (erro) {
     console.error("Erro geral ao cadastrar IP:", erro);
   }
@@ -280,7 +328,7 @@ async function carregarSelects() {
       .from("pops_provedor")
       .select("id,nome")
       .eq("app_id", appId)
-      .order("nome");
+      .order("nome", { ascending: true });
 
     if (popError) {
       console.error("Erro ao carregar POPs:", popError);
@@ -298,7 +346,7 @@ async function carregarSelects() {
       .from("equipamentos_provedor")
       .select("id,nome")
       .eq("app_id", appId)
-      .order("nome");
+      .order("nome", { ascending: true });
 
     if (equipError) {
       console.error("Erro ao carregar equipamentos:", equipError);
@@ -320,55 +368,26 @@ async function carregarSelects() {
 async function buscar() {
   try {
     const busca = document.getElementById("busca").value.trim();
+    const linhas = await buscarDadosCompletos(busca);
+
     const tabela = document.getElementById("lista");
     tabela.innerHTML = "";
 
-    let query = supabase
-      .from("ips_provedor")
-      .select(`
-        id,
-        ip,
-        equipamentos_provedor (
-          nome,
-          modelo,
-          pops_provedor (
-            nome,
-            localizacao
-          )
-        )
-      `)
-      .eq("app_id", appId)
-      .order("ip");
-
-    if (busca) {
-      query = query.ilike("ip", `%${busca}%`);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("Erro ao buscar IP:", error);
-      alert("Erro ao buscar IP");
-      return;
-    }
-
-    (data || []).forEach(l => {
-      const eq = l.equipamentos_provedor || {};
-      const pop = eq.pops_provedor || {};
-
+    linhas.forEach(l => {
       tabela.innerHTML += `
         <tr>
           <td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
-          <td>${eq.nome || ""}</td>
-          <td>${eq.modelo || ""}</td>
-          <td>${pop.nome || ""}</td>
-          <td>${pop.localizacao || ""}</td>
+          <td>${l.equipamentoNome}</td>
+          <td>${l.equipamentoModelo}</td>
+          <td>${l.popNome}</td>
+          <td>${l.popLocalizacao}</td>
         </tr>
       `;
     });
 
   } catch (erro) {
-    console.error("Erro geral na busca:", erro);
+    console.error("Erro ao buscar:", erro);
+    alert(erro.message || "Erro ao buscar");
   }
 }
 
