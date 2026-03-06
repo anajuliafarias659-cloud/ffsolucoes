@@ -6,7 +6,1101 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Equipamentos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const supabase = createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const COLUNA_EQUIPAMENTO_IP = "equipamento";
+
+let appId = null;
+
+/* ========================
+   AUXILIARES
+======================== */
+function escaparHtml(texto){
+  if(texto === null || texto === undefined) return "";
+  return String(texto)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;");
+}
+
+function normalizarTexto(texto){
+  if(!texto) return "";
+  return String(texto)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function limparHtmlTexto(texto){
+  if(!texto) return "";
+  return String(texto)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizarIp(ip){
+  if(!ip) return "";
+  return String(ip)
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .trim();
+}
+
+function abrirModalEdicao(){
+  document.getElementById("modalEditar").style.display = "flex";
+}
+
+function fecharModalEdicao(){
+  document.getElementById("modalEditar").style.display = "none";
+}
+
+function classeStatusPRTG(status){
+  const s = normalizarTexto(status);
+
+  if(
+    s.includes("down") ||
+    s.includes("offline") ||
+    s.includes("error") ||
+    s.includes("erro")
+  ) return "status-offline";
+
+  if(
+    s.includes("warning") ||
+    s.includes("alarme") ||
+    s.includes("alerta")
+  ) return "status-alerta";
+
+  if(
+    s.includes("up") ||
+    s.includes("online") ||
+    s.includes("ok")
+  ) return "status-online";
+
+  return "status-desconhecido";
+}
+
+function textoStatusPRTG(status){
+  const s = normalizarTexto(status);
+
+  if(
+    s.includes("down") ||
+    s.includes("offline") ||
+    s.includes("error") ||
+    s.includes("erro")
+  ) return "Offline";
+
+  if(
+    s.includes("warning") ||
+    s.includes("alarme") ||
+    s.includes("alerta")
+  ) return "Alerta";
+
+  if(
+    s.includes("up") ||
+    s.includes("online") ||
+    s.includes("ok")
+  ) return "Online";
+
+  return "Desconhecido";
+}
+
+/* ========================
+   PRTG
+======================== */
+async function carregarStatusPRTG(){
+  try{
+    const url = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/PRTG";
+
+    const resposta = await fetch(url);
+    const textoBruto = await resposta.text();
+
+    let dados = {};
+    try{
+      dados = textoBruto ? JSON.parse(textoBruto) : {};
+    }catch{
+      dados = { erro: textoBruto || "Resposta inválida da function" };
+    }
+
+    if(!resposta.ok){
+      throw new Error(dados.erro || ("Function respondeu com status " + resposta.status));
+    }
+
+    const devices = dados.devices || [];
+
+    const mapaPorIp = {};
+    const mapaPorNome = {};
+
+    devices.forEach(item => {
+      const hostOriginal = String(item.host || "").trim();
+      const hostNormalizado = normalizarIp(hostOriginal);
+
+      const nomeDevice = String(item.device || "").trim();
+      const nomeNormalizado = normalizarTexto(nomeDevice);
+
+      const statusInfo = {
+        status: item.status || "",
+        message: limparHtmlTexto(item.message || ""),
+        device: nomeDevice || "",
+        host: hostNormalizado || hostOriginal || ""
+      };
+
+      if(hostNormalizado){
+        mapaPorIp[hostNormalizado] = statusInfo;
+      }
+
+      if(nomeNormalizado){
+        mapaPorNome[nomeNormalizado] = statusInfo;
+      }
+    });
+
+    console.log("PRTG devices:", devices);
+    console.log("PRTG mapaPorIp:", mapaPorIp);
+    console.log("PRTG mapaPorNome:", mapaPorNome);
+
+    return {
+      ok: true,
+      porIp: mapaPorIp,
+      porNome: mapaPorNome
+    };
+
+  }catch(erro){
+    console.error("Erro ao buscar status no PRTG:", erro);
+    return {
+      ok: false,
+      porIp: {},
+      porNome: {},
+      erro: erro.message || "Erro ao consultar PRTG"
+    };
+  }
+}
+
+/* ========================
+   INICIAR
+======================== */
+async function iniciar(){
+  try{
+    const { data:{ session }, error: sessionError } = await supabase.auth.getSession();
+
+    if(sessionError){
+      console.error("Erro ao verificar sessão:", sessionError);
+      alert("Erro ao verificar login");
+      return;
+    }
+
+    if(!session){
+      location.href = "/auth/login.html";
+      return;
+    }
+
+    const userId = session.user.id;
+
+    const { data:user, error:userError } = await supabase
+      .from("usuarios")
+      .select("app_id")
+      .eq("id", userId)
+      .single();
+
+    if(userError){
+      console.error("Erro ao buscar app_id:", userError);
+      alert("Erro ao carregar usuário: " + userError.message);
+      return;
+    }
+
+    if(!user || !user.app_id){
+      alert("Usuário sem app_id vinculado");
+      return;
+    }
+
+    appId = user.app_id;
+
+    await carregarPops();
+    await carregarEquipamentos();
+
+  }catch(erro){
+    console.error("Erro ao iniciar:", erro);
+    alert("Erro ao abrir tela de equipamentos");
+  }
+}
+
+/* ========================
+   CARREGAR POPS
+======================== */
+async function carregarPops(){
+  try{
+    const { data:pops, error } = await supabase
+      .from("pops_provedor")
+      .select("id,nome")
+      .eq("app_id", appId)
+      .order("nome", { ascending:true });
+
+    if(error){
+      console.error("Erro ao carregar POPs:", error);
+      alert("Erro ao carregar POPs");
+      return;
+    }
+
+    const filtro = document.getElementById("filtroPop");
+    const selectEditar = document.getElementById("editarPop");
+
+    filtro.innerHTML = `<option value="">Todos os POPs</option>`;
+    selectEditar.innerHTML = `<option value="">Selecione o POP</option>`;
+
+    (pops || []).forEach(p => {
+      const id = escaparHtml(p.id);
+      const nome = escaparHtml(p.nome || "");
+      filtro.innerHTML += `<option value="${id}">${nome}</option>`;
+      selectEditar.innerHTML += `<option value="${id}">${nome}</option>`;
+    });
+
+  }catch(erro){
+    console.error("Erro geral ao carregar POPs:", erro);
+  }
+}
+
+/* ========================
+   CARREGAR EQUIPAMENTOS
+======================== */
+async function carregarEquipamentos(){
+  try{
+    const popSelecionado = document.getElementById("filtroPop").value;
+
+    let query = supabase
+      .from("equipamentos_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .order("nome", { ascending:true });
+
+    if(popSelecionado){
+      query = query.eq("pop_id", popSelecionado);
+    }
+
+    const { data:equip, error:equipError } = await query;
+
+    if(equipError){
+      console.error("Erro ao carregar equipamentos:", equipError);
+      alert("Erro ao carregar equipamentos");
+      return;
+    }
+
+    const { data:pops, error:popsError } = await supabase
+      .from("pops_provedor")
+      .select("*")
+      .eq("app_id", appId);
+
+    if(popsError){
+      console.error("Erro ao carregar POPs:", popsError);
+      alert("Erro ao carregar POPs");
+      return;
+    }
+
+    const { data:ips, error:ipsError } = await supabase
+      .from("ips_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .order("ip", { ascending:true });
+
+    if(ipsError){
+      console.error("Erro ao carregar IPs:", ipsError);
+      alert("Erro ao carregar IPs");
+      return;
+    }
+
+    const statusPRTG = await carregarStatusPRTG();
+
+    const mapaPop = {};
+    (pops || []).forEach(p => {
+      mapaPop[String(p.id)] = p;
+    });
+
+    const mapaIpsPorEquipamento = {};
+    (ips || []).forEach(ipItem => {
+      const equipId = String(ipItem[COLUNA_EQUIPAMENTO_IP] || "");
+      if(!equipId) return;
+
+      if(!mapaIpsPorEquipamento[equipId]){
+        mapaIpsPorEquipamento[equipId] = [];
+      }
+
+      mapaIpsPorEquipamento[equipId].push({
+        id: ipItem.id || "",
+        ip: ipItem.ip || "",
+        cidr: ipItem.cidr || "",
+        porta: ipItem.porta || ""
+      });
+    });
+
+    const tabela = document.getElementById("lista");
+    tabela.innerHTML = "";
+
+    (equip || []).forEach(e => {
+      const pop = mapaPop[String(e.pop_id)] || null;
+      const nomePop = pop?.nome || "";
+      const localizacao = pop?.localizacao || "";
+      const ipsEquip = mapaIpsPorEquipamento[String(e.id)] || [];
+
+      const nomeSeguro = escaparHtml(e.nome || "");
+      const modeloSeguro = escaparHtml(e.modelo || "");
+      const popSeguro = escaparHtml(nomePop);
+      const localizacaoSegura = escaparHtml(localizacao);
+
+      let infoStatus = null;
+
+      for(const item of ipsEquip){
+        const ipBase = normalizarIp(item.ip || "");
+        if(ipBase && statusPRTG.porIp[ipBase]){
+          infoStatus = statusPRTG.porIp[ipBase];
+          break;
+        }
+      }
+
+      if(!infoStatus){
+        const nomeNormalizado = normalizarTexto(e.nome || "");
+        if(nomeNormalizado && statusPRTG.porNome[nomeNormalizado]){
+          infoStatus = statusPRTG.porNome[nomeNormalizado];
+        }
+      }
+
+      let htmlStatus = `
+        <div class="status-box">
+          <span class="status-badge status-desconhecido">Desconhecido</span>
+          <div class="status-msg">Não localizado no PRTG</div>
+        </div>
+      `;
+
+      if(statusPRTG.ok && infoStatus){
+        htmlStatus = `
+          <div class="status-box">
+            <span class="status-badge ${classeStatusPRTG(infoStatus.status)}">
+              ${escaparHtml(textoStatusPRTG(infoStatus.status))}
+            </span>
+            <div class="status-msg">${escaparHtml(infoStatus.message || infoStatus.device || "")}</div>
+          </div>
+        `;
+      }else if(!statusPRTG.ok){
+        htmlStatus = `
+          <div class="status-box">
+            <span class="status-badge status-desconhecido">Sem conexão</span>
+            <div class="status-msg">${escaparHtml(statusPRTG.erro || "Não foi possível consultar o PRTG")}</div>
+          </div>
+        `;
+      }
+
+      const htmlIps = ipsEquip.length
+        ? ipsEquip.map(item => {
+            const ipBase = item.ip || "";
+            const ipExibido = item.cidr ? `${ipBase}/${item.cidr}` : ipBase;
+            const ipSeguro = escaparHtml(ipExibido);
+            const hrefSeguro = escaparHtml(ipBase);
+            const portaHtml = item.porta
+              ? `<div class="texto-porta">Porta: ${escaparHtml(item.porta)}</div>`
+              : "";
+
+            return `
+              <div class="bloco-ip">
+                <a href="http://${hrefSeguro}" target="_blank" class="link-ip">${ipSeguro}</a>
+                ${portaHtml}
+              </div>
+            `;
+          }).join("")
+        : `<span class="muted">Sem IP</span>`;
+
+      const htmlLocalizacao = localizacao
+        ? `
+            <a href="https://www.google.com/maps/search/${encodeURIComponent(localizacao)}" target="_blank" class="btn-localizacao">
+              📍 Ver localização
+            </a>
+            <div class="texto-localizacao">${localizacaoSegura}</div>
+          `
+        : `<span class="muted">Sem localização</span>`;
+
+      const idJs = JSON.stringify(String(e.id || ""));
+      const nomeJs = JSON.stringify(String(e.nome || ""));
+      const modeloJs = JSON.stringify(String(e.modelo || ""));
+      const popJs = JSON.stringify(String(e.pop_id || ""));
+
+      tabela.innerHTML += `
+        <tr>
+          <td data-label="Nome">${nomeSeguro}</td>
+          <td data-label="Modelo">${modeloSeguro}</td>
+          <td data-label="POP">${popSeguro}</td>
+          <td data-label="Status">${htmlStatus}</td>
+          <td data-label="IP">${htmlIps}</td>
+          <td data-label="Localização">${htmlLocalizacao}</td>
+          <td data-label="Ações">
+            <div class="acoes-linha">
+              <button class="btn-editar" onclick='abrirEditarEquipamento(${idJs}, ${nomeJs}, ${modeloJs}, ${popJs})'>Editar</button>
+              <button class="btn-excluir" onclick='excluirEquipamento(${idJs}, ${nomeJs})'>Excluir</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+
+    if(!(equip || []).length){
+      tabela.innerHTML = `
+        <tr>
+          <td colspan="7" class="muted center">Nenhum equipamento encontrado</td>
+        </tr>
+      `;
+    }
+
+  }catch(erro){
+    console.error("Erro geral ao carregar equipamentos:", erro);
+    alert("Erro ao carregar equipamentos");
+  }
+}
+
+/* ========================
+   EDITAR EQUIPAMENTO + ESCOLHER IP
+======================== */
+async function abrirEditarEquipamento(id, nome, modelo, popId){
+  try{
+    document.getElementById("editarId").value = id || "";
+    document.getElementById("editarNome").value = nome || "";
+    document.getElementById("editarModelo").value = modelo || "";
+    document.getElementById("editarPop").value = popId || "";
+
+    document.getElementById("editarIpId").value = "";
+    document.getElementById("editarIp").value = "";
+    document.getElementById("editarPorta").value = "";
+
+    const { data: ips, error } = await supabase
+      .from("ips_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .eq(COLUNA_EQUIPAMENTO_IP, id)
+      .order("ip", { ascending:true });
+
+    if(error){
+      console.error("Erro ao buscar IPs do equipamento:", error);
+      alert("Erro ao carregar IPs do equipamento");
+      return;
+    }
+
+    const box = document.getElementById("listaIpsEditar");
+    box.innerHTML = "";
+
+    if(!ips || ips.length === 0){
+      box.innerHTML = `<div class="muted">Sem IP vinculado</div>`;
+    }else{
+      ips.forEach(ip => {
+        const ipSeguro = escaparHtml(ip.ip || "");
+        const portaSeguro = escaparHtml(ip.porta || "-");
+        const idSeguro = JSON.stringify(String(ip.id || ""));
+        const ipValorSeguro = JSON.stringify(String(ip.ip || ""));
+        const portaValorSeguro = JSON.stringify(String(ip.porta || ""));
+
+        box.innerHTML += `
+          <div class="linha-ip-editar">
+            <div class="info-ip-editar">
+              <strong>${ipSeguro}</strong>
+              <span class="porta-ip">${portaSeguro}</span>
+            </div>
+
+            <button
+              type="button"
+              class="btn-editar-ip"
+              onclick='selecionarIpEditar(${idSeguro}, ${ipValorSeguro}, ${portaValorSeguro})'>
+              Editar
+            </button>
+          </div>
+        `;
+      });
+    }
+
+    abrirModalEdicao();
+
+  }catch(erro){
+    console.error("Erro ao abrir edição:", erro);
+    alert("Erro ao abrir edição");
+  }
+}
+
+function selecionarIpEditar(id, ip, porta){
+  document.getElementById("editarIpId").value = id || "";
+  document.getElementById("editarIp").value = ip || "";
+  document.getElementById("editarPorta").value = porta || "";
+}
+
+async function salvarEdicaoEquipamento(){
+  try{
+    const id = document.getElementById("editarId").value;
+    const nome = document.getElementById("editarNome").value.trim();
+    const modelo = document.getElementById("editarModelo").value.trim();
+    const popId = document.getElementById("editarPop").value;
+
+    const ipId = document.getElementById("editarIpId").value;
+    const ip = document.getElementById("editarIp").value.trim();
+    const porta = document.getElementById("editarPorta").value.trim();
+
+    if(!id || !nome || !modelo || !popId){
+      alert("Preencha nome, modelo e POP");
+      return;
+    }
+
+    const { error: erroEquip } = await supabase
+      .from("equipamentos_provedor")
+      .update({
+        nome,
+        modelo,
+        pop_id: popId
+      })
+      .eq("id", id)
+      .eq("app_id", appId);
+
+    if(erroEquip){
+      console.error("Erro ao editar equipamento:", erroEquip);
+      alert("Erro ao editar equipamento: " + erroEquip.message);
+      return;
+    }
+
+    if(ipId){
+      if(!ip){
+        alert("Preencha o IP selecionado");
+        return;
+      }
+
+      const { error: erroIp } = await supabase
+        .from("ips_provedor")
+        .update({
+          ip: ip,
+          porta: porta || null
+        })
+        .eq("id", ipId)
+        .eq("app_id", appId);
+
+      if(erroIp){
+        console.error("Erro ao editar IP:", erroIp);
+        alert("Equipamento salvo, mas deu erro ao atualizar IP: " + erroIp.message);
+        return;
+      }
+    }
+
+    alert("Equipamento atualizado com sucesso");
+    fecharModalEdicao();
+    await carregarEquipamentos();
+
+  }catch(erro){
+    console.error("Erro geral ao editar equipamento:", erro);
+    alert("Erro ao editar equipamento");
+  }
+}
+
+/* ========================
+   EXCLUIR EQUIPAMENTO
+======================== */
+async function excluirEquipamento(id, nome){
+  try{
+    const confirmar = confirm(`Deseja excluir o equipamento "${nome}"?\n\nOs IPs vinculados também serão excluídos.`);
+    if(!confirmar) return;
+
+    const { error: erroExcluirIps } = await supabase
+      .from("ips_provedor")
+      .delete()
+      .eq("app_id", appId)
+      .eq(COLUNA_EQUIPAMENTO_IP, id);
+
+    if(erroExcluirIps){
+      console.error("Erro ao excluir IPs vinculados:", erroExcluirIps);
+      alert("Erro ao excluir IPs vinculados: " + erroExcluirIps.message);
+      return;
+    }
+
+    const { error: erroExcluirEquip } = await supabase
+      .from("equipamentos_provedor")
+      .delete()
+      .eq("id", id)
+      .eq("app_id", appId);
+
+    if(erroExcluirEquip){
+      console.error("Erro ao excluir equipamento:", erroExcluirEquip);
+      alert("Erro ao excluir equipamento: " + erroExcluirEquip.message);
+      return;
+    }
+
+    alert("Equipamento e IPs vinculados excluídos com sucesso");
+    await carregarEquipamentos();
+
+  }catch(erro){
+    console.error("Erro geral ao excluir equipamento:", erro);
+    alert("Erro ao excluir equipamento");
+  }
+}
+
+window.carregarEquipamentos = carregarEquipamentos;
+window.abrirEditarEquipamento = abrirEditarEquipamento;
+window.selecionarIpEditar = selecionarIpEditar;
+window.salvarEdicaoEquipamento = salvarEdicaoEquipamento;
+window.excluirEquipamento = excluirEquipamento;
+window.fecharModalEdicao = fecharModalEdicao;
+
+iniciar();
+</script>
+
+<style>
+*{
+  box-sizing:border-box;
+}
+
+body{
+  background:#020617;
+  color:#fff;
+  font-family:Arial, sans-serif;
+  padding:30px;
+  margin:0;
+}
+
+h2{
+  margin-bottom:20px;
+}
+
+h4{
+  margin:0 0 10px 0;
+}
+
+.topo{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:20px;
+}
+
+select,input{
+  padding:10px;
+  border-radius:8px;
+  border:none;
+  min-width:220px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  background:#0f172a;
+  border:1px solid #1e293b;
+}
+
+td,th{
+  padding:12px;
+  border-bottom:1px solid #1e293b;
+  text-align:left;
+  vertical-align:top;
+}
+
+th{
+  background:#020617;
+}
+
+tr:hover{
+  background:#172036;
+}
+
+.link-ip{
+  color:#38bdf8;
+  text-decoration:none;
+  word-break:break-all;
+}
+
+.link-ip:hover{
+  text-decoration:underline;
+}
+
+.bloco-ip + .bloco-ip{
+  margin-top:8px;
+}
+
+.texto-porta{
+  margin-top:4px;
+  font-size:12px;
+  color:#94a3b8;
+  line-height:1.4;
+}
+
+.btn-localizacao{
+  display:inline-block;
+  background:#2563eb;
+  color:#fff;
+  text-decoration:none;
+  padding:6px 10px;
+  border-radius:6px;
+  font-size:12px;
+}
+
+.btn-localizacao:hover{
+  background:#1d4ed8;
+}
+
+.texto-localizacao{
+  margin-top:6px;
+  font-size:12px;
+  color:#94a3b8;
+  line-height:1.4;
+  word-break:break-word;
+}
+
+.muted{
+  color:#94a3b8;
+}
+
+.center{
+  text-align:center;
+}
+
+.acoes-linha{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.btn-editar{
+  background:#f59e0b;
+  color:#000;
+  border:none;
+  padding:8px 12px;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btn-excluir{
+  background:#ef4444;
+  color:#fff;
+  border:none;
+  padding:8px 12px;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.65);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+}
+
+.modal-box{
+  width:100%;
+  max-width:560px;
+  background:#0f172a;
+  border:1px solid #1e293b;
+  border-radius:14px;
+  padding:20px;
+}
+
+.modal-box h3{
+  margin-top:0;
+}
+
+.modal-acoes{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+
+.btn-salvar{
+  background:#22c55e;
+  color:#000;
+  border:none;
+  padding:10px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btn-cancelar{
+  background:#475569;
+  color:#fff;
+  border:none;
+  padding:10px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.linha-ip-editar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  background:#020617;
+  border:1px solid #1e293b;
+  padding:10px;
+  border-radius:8px;
+  margin-bottom:8px;
+}
+
+.info-ip-editar{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  min-width:0;
+}
+
+.porta-ip{
+  font-size:12px;
+  color:#94a3b8;
+}
+
+.btn-editar-ip{
+  background:#2563eb;
+  color:#fff;
+  border:none;
+  padding:8px 12px;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:bold;
+  flex-shrink:0;
+}
+
+.status-box{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.status-badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:max-content;
+  min-width:92px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:bold;
+}
+
+.status-online{
+  background:#22c55e;
+  color:#052e16;
+}
+
+.status-alerta{
+  background:#f59e0b;
+  color:#111827;
+}
+
+.status-offline{
+  background:#ef4444;
+  color:#fff;
+}
+
+.status-desconhecido{
+  background:#475569;
+  color:#fff;
+}
+
+.status-msg{
+  font-size:12px;
+  color:#94a3b8;
+  line-height:1.4;
+  word-break:break-word;
+}
+
+@media(max-width:700px){
+  body{
+    padding:15px;
+  }
+
+  .topo{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  select,input{
+    width:100%;
+    min-width:100%;
+  }
+
+  table,
+  thead,
+  tbody,
+  tr,
+  td{
+    display:block;
+    width:100%;
+  }
+
+  thead{
+    display:none;
+  }
+
+  table{
+    background:transparent;
+    border:none;
+  }
+
+  tbody{
+    display:block;
+  }
+
+  tr{
+    background:#0f172a;
+    border:1px solid #1e293b;
+    border-radius:14px;
+    margin-bottom:14px;
+    padding:10px;
+  }
+
+  tr:hover{
+    background:#0f172a;
+  }
+
+  td{
+    border:none;
+    padding:8px 6px;
+  }
+
+  td::before{
+    content:attr(data-label);
+    display:block;
+    font-size:12px;
+    color:#94a3b8;
+    margin-bottom:4px;
+    font-weight:bold;
+    text-transform:uppercase;
+  }
+
+  td:nth-child(4){
+    padding-bottom:12px;
+    border-bottom:1px solid #1e293b;
+    margin-bottom:8px;
+  }
+
+  td:nth-child(5){
+    padding-top:12px;
+  }
+
+  .acoes-linha{
+    flex-direction:column;
+  }
+
+  .btn-editar,
+  .btn-excluir,
+  .btn-localizacao{
+    width:100%;
+    text-align:center;
+  }
+
+  .modal-box{
+    padding:16px;
+  }
+
+  .modal-acoes{
+    flex-direction:column;
+  }
+
+  .btn-salvar,
+  .btn-cancelar{
+    width:100%;
+  }
+
+  .linha-ip-editar{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  .btn-editar-ip{
+    width:100%;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <h2>Equipamentos</h2>
+
+  <select id="filtroPop" onchange="carregarEquipamentos()">
+    <option value="">Todos os POPs</option>
+  </select>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Nome</th>
+      <th>Modelo</th>
+      <th>POP</th>
+      <th>Status</th>
+      <th>IP</th>
+      <th>Localização</th>
+      <th>Ações</th>
+    </tr>
+  </thead>
+
+  <tbody id="lista"></tbody>
+</table>
+
+<div class="modal" id="modalEditar">
+  <div class="modal-box">
+    <h3>Editar equipamento</h3>
+
+    <input type="hidden" id="editarId">
+    <input type="hidden" id="editarIpId">
+
+    <div style="margin-bottom:10px;">
+      <input id="editarNome" placeholder="Nome do equipamento">
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <input id="editarModelo" placeholder="Modelo">
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <h4>IPs do equipamento</h4>
+      <div id="listaIpsEditar"></div>
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <input id="editarIp" placeholder="IP selecionado">
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <input id="editarPorta" placeholder="Porta (ether1 / sfp1)">
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <select id="editarPop">
+        <option value="">Selecione o POP</option>
+      </select>
+    </div>
+
+    <div class="modal-acoes">
+      <button class="btn-salvar" onclick="salvarEdicaoEquipamento()">Salvar</button>
+      <button class="btn-cancelar" onclick="fecharModalEdicao()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
 
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
