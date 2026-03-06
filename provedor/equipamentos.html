@@ -6,190 +6,357 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module">
-
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm"
 
 const supabase = createClient(
-"https://pdajixsoowcyhnjwhgpc.supabase.co",
-"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let appId=null;
+let appId = null;
+
+/* ========================
+   AUXILIAR
+======================== */
+function escaparHtml(texto){
+  if(texto === null || texto === undefined) return "";
+  return String(texto)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;");
+}
 
 /* ========================
    INICIAR
 ======================== */
-
 async function iniciar(){
+  try{
+    const { data:{ session }, error: sessionError } = await supabase.auth.getSession();
 
- const {data:{session}}=await supabase.auth.getSession();
+    if(sessionError){
+      console.error("Erro ao verificar sessão:", sessionError);
+      alert("Erro ao verificar login");
+      return;
+    }
 
- if(!session){
-  location.href="/auth/login.html";
-  return;
- }
+    if(!session){
+      location.href="/auth/login.html";
+      return;
+    }
 
- const userId=session.user.id;
+    const userId = session.user.id;
 
- const {data:user}=await supabase
- .from("usuarios")
- .select("app_id")
- .eq("id",userId)
- .single();
+    const { data:user, error:userError } = await supabase
+      .from("usuarios")
+      .select("app_id")
+      .eq("id", userId)
+      .single();
 
- appId=user.app_id;
+    if(userError){
+      console.error("Erro ao buscar app_id:", userError);
+      alert("Erro ao carregar usuário: " + userError.message);
+      return;
+    }
 
- await carregarPops();
- await carregarEquipamentos();
+    if(!user || !user.app_id){
+      alert("Usuário sem app_id vinculado");
+      return;
+    }
 
+    appId = user.app_id;
+
+    await carregarPops();
+    await carregarEquipamentos();
+
+  }catch(erro){
+    console.error("Erro ao iniciar:", erro);
+    alert("Erro ao abrir tela de equipamentos");
+  }
 }
 
 /* ========================
    CARREGAR POPS
 ======================== */
-
 async function carregarPops(){
+  try{
+    const { data:pops, error } = await supabase
+      .from("pops_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .order("nome");
 
- const {data:pops}=await supabase
- .from("pops_provedor")
- .select("*")
- .eq("app_id",appId)
- .order("nome");
+    if(error){
+      console.error("Erro ao carregar POPs:", error);
+      alert("Erro ao carregar POPs");
+      return;
+    }
 
- const select=document.getElementById("filtroPop");
+    const select = document.getElementById("filtroPop");
+    select.innerHTML = `<option value="">Todos os POPs</option>`;
 
- select.innerHTML=`<option value="">Todos os POPs</option>`;
+    (pops || []).forEach(p => {
+      select.innerHTML += `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nome)}</option>`;
+    });
 
- pops.forEach(p=>{
-  select.innerHTML+=`
-  <option value="${p.id}">${p.nome}</option>
-  `;
- });
-
+  }catch(erro){
+    console.error("Erro geral ao carregar POPs:", erro);
+  }
 }
 
 /* ========================
    CARREGAR EQUIPAMENTOS
 ======================== */
-
 async function carregarEquipamentos(){
+  try{
+    const popSelecionado = document.getElementById("filtroPop").value;
 
- const popSelecionado=document.getElementById("filtroPop").value;
+    let query = supabase
+      .from("equipamentos_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .order("nome");
 
- let query=supabase
- .from("equipamentos_provedor")
- .select("*")
- .eq("app_id",appId)
- .order("nome");
+    if(popSelecionado){
+      query = query.eq("pop_id", popSelecionado);
+    }
 
- if(popSelecionado){
-  query=query.eq("pop_id",popSelecionado);
- }
+    const { data:equip, error:equipError } = await query;
 
- const {data:equip}=await query;
+    if(equipError){
+      console.error("Erro ao carregar equipamentos:", equipError);
+      alert("Erro ao carregar equipamentos");
+      return;
+    }
 
- const {data:pops}=await supabase
- .from("pops_provedor")
- .select("*")
- .eq("app_id",appId);
+    const { data:pops, error:popsError } = await supabase
+      .from("pops_provedor")
+      .select("*")
+      .eq("app_id", appId);
 
- const mapaPop={};
+    if(popsError){
+      console.error("Erro ao carregar POPs:", popsError);
+      alert("Erro ao carregar POPs");
+      return;
+    }
 
- pops.forEach(p=>{
-  mapaPop[p.id]=p.nome;
- });
+    const { data:ips, error:ipsError } = await supabase
+      .from("ips_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .order("ip");
 
- const tabela=document.getElementById("lista");
+    if(ipsError){
+      console.error("Erro ao carregar IPs:", ipsError);
+      alert("Erro ao carregar IPs");
+      return;
+    }
 
- tabela.innerHTML="";
+    const mapaPop = {};
+    (pops || []).forEach(p => {
+      mapaPop[String(p.id)] = p;
+    });
 
- equip.forEach(e=>{
+    const mapaIpsPorEquipamento = {};
+    (ips || []).forEach(ipItem => {
+      const equipId = String(ipItem.equipamento || "");
+      if(!mapaIpsPorEquipamento[equipId]){
+        mapaIpsPorEquipamento[equipId] = [];
+      }
+      mapaIpsPorEquipamento[equipId].push(ipItem.ip);
+    });
 
- tabela.innerHTML+=`
- <tr>
- <td>${e.nome}</td>
- <td>${e.modelo}</td>
- <td>${mapaPop[e.pop_id]||""}</td>
- </tr>
- `
+    const tabela = document.getElementById("lista");
+    tabela.innerHTML = "";
 
- });
+    (equip || []).forEach(e => {
+      const pop = mapaPop[String(e.pop_id)] || null;
+      const nomePop = pop?.nome || "";
+      const localizacao = pop?.localizacao || "";
+      const ipsEquip = mapaIpsPorEquipamento[String(e.id)] || [];
 
+      const htmlIps = ipsEquip.length
+        ? ipsEquip.map(ip => {
+            const ipSeguro = escaparHtml(ip);
+            return `<a href="http://${ipSeguro}" target="_blank" class="link-ip">${ipSeguro}</a>`;
+          }).join("<br>")
+        : `<span class="muted">Sem IP</span>`;
+
+      const htmlLocalizacao = localizacao
+        ? `<a href="https://www.google.com/maps/search/${encodeURIComponent(localizacao)}" target="_blank" class="btn-localizacao">📍 Ver localização</a>
+           <div class="texto-localizacao">${escaparHtml(localizacao)}</div>`
+        : `<span class="muted">Sem localização</span>`;
+
+      tabela.innerHTML += `
+        <tr>
+          <td>${escaparHtml(e.nome || "")}</td>
+          <td>${escaparHtml(e.modelo || "")}</td>
+          <td>${escaparHtml(nomePop)}</td>
+          <td>${htmlIps}</td>
+          <td>${htmlLocalizacao}</td>
+        </tr>
+      `;
+    });
+
+    if(!(equip || []).length){
+      tabela.innerHTML = `
+        <tr>
+          <td colspan="5" class="muted center">Nenhum equipamento encontrado</td>
+        </tr>
+      `;
+    }
+
+  }catch(erro){
+    console.error("Erro geral ao carregar equipamentos:", erro);
+    alert("Erro ao carregar equipamentos");
+  }
 }
 
-/* ======================== */
-
-window.carregarEquipamentos=carregarEquipamentos;
+window.carregarEquipamentos = carregarEquipamentos;
 
 iniciar();
-
 </script>
 
 <style>
+*{
+  box-sizing:border-box;
+}
 
 body{
-background:#020617;
-color:#fff;
-font-family:Arial;
-padding:30px;
-margin:0;
+  background:#020617;
+  color:#fff;
+  font-family:Arial, sans-serif;
+  padding:30px;
+  margin:0;
 }
 
 h2{
-margin-bottom:20px;
+  margin-bottom:20px;
+}
+
+.topo{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:20px;
 }
 
 select{
-padding:10px;
-border-radius:8px;
-border:none;
-margin-bottom:20px;
+  padding:10px;
+  border-radius:8px;
+  border:none;
+  min-width:220px;
 }
 
 table{
-width:100%;
-border-collapse:collapse;
-background:#0f172a;
+  width:100%;
+  border-collapse:collapse;
+  background:#0f172a;
+  border:1px solid #1e293b;
 }
 
 td,th{
-padding:12px;
-border-bottom:1px solid #1e293b;
-text-align:left;
+  padding:12px;
+  border-bottom:1px solid #1e293b;
+  text-align:left;
+  vertical-align:top;
 }
 
 th{
-background:#020617;
+  background:#020617;
 }
 
 tr:hover{
-background:#172036;
+  background:#172036;
 }
 
-</style>
+.link-ip{
+  color:#38bdf8;
+  text-decoration:none;
+  word-break:break-all;
+}
 
+.link-ip:hover{
+  text-decoration:underline;
+}
+
+.btn-localizacao{
+  display:inline-block;
+  background:#2563eb;
+  color:#fff;
+  text-decoration:none;
+  padding:6px 10px;
+  border-radius:6px;
+  font-size:12px;
+}
+
+.btn-localizacao:hover{
+  background:#1d4ed8;
+}
+
+.texto-localizacao{
+  margin-top:6px;
+  font-size:12px;
+  color:#94a3b8;
+  line-height:1.4;
+}
+
+.muted{
+  color:#94a3b8;
+}
+
+.center{
+  text-align:center;
+}
+
+@media(max-width:700px){
+  body{
+    padding:15px;
+  }
+
+  .topo{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  select{
+    width:100%;
+  }
+
+  table{
+    display:block;
+    overflow-x:auto;
+    font-size:14px;
+  }
+}
+</style>
 </head>
 
 <body>
 
-<h2>Equipamentos</h2>
+<div class="topo">
+  <h2>Equipamentos</h2>
 
-<select id="filtroPop" onchange="carregarEquipamentos()">
-<option value="">Todos os POPs</option>
-</select>
+  <select id="filtroPop" onchange="carregarEquipamentos()">
+    <option value="">Todos os POPs</option>
+  </select>
+</div>
 
 <table>
+  <thead>
+    <tr>
+      <th>Nome</th>
+      <th>Modelo</th>
+      <th>POP</th>
+      <th>IP</th>
+      <th>Localização</th>
+    </tr>
+  </thead>
 
-<thead>
-<tr>
-<th>Nome</th>
-<th>Modelo</th>
-<th>POP</th>
-</tr>
-</thead>
-
-<tbody id="lista"></tbody>
-
+  <tbody id="lista"></tbody>
 </table>
 
 </body>
