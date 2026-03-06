@@ -184,6 +184,7 @@ async function carregarEquipamentos(){
       }
 
       mapaIpsPorEquipamento[equipId].push({
+        id: ipItem.id || "",
         ip: ipItem.ip || "",
         cidr: ipItem.cidr || "",
         porta: ipItem.porta || ""
@@ -269,14 +270,75 @@ async function carregarEquipamentos(){
 }
 
 /* ========================
-   EDITAR EQUIPAMENTO
+   EDITAR EQUIPAMENTO + ESCOLHER IP
 ======================== */
-function abrirEditarEquipamento(id, nome, modelo, popId){
-  document.getElementById("editarId").value = id || "";
-  document.getElementById("editarNome").value = nome || "";
-  document.getElementById("editarModelo").value = modelo || "";
-  document.getElementById("editarPop").value = popId || "";
-  abrirModalEdicao();
+async function abrirEditarEquipamento(id, nome, modelo, popId){
+  try{
+    document.getElementById("editarId").value = id || "";
+    document.getElementById("editarNome").value = nome || "";
+    document.getElementById("editarModelo").value = modelo || "";
+    document.getElementById("editarPop").value = popId || "";
+
+    document.getElementById("editarIpId").value = "";
+    document.getElementById("editarIp").value = "";
+    document.getElementById("editarPorta").value = "";
+
+    const { data: ips, error } = await supabase
+      .from("ips_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .eq(COLUNA_EQUIPAMENTO_IP, id)
+      .order("ip", { ascending:true });
+
+    if(error){
+      console.error("Erro ao buscar IPs do equipamento:", error);
+      alert("Erro ao carregar IPs do equipamento");
+      return;
+    }
+
+    const box = document.getElementById("listaIpsEditar");
+    box.innerHTML = "";
+
+    if(!ips || ips.length === 0){
+      box.innerHTML = `<div class="muted">Sem IP vinculado</div>`;
+    }else{
+      ips.forEach(ip => {
+        const ipSeguro = escaparHtml(ip.ip || "");
+        const portaSeguro = escaparHtml(ip.porta || "-");
+        const idSeguro = JSON.stringify(String(ip.id || ""));
+        const ipValorSeguro = JSON.stringify(String(ip.ip || ""));
+        const portaValorSeguro = JSON.stringify(String(ip.porta || ""));
+
+        box.innerHTML += `
+          <div class="linha-ip-editar">
+            <div class="info-ip-editar">
+              <strong>${ipSeguro}</strong>
+              <span class="porta-ip">${portaSeguro}</span>
+            </div>
+
+            <button
+              type="button"
+              class="btn-editar-ip"
+              onclick='selecionarIpEditar(${idSeguro}, ${ipValorSeguro}, ${portaValorSeguro})'>
+              Editar
+            </button>
+          </div>
+        `;
+      });
+    }
+
+    abrirModalEdicao();
+
+  }catch(erro){
+    console.error("Erro ao abrir edição:", erro);
+    alert("Erro ao abrir edição");
+  }
+}
+
+function selecionarIpEditar(id, ip, porta){
+  document.getElementById("editarIpId").value = id || "";
+  document.getElementById("editarIp").value = ip || "";
+  document.getElementById("editarPorta").value = porta || "";
 }
 
 async function salvarEdicaoEquipamento(){
@@ -286,12 +348,16 @@ async function salvarEdicaoEquipamento(){
     const modelo = document.getElementById("editarModelo").value.trim();
     const popId = document.getElementById("editarPop").value;
 
+    const ipId = document.getElementById("editarIpId").value;
+    const ip = document.getElementById("editarIp").value.trim();
+    const porta = document.getElementById("editarPorta").value.trim();
+
     if(!id || !nome || !modelo || !popId){
-      alert("Preencha todos os campos");
+      alert("Preencha nome, modelo e POP");
       return;
     }
 
-    const { error } = await supabase
+    const { error: erroEquip } = await supabase
       .from("equipamentos_provedor")
       .update({
         nome,
@@ -301,10 +367,32 @@ async function salvarEdicaoEquipamento(){
       .eq("id", id)
       .eq("app_id", appId);
 
-    if(error){
-      console.error("Erro ao editar equipamento:", error);
-      alert("Erro ao editar equipamento: " + error.message);
+    if(erroEquip){
+      console.error("Erro ao editar equipamento:", erroEquip);
+      alert("Erro ao editar equipamento: " + erroEquip.message);
       return;
+    }
+
+    if(ipId){
+      if(!ip){
+        alert("Preencha o IP selecionado");
+        return;
+      }
+
+      const { error: erroIp } = await supabase
+        .from("ips_provedor")
+        .update({
+          ip: ip,
+          porta: porta || null
+        })
+        .eq("id", ipId)
+        .eq("app_id", appId);
+
+      if(erroIp){
+        console.error("Erro ao editar IP:", erroIp);
+        alert("Equipamento salvo, mas deu erro ao atualizar IP: " + erroIp.message);
+        return;
+      }
     }
 
     alert("Equipamento atualizado com sucesso");
@@ -365,6 +453,7 @@ async function excluirEquipamento(id, nome){
 
 window.carregarEquipamentos = carregarEquipamentos;
 window.abrirEditarEquipamento = abrirEditarEquipamento;
+window.selecionarIpEditar = selecionarIpEditar;
 window.salvarEdicaoEquipamento = salvarEdicaoEquipamento;
 window.excluirEquipamento = excluirEquipamento;
 window.fecharModalEdicao = fecharModalEdicao;
@@ -387,6 +476,10 @@ body{
 
 h2{
   margin-bottom:20px;
+}
+
+h4{
+  margin:0 0 10px 0;
 }
 
 .topo{
@@ -515,7 +608,7 @@ tr:hover{
 
 .modal-box{
   width:100%;
-  max-width:500px;
+  max-width:560px;
   background:#0f172a;
   border:1px solid #1e293b;
   border-radius:14px;
@@ -551,6 +644,41 @@ tr:hover{
   border-radius:8px;
   cursor:pointer;
   font-weight:bold;
+}
+
+.linha-ip-editar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  background:#020617;
+  border:1px solid #1e293b;
+  padding:10px;
+  border-radius:8px;
+  margin-bottom:8px;
+}
+
+.info-ip-editar{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  min-width:0;
+}
+
+.porta-ip{
+  font-size:12px;
+  color:#94a3b8;
+}
+
+.btn-editar-ip{
+  background:#2563eb;
+  color:#fff;
+  border:none;
+  padding:8px 12px;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:bold;
+  flex-shrink:0;
 }
 
 @media(max-width:700px){
@@ -617,18 +745,6 @@ tr:hover{
     text-transform:uppercase;
   }
 
-  td:nth-child(1),
-  td:nth-child(2),
-  td:nth-child(3){
-    width:100%;
-  }
-
-  td:nth-child(4),
-  td:nth-child(5),
-  td:nth-child(6){
-    width:100%;
-  }
-
   td:nth-child(3){
     padding-bottom:12px;
     border-bottom:1px solid #1e293b;
@@ -660,6 +776,15 @@ tr:hover{
 
   .btn-salvar,
   .btn-cancelar{
+    width:100%;
+  }
+
+  .linha-ip-editar{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  .btn-editar-ip{
     width:100%;
   }
 }
@@ -696,6 +821,7 @@ tr:hover{
     <h3>Editar equipamento</h3>
 
     <input type="hidden" id="editarId">
+    <input type="hidden" id="editarIpId">
 
     <div style="margin-bottom:10px;">
       <input id="editarNome" placeholder="Nome do equipamento">
@@ -703,6 +829,19 @@ tr:hover{
 
     <div style="margin-bottom:10px;">
       <input id="editarModelo" placeholder="Modelo">
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <h4>IPs do equipamento</h4>
+      <div id="listaIpsEditar"></div>
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <input id="editarIp" placeholder="IP selecionado">
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <input id="editarPorta" placeholder="Porta (ether1 / sfp1)">
     </div>
 
     <div style="margin-bottom:10px;">
