@@ -6,12 +6,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm"
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
+
+const COLUNA_EQUIPAMENTO_IP = "equipamento";
 
 let appId = null;
 
@@ -91,9 +93,9 @@ async function carregarPops(){
   try{
     const { data:pops, error } = await supabase
       .from("pops_provedor")
-      .select("*")
+      .select("id,nome")
       .eq("app_id", appId)
-      .order("nome");
+      .order("nome", { ascending:true });
 
     if(error){
       console.error("Erro ao carregar POPs:", error);
@@ -109,7 +111,7 @@ async function carregarPops(){
 
     (pops || []).forEach(p => {
       const id = escaparHtml(p.id);
-      const nome = escaparHtml(p.nome);
+      const nome = escaparHtml(p.nome || "");
       filtro.innerHTML += `<option value="${id}">${nome}</option>`;
       selectEditar.innerHTML += `<option value="${id}">${nome}</option>`;
     });
@@ -130,7 +132,7 @@ async function carregarEquipamentos(){
       .from("equipamentos_provedor")
       .select("*")
       .eq("app_id", appId)
-      .order("nome");
+      .order("nome", { ascending:true });
 
     if(popSelecionado){
       query = query.eq("pop_id", popSelecionado);
@@ -159,7 +161,7 @@ async function carregarEquipamentos(){
       .from("ips_provedor")
       .select("*")
       .eq("app_id", appId)
-      .order("ip");
+      .order("ip", { ascending:true });
 
     if(ipsError){
       console.error("Erro ao carregar IPs:", ipsError);
@@ -174,11 +176,18 @@ async function carregarEquipamentos(){
 
     const mapaIpsPorEquipamento = {};
     (ips || []).forEach(ipItem => {
-      const equipId = String(ipItem.equipamento || "");
+      const equipId = String(ipItem[COLUNA_EQUIPAMENTO_IP] || "");
+      if(!equipId) return;
+
       if(!mapaIpsPorEquipamento[equipId]){
         mapaIpsPorEquipamento[equipId] = [];
       }
-      mapaIpsPorEquipamento[equipId].push(ipItem.ip);
+
+      mapaIpsPorEquipamento[equipId].push({
+        ip: ipItem.ip || "",
+        cidr: ipItem.cidr || "",
+        porta: ipItem.porta || ""
+      });
     });
 
     const tabela = document.getElementById("lista");
@@ -196,18 +205,34 @@ async function carregarEquipamentos(){
       const localizacaoSegura = escaparHtml(localizacao);
 
       const htmlIps = ipsEquip.length
-        ? ipsEquip.map(ip => {
-            const ipSeguro = escaparHtml(ip);
-            return `<a href="http://${ipSeguro}" target="_blank" class="link-ip">${ipSeguro}</a>`;
-          }).join("<br>")
+        ? ipsEquip.map(item => {
+            const ipBase = item.ip || "";
+            const ipExibido = item.cidr ? `${ipBase}/${item.cidr}` : ipBase;
+            const ipSeguro = escaparHtml(ipExibido);
+            const hrefSeguro = escaparHtml(ipBase);
+            const portaHtml = item.porta
+              ? `<div class="texto-porta">Porta: ${escaparHtml(item.porta)}</div>`
+              : "";
+
+            return `
+              <div class="bloco-ip">
+                <a href="http://${hrefSeguro}" target="_blank" class="link-ip">${ipSeguro}</a>
+                ${portaHtml}
+              </div>
+            `;
+          }).join("")
         : `<span class="muted">Sem IP</span>`;
 
       const htmlLocalizacao = localizacao
-        ? `<a href="https://www.google.com/maps/search/${encodeURIComponent(localizacao)}" target="_blank" class="btn-localizacao">📍 Ver localização</a>
-           <div class="texto-localizacao">${localizacaoSegura}</div>`
+        ? `
+            <a href="https://www.google.com/maps/search/${encodeURIComponent(localizacao)}" target="_blank" class="btn-localizacao">
+              📍 Ver localização
+            </a>
+            <div class="texto-localizacao">${localizacaoSegura}</div>
+          `
         : `<span class="muted">Sem localização</span>`;
 
-      const idJs = JSON.stringify(String(e.id));
+      const idJs = JSON.stringify(String(e.id || ""));
       const nomeJs = JSON.stringify(String(e.nome || ""));
       const modeloJs = JSON.stringify(String(e.modelo || ""));
       const popJs = JSON.stringify(String(e.pop_id || ""));
@@ -304,7 +329,7 @@ async function excluirEquipamento(id, nome){
       .from("ips_provedor")
       .select("id")
       .eq("app_id", appId)
-      .eq("equipamento", id);
+      .eq(COLUNA_EQUIPAMENTO_IP, id);
 
     if(erroIps){
       console.error("Erro ao verificar IPs vinculados:", erroIps);
@@ -410,6 +435,17 @@ tr:hover{
 
 .link-ip:hover{
   text-decoration:underline;
+}
+
+.bloco-ip + .bloco-ip{
+  margin-top:8px;
+}
+
+.texto-porta{
+  margin-top:4px;
+  font-size:12px;
+  color:#94a3b8;
+  line-height:1.4;
 }
 
 .btn-localizacao{
