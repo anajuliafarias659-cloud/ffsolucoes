@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Painel Provedor</title>
+<title>Painel NOC Provedor</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module">
@@ -13,10 +13,6 @@ const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/*
-  IMPORTANTE:
-  TROQUE AQUI SE O NOME DA COLUNA FOR OUTRO
-*/
 const COLUNA_EQUIPAMENTO_IP = "equipamento";
 
 let appId = null;
@@ -103,7 +99,37 @@ async function dashboard() {
 }
 
 /* =========================
-   BUSCA DADOS E MONTA MAPA
+   AUXILIAR PARA ESCAPAR TEXTO
+========================= */
+function escaparHtml(texto) {
+  if (texto === null || texto === undefined) return "";
+  return String(texto)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/* =========================
+   TOGGLE FORM/LISTA EQUIP
+========================= */
+function toggleFormEquip() {
+  const box = document.getElementById("boxFormEquip");
+  box.style.display = box.style.display === "none" ? "block" : "none";
+}
+
+function toggleListaEquip() {
+  const box = document.getElementById("boxListaEquip");
+  box.style.display = box.style.display === "none" ? "block" : "none";
+
+  if (box.style.display === "block") {
+    listarEquipamentos();
+  }
+}
+
+/* =========================
+   BUSCA DADOS COMPLETOS
 ========================= */
 async function buscarDadosCompletos(filtroIp = "") {
   let queryIps = supabase
@@ -142,18 +168,18 @@ async function buscarDadosCompletos(filtroIp = "") {
 
   const mapaEquip = {};
   (equipamentos || []).forEach(e => {
-    mapaEquip[e.id] = e;
+    mapaEquip[String(e.id)] = e;
   });
 
   const mapaPop = {};
   (pops || []).forEach(p => {
-    mapaPop[p.id] = p;
+    mapaPop[String(p.id)] = p;
   });
 
   const linhas = (ips || []).map(item => {
-    const idEquip = item[COLUNA_EQUIPAMENTO_IP];
+    const idEquip = String(item[COLUNA_EQUIPAMENTO_IP] || "");
     const equip = mapaEquip[idEquip] || null;
-    const pop = equip ? (mapaPop[equip.pop_id] || null) : null;
+    const pop = equip ? (mapaPop[String(equip.pop_id)] || null) : null;
 
     return {
       ip: item.ip || "",
@@ -168,7 +194,7 @@ async function buscarDadosCompletos(filtroIp = "") {
 }
 
 /* =========================
-   CARREGAR TABELA
+   CARREGAR TABELA IPs
 ========================= */
 async function carregarTabela() {
   try {
@@ -178,22 +204,30 @@ async function carregarTabela() {
     tabela.innerHTML = "";
 
     linhas.forEach(l => {
+      const ipSeguro = escaparHtml(l.ip);
+      const nomeEquip = escaparHtml(l.equipamentoNome);
+      const modeloEquip = escaparHtml(l.equipamentoModelo);
+      const nomePop = escaparHtml(l.popNome);
+      const localizacao = l.popLocalizacao || "";
+      const localizacaoSegura = escaparHtml(localizacao);
+      const linkMapa = "https://www.google.com/maps/search/" + encodeURIComponent(localizacao);
+
       tabela.innerHTML += `
-<tr>
-<td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
-<td>${l.equipamentoNome}</td>
-<td>${l.equipamentoModelo}</td>
-<td>${l.popNome}</td>
-
-<td>
-<a href="https://www.google.com/maps/search/${encodeURIComponent(l.popLocalizacao)}"
-target="_blank">
-<button class="btn-mapa">📍 Ver localização</button>
-</a>
-</td>
-
-</tr>
-`
+        <tr>
+          <td><a href="http://${ipSeguro}" target="_blank">${ipSeguro}</a></td>
+          <td>${nomeEquip}</td>
+          <td>${modeloEquip}</td>
+          <td>${nomePop}</td>
+          <td>
+            ${localizacao
+              ? `<a href="${linkMapa}" target="_blank" class="btn-mapa-link">
+                   <button type="button" class="btn-mapa">📍 Ver localização</button>
+                 </a>`
+              : `<span class="muted">Sem localização</span>`
+            }
+            ${localizacao ? `<div class="texto-localizacao">${localizacaoSegura}</div>` : ``}
+          </td>
+        </tr>
       `;
     });
 
@@ -237,6 +271,8 @@ async function cadastrarPop() {
 
     await carregarSelects();
     await dashboard();
+    await carregarTabela();
+
   } catch (erro) {
     console.error("Erro geral ao cadastrar POP:", erro);
   }
@@ -273,11 +309,14 @@ async function cadastrarEquip() {
 
     document.getElementById("equipNome").value = "";
     document.getElementById("equipModelo").value = "";
+    document.getElementById("equipPop").value = "";
 
     alert("Equipamento cadastrado com sucesso");
 
     await carregarSelects();
     await dashboard();
+    await listarEquipamentos();
+
   } catch (erro) {
     console.error("Erro geral ao cadastrar equipamento:", erro);
   }
@@ -286,28 +325,44 @@ async function cadastrarEquip() {
 /* =========================
    CADASTRAR IP
 ========================= */
-async function cadastrarIp(){
+async function cadastrarIp() {
+  try {
+    const ip = document.getElementById("ip").value.trim();
+    const equip = document.getElementById("equipIp").value;
 
- const ip=document.getElementById("ip").value
- const equip=document.getElementById("equipIp").value
+    if (!ip || !equip) {
+      alert("Preencha IP e equipamento");
+      return;
+    }
 
- const { error } = await supabase
- .from("ips_provedor")
- .insert({
-  ip: ip,
-  equipamento: equip,   // AQUI ESTÁ O NOME CERTO
-  app_id: appId
- })
+    const objetoInsert = {
+      ip: ip,
+      app_id: appId
+    };
 
- if(error){
-  alert("Erro ao cadastrar IP: "+error.message)
-  return
- }
+    objetoInsert[COLUNA_EQUIPAMENTO_IP] = equip;
 
- document.getElementById("ip").value=""
+    const { error } = await supabase
+      .from("ips_provedor")
+      .insert(objetoInsert);
 
- carregarTabela()
- dashboard()
+    if (error) {
+      console.error("Erro ao cadastrar IP:", error);
+      alert("Erro ao cadastrar IP: " + error.message);
+      return;
+    }
+
+    document.getElementById("ip").value = "";
+    document.getElementById("equipIp").value = "";
+
+    alert("IP cadastrado com sucesso");
+
+    await carregarTabela();
+    await dashboard();
+
+  } catch (erro) {
+    console.error("Erro geral ao cadastrar IP:", erro);
+  }
 }
 
 /* =========================
@@ -317,6 +372,9 @@ async function carregarSelects() {
   try {
     const popSelect = document.getElementById("equipPop");
     popSelect.innerHTML = `<option value="">Selecione o POP</option>`;
+
+    const filtroPopEquip = document.getElementById("filtroPopEquip");
+    filtroPopEquip.innerHTML = `<option value="">Todos os POPs</option>`;
 
     const { data: pops, error: popError } = await supabase
       .from("pops_provedor")
@@ -330,7 +388,8 @@ async function carregarSelects() {
     }
 
     (pops || []).forEach(p => {
-      popSelect.innerHTML += `<option value="${p.id}">${p.nome}</option>`;
+      popSelect.innerHTML += `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nome)}</option>`;
+      filtroPopEquip.innerHTML += `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nome)}</option>`;
     });
 
     const equipSelect = document.getElementById("equipIp");
@@ -348,7 +407,7 @@ async function carregarSelects() {
     }
 
     (equip || []).forEach(e => {
-      equipSelect.innerHTML += `<option value="${e.id}">${e.nome}</option>`;
+      equipSelect.innerHTML += `<option value="${escaparHtml(e.id)}">${escaparHtml(e.nome)}</option>`;
     });
 
   } catch (erro) {
@@ -357,7 +416,81 @@ async function carregarSelects() {
 }
 
 /* =========================
-   BUSCAR
+   LISTAR EQUIPAMENTOS
+========================= */
+async function listarEquipamentos() {
+  try {
+    const filtroPop = document.getElementById("filtroPopEquip").value;
+
+    const { data: equipamentos, error: erroEquip } = await supabase
+      .from("equipamentos_provedor")
+      .select("*")
+      .eq("app_id", appId)
+      .order("nome", { ascending: true });
+
+    if (erroEquip) {
+      alert("Erro ao listar equipamentos: " + erroEquip.message);
+      return;
+    }
+
+    const { data: pops, error: erroPops } = await supabase
+      .from("pops_provedor")
+      .select("*")
+      .eq("app_id", appId);
+
+    if (erroPops) {
+      alert("Erro ao listar POPs: " + erroPops.message);
+      return;
+    }
+
+    const mapaPop = {};
+    (pops || []).forEach(p => {
+      mapaPop[String(p.id)] = p.nome;
+    });
+
+    const tbody = document.getElementById("listaEquipamentos");
+    tbody.innerHTML = "";
+
+    (equipamentos || [])
+      .filter(e => !filtroPop || String(e.pop_id) === String(filtroPop))
+      .forEach(e => {
+        const id = escaparHtml(e.id);
+        const nome = escaparHtml(e.nome || "");
+        const modelo = escaparHtml(e.modelo || "");
+        const popNome = escaparHtml(mapaPop[String(e.pop_id)] || "");
+
+        tbody.innerHTML += `
+          <tr class="linha-click" onclick="selecionarEquipamento('${id}', '${nome}')">
+            <td>${nome}</td>
+            <td>${modelo}</td>
+            <td>${popNome}</td>
+          </tr>
+        `;
+      });
+
+    if (!tbody.innerHTML.trim()) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="3" class="muted">Nenhum equipamento encontrado</td>
+        </tr>
+      `;
+    }
+
+  } catch (erro) {
+    console.error("Erro ao listar equipamentos:", erro);
+  }
+}
+
+/* =========================
+   SELECIONAR EQUIPAMENTO
+========================= */
+function selecionarEquipamento(id, nome) {
+  document.getElementById("equipIp").value = id;
+  alert("Equipamento selecionado: " + nome);
+}
+
+/* =========================
+   BUSCAR IP
 ========================= */
 async function buscar() {
   try {
@@ -368,13 +501,29 @@ async function buscar() {
     tabela.innerHTML = "";
 
     linhas.forEach(l => {
+      const ipSeguro = escaparHtml(l.ip);
+      const nomeEquip = escaparHtml(l.equipamentoNome);
+      const modeloEquip = escaparHtml(l.equipamentoModelo);
+      const nomePop = escaparHtml(l.popNome);
+      const localizacao = l.popLocalizacao || "";
+      const localizacaoSegura = escaparHtml(localizacao);
+      const linkMapa = "https://www.google.com/maps/search/" + encodeURIComponent(localizacao);
+
       tabela.innerHTML += `
         <tr>
-          <td><a href="http://${l.ip}" target="_blank">${l.ip}</a></td>
-          <td>${l.equipamentoNome}</td>
-          <td>${l.equipamentoModelo}</td>
-          <td>${l.popNome}</td>
-          <td>${l.popLocalizacao}</td>
+          <td><a href="http://${ipSeguro}" target="_blank">${ipSeguro}</a></td>
+          <td>${nomeEquip}</td>
+          <td>${modeloEquip}</td>
+          <td>${nomePop}</td>
+          <td>
+            ${localizacao
+              ? `<a href="${linkMapa}" target="_blank" class="btn-mapa-link">
+                   <button type="button" class="btn-mapa">📍 Ver localização</button>
+                 </a>`
+              : `<span class="muted">Sem localização</span>`
+            }
+            ${localizacao ? `<div class="texto-localizacao">${localizacaoSegura}</div>` : ``}
+          </td>
         </tr>
       `;
     });
@@ -389,35 +538,34 @@ window.cadastrarPop = cadastrarPop;
 window.cadastrarEquip = cadastrarEquip;
 window.cadastrarIp = cadastrarIp;
 window.buscar = buscar;
+window.toggleFormEquip = toggleFormEquip;
+window.toggleListaEquip = toggleListaEquip;
+window.listarEquipamentos = listarEquipamentos;
+window.selecionarEquipamento = selecionarEquipamento;
 
 carregarApp();
 </script>
 
 <style>
+*{
+  box-sizing:border-box;
+}
+
 body{
   background:#020617;
   color:#fff;
-  font-family:Arial;
+  font-family:Arial, sans-serif;
   padding:30px;
   margin:0;
 }
 
 h2{
   margin-top:0;
+  margin-bottom:20px;
 }
 
-.btn-mapa{
-background:#2563eb;
-color:#fff;
-border:none;
-padding:6px 10px;
-border-radius:6px;
-cursor:pointer;
-font-size:12px;
-}
-
-.btn-mapa:hover{
-background:#1d4ed8;
+h3{
+  margin-top:0;
 }
 
 .dashboard{
@@ -430,28 +578,46 @@ background:#1d4ed8;
 .card{
   background:#0f172a;
   padding:20px;
-  border-radius:10px;
+  border-radius:12px;
   flex:1;
   min-width:180px;
   text-align:center;
+  border:1px solid #1e293b;
 }
 
 .section{
   background:#0f172a;
   padding:20px;
-  border-radius:10px;
+  border-radius:12px;
   margin-bottom:20px;
+  border:1px solid #1e293b;
+}
+
+.topo-secao{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.acoes-topo{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
 }
 
 input,select,button{
   padding:10px;
   margin:5px;
-  border-radius:6px;
+  border-radius:8px;
   border:none;
 }
 
 input,select{
   min-width:220px;
+  background:#fff;
+  color:#000;
 }
 
 button{
@@ -461,21 +627,64 @@ button{
   cursor:pointer;
 }
 
+button:hover{
+  opacity:.92;
+}
+
 table{
   width:100%;
-  margin-top:20px;
+  margin-top:15px;
   border-collapse:collapse;
 }
 
 td,th{
   padding:10px;
-  border-bottom:1px solid #333;
+  border-bottom:1px solid #334155;
   text-align:left;
+  vertical-align:top;
 }
 
 a{
   color:#38bdf8;
   text-decoration:none;
+}
+
+.btn-mapa{
+  background:#2563eb;
+  color:#fff;
+  border:none;
+  padding:6px 10px;
+  border-radius:6px;
+  cursor:pointer;
+  font-size:12px;
+  margin:0;
+}
+
+.btn-mapa:hover{
+  background:#1d4ed8;
+}
+
+.btn-mapa-link{
+  text-decoration:none;
+}
+
+.texto-localizacao{
+  margin-top:6px;
+  font-size:12px;
+  color:#94a3b8;
+  line-height:1.4;
+}
+
+.muted{
+  color:#94a3b8;
+}
+
+.linha-click{
+  cursor:pointer;
+}
+
+.linha-click:hover{
+  background:#172036;
 }
 
 @media(max-width:700px){
@@ -492,8 +701,18 @@ a{
     flex-direction:column;
   }
 
+  .acoes-topo{
+    width:100%;
+  }
+
+  .acoes-topo button{
+    width:100%;
+  }
+
   table{
     font-size:14px;
+    display:block;
+    overflow-x:auto;
   }
 }
 </style>
@@ -501,7 +720,7 @@ a{
 
 <body>
 
-<h2>📡 Painel Provedor</h2>
+<h2>📡 NOC Provedor</h2>
 
 <div class="dashboard">
   <div class="card">
@@ -528,11 +747,39 @@ a{
 </div>
 
 <div class="section">
-  <h3>Cadastrar Equipamento</h3>
-  <input id="equipNome" placeholder="Nome do equipamento">
-  <input id="equipModelo" placeholder="Modelo (Mikrotik / Intelbras / STC / etc)">
-  <select id="equipPop"></select>
-  <button onclick="cadastrarEquip()">Salvar</button>
+  <div class="topo-secao">
+    <h3>Equipamentos</h3>
+    <div class="acoes-topo">
+      <button type="button" onclick="toggleFormEquip()">+ Novo equipamento</button>
+      <button type="button" onclick="toggleListaEquip()">Ver equipamentos</button>
+    </div>
+  </div>
+
+  <div id="boxFormEquip" style="display:none; margin-top:15px;">
+    <input id="equipNome" placeholder="Nome do equipamento">
+    <input id="equipModelo" placeholder="Modelo (Mikrotik / Intelbras / STC / etc)">
+    <select id="equipPop"></select>
+    <button onclick="cadastrarEquip()">Salvar</button>
+  </div>
+
+  <div id="boxListaEquip" style="display:none; margin-top:15px;">
+    <div style="margin-bottom:10px;">
+      <select id="filtroPopEquip" onchange="listarEquipamentos()">
+        <option value="">Todos os POPs</option>
+      </select>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Modelo</th>
+          <th>POP</th>
+        </tr>
+      </thead>
+      <tbody id="listaEquipamentos"></tbody>
+    </table>
+  </div>
 </div>
 
 <div class="section">
@@ -563,4 +810,3 @@ a{
 
 </body>
 </html>
-
