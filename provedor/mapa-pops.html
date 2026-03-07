@@ -451,9 +451,10 @@ async function obterAppId(){
    FILTRO POP
 ========================= */
 async function carregarFiltroPops(){
+
   const { data:pops, error } = await supabase
     .from("pops_provedor")
-    .select("id,nome")
+    .select("id,nome,principal")
     .eq("app_id", appId)
     .order("id", { ascending:true });
 
@@ -462,13 +463,27 @@ async function carregarFiltroPops(){
   }
 
   const filtro = document.getElementById("filtroPop");
+  const selectPrincipal = document.getElementById("selectPopPrincipal");
+
   filtro.innerHTML = `<option value="">Todos os POPs</option>`;
+  selectPrincipal.innerHTML = `<option value="">Definir POP principal</option>`;
 
   (pops || []).forEach(pop => {
+
     filtro.innerHTML += `
-      <option value="${escaparHtml(pop.id)}">${escaparHtml(pop.nome || "")}</option>
+      <option value="${pop.id}">
+        ${escaparHtml(pop.nome)}
+      </option>
     `;
+
+    selectPrincipal.innerHTML += `
+      <option value="${pop.id}" ${pop.principal ? "selected" : ""}>
+        ${escaparHtml(pop.nome)}
+      </option>
+    `;
+
   });
+
 }
 
 /* =========================
@@ -502,7 +517,52 @@ async function buscarDadosMapa(){
   if(errorEquip){
     throw new Error("Erro ao carregar equipamentos: " + errorEquip.message);
   }
+async function definirPopPrincipal(){
 
+  try{
+
+    const popId = document.getElementById("selectPopPrincipal").value;
+
+    if(!popId){
+      mostrarStatus("Selecione um POP.", "erro");
+      return;
+    }
+
+    mostrarStatus("Atualizando POP principal...", "ok");
+
+    // Remove principal atual
+    const { error:error1 } = await supabase
+      .from("pops_provedor")
+      .update({ principal:false })
+      .eq("app_id", appId);
+
+    if(error1){
+      throw new Error(error1.message);
+    }
+
+    // Define novo principal
+    const { error:error2 } = await supabase
+      .from("pops_provedor")
+      .update({ principal:true })
+      .eq("id", popId)
+      .eq("app_id", appId);
+
+    if(error2){
+      throw new Error(error2.message);
+    }
+
+    mostrarStatus("POP principal atualizado.", "sucesso");
+
+    await desenharMapa();
+
+  }catch(erro){
+
+    console.error(erro);
+    mostrarStatus("Erro ao definir principal: " + erro.message, "erro");
+
+  }
+
+}
   const { data:ips, error:errorIps } = await supabase
     .from("ips_provedor")
     .select("*")
@@ -707,6 +767,7 @@ async function desenharMapa(){
   lat: coords.lat,
   lng: coords.lng,
   principal: pop.principal === true,
+  
   equipamentos: listaEquip,
   ips: [...new Set(ipsDoPop)],
   ipsObjetos: ipsObjetosDoPop,
@@ -731,7 +792,7 @@ async function desenharMapa(){
       return;
     }
 
-    const ehPrincipal = String(pop.id) === String(popPrincipal?.id);
+    const popPrincipal = pontos.find(p => p.principal === true) || pontos[0];
     const bounds = [];
     let totalEquip = 0;
     let totalIps = 0;
@@ -777,6 +838,7 @@ async function desenharMapa(){
       const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
       const ehPrincipal = pop.principal === true;
       const nomeMarker = ehPrincipal ? `${pop.nome} ⭐` : pop.nome;
+      const ehPrincipal = String(pop.id) === String(popPrincipal?.id);
 
       const marker = L.marker([pop.lat, pop.lng], {
         icon: criarIconePop(pop.status, nomeMarker, ehPrincipal)
@@ -975,6 +1037,7 @@ async function iniciar(){
 }
 
 window.recarregarMapa = desenharMapa;
+window.definirPopPrincipal = definirPopPrincipal;
 iniciar();
 </script>
 
@@ -1892,17 +1955,22 @@ button:hover{
   <div class="topo">
     <div class="topo-esq">
       <h2>Mapa Automático dos POPs</h2>
-      <div class="subtitulo">O POP principal é definido no banco e os demais se interligam a ele</div>
+      <div class="subtitulo">Primeiro POP cadastrado é o principal e todos os demais se interligam a ele</div>
     </div>
 
-    <div class="painel">
-      <select id="filtroPop" onchange="recarregarMapa()">
-        <option value="">Todos os POPs</option>
-      </select>
+  <div class="painel">
 
-      <button onclick="recarregarMapa()">Atualizar mapa</button>
-    </div>
-  </div>
+  <select id="filtroPop" onchange="recarregarMapa()">
+    <option value="">Todos os POPs</option>
+  </select>
+
+  <select id="selectPopPrincipal" onchange="definirPopPrincipal()">
+    <option value="">Definir POP principal</option>
+  </select>
+
+  <button onclick="recarregarMapa()">Atualizar mapa</button>
+
+</div>
 
   <div id="status" class="status ok">Iniciando...</div>
 
