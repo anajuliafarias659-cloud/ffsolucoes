@@ -9,12 +9,12 @@
 
 <style>
 
-html, body{
+html,body{
 margin:0;
 padding:0;
 height:100%;
 background:#0f172a;
-font-family:Arial, Helvetica, sans-serif;
+font-family:Arial,Helvetica,sans-serif;
 }
 
 #mapa{
@@ -29,8 +29,8 @@ justify-content:center;
 }
 
 </style>
-</head>
 
+</head>
 <body>
 
 <div id="mapa"></div>
@@ -41,23 +41,24 @@ justify-content:center;
 <script>
 
 /* ================================
-   CONFIGURAÇÃO SUPABASE
+CONFIGURAÇÃO
 ================================ */
 
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co"
-const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-const APP_ID = "provedor1"
+const SUPABASE_URL="https://pdajixsoowcyhnjwhgpc.supabase.co"
+const SUPABASE_KEY="sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 
-const supabaseClient = supabase.createClient(
+const appId="provedor1"
+
+const supabase=supabase.createClient(
 SUPABASE_URL,
 SUPABASE_KEY
 )
 
 /* ================================
-   MAPA
+MAPA
 ================================ */
 
-const mapa = L.map("mapa").setView([-14.235,-51.925],4)
+const mapa=L.map("mapa").setView([-14.235,-51.925],4)
 
 L.tileLayer(
 "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -66,75 +67,52 @@ maxZoom:19
 }
 ).addTo(mapa)
 
-/* ================================
-   CARREGAR POPS
-================================ */
+const camadaMarcadores=L.layerGroup().addTo(mapa)
+const camadaLinhas=L.layerGroup().addTo(mapa)
 
-async function carregarMapa(){
-
-const camadaLinhas = L.layerGroup().addTo(mapa)
-const bounds = []
-
-try{
-
-const { data:pops, error } = await supabaseClient
-.from("pops_provedor")
-.select("*")
-.eq("app_id",APP_ID)
-
-if(error){
-console.error(error)
-return
-}
-
-if(!pops || pops.length===0){
-console.log("Nenhum POP encontrado")
-return
-}
-
-const pontos = []
-
-pops.forEach(pop=>{
-
-const lat = parseFloat(pop.latitude)
-const lng = parseFloat(pop.longitude)
-
-if(!lat || !lng) return
-
-const status =
-pop.status==="down"
-? "down"
-: pop.status==="warning"
-? "warning"
-: "up"
-
-pontos.push({
-id:pop.id,
-nome:pop.nome,
-lat,
-lng,
-status
-})
-
-bounds.push([lat,lng])
-
-})
+let animacoes=[]
 
 /* ================================
-   MARCADORES
+UTIL
 ================================ */
 
-pontos.forEach(pop=>{
+function corStatus(status){
 
-const cor =
-pop.status==="down"
-? "#ef4444"
-: pop.status==="warning"
-? "#f59e0b"
-: "#22c55e"
+if(status==="down") return "#ef4444"
+if(status==="warning") return "#f59e0b"
+return "#22c55e"
 
-const icone = L.divIcon({
+}
+
+function textoStatus(status){
+
+if(status==="down") return "Offline"
+if(status==="warning") return "Alerta"
+return "Online"
+
+}
+
+function normalizarStatus(s){
+
+if(!s) return "up"
+
+s=String(s).toLowerCase()
+
+if(s==="down") return "down"
+if(s==="warning") return "warning"
+
+return "up"
+
+}
+
+function criarIconePop(status){
+
+const cor=corStatus(status)
+
+return L.divIcon({
+
 className:"pop-marker",
+
 html:`
 <div style="
 width:16px;
@@ -145,48 +123,119 @@ border:2px solid white;
 box-shadow:0 0 8px ${cor};
 "></div>
 `,
+
 iconSize:[16,16]
-})
-
-L.marker([pop.lat,pop.lng],{icon:icone})
-.addTo(mapa)
-.bindPopup("<b>"+pop.nome+"</b><br>Status: "+pop.status)
 
 })
 
+}
+
+function limparAnimacoesFluxo(){
+
+animacoes.forEach(a=>clearInterval(a))
+animacoes=[]
+
+}
+
 /* ================================
-   CORE
+ANIMAÇÃO
 ================================ */
 
-const popPrincipal =
-pontos.find(p=>p.nome?.toUpperCase()==="CORE") || pontos[0]
+function animarFluxo(origem,destino,status){
+
+const cor=corStatus(status)
+
+const ponto=L.circleMarker(origem,{
+radius:4,
+color:cor,
+fillColor:cor,
+fillOpacity:1
+}).addTo(mapa)
+
+let passo=0
+
+const anim=setInterval(()=>{
+
+passo+=0.02
+
+if(passo>=1) passo=0
+
+const lat=origem[0]+(destino[0]-origem[0])*passo
+const lng=origem[1]+(destino[1]-origem[1])*passo
+
+ponto.setLatLng([lat,lng])
+
+},60)
+
+animacoes.push(anim)
+
+}
 
 /* ================================
-   LINHAS ENTRE POPS
+CARREGAR MAPA
 ================================ */
 
-pontos.forEach(pop=>{
+async function carregarMapa(){
 
-if(pop.id===popPrincipal.id) return
+camadaMarcadores.clearLayers()
+camadaLinhas.clearLayers()
+limparAnimacoesFluxo()
 
-const statusLinha =
-pop.status==="down" || popPrincipal.status==="down"
-? "down"
-: pop.status==="warning" || popPrincipal.status==="warning"
-? "warning"
-: "up"
+const {data:pops,error}=await supabase
+.from("pops_provedor")
+.select("*")
+.eq("app_id",appId)
 
-const corLinha =
-statusLinha==="down"
-? "#ef4444"
-: statusLinha==="warning"
-? "#f59e0b"
-: "#38bdf8"
+if(error){
+
+console.error("Erro:",error)
+return
+
+}
+
+if(!pops || pops.length===0){
+
+console.warn("Nenhum POP")
+return
+
+}
+
+const bounds=[]
+
+const core=
+pops.find(p=>String(p.nome).toUpperCase()==="CORE")
+|| pops[0]
+
+const latCore=Number(core.latitude)
+const lngCore=Number(core.longitude)
+
+pops.forEach(pop=>{
+
+const lat=Number(pop.latitude)
+const lng=Number(pop.longitude)
+
+if(!lat || !lng) return
+
+bounds.push([lat,lng])
+
+const status=normalizarStatus(pop.status)
+
+const marker=L.marker([lat,lng],{
+icon:criarIconePop(status)
+}).addTo(camadaMarcadores)
+
+marker.bindPopup(
+"<b>"+pop.nome+"</b><br>Status: "+textoStatus(status)
+)
+
+if(pop.id===core.id) return
+
+const corLinha=corStatus(status)
 
 L.polyline(
 [
-[popPrincipal.lat,popPrincipal.lng],
-[pop.lat,pop.lng]
+[latCore,lngCore],
+[lat,lng]
 ],
 {
 color:corLinha,
@@ -196,63 +245,32 @@ opacity:0.9
 ).addTo(camadaLinhas)
 
 animarFluxo(
-[popPrincipal.lat,popPrincipal.lng],
-[pop.lat,pop.lng],
-corLinha
+[latCore,lngCore],
+[lat,lng],
+status
 )
 
 })
 
-if(bounds.length>0){
+if(bounds.length){
+
 mapa.fitBounds(bounds,{padding:[40,40]})
-}
 
-}catch(err){
-console.error("Erro:",err)
 }
 
 }
 
 /* ================================
-   ANIMAÇÃO DE TRÁFEGO
-================================ */
-
-function animarFluxo(origem,destino,cor){
-
-const circulo = L.circleMarker(origem,{
-radius:4,
-color:cor,
-fillColor:cor,
-fillOpacity:1
-}).addTo(mapa)
-
-let passo = 0
-
-setInterval(()=>{
-
-passo += 0.02
-
-if(passo >= 1){
-passo = 0
-}
-
-const lat =
-origem[0] + (destino[0]-origem[0]) * passo
-
-const lng =
-origem[1] + (destino[1]-origem[1]) * passo
-
-circulo.setLatLng([lat,lng])
-
-},60)
-
-}
-
-/* ================================
-   INICIAR
+INICIAR
 ================================ */
 
 carregarMapa()
+
+setInterval(()=>{
+
+carregarMapa()
+
+},30000)
 
 </script>
 
