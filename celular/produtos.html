@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -29,6 +30,33 @@ small{opacity:.7}
 .preview-item img{width:90px;height:90px;object-fit:cover;border-radius:10px}
 .preview-item button{position:absolute;top:-6px;right:-6px;background:red;color:#fff;border:none;border-radius:50%;width:22px;height:22px}
 .cor-box{background:#111;padding:6px;border-radius:6px;margin-top:6px;font-size:13px}
+#listaComplementares{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:8px;
+  margin-top:10px;
+}
+
+.item-comp{
+  background:#020617;
+  border:1px solid #334155;
+  border-radius:10px;
+  padding:10px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.item-comp input[type="checkbox"]{
+  width:auto;
+  margin:0;
+}
+
+.item-comp label{
+  cursor:pointer;
+  font-size:14px;
+  flex:1;
+}
 </style>
 </head>
 
@@ -58,6 +86,10 @@ small{opacity:.7}
 <button type="button" onclick="adicionarCor()">Adicionar cor</button>
 <div id="listaCores"></div>
 
+<h3 style="margin-top:18px;">🔗 Produtos complementares</h3>
+<small>Marque os produtos que serão sugeridos no carrinho junto com este item.</small>
+<div id="listaComplementares" style="margin-top:10px;"></div>
+
 <input id="camera" type="file" accept="image/*" hidden>
 <button type="button" onclick="tirarFoto()">📷 Adicionar foto (até 3)</button>
 <div id="preview"></div>
@@ -86,6 +118,7 @@ let variacoes = [];
 const LIMITE = 3;
 let editando = false;
 let produtoEditandoId = null;
+let complementaresSelecionados = [];
 
 /* ===== FORMATAR REAL ===== */
 function formatarReal(valor){
@@ -150,7 +183,35 @@ async function carregarCategorias(){
     .select("*")
     .eq("app_id", admin.app_id)
     .order("nome");
+async function carregarComplementares(){
+  const { data } = await sb
+    .from("produtos")
+    .select("id,nome")
+    .eq("app_id", admin.app_id)
+    .order("nome");
 
+  const lista = data || [];
+
+  const filtrados = lista.filter(p => String(p.id) !== String(produtoEditandoId));
+
+  const html = filtrados.map(p => `
+    <div class="item-comp">
+      <input
+        type="checkbox"
+        id="comp_${p.id}"
+        value="${p.id}"
+        ${complementaresSelecionados.includes(String(p.id)) ? "checked" : ""}
+      >
+      <label for="comp_${p.id}">${p.nome}</label>
+    </div>
+  `).join("");
+function lerComplementaresSelecionados(){
+  const checks = document.querySelectorAll('#listaComplementares input[type="checkbox"]:checked');
+  return [...checks].map(c => String(c.value));
+}
+  document.getElementById("listaComplementares").innerHTML =
+    html || "<small>Nenhum outro produto cadastrado ainda.</small>";
+}
   if(!data || data.length === 0){
     categoria.innerHTML = "<option value=''>Nenhuma categoria cadastrada</option>";
     return;
@@ -266,23 +327,24 @@ async function salvar(){
     .replace(/\./g,"")
     .replace(",",".")
 ),
-    estoque:Number(estoque.value||0),
-    descricao:descricao.value,
-    categoria:categoria.value,
-    variacoes:JSON.stringify(variacoes),
-    imagens:JSON.stringify(imagens)
-  };
+const idsComplementares = lerComplementaresSelecionados();
 
-  if(editando){
-    await sb.from("produtos").update(payload).eq("id",produtoEditandoId);
-  }else{
-    await sb.from("produtos").insert({
-      ...payload,
-      app_id:admin.app_id,
-      ativo:true
-    });
-  }
-
+const payload = {
+  nome:nome.value,
+  preco: Number(
+    preco.value
+      .replace(/\s/g,"")
+      .replace("R$","")
+      .replace(/\./g,"")
+      .replace(",",".")
+  ),
+  estoque:Number(estoque.value||0),
+  descricao:descricao.value,
+  categoria:categoria.value,
+  variacoes:JSON.stringify(variacoes),
+  imagens:JSON.stringify(imagens),
+  produtos_complementares: JSON.stringify(idsComplementares)
+};
   limpar();
   carregar();
   alert("✅ Produto salvo");
@@ -301,10 +363,16 @@ function editar(p){
 
   try{ fotosExistentes=JSON.parse(p.imagens||"[]"); }catch{ fotosExistentes=[]; }
   try{ variacoes=JSON.parse(p.variacoes||"[]"); }catch{ variacoes=[]; }
+  try{
+    complementaresSelecionados = JSON.parse(p.produtos_complementares || "[]").map(String);
+  }catch{
+    complementaresSelecionados = [];
+  }
 
   fotosTemp=[];
   atualizarPreview();
   atualizarCores();
+  carregarComplementares();
 
   btnSalvar.innerText="💾 Salvar alterações";
 }
@@ -349,16 +417,19 @@ function limpar(){
   variacoes=[];
   fotosTemp=[];
   fotosExistentes=[];
+  complementaresSelecionados = [];
   preview.innerHTML="";
   listaCores.innerHTML="";
   btnSalvar.innerText="Cadastrar celular";
+  carregarComplementares();
 }
 
 /* ===== INIT ===== */
-carregarAdmin().then(()=>{
+carregarAdmin().then(async ()=>{
   if(admin){
-    carregarCategorias();
-    carregar();
+    await carregarCategorias();
+    await carregar();
+    await carregarComplementares();
   }
 });
 
