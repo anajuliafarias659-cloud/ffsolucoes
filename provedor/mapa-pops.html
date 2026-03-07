@@ -23,9 +23,6 @@ let camadaLinhas = null;
 let camadaFluxo = null;
 let cacheGeocoding = {};
 let animacoesFluxo = [];
-let pontosGlobais = [];
-let autoRefreshTimer = null;
-let ultimoAtualizadoEm = null;
 
 /* =========================
    AUX
@@ -38,6 +35,23 @@ function escaparHtml(texto){
     .replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;")
     .replace(/'/g,"&#39;");
+}
+
+function normalizarTexto(texto){
+  if(!texto) return "";
+  return String(texto)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function limparHtmlTexto(texto){
+  if(!texto) return "";
+  return String(texto)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizarIp(ip){
@@ -136,11 +150,6 @@ function mostrarStatus(texto, tipo="ok"){
   box.innerText = texto || "";
 }
 
-function formatarHora(date){
-  const d = date instanceof Date ? date : new Date();
-  return d.toLocaleTimeString("pt-BR");
-}
-
 /* =========================
    STATUS
 ========================= */
@@ -163,10 +172,17 @@ function normalizarStatus(valor){
     s.includes("down") ||
     s.includes("offline") ||
     s.includes("erro") ||
-    s.includes("falha") ||
-    s.includes("alerta")
+    s.includes("falha")
   ){
     return "down";
+  }
+
+  if(
+    s.includes("warning") ||
+    s.includes("alerta") ||
+    s.includes("alarme")
+  ){
+    return "warning";
   }
 
   return "unknown";
@@ -175,12 +191,14 @@ function normalizarStatus(valor){
 function corStatus(status){
   if(status === "up") return "#22c55e";
   if(status === "down") return "#ef4444";
+  if(status === "warning") return "#f59e0b";
   return "#f59e0b";
 }
 
 function textoStatus(status){
   if(status === "up") return "UP";
   if(status === "down") return "DOWN";
+  if(status === "warning") return "ALERTA";
   return "SEM STATUS";
 }
 
@@ -190,19 +208,119 @@ function badgeClassStatus(status){
   return "unknown";
 }
 
-function calcularStatusPop(listaIps){
-  if(!listaIps.length) return "unknown";
+/* =========================
+   PRTG
+========================= */
+async function carregarStatusPRTG(){
+  try{
+    const url = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/PRTG";
 
-  let encontrouUp = false;
+    const resposta = await fetch(url);
+    const textoBruto = await resposta.text();
 
-  for(const ip of listaIps){
-    const st = normalizarStatus(ip.status);
+    let dados = {};
+    try{
+      dados = textoBruto ? JSON.parse(textoBruto) : {};
+    }catch{
+      dados = { erro: textoBruto || "Resposta inválida da function" };
+    }
 
-    if(st === "down") return "down";
-    if(st === "up") encontrouUp = true;
+    if(!resposta.ok){
+      throw new Error(dados.erro || ("Function respondeu com status " + resposta.status));
+    }
+
+    const devices = dados.devices || [];
+
+    const mapaPorIp = {};
+    const mapaPorNome = {};
+
+    devices.forEach(item => {
+      const hostOriginal = String(item.host || "").trim();
+      const hostNormalizado = normalizarIp(hostOriginal);
+
+      const nomeDevice = String(item.device || "").trim();
+      const nomeNormalizado = normalizarTexto(nomeDevice);
+
+      const statusInfo = {
+        status: item.status || "",
+        message: limparHtmlTexto(item.message || ""),
+        device: nomeDevice || "",
+        host: hostNormalizado || hostOriginal || ""
+      };
+
+      if(hostNormalizado){
+        mapaPorIp[hostNormalizado] = statusInfo;
+      }
+
+      if(nomeNormalizado){
+        mapaPorNome[nomeNormalizado] = statusInfo;
+      }
+    });
+
+    return {
+      ok: true,
+      porIp: mapaPorIp,
+      porNome: mapaPorNome
+    };
+
+  }catch(erro){
+    console.error("Erro ao buscar status no PRTG:", erro);
+    return {
+      ok: false,
+      porIp: {},
+      porNome: {},
+      erro: erro.message || "Erro ao consultar PRTG"
+    };
+  }
+}
+
+function obterStatusEquipamento(eq, listaIpsEquip, statusPRTG){
+  if(!statusPRTG || !statusPRTG.ok){
+    return {
+      status: "unknown",
+      info: null
+    };
   }
 
-  return encontrouUp ? "up" : "unknown";
+  for(const item of listaIpsEquip){
+    const ipBase = normalizarIp(item.ip || "");
+    if(ipBase && statusPRTG.porIp[ipBase]){
+      return {
+        status: normalizarStatus(statusPRTG.porIp[ipBase].status),
+        info: statusPRTG.porIp[ipBase]
+      };
+    }
+  }
+
+  const nomeNormalizado = normalizarTexto(eq.nome || "");
+  if(nomeNormalizado && statusPRTG.porNome[nomeNormalizado]){
+    return {
+      status: normalizarStatus(statusPRTG.porNome[nomeNormalizado].status),
+      info: statusPRTG.porNome[nomeNormalizado]
+    };
+  }
+
+  return {
+    status: "unknown",
+    info: null
+  };
+}
+
+function calcularStatusPopPorEquipamentos(statusesEquip){
+  if(!statusesEquip.length) return "unknown";
+
+  let temUp = false;
+  let temWarning = false;
+
+  for(const st of statusesEquip){
+    if(st === "down") return "down";
+    if(st === "warning") temWarning = true;
+    if(st === "up") temUp = true;
+  }
+
+  if(temWarning) return "warning";
+  if(temUp) return "up";
+  return "unknown";
 }
 
 /* =========================
@@ -576,6 +694,7 @@ async function desenharMapa(silencioso = false){
     limparAnimacoesFluxo();
 
     const { pops, equipamentos, ips } = await buscarDadosMapa();
+    const statusPRTG = await carregarStatusPRTG();
 
     const mapaEquipPorPop = {};
     equipamentos.forEach(eq => {
@@ -631,22 +750,26 @@ async function desenharMapa(silencioso = false){
       }
 
       const listaEquip = mapaEquipPorPop[String(pop.id)] || [];
-      const ipsDoPop = [];
-      const ipsObjetosDoPop = [];
+const ipsDoPop = [];
+const ipsObjetosDoPop = [];
+const statusesEquip = [];
 
-      listaEquip.forEach(eq => {
-        const listaIpsEquip = mapaIpsPorEquip[String(eq.id)] || [];
+listaEquip.forEach(eq => {
+  const listaIpsEquip = mapaIpsPorEquip[String(eq.id)] || [];
 
-        listaIpsEquip.forEach(ipItem => {
-          const ipTratado = normalizarIp(ipItem.ip || "");
-          if(ipTratado){
-            ipsDoPop.push(ipTratado);
-          }
-          ipsObjetosDoPop.push(ipItem);
-        });
-      });
+  listaIpsEquip.forEach(ipItem => {
+    const ipTratado = normalizarIp(ipItem.ip || "");
+    if(ipTratado){
+      ipsDoPop.push(ipTratado);
+    }
+    ipsObjetosDoPop.push(ipItem);
+  });
 
-      const statusPop = calcularStatusPop(ipsObjetosDoPop);
+  const statusEquip = obterStatusEquipamento(eq, listaIpsEquip, statusPRTG);
+  statusesEquip.push(statusEquip.status);
+});
+
+const statusPop = calcularStatusPopPorEquipamentos(statusesEquip);
 
       pontos.push({
         id: pop.id,
