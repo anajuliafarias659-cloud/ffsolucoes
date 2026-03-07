@@ -26,8 +26,63 @@ let camadaLinhas = null;
 let cacheGeocoding = {};
 
 /* =========================
+   STATUS
+========================= */
+
+function normalizarStatus(valor){
+
+  if(!valor) return "unknown";
+
+  const s = String(valor).toLowerCase();
+
+  if(
+    s.includes("up") ||
+    s.includes("online") ||
+    s.includes("ok") ||
+    s.includes("ativo")
+  ){
+    return "up";
+  }
+
+  if(
+    s.includes("down") ||
+    s.includes("offline") ||
+    s.includes("erro")
+  ){
+    return "down";
+  }
+
+  return "unknown";
+}
+
+function corStatus(status){
+
+  if(status === "up") return "#22c55e";
+  if(status === "down") return "#ef4444";
+
+  return "#f59e0b";
+}
+
+function criarIconePop(status){
+
+  const cor = corStatus(status);
+
+  return L.divIcon({
+    className:"marcador-wrap",
+    html:`
+      <div class="marcador" style="background:${cor}">
+        <div class="centro"></div>
+      </div>
+    `,
+    iconSize:[24,24],
+    iconAnchor:[12,12]
+  });
+}
+
+/* =========================
    AUX
 ========================= */
+
 function escaparHtml(texto){
   if(texto === null || texto === undefined) return "";
   return String(texto)
@@ -48,524 +103,234 @@ function normalizarIp(ip){
     .trim();
 }
 
-function ehLatLngTexto(texto){
-  if(!texto) return false;
-  return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(String(texto).trim());
-}
-
-function extrairLatLng(texto){
-  if(!ehLatLngTexto(texto)) return null;
-
-  const partes = String(texto).split(",");
-  const lat = Number(partes[0].trim());
-  const lng = Number(partes[1].trim());
-
-  if(Number.isNaN(lat) || Number.isNaN(lng)) return null;
-
-  return { lat, lng };
-}
-
-function ehLinkMapa(texto){
-  const valor = String(texto || "").trim().toLowerCase();
-  return (
-    valor.startsWith("http://") ||
-    valor.startsWith("https://") ||
-    valor.startsWith("www.") ||
-    valor.includes("maps.app.goo.gl") ||
-    valor.includes("google.com/maps")
-  );
-}
-
-function montarLinkMapa(localizacao, lat = null, lng = null){
-  const valor = String(localizacao || "").trim();
-
-  if(valor){
-    if(
-      valor.startsWith("http://") ||
-      valor.startsWith("https://")
-    ){
-      return valor;
-    }
-
-    if(
-      valor.startsWith("www.") ||
-      valor.includes("maps.app.goo.gl") ||
-      valor.includes("google.com/maps")
-    ){
-      return "https://" + valor.replace(/^https?:\/\//i, "");
-    }
-
-    return "https://www.google.com/maps/search/" + encodeURIComponent(valor);
-  }
-
-  if(lat !== null && lng !== null){
-    return "https://www.google.com/maps/search/" + encodeURIComponent(`${lat},${lng}`);
-  }
-
-  return "";
-}
-
-function extrairCoordenadaDeLink(link){
-  const texto = String(link || "").trim();
-  if(!texto) return null;
-
-  let match = texto.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  match = texto.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  match = texto.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  match = texto.match(/[?&]ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  return null;
-}
-
-function mostrarStatus(texto, tipo="ok"){
-  const box = document.getElementById("status");
-  box.className = "status " + tipo;
-  box.innerText = texto || "";
-}
-
-function criarIconePop(){
-  return L.divIcon({
-    className: "marcador-pop-wrap",
-    html: `
-      <div class="marcador-pop">
-        <div class="marcador-pop-interno"></div>
-      </div>
-    `,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-    popupAnchor: [0, -10]
-  });
-}
+/* =========================
+   MAPA
+========================= */
 
 function iniciarMapa(){
+
   if(mapa) return;
 
-  mapa = L.map("mapaPops", {
-    zoomControl: true
-  });
+  mapa = L.map("mapaPops");
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
-  }).addTo(mapa);
+  L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {
+      maxZoom:19
+    }
+  ).addTo(mapa);
 
   camadaMarcadores = L.layerGroup().addTo(mapa);
   camadaLinhas = L.layerGroup().addTo(mapa);
 
-  mapa.setView([-9.0, -42.7], 6);
+  mapa.setView([-9,-42.7],6);
 }
 
 /* =========================
-   GEOCODING
+   AUTH
 ========================= */
-async function geocodificarEndereco(endereco){
-  try{
-    if(!endereco) return null;
 
-    const chave = String(endereco).trim().toLowerCase();
-    if(cacheGeocoding[chave]) return cacheGeocoding[chave];
-
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(endereco)}`;
-
-    const resposta = await fetch(url, {
-      headers: {
-        "Accept": "application/json"
-      }
-    });
-
-    const dados = await resposta.json();
-
-    if(!dados || !dados.length){
-      return null;
-    }
-
-    const resultado = {
-      lat: Number(dados[0].lat),
-      lng: Number(dados[0].lon)
-    };
-
-    cacheGeocoding[chave] = resultado;
-    return resultado;
-
-  }catch(erro){
-    console.error("Erro ao geocodificar:", endereco, erro);
-    return null;
-  }
-}
-
-/* =========================
-   AUTH / APP ID
-========================= */
 async function obterAppId(){
-  const { data:{ session }, error: sessionError } = await supabase.auth.getSession();
 
-  if(sessionError){
-    throw new Error("Erro ao verificar sessão: " + sessionError.message);
-  }
+  const { data:{ session } } = await supabase.auth.getSession();
 
   if(!session){
-    location.href = "/auth/login.html";
+    location.href="/auth/login.html";
     return null;
   }
 
-  const userId = session.user.id;
-
-  const { data:user, error:userError } = await supabase
+  const { data:user } = await supabase
     .from("usuarios")
     .select("app_id")
-    .eq("id", userId)
+    .eq("id",session.user.id)
     .single();
-
-  if(userError){
-    throw new Error("Erro ao buscar app_id: " + userError.message);
-  }
-
-  if(!user || !user.app_id){
-    throw new Error("Usuário sem app_id vinculado");
-  }
 
   return user.app_id;
 }
 
 /* =========================
-   CARREGAR POPS NO FILTRO
-========================= */
-async function carregarFiltroPops(){
-  const { data:pops, error } = await supabase
-    .from("pops_provedor")
-    .select("id,nome")
-    .eq("app_id", appId)
-    .order("nome", { ascending:true });
-
-  if(error){
-    throw new Error("Erro ao carregar filtro de POPs: " + error.message);
-  }
-
-  const filtro = document.getElementById("filtroPop");
-  filtro.innerHTML = `<option value="">Todos os POPs</option>`;
-
-  (pops || []).forEach(pop => {
-    filtro.innerHTML += `
-      <option value="${escaparHtml(pop.id)}">${escaparHtml(pop.nome || "")}</option>
-    `;
-  });
-}
-
-/* =========================
    BUSCAR DADOS
 ========================= */
+
 async function buscarDadosMapa(){
-  const popSelecionado = document.getElementById("filtroPop").value;
+
+  const popSelecionado =
+    document.getElementById("filtroPop").value;
 
   let queryPops = supabase
     .from("pops_provedor")
     .select("*")
-    .eq("app_id", appId)
-    .order("nome", { ascending:true });
+    .eq("app_id",appId);
 
   if(popSelecionado){
-    queryPops = queryPops.eq("id", popSelecionado);
+    queryPops = queryPops.eq("id",popSelecionado);
   }
 
-  const { data:pops, error:errorPops } = await queryPops;
+  const { data:pops } = await queryPops;
 
-  if(errorPops){
-    throw new Error("Erro ao carregar POPs: " + errorPops.message);
-  }
-
-  const { data:equipamentos, error:errorEquip } = await supabase
+  const { data:equipamentos } = await supabase
     .from("equipamentos_provedor")
     .select("*")
-    .eq("app_id", appId)
-    .order("nome", { ascending:true });
+    .eq("app_id",appId);
 
-  if(errorEquip){
-    throw new Error("Erro ao carregar equipamentos: " + errorEquip.message);
-  }
-
-  const { data:ips, error:errorIps } = await supabase
+  const { data:ips } = await supabase
     .from("ips_provedor")
     .select("*")
-    .eq("app_id", appId)
-    .order("ip", { ascending:true });
+    .eq("app_id",appId);
 
-  if(errorIps){
-    throw new Error("Erro ao carregar IPs: " + errorIps.message);
-  }
-
-  return {
-    pops: pops || [],
-    equipamentos: equipamentos || [],
-    ips: ips || []
+  return{
+    pops:pops||[],
+    equipamentos:equipamentos||[],
+    ips:ips||[]
   };
 }
 
 /* =========================
-   MONTAR MAPA
+   DESENHAR MAPA
 ========================= */
+
 async function desenharMapa(){
-  try{
-    mostrarStatus("Carregando mapa...", "ok");
-    iniciarMapa();
-    camadaMarcadores.clearLayers();
-    camadaLinhas.clearLayers();
 
-    const { pops, equipamentos, ips } = await buscarDadosMapa();
+  iniciarMapa();
 
-    const mapaEquipPorPop = {};
-    equipamentos.forEach(eq => {
-      const popId = String(eq.pop_id || "");
-      if(!popId) return;
+  camadaMarcadores.clearLayers();
+  camadaLinhas.clearLayers();
 
-      if(!mapaEquipPorPop[popId]){
-        mapaEquipPorPop[popId] = [];
-      }
+  const { pops, equipamentos, ips } =
+    await buscarDadosMapa();
 
-      mapaEquipPorPop[popId].push(eq);
-    });
+  const mapaEquipPorPop = {};
+  const mapaIpsPorEquip = {};
 
-    const mapaIpsPorEquip = {};
-    ips.forEach(ipItem => {
-      const equipId = String(ipItem.equipamento || "");
-      if(!equipId) return;
+  equipamentos.forEach(eq=>{
+    if(!mapaEquipPorPop[eq.pop_id]){
+      mapaEquipPorPop[eq.pop_id]=[];
+    }
+    mapaEquipPorPop[eq.pop_id].push(eq);
+  });
 
-      if(!mapaIpsPorEquip[equipId]){
-        mapaIpsPorEquip[equipId] = [];
-      }
+  ips.forEach(ip=>{
+    if(!mapaIpsPorEquip[ip.equipamento]){
+      mapaIpsPorEquip[ip.equipamento]=[];
+    }
+    mapaIpsPorEquip[ip.equipamento].push(ip);
+  });
 
-      mapaIpsPorEquip[equipId].push(ipItem);
-    });
+  const pontos=[];
 
-    const pontos = [];
+  for(const pop of pops){
 
-    for(const pop of pops){
-      let coords = null;
+    if(!pop.latitude || !pop.longitude) continue;
 
-      if(pop.latitude && pop.longitude){
-        coords = {
-          lat: Number(pop.latitude),
-          lng: Number(pop.longitude)
-        };
-      }else if(pop.localizacao){
-        const localizacaoTexto = String(pop.localizacao || "").trim();
+    const listaEquip =
+      mapaEquipPorPop[pop.id] || [];
 
-        coords = extrairLatLng(localizacaoTexto);
+    let statusFinal="up";
 
-        if(!coords){
-          coords = extrairCoordenadaDeLink(localizacaoTexto);
+    const ipsDoPop=[];
+
+    listaEquip.forEach(eq=>{
+
+      const listaIpsEquip =
+        mapaIpsPorEquip[eq.id] || [];
+
+      listaIpsEquip.forEach(ipItem=>{
+
+        const ipTratado =
+          normalizarIp(ipItem.ip);
+
+        ipsDoPop.push(ipTratado);
+
+        const st =
+          normalizarStatus(ipItem.status);
+
+        if(st==="down"){
+          statusFinal="down";
         }
 
-        if(!coords && !ehLinkMapa(localizacaoTexto)){
-          coords = await geocodificarEndereco(localizacaoTexto);
-        }
-      }
-
-      if(!coords){
-        console.warn("POP sem coordenadas/localização válida:", pop.nome, pop.localizacao);
-        continue;
-      }
-
-      const listaEquip = mapaEquipPorPop[String(pop.id)] || [];
-
-      const ipsDoPop = [];
-      listaEquip.forEach(eq => {
-        const listaIpsEquip = mapaIpsPorEquip[String(eq.id)] || [];
-        listaIpsEquip.forEach(ipItem => {
-          const ipTratado = normalizarIp(ipItem.ip || "");
-          if(ipTratado){
-            ipsDoPop.push(ipTratado);
-          }
-        });
       });
 
-      pontos.push({
-        id: pop.id,
-        nome: pop.nome || "Sem nome",
-        localizacao: pop.localizacao || "",
-        lat: coords.lat,
-        lng: coords.lng,
-        equipamentos: listaEquip,
-        ips: [...new Set(ipsDoPop)]
-      });
-    }
-
-    if(!pontos.length){
-      mostrarStatus("Nenhum POP com localização válida encontrado.", "erro");
-      mapa.setView([-14.235, -51.9253], 4);
-      document.getElementById("resumo").innerHTML = `
-        <div class="card-resumo">
-          <div class="card-icone">📍</div>
-          <div>
-            <div class="card-label">Mapa</div>
-            <div class="card-value-mini">Nenhum POP com localização válida para mostrar.</div>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    const bounds = [];
-    let totalEquip = 0;
-    let totalIps = 0;
-
-    pontos.forEach((pop, index) => {
-      totalEquip += pop.equipamentos.length;
-      totalIps += pop.ips.length;
-
-      const equipamentosHtml = pop.equipamentos.length
-        ? pop.equipamentos.map(eq => `
-            <div class="item-popup">
-              <div class="item-popup-titulo">${escaparHtml(eq.nome || "Sem nome")}</div>
-              <div class="item-popup-sub">${escaparHtml(eq.modelo || "Sem modelo")}</div>
-            </div>
-          `).join("")
-        : `<div class="item-popup-vazio">Sem equipamentos</div>`;
-
-      const ipsHtml = pop.ips.length
-        ? pop.ips.slice(0, 10).map(ip => `
-            <span class="ip-popup">${escaparHtml(ip)}</span>
-          `).join("")
-        : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
-
-      const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
-
-      const marker = L.marker([pop.lat, pop.lng], {
-        icon: criarIconePop()
-      }).addTo(camadaMarcadores);
-
-      marker.bindPopup(`
-        <div class="popup-mapa">
-          <div class="popup-topo">
-            <div>
-              <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
-              <div class="badge-popup">POP</div>
-            </div>
-          </div>
-
-          <div class="bloco-popup">
-            <div class="linha-popup"><span>Localização</span><strong>${escaparHtml(pop.localizacao || "Não informada")}</strong></div>
-            <div class="linha-popup"><span>Latitude</span><strong>${escaparHtml(pop.lat)}</strong></div>
-            <div class="linha-popup"><span>Longitude</span><strong>${escaparHtml(pop.lng)}</strong></div>
-            <div class="linha-popup"><span>Equipamentos</span><strong>${pop.equipamentos.length}</strong></div>
-            <div class="linha-popup"><span>IPs</span><strong>${pop.ips.length}</strong></div>
-          </div>
-
-          <div class="sub-popup">Equipamentos</div>
-          <div class="lista-popup">
-            ${equipamentosHtml}
-          </div>
-
-          <div class="sub-popup">IPs</div>
-          <div class="lista-ips-popup">
-            ${ipsHtml}
-          </div>
-
-          <div class="acoes-popup">
-            <a
-              href="${escaparHtml(linkMapa)}"
-              target="_blank"
-              class="btn-popup-mapa"
-            >
-              Abrir no Google Maps
-            </a>
-          </div>
-        </div>
-      `);
-
-      bounds.push([pop.lat, pop.lng]);
-
-      if(index > 0){
-        const anterior = pontos[index - 1];
-
-        L.polyline(
-          [
-            [anterior.lat, anterior.lng],
-            [pop.lat, pop.lng]
-          ],
-          {
-            color: "#38bdf8",
-            weight: 3,
-            opacity: 0.85
-          }
-        ).addTo(camadaLinhas);
-      }
     });
 
-    mapa.fitBounds(bounds, { padding:[30,30] });
+    pontos.push({
 
-    document.getElementById("resumo").innerHTML = `
-      <div class="card-resumo">
-        <div class="card-icone">📍</div>
-        <div>
-          <div class="card-label">POPs no mapa</div>
-          <div class="card-value">${pontos.length}</div>
-        </div>
-      </div>
+      id:pop.id,
+      nome:pop.nome,
+      lat:Number(pop.latitude),
+      lng:Number(pop.longitude),
+      equipamentos:listaEquip,
+      ips:[...new Set(ipsDoPop)],
+      status:statusFinal
 
-      <div class="card-resumo">
-        <div class="card-icone">🖧</div>
-        <div>
-          <div class="card-label">Equipamentos encontrados</div>
-          <div class="card-value">${totalEquip}</div>
-        </div>
-      </div>
+    });
 
-      <div class="card-resumo">
-        <div class="card-icone">🌐</div>
-        <div>
-          <div class="card-label">IPs encontrados</div>
-          <div class="card-value">${totalIps}</div>
-        </div>
-      </div>
-    `;
-
-    mostrarStatus("Mapa carregado com sucesso.", "sucesso");
-
-  }catch(erro){
-    console.error(erro);
-    mostrarStatus(erro.message || "Erro ao carregar mapa", "erro");
   }
+
+  const bounds=[];
+
+  pontos.forEach((pop,index)=>{
+
+    const marker =
+      L.marker(
+        [pop.lat,pop.lng],
+        {icon:criarIconePop(pop.status)}
+      ).addTo(camadaMarcadores);
+
+    marker.bindPopup(`
+
+      <div class="popup">
+
+      <div class="titulo">${escaparHtml(pop.nome)}</div>
+
+      <div>Status:
+      <b style="color:${corStatus(pop.status)}">
+      ${pop.status.toUpperCase()}
+      </b></div>
+
+      <div>Equipamentos: ${pop.equipamentos.length}</div>
+      <div>IPs: ${pop.ips.length}</div>
+
+      </div>
+
+    `);
+
+    bounds.push([pop.lat,pop.lng]);
+
+    if(index>0){
+
+      const anterior=pontos[index-1];
+
+      L.polyline(
+        [
+          [anterior.lat,anterior.lng],
+          [pop.lat,pop.lng]
+        ],
+        {
+          color:"#38bdf8",
+          weight:3
+        }
+      ).addTo(camadaLinhas);
+
+    }
+
+  });
+
+  if(bounds.length){
+    mapa.fitBounds(bounds,{padding:[40,40]});
+  }
+
 }
 
 /* =========================
-   INICIAR
+   INIT
 ========================= */
+
 async function iniciar(){
-  try{
-    appId = await obterAppId();
-    await carregarFiltroPops();
-    await desenharMapa();
-  }catch(erro){
-    console.error("Erro ao iniciar:", erro);
-    mostrarStatus(erro.message || "Erro ao iniciar página", "erro");
-  }
+
+  appId = await obterAppId();
+
+  await desenharMapa();
+
 }
 
 window.recarregarMapa = desenharMapa;
