@@ -23,6 +23,8 @@ let camadaLinhas = null;
 let camadaFluxo = null;
 let cacheGeocoding = {};
 let animacoesFluxo = [];
+let timerAtualizacao = null;
+let popPrincipalId = localStorage.getItem("popPrincipalId") || "";
 
 /* =========================
    AUX
@@ -335,20 +337,23 @@ function calcularStatusPopPorEquipamentos(statusesEquip){
 /* =========================
    MAPA / MARCADORES
 ========================= */
-function criarIconePop(status, nome){
+function criarIconePop(status, nome, ehPrincipal = false){
   return L.divIcon({
     className: "marcador-pop-wrap",
     html: `
-      <div class="marcador-completo">
-        <div class="marcador-pop marcador-${status}">
+      <div class="marcador-completo ${ehPrincipal ? "principal" : ""}">
+        <div class="marcador-pop marcador-${status} ${ehPrincipal ? "marcador-principal" : ""}">
           <div class="marcador-core"></div>
         </div>
-        <div class="nome-pop-fixo">${escaparHtml(nome || "")}</div>
+        <div class="nome-pop-fixo">
+          ${ehPrincipal ? '<span class="tag-principal">PRINCIPAL</span>' : ''}
+          ${escaparHtml(nome || "")}
+        </div>
       </div>
     `,
-    iconSize: [170, 34],
-    iconAnchor: [13, 17],
-    popupAnchor: [0, -12]
+    iconSize: [190, 40],
+    iconAnchor: [13, 18],
+    popupAnchor: [0, -14]
   });
 }
 
@@ -374,7 +379,9 @@ function iniciarMapa(){
 function limparAnimacoesFluxo(){
   animacoesFluxo.forEach(id => cancelAnimationFrame(id));
   animacoesFluxo = [];
-  camadaFluxo.clearLayers();
+  if(camadaFluxo){
+    camadaFluxo.clearLayers();
+  }
 }
 
 async function geocodificarEndereco(endereco){
@@ -447,6 +454,51 @@ async function obterAppId(){
 }
 
 /* =========================
+   POP PRINCIPAL
+========================= */
+function atualizarInfoPopPrincipalTexto(){
+  const info = document.getElementById("infoPopPrincipal");
+  const seletor = document.getElementById("selectPopPrincipal");
+
+  if(!info) return;
+
+  if(!popPrincipalId){
+    info.innerHTML = `POP principal: <strong>não definido</strong>`;
+    return;
+  }
+
+  const opt = seletor ? Array.from(seletor.options).find(o => o.value === popPrincipalId) : null;
+  const nome = opt ? opt.textContent : "Selecionado";
+  info.innerHTML = `POP principal: <strong>${escaparHtml(nome)}</strong>`;
+}
+
+function definirPopPrincipal(){
+  const seletor = document.getElementById("selectPopPrincipal");
+  const valor = seletor ? String(seletor.value || "").trim() : "";
+
+  if(!valor){
+    mostrarStatus("Selecione um POP para definir como principal.", "erro");
+    return;
+  }
+
+  popPrincipalId = valor;
+  localStorage.setItem("popPrincipalId", popPrincipalId);
+  atualizarInfoPopPrincipalTexto();
+  desenharMapa();
+}
+
+function limparPopPrincipal(){
+  popPrincipalId = "";
+  localStorage.removeItem("popPrincipalId");
+
+  const seletor = document.getElementById("selectPopPrincipal");
+  if(seletor) seletor.value = "";
+
+  atualizarInfoPopPrincipalTexto();
+  desenharMapa();
+}
+
+/* =========================
    FILTRO POP
 ========================= */
 async function carregarFiltroPops(){
@@ -461,13 +513,32 @@ async function carregarFiltroPops(){
   }
 
   const filtro = document.getElementById("filtroPop");
+  const selectPrincipal = document.getElementById("selectPopPrincipal");
+
   filtro.innerHTML = `<option value="">Todos os POPs</option>`;
+  selectPrincipal.innerHTML = `<option value="">Escolher POP principal</option>`;
 
   (pops || []).forEach(pop => {
     filtro.innerHTML += `
       <option value="${escaparHtml(pop.id)}">${escaparHtml(pop.nome || "")}</option>
     `;
+
+    selectPrincipal.innerHTML += `
+      <option value="${escaparHtml(pop.id)}">${escaparHtml(pop.nome || "")}</option>
+    `;
   });
+
+  if(popPrincipalId){
+    const existe = (pops || []).some(p => String(p.id) === String(popPrincipalId));
+    if(existe){
+      selectPrincipal.value = popPrincipalId;
+    }else{
+      popPrincipalId = "";
+      localStorage.removeItem("popPrincipalId");
+    }
+  }
+
+  atualizarInfoPopPrincipalTexto();
 }
 
 /* =========================
@@ -562,6 +633,41 @@ function animarFluxoEntrePontos(origem, destino, statusLinha = "up"){
   animacoesFluxo.push(id);
 }
 
+function desenharLigacao(origem, destino){
+  const statusLinha =
+    origem.status === "down" || destino.status === "down"
+      ? "down"
+      : (origem.status === "warning" || destino.status === "warning")
+        ? "warning"
+        : (origem.status === "up" && destino.status === "up" ? "up" : "unknown");
+
+  L.polyline(
+    [
+      [origem.lat, origem.lng],
+      [destino.lat, destino.lng]
+    ],
+    {
+      color:
+        statusLinha === "down"
+          ? "#ef4444"
+          : statusLinha === "warning"
+            ? "#f59e0b"
+            : statusLinha === "up"
+              ? "#38bdf8"
+              : "#94a3b8",
+      weight: origem.id === popPrincipalId || destino.id === popPrincipalId ? 4 : 3,
+      opacity: 0.92,
+      dashArray: statusLinha === "unknown" ? "8, 10" : null
+    }
+  ).addTo(camadaLinhas);
+
+  animarFluxoEntrePontos(
+    [origem.lat, origem.lng],
+    [destino.lat, destino.lng],
+    statusLinha
+  );
+}
+
 /* =========================
    MONTAR LISTA LATERAL
 ========================= */
@@ -579,9 +685,12 @@ function renderizarListaLateral(pontos){
   });
 
   box.innerHTML = ordenados.map(pop => `
-    <div class="item-lateral ${badgeClassStatus(pop.status)}">
+    <div class="item-lateral ${badgeClassStatus(pop.status)} ${String(pop.id) === String(popPrincipalId) ? "principal" : ""}">
       <div class="item-lateral-topo">
-        <div class="item-lateral-nome">${escaparHtml(pop.nome)}</div>
+        <div class="item-lateral-nome">
+          ${escaparHtml(pop.nome)}
+          ${String(pop.id) === String(popPrincipalId) ? '<span class="tag-lateral-principal">PRINCIPAL</span>' : ''}
+        </div>
         <div class="item-lateral-badge ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
       </div>
       <div class="item-lateral-sub">${escaparHtml(textoStatusCompleto(pop.status))}</div>
@@ -590,6 +699,69 @@ function renderizarListaLateral(pontos){
       </div>
     </div>
   `).join("");
+}
+
+/* =========================
+   RESUMO
+========================= */
+function renderizarResumo(pontos, totais){
+  document.getElementById("resumo").innerHTML = `
+    <div class="card-resumo compacto">
+      <div class="card-icone">📍</div>
+      <div>
+        <div class="card-label">POPs</div>
+        <div class="card-value">${pontos.length}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo compacto">
+      <div class="card-icone">🟢</div>
+      <div>
+        <div class="card-label">UP</div>
+        <div class="card-value">${totais.totalUp}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo compacto">
+      <div class="card-icone">🟠</div>
+      <div>
+        <div class="card-label">Alerta</div>
+        <div class="card-value">${totais.totalWarning}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo compacto">
+      <div class="card-icone">🔴</div>
+      <div>
+        <div class="card-label">DOWN</div>
+        <div class="card-value">${totais.totalDown}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo compacto">
+      <div class="card-icone">🖧</div>
+      <div>
+        <div class="card-label">Equip.</div>
+        <div class="card-value">${totais.totalEquip}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo compacto">
+      <div class="card-icone">🌐</div>
+      <div>
+        <div class="card-label">IPs</div>
+        <div class="card-value">${totais.totalIps}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo compacto">
+      <div class="card-icone">⚪</div>
+      <div>
+        <div class="card-label">Sem status</div>
+        <div class="card-value">${totais.totalUnknown}</div>
+      </div>
+    </div>
+  `;
 }
 
 /* =========================
@@ -692,7 +864,7 @@ async function desenharMapa(){
       const statusPop = calcularStatusPopPorEquipamentos(statusesEquip);
 
       pontos.push({
-        id: pop.id,
+        id: String(pop.id),
         nome: pop.nome || "Sem nome",
         localizacao: pop.localizacao || "",
         lat: coords.lat,
@@ -709,7 +881,7 @@ async function desenharMapa(){
       mostrarStatus("Nenhum POP com localização válida encontrado.", "erro");
       mapa.setView([-14.235, -51.9253], 4);
       document.getElementById("resumo").innerHTML = `
-        <div class="card-resumo">
+        <div class="card-resumo compacto">
           <div class="card-icone">📍</div>
           <div>
             <div class="card-label">Mapa</div>
@@ -729,7 +901,7 @@ async function desenharMapa(){
     let totalWarning = 0;
     let totalUnknown = 0;
 
-    pontos.forEach((pop, index) => {
+    pontos.forEach(pop => {
       totalEquip += pop.equipamentos.length;
       totalIps += pop.ips.length;
 
@@ -737,7 +909,9 @@ async function desenharMapa(){
       else if(pop.status === "down") totalDown++;
       else if(pop.status === "warning") totalWarning++;
       else totalUnknown++;
+    });
 
+    pontos.forEach(pop => {
       const equipamentosHtml = pop.detalhesEquipStatus.length
         ? pop.detalhesEquipStatus.map(eq => `
             <div class="item-popup">
@@ -764,9 +938,10 @@ async function desenharMapa(){
         : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
 
       const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
+      const ehPrincipal = String(pop.id) === String(popPrincipalId);
 
       const marker = L.marker([pop.lat, pop.lng], {
-        icon: criarIconePop(pop.status, pop.nome)
+        icon: criarIconePop(pop.status, pop.nome, ehPrincipal)
       }).addTo(camadaMarcadores);
 
       marker.bindPopup(`
@@ -774,7 +949,10 @@ async function desenharMapa(){
           <div class="popup-topo">
             <div>
               <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
-              <div class="badge-popup ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <div class="badge-popup ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
+                ${ehPrincipal ? '<div class="badge-popup principal-popup">PRINCIPAL</div>' : ''}
+              </div>
             </div>
           </div>
 
@@ -807,106 +985,34 @@ async function desenharMapa(){
       `);
 
       bounds.push([pop.lat, pop.lng]);
-
-      if(index > 0){
-        const anterior = pontos[index - 1];
-
-        const statusLinha =
-          pop.status === "down" || anterior.status === "down"
-            ? "down"
-            : (pop.status === "warning" || anterior.status === "warning")
-              ? "warning"
-              : (pop.status === "up" && anterior.status === "up" ? "up" : "unknown");
-
-        L.polyline(
-          [
-            [anterior.lat, anterior.lng],
-            [pop.lat, pop.lng]
-          ],
-          {
-            color:
-              statusLinha === "down"
-                ? "#ef4444"
-                : statusLinha === "warning"
-                  ? "#f59e0b"
-                  : statusLinha === "up"
-                    ? "#38bdf8"
-                    : "#94a3b8",
-            weight: statusLinha === "down" ? 4 : 3,
-            opacity: 0.9,
-            dashArray: statusLinha === "unknown" ? "8, 10" : null
-          }
-        ).addTo(camadaLinhas);
-
-        animarFluxoEntrePontos(
-          [anterior.lat, anterior.lng],
-          [pop.lat, pop.lng],
-          statusLinha
-        );
-      }
     });
+
+    const principal = pontos.find(p => String(p.id) === String(popPrincipalId));
+
+    if(principal && pontos.length > 1){
+      pontos.forEach(pop => {
+        if(String(pop.id) === String(principal.id)) return;
+        desenharLigacao(principal, pop);
+      });
+    }else{
+      for(let i = 1; i < pontos.length; i++){
+        desenharLigacao(pontos[i - 1], pontos[i]);
+      }
+    }
 
     mapa.fitBounds(bounds, { padding:[30,30] });
 
-    document.getElementById("resumo").innerHTML = `
-      <div class="card-resumo">
-        <div class="card-icone">📍</div>
-        <div>
-          <div class="card-label">POPs no mapa</div>
-          <div class="card-value">${pontos.length}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🟢</div>
-        <div>
-          <div class="card-label">POPs UP</div>
-          <div class="card-value">${totalUp}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🟠</div>
-        <div>
-          <div class="card-label">POPs em alerta</div>
-          <div class="card-value">${totalWarning}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🔴</div>
-        <div>
-          <div class="card-label">POPs DOWN</div>
-          <div class="card-value">${totalDown}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🖧</div>
-        <div>
-          <div class="card-label">Equipamentos encontrados</div>
-          <div class="card-value">${totalEquip}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🌐</div>
-        <div>
-          <div class="card-label">IPs encontrados</div>
-          <div class="card-value">${totalIps}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">⚪</div>
-        <div>
-          <div class="card-label">Sem status</div>
-          <div class="card-value">${totalUnknown}</div>
-        </div>
-      </div>
-    `;
+    renderizarResumo(pontos, {
+      totalEquip,
+      totalIps,
+      totalUp,
+      totalDown,
+      totalWarning,
+      totalUnknown
+    });
 
     renderizarListaLateral(pontos);
+    atualizarInfoPopPrincipalTexto();
 
     if(statusPRTG.ok){
       mostrarStatus("Mapa carregado com sucesso.", "sucesso");
@@ -926,8 +1032,6 @@ async function desenharMapa(){
 async function atualizarMapaAutomaticamente(){
   await desenharMapa();
 }
-
-let timerAtualizacao = null;
 
 function iniciarAtualizacaoAutomatica(){
   if(timerAtualizacao){
@@ -955,6 +1059,9 @@ async function iniciar(){
 }
 
 window.recarregarMapa = desenharMapa;
+window.definirPopPrincipal = definirPopPrincipal;
+window.limparPopPrincipal = limparPopPrincipal;
+
 iniciar();
 </script>
 
@@ -990,7 +1097,7 @@ body{
     linear-gradient(180deg, #020617 0%, #06101f 100%);
   color:var(--texto);
   font-family:Arial, sans-serif;
-  padding:24px;
+  padding:18px;
 }
 
 .pagina{
@@ -1001,33 +1108,33 @@ body{
 .topo{
   display:flex;
   justify-content:space-between;
-  align-items:center;
-  gap:16px;
+  align-items:flex-start;
+  gap:14px;
   flex-wrap:wrap;
-  margin-bottom:18px;
-  padding:20px;
+  margin-bottom:14px;
+  padding:18px;
   border:1px solid rgba(255,255,255,.06);
   background:rgba(15,23,42,.75);
   backdrop-filter:blur(10px);
-  border-radius:24px;
+  border-radius:22px;
   box-shadow:var(--sombra);
 }
 
 .topo-esq{
   display:flex;
   flex-direction:column;
-  gap:6px;
+  gap:5px;
 }
 
 h2{
   margin:0;
-  font-size:28px;
+  font-size:26px;
   line-height:1.1;
 }
 
 .subtitulo{
   color:var(--texto-soft);
-  font-size:14px;
+  font-size:13px;
 }
 
 .painel{
@@ -1037,16 +1144,34 @@ h2{
   align-items:center;
 }
 
+.bloco-controle{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  background:rgba(2,6,23,.55);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:16px;
+  padding:10px;
+}
+
+.info-principal{
+  width:100%;
+  font-size:12px;
+  color:#cbd5e1;
+  margin-top:4px;
+}
+
 select, button{
   border:none;
-  border-radius:14px;
-  padding:12px 16px;
-  font-size:14px;
+  border-radius:12px;
+  padding:11px 14px;
+  font-size:13px;
   transition:.2s;
 }
 
 select{
-  min-width:240px;
+  min-width:220px;
   background:#020617;
   color:#fff;
   border:1px solid var(--borda-2);
@@ -1071,10 +1196,15 @@ button:hover{
   filter:brightness(1.05);
 }
 
+.btn-secundario{
+  background:linear-gradient(135deg, #334155, #1e293b);
+  box-shadow:none;
+}
+
 .status{
-  margin-bottom:18px;
-  padding:14px 16px;
-  border-radius:16px;
+  margin-bottom:14px;
+  padding:13px 15px;
+  border-radius:14px;
   border:1px solid var(--borda);
   background:rgba(15,23,42,.78);
   backdrop-filter:blur(8px);
@@ -1098,70 +1228,15 @@ button:hover{
   background:rgba(40,10,10,.92);
 }
 
-#resumo{
-  display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(220px,1fr));
-  gap:14px;
-  margin-bottom:18px;
-}
-
-.card-resumo{
-  display:flex;
-  align-items:center;
-  gap:14px;
-  background:rgba(15,23,42,.82);
-  border:1px solid rgba(255,255,255,.06);
-  border-radius:20px;
-  padding:18px;
-  box-shadow:var(--sombra);
-  min-height:90px;
-}
-
-.card-icone{
-  min-width:52px;
-  width:52px;
-  height:52px;
-  border-radius:16px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:24px;
-  background:linear-gradient(135deg, rgba(37,99,235,.24), rgba(56,189,248,.14));
-  border:1px solid rgba(56,189,248,.20);
-}
-
-.card-label{
-  color:var(--texto-soft);
-  font-size:13px;
-  margin-bottom:4px;
-}
-
-.card-value{
-  font-size:28px;
-  font-weight:bold;
-  line-height:1;
-}
-
-.card-value-mini{
-  font-size:15px;
-  color:#fff;
-  font-weight:600;
-}
-
-.grid-principal{
-  display:grid;
-  grid-template-columns:minmax(0, 1fr) 340px;
-  gap:18px;
-}
-
 .box-mapa{
   position:relative;
   background:rgba(15,23,42,.82);
   border:1px solid rgba(255,255,255,.06);
   border-radius:24px;
-  padding:18px;
+  padding:14px;
   box-shadow:var(--sombra);
   overflow:hidden;
+  margin-bottom:14px;
 }
 
 #mapaPops{
@@ -1171,36 +1246,89 @@ button:hover{
   overflow:hidden;
 }
 
-.painel-lateral{
-  background:rgba(15,23,42,.82);
-  border:1px solid rgba(255,255,255,.06);
-  border-radius:24px;
-  padding:18px;
-  box-shadow:var(--sombra);
-  display:flex;
-  flex-direction:column;
-  min-height:616px;
-}
-
-.titulo-lateral{
-  font-size:16px;
-  font-weight:700;
+#resumo{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(150px,1fr));
+  gap:10px;
   margin-bottom:14px;
 }
 
-.lista-lateral{
+.card-resumo{
   display:flex;
-  flex-direction:column;
+  align-items:center;
   gap:10px;
-  overflow:auto;
-  padding-right:4px;
+  background:rgba(15,23,42,.82);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:16px;
+  padding:12px;
+  box-shadow:var(--sombra);
+}
+
+.card-resumo.compacto{
+  min-height:72px;
+}
+
+.card-icone{
+  min-width:42px;
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:20px;
+  background:linear-gradient(135deg, rgba(37,99,235,.24), rgba(56,189,248,.14));
+  border:1px solid rgba(56,189,248,.20);
+}
+
+.card-label{
+  color:var(--texto-soft);
+  font-size:12px;
+  margin-bottom:3px;
+}
+
+.card-value{
+  font-size:22px;
+  font-weight:bold;
+  line-height:1;
+}
+
+.card-value-mini{
+  font-size:14px;
+  color:#fff;
+  font-weight:600;
+}
+
+.painel-lateral{
+  background:rgba(15,23,42,.82);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:22px;
+  padding:16px;
+  box-shadow:var(--sombra);
+}
+
+.titulo-lateral{
+  font-size:15px;
+  font-weight:700;
+  margin-bottom:12px;
+}
+
+.lista-lateral{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px,1fr));
+  gap:10px;
 }
 
 .item-lateral{
-  border-radius:16px;
-  padding:14px;
+  border-radius:14px;
+  padding:12px;
   border:1px solid var(--borda);
   background:#0b1220;
+}
+
+.item-lateral.principal{
+  border-color:rgba(59,130,246,.55);
+  box-shadow:0 0 0 1px rgba(59,130,246,.18) inset;
 }
 
 .item-lateral.up{
@@ -1222,7 +1350,7 @@ button:hover{
 .item-lateral-topo{
   display:flex;
   justify-content:space-between;
-  align-items:center;
+  align-items:flex-start;
   gap:10px;
   margin-bottom:8px;
 }
@@ -1248,11 +1376,23 @@ button:hover{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  padding:5px 10px;
+  padding:4px 9px;
   border-radius:999px;
-  font-size:11px;
+  font-size:10px;
   font-weight:700;
   white-space:nowrap;
+}
+
+.tag-lateral-principal{
+  display:inline-block;
+  margin-left:6px;
+  font-size:10px;
+  background:#dbeafe;
+  color:#1d4ed8;
+  padding:3px 7px;
+  border-radius:999px;
+  vertical-align:middle;
+  font-weight:800;
 }
 
 .lista-vazia{
@@ -1273,6 +1413,11 @@ button:hover{
   gap:8px;
 }
 
+.marcador-completo.principal .nome-pop-fixo{
+  border-color:rgba(59,130,246,.35);
+  box-shadow:0 0 0 1px rgba(59,130,246,.18) inset, 0 6px 14px rgba(0,0,0,.35);
+}
+
 .nome-pop-fixo{
   color:#f8fafc;
   font-size:12px;
@@ -1282,7 +1427,7 @@ button:hover{
     0 0 6px rgba(0,0,0,.85),
     0 0 12px rgba(0,0,0,.65);
   white-space:nowrap;
-  max-width:160px;
+  max-width:170px;
   overflow:hidden;
   text-overflow:ellipsis;
   background:rgba(2,6,23,.78);
@@ -1291,6 +1436,18 @@ button:hover{
   border-radius:10px;
   backdrop-filter:blur(4px);
   box-shadow:0 6px 14px rgba(0,0,0,.35);
+}
+
+.tag-principal{
+  display:inline-block;
+  margin-right:6px;
+  padding:2px 6px;
+  border-radius:999px;
+  font-size:9px;
+  background:#dbeafe;
+  color:#1d4ed8;
+  text-shadow:none;
+  vertical-align:middle;
 }
 
 .marcador-pop{
@@ -1304,6 +1461,11 @@ button:hover{
   position:relative;
   box-shadow:0 10px 24px rgba(0,0,0,.35);
   flex-shrink:0;
+}
+
+.marcador-principal{
+  outline:3px solid rgba(59,130,246,.55);
+  outline-offset:3px;
 }
 
 .marcador-core{
@@ -1467,6 +1629,12 @@ button:hover{
   border-color:#cbd5e1;
 }
 
+.principal-popup{
+  background:#dbeafe;
+  color:#1d4ed8;
+  border-color:#bfdbfe;
+}
+
 .bloco-popup{
   background:#f8fafc;
   border:1px solid #e2e8f0;
@@ -1616,37 +1784,43 @@ button:hover{
 
 /* Responsivo */
 @media(max-width:1100px){
-  .grid-principal{
-    grid-template-columns:1fr;
-  }
-
-  .painel-lateral{
-    min-height:auto;
+  #mapaPops{
+    height:500px;
   }
 }
 
 @media(max-width:900px){
   h2{
-    font-size:24px;
+    font-size:22px;
   }
 
   #mapaPops{
-    height:460px;
+    height:430px;
+  }
+
+  .lista-lateral{
+    grid-template-columns:1fr;
   }
 }
 
 @media(max-width:700px){
   body{
-    padding:14px;
+    padding:12px;
   }
 
   .topo{
     flex-direction:column;
     align-items:stretch;
-    padding:16px;
+    padding:14px;
   }
 
   .painel{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  .bloco-controle{
+    width:100%;
     flex-direction:column;
     align-items:stretch;
   }
@@ -1656,16 +1830,20 @@ button:hover{
   }
 
   #mapaPops{
-    height:380px;
+    height:360px;
   }
 
   .box-mapa{
-    padding:12px;
+    padding:10px;
   }
 
   .nome-pop-fixo{
-    max-width:90px;
+    max-width:95px;
     font-size:11px;
+  }
+
+  #resumo{
+    grid-template-columns:repeat(2, minmax(0,1fr));
   }
 }
 </style>
@@ -1676,31 +1854,42 @@ button:hover{
   <div class="topo">
     <div class="topo-esq">
       <h2>Mapa Automático dos POPs</h2>
-      <div class="subtitulo">Com status real do PRTG, marcador pulsando, lista lateral e atualização automática a cada 30s</div>
+      <div class="subtitulo">Mapa no topo, cards menores e opção para definir POP principal</div>
     </div>
 
     <div class="painel">
-      <select id="filtroPop" onchange="recarregarMapa()">
-        <option value="">Todos os POPs</option>
-      </select>
+      <div class="bloco-controle">
+        <select id="filtroPop" onchange="recarregarMapa()">
+          <option value="">Todos os POPs</option>
+        </select>
 
-      <button onclick="recarregarMapa()">Atualizar mapa</button>
+        <button onclick="recarregarMapa()">Atualizar mapa</button>
+      </div>
+
+      <div class="bloco-controle">
+        <select id="selectPopPrincipal">
+          <option value="">Escolher POP principal</option>
+        </select>
+
+        <button onclick="definirPopPrincipal()">Definir principal</button>
+        <button class="btn-secundario" onclick="limparPopPrincipal()">Limpar principal</button>
+
+        <div id="infoPopPrincipal" class="info-principal">POP principal: <strong>não definido</strong></div>
+      </div>
     </div>
   </div>
 
   <div id="status" class="status ok">Iniciando...</div>
 
+  <div class="box-mapa">
+    <div id="mapaPops"></div>
+  </div>
+
   <div id="resumo"></div>
 
-  <div class="grid-principal">
-    <div class="box-mapa">
-      <div id="mapaPops"></div>
-    </div>
-
-    <div class="painel-lateral">
-      <div class="titulo-lateral">POPs UP / DOWN / ALERTA</div>
-      <div id="listaPopsStatus" class="lista-lateral"></div>
-    </div>
+  <div class="painel-lateral">
+    <div class="titulo-lateral">POPs UP / DOWN / ALERTA</div>
+    <div id="listaPopsStatus" class="lista-lateral"></div>
   </div>
 </div>
 
