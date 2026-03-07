@@ -335,12 +335,12 @@ function calcularStatusPopPorEquipamentos(statusesEquip){
 /* =========================
    MAPA / MARCADORES
 ========================= */
-function criarIconePop(status, nome){
+function criarIconePop(status, nome, principal = false){
   return L.divIcon({
     className: "marcador-pop-wrap",
     html: `
       <div class="marcador-completo">
-        <div class="marcador-pop marcador-${status}">
+        <div class="marcador-pop marcador-${status} ${principal ? "marcador-principal" : ""}">
           <div class="marcador-core"></div>
         </div>
         <div class="nome-pop-fixo">${escaparHtml(nome || "")}</div>
@@ -454,7 +454,7 @@ async function carregarFiltroPops(){
     .from("pops_provedor")
     .select("id,nome")
     .eq("app_id", appId)
-    .order("nome", { ascending:true });
+    .order("created_at", { ascending:true });
 
   if(error){
     throw new Error("Erro ao carregar filtro de POPs: " + error.message);
@@ -480,7 +480,7 @@ async function buscarDadosMapa(){
     .from("pops_provedor")
     .select("*")
     .eq("app_id", appId)
-    .order("nome", { ascending:true });
+    .order("created_at", { ascending:true });
 
   if(popSelecionado){
     queryPops = queryPops.eq("id", popSelecionado);
@@ -488,7 +488,7 @@ async function buscarDadosMapa(){
 
   const { data:pops, error:errorPops } = await queryPops;
 
-  if(errorPops){
+  if(error:errorPops){
     throw new Error("Erro ao carregar POPs: " + errorPops.message);
   }
 
@@ -573,15 +573,23 @@ function renderizarListaLateral(pontos){
     return;
   }
 
+  const principalId = pontos[0]?.id || null;
+
   const ordenados = [...pontos].sort((a, b) => {
+    if(a.id === principalId) return -1;
+    if(b.id === principalId) return 1;
+
     const ordem = { down: 0, warning: 1, up: 2, unknown: 3 };
     return ordem[a.status] - ordem[b.status] || String(a.nome).localeCompare(String(b.nome));
   });
 
   box.innerHTML = ordenados.map(pop => `
-    <div class="item-lateral ${badgeClassStatus(pop.status)}">
+    <div class="item-lateral ${badgeClassStatus(pop.status)} ${pop.id === principalId ? "principal" : ""}">
       <div class="item-lateral-topo">
-        <div class="item-lateral-nome">${escaparHtml(pop.nome)}</div>
+        <div class="item-lateral-nome">
+          ${escaparHtml(pop.nome)}
+          ${pop.id === principalId ? `<span class="tag-principal">PRINCIPAL</span>` : ""}
+        </div>
         <div class="item-lateral-badge ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
       </div>
       <div class="item-lateral-sub">${escaparHtml(textoStatusCompleto(pop.status))}</div>
@@ -721,6 +729,7 @@ async function desenharMapa(){
       return;
     }
 
+    const popPrincipal = pontos[0];
     const bounds = [];
     let totalEquip = 0;
     let totalIps = 0;
@@ -764,9 +773,11 @@ async function desenharMapa(){
         : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
 
       const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
+      const ehPrincipal = index === 0;
+      const nomeMarker = ehPrincipal ? `${pop.nome} ⭐` : pop.nome;
 
       const marker = L.marker([pop.lat, pop.lng], {
-        icon: criarIconePop(pop.status, pop.nome)
+        icon: criarIconePop(pop.status, nomeMarker, ehPrincipal)
       }).addTo(camadaMarcadores);
 
       marker.bindPopup(`
@@ -779,6 +790,7 @@ async function desenharMapa(){
           </div>
 
           <div class="bloco-popup">
+            <div class="linha-popup"><span>Tipo</span><strong>${ehPrincipal ? "POP PRINCIPAL" : "POP INTERLIGADO"}</strong></div>
             <div class="linha-popup"><span>Localização</span><strong>${escaparHtml(pop.localizacao || "Não informada")}</strong></div>
             <div class="linha-popup"><span>Latitude</span><strong>${escaparHtml(pop.lat)}</strong></div>
             <div class="linha-popup"><span>Longitude</span><strong>${escaparHtml(pop.lng)}</strong></div>
@@ -808,126 +820,53 @@ async function desenharMapa(){
 
       bounds.push([pop.lat, pop.lng]);
 
-      const popPrincipal = pontos[0];
+      if(!ehPrincipal && popPrincipal){
+        const statusLinha =
+          pop.status === "down" || popPrincipal.status === "down"
+            ? "down"
+            : (pop.status === "warning" || popPrincipal.status === "warning")
+              ? "warning"
+              : (pop.status === "up" && popPrincipal.status === "up" ? "up" : "unknown");
 
-pontos.forEach((pop, index) => {
-  totalEquip += pop.equipamentos.length;
-  totalIps += pop.ips.length;
-
-  if(pop.status === "up") totalUp++;
-  else if(pop.status === "down") totalDown++;
-  else if(pop.status === "warning") totalWarning++;
-  else totalUnknown++;
-
-  const equipamentosHtml = pop.detalhesEquipStatus.length
-    ? pop.detalhesEquipStatus.map(eq => `
-        <div class="item-popup">
-          <div class="item-popup-linha-topo">
-            <div>
-              <div class="item-popup-titulo">${escaparHtml(eq.nome || "Sem nome")}</div>
-              <div class="item-popup-sub">${escaparHtml(eq.modelo || "Sem modelo")}</div>
-            </div>
-            <div class="mini-badge ${badgeClassStatus(eq.status)}">${textoStatus(eq.status)}</div>
-          </div>
-          ${
-            eq.host || eq.mensagem
-              ? `<div class="item-popup-msg">${escaparHtml(eq.host || eq.mensagem)}</div>`
-              : ""
+        L.polyline(
+          [
+            [popPrincipal.lat, popPrincipal.lng],
+            [pop.lat, pop.lng]
+          ],
+          {
+            color:
+              statusLinha === "down"
+                ? "#ef4444"
+                : statusLinha === "warning"
+                  ? "#f59e0b"
+                  : statusLinha === "up"
+                    ? "#38bdf8"
+                    : "#94a3b8",
+            weight: statusLinha === "down" ? 4 : 3,
+            opacity: 0.9,
+            dashArray: statusLinha === "unknown" ? "8, 10" : null
           }
-        </div>
-      `).join("")
-    : `<div class="item-popup-vazio">Sem equipamentos</div>`;
+        ).addTo(camadaLinhas);
 
-  const ipsHtml = pop.ips.length
-    ? pop.ips.slice(0, 12).map(ip => `
-        <span class="ip-popup">${escaparHtml(ip)}</span>
-      `).join("")
-    : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
-
-  const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
-
-  const marker = L.marker([pop.lat, pop.lng], {
-    icon: criarIconePop(pop.status, pop.nome)
-  }).addTo(camadaMarcadores);
-
-  marker.bindPopup(`
-    <div class="popup-mapa">
-      <div class="popup-topo">
-        <div>
-          <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
-          <div class="badge-popup ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
-        </div>
-      </div>
-
-      <div class="bloco-popup">
-        <div class="linha-popup"><span>Localização</span><strong>${escaparHtml(pop.localizacao || "Não informada")}</strong></div>
-        <div class="linha-popup"><span>Latitude</span><strong>${escaparHtml(pop.lat)}</strong></div>
-        <div class="linha-popup"><span>Longitude</span><strong>${escaparHtml(pop.lng)}</strong></div>
-        <div class="linha-popup"><span>Equipamentos</span><strong>${pop.equipamentos.length}</strong></div>
-        <div class="linha-popup"><span>IPs</span><strong>${pop.ips.length}</strong></div>
-        <div class="linha-popup"><span>Status do POP</span><strong style="color:${corStatus(pop.status)}">${textoStatus(pop.status)}</strong></div>
-        <div class="linha-popup"><span>Fonte do status</span><strong>${statusPRTG.ok ? "PRTG" : "Sem conexão com PRTG"}</strong></div>
-        <div class="linha-popup"><span>Tipo</span><strong>${index === 0 ? "POP PRINCIPAL" : "POP INTERLIGADO"}</strong></div>
-      </div>
-
-      <div class="sub-popup">Equipamentos</div>
-      <div class="lista-popup">${equipamentosHtml}</div>
-
-      <div class="sub-popup">IPs</div>
-      <div class="lista-ips-popup">${ipsHtml}</div>
-
-      <div class="acoes-popup">
-        <a
-          href="${escaparHtml(linkMapa)}"
-          target="_blank"
-          class="btn-popup-mapa"
-        >
-          Abrir no Google Maps
-        </a>
-      </div>
-    </div>
-  `);
-
-  bounds.push([pop.lat, pop.lng]);
-
-  if(index > 0 && popPrincipal){
-    const statusLinha =
-      pop.status === "down" || popPrincipal.status === "down"
-        ? "down"
-        : (pop.status === "warning" || popPrincipal.status === "warning")
-          ? "warning"
-          : (pop.status === "up" && popPrincipal.status === "up" ? "up" : "unknown");
-
-    L.polyline(
-      [
-        [popPrincipal.lat, popPrincipal.lng],
-        [pop.lat, pop.lng]
-      ],
-      {
-        color:
-          statusLinha === "down"
-            ? "#ef4444"
-            : statusLinha === "warning"
-              ? "#f59e0b"
-              : statusLinha === "up"
-                ? "#38bdf8"
-                : "#94a3b8",
-        weight: statusLinha === "down" ? 4 : 3,
-        opacity: 0.9,
-        dashArray: statusLinha === "unknown" ? "8, 10" : null
+        animarFluxoEntrePontos(
+          [popPrincipal.lat, popPrincipal.lng],
+          [pop.lat, pop.lng],
+          statusLinha
+        );
       }
-    ).addTo(camadaLinhas);
+    });
 
-    animarFluxoEntrePontos(
-      [popPrincipal.lat, popPrincipal.lng],
-      [pop.lat, pop.lng],
-      statusLinha
-    );
-  }
-});
     mapa.fitBounds(bounds, { padding:[30,30] });
 
     document.getElementById("resumo").innerHTML = `
+      <div class="card-resumo destaque-principal">
+        <div class="card-icone">⭐</div>
+        <div>
+          <div class="card-label">POP principal</div>
+          <div class="card-value-mini">${escaparHtml(popPrincipal?.nome || "Não encontrado")}</div>
+        </div>
+      </div>
+
       <div class="card-resumo">
         <div class="card-icone">📍</div>
         <div>
@@ -1203,6 +1142,11 @@ button:hover{
   min-height:78px;
 }
 
+.destaque-principal{
+  border-color:rgba(250,204,21,.35);
+  background:linear-gradient(135deg, rgba(15,23,42,.92), rgba(51,65,85,.78));
+}
+
 .card-icone{
   min-width:42px;
   width:42px;
@@ -1232,6 +1176,7 @@ button:hover{
   font-size:14px;
   color:#fff;
   font-weight:600;
+  line-height:1.3;
 }
 
 .grid-principal{
@@ -1293,6 +1238,11 @@ button:hover{
   background:#0b1220;
 }
 
+.item-lateral.principal{
+  border-color:rgba(250,204,21,.45);
+  box-shadow:inset 0 0 0 1px rgba(250,204,21,.15);
+}
+
 .item-lateral.up{
   border-color:rgba(34,197,94,.28);
 }
@@ -1321,6 +1271,19 @@ button:hover{
   font-weight:700;
   color:#fff;
   line-height:1.3;
+}
+
+.tag-principal{
+  display:inline-flex;
+  align-items:center;
+  margin-left:8px;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#fef3c7;
+  color:#92400e;
+  font-size:10px;
+  font-weight:800;
+  vertical-align:middle;
 }
 
 .item-lateral-sub{
@@ -1394,6 +1357,11 @@ button:hover{
   position:relative;
   box-shadow:0 10px 24px rgba(0,0,0,.35);
   flex-shrink:0;
+}
+
+.marcador-principal{
+  outline:3px solid rgba(250,204,21,.8);
+  outline-offset:3px;
 }
 
 .marcador-core{
@@ -1922,7 +1890,7 @@ button:hover{
   <div class="topo">
     <div class="topo-esq">
       <h2>Mapa Automático dos POPs</h2>
-      <div class="subtitulo">Com status real do PRTG, marcador pulsando, lista lateral e atualização automática a cada 30s</div>
+      <div class="subtitulo">Primeiro POP cadastrado é o principal e todos os demais se interligam a ele</div>
     </div>
 
     <div class="painel">
