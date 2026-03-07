@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF-8" />
 <title>Mapa dos POPs</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <link
   rel="stylesheet"
   href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
 />
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script type="module">
@@ -19,711 +20,602 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let appId = null;
 let mapa = null;
-let camadaMarcadores = null;
-let camadaLinhas = null;
-let cacheGeocoding = {};
+let markersLayer = null;
+let popsCache = [];
+
+/* =========================
+   CONFIG
+========================= */
+const TABELA_POPS = "pops";
 
 /* =========================
    AUX
 ========================= */
-function escaparHtml(texto){
-  if(texto === null || texto === undefined) return "";
+function escaparHtml(texto) {
+  if (texto === null || texto === undefined) return "";
   return String(texto)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;")
-    .replace(/'/g,"&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-function normalizarIp(ip){
-  if(!ip) return "";
-  return String(ip)
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/.*$/, "")
-    .replace(/:\d+$/, "")
-    .trim();
+function numeroValido(v) {
+  const n = Number(v);
+  return !isNaN(n) && isFinite(n);
 }
 
-function ehLatLngTexto(texto){
-  if(!texto) return false;
-  return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(String(texto).trim());
+function obterLatitude(pop) {
+  return pop.latitude ?? pop.lat ?? pop.local_lat ?? pop.latitude_pop;
 }
 
-function extrairLatLng(texto){
-  if(!ehLatLngTexto(texto)) return null;
-
-  const partes = String(texto).split(",");
-  const lat = Number(partes[0].trim());
-  const lng = Number(partes[1].trim());
-
-  if(Number.isNaN(lat) || Number.isNaN(lng)) return null;
-
-  return { lat, lng };
+function obterLongitude(pop) {
+  return pop.longitude ?? pop.lng ?? pop.lon ?? pop.local_lng ?? pop.longitude_pop;
 }
 
-function ehLinkMapa(texto){
-  const valor = String(texto || "").trim().toLowerCase();
-  return (
-    valor.startsWith("http://") ||
-    valor.startsWith("https://") ||
-    valor.startsWith("www.") ||
-    valor.includes("maps.app.goo.gl") ||
-    valor.includes("google.com/maps")
-  );
+function obterNome(pop) {
+  return pop.nome ?? pop.pop ?? pop.titulo ?? pop.descricao ?? "POP sem nome";
 }
 
-function montarLinkMapa(localizacao, lat = null, lng = null){
-  const valor = String(localizacao || "").trim();
+function obterIp(pop) {
+  return pop.ip ?? pop.equipamento ?? pop.host ?? pop.endereco_ip ?? "";
+}
 
-  if(valor){
-    if(
-      valor.startsWith("http://") ||
-      valor.startsWith("https://")
-    ){
-      return valor;
-    }
+function obterStatus(pop) {
+  const bruto =
+    pop.status ??
+    pop.prtg_status ??
+    pop.estado ??
+    pop.situacao ??
+    "";
 
-    if(
-      valor.startsWith("www.") ||
-      valor.includes("maps.app.goo.gl") ||
-      valor.includes("google.com/maps")
-    ){
-      return "https://" + valor.replace(/^https?:\/\//i, "");
-    }
+  const s = String(bruto).trim().toLowerCase();
 
-    return "https://www.google.com/maps/search/" + encodeURIComponent(valor);
+  if (
+    s.includes("up") ||
+    s.includes("online") ||
+    s.includes("ativo") ||
+    s.includes("ok")
+  ) {
+    return "UP";
   }
 
-  if(lat !== null && lng !== null){
-    return "https://www.google.com/maps/search/" + encodeURIComponent(`${lat},${lng}`);
+  if (
+    s.includes("down") ||
+    s.includes("offline") ||
+    s.includes("inativo") ||
+    s.includes("erro")
+  ) {
+    return "DOWN";
   }
 
-  return "";
+  return "SEM STATUS";
 }
 
-function extrairCoordenadaDeLink(link){
-  const texto = String(link || "").trim();
-  if(!texto) return null;
-
-  let match = texto.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  match = texto.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  match = texto.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  match = texto.match(/[?&]ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if(match){
-    return {
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    };
-  }
-
-  return null;
+function corStatus(status) {
+  if (status === "UP") return "#22c55e";
+  if (status === "DOWN") return "#ef4444";
+  return "#f59e0b";
 }
 
-function mostrarStatus(texto, tipo="ok"){
-  const box = document.getElementById("status");
-  box.className = "status " + tipo;
-  box.innerText = texto || "";
+function classeStatus(status) {
+  if (status === "UP") return "up";
+  if (status === "DOWN") return "down";
+  return "warn";
 }
 
-function iniciarMapa(){
-  if(mapa) return;
+function criarIcone(status) {
+  const cor = corStatus(status);
 
-  mapa = L.map("mapaPops");
+  return L.divIcon({
+    className: "custom-marker-wrapper",
+    html: `
+      <div class="marker-pin" style="background:${cor}">
+        <div class="marker-core"></div>
+      </div>
+    `,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -8]
+  });
+}
+
+/* =========================
+   MAPA
+========================= */
+function iniciarMapa() {
+  mapa = L.map("mapa", {
+    zoomControl: true
+  }).setView([-9.015, -42.699], 6);
+
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap"
   }).addTo(mapa);
 
-  camadaMarcadores = L.layerGroup().addTo(mapa);
-  camadaLinhas = L.layerGroup().addTo(mapa);
-
-  mapa.setView([-9.0, -42.7], 6);
+  markersLayer = L.layerGroup().addTo(mapa);
 }
 
-async function geocodificarEndereco(endereco){
-  try{
-    if(!endereco) return null;
+function popupHtml(pop) {
+  const nome = escaparHtml(obterNome(pop));
+  const ip = escaparHtml(obterIp(pop) || "Não informado");
+  const status = obterStatus(pop);
+  const statusClass = classeStatus(status);
+  const lat = obterLatitude(pop);
+  const lng = obterLongitude(pop);
 
-    const chave = String(endereco).trim().toLowerCase();
-    if(cacheGeocoding[chave]) return cacheGeocoding[chave];
+  return `
+    <div class="popup-box">
+      <div class="popup-topo">
+        <div class="popup-titulo">${nome}</div>
+        <div class="badge ${statusClass}">${status}</div>
+      </div>
+      <div class="popup-linha"><strong>IP:</strong> ${ip}</div>
+      <div class="popup-linha"><strong>Latitude:</strong> ${escaparHtml(lat)}</div>
+      <div class="popup-linha"><strong>Longitude:</strong> ${escaparHtml(lng)}</div>
+    </div>
+  `;
+}
 
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(endereco)}`;
+function renderizarMapa(pops) {
+  markersLayer.clearLayers();
 
-    const resposta = await fetch(url, {
-      headers: {
-        "Accept": "application/json"
-      }
+  const bounds = [];
+
+  for (const pop of pops) {
+    const lat = obterLatitude(pop);
+    const lng = obterLongitude(pop);
+
+    if (!numeroValido(lat) || !numeroValido(lng)) continue;
+
+    const status = obterStatus(pop);
+
+    const marker = L.marker([Number(lat), Number(lng)], {
+      icon: criarIcone(status)
     });
 
-    const dados = await resposta.json();
-
-    if(!dados || !dados.length){
-      return null;
-    }
-
-    const resultado = {
-      lat: Number(dados[0].lat),
-      lng: Number(dados[0].lon)
-    };
-
-    cacheGeocoding[chave] = resultado;
-    return resultado;
-
-  }catch(erro){
-    console.error("Erro ao geocodificar:", endereco, erro);
-    return null;
-  }
-}
-
-/* =========================
-   AUTH / APP ID
-========================= */
-async function obterAppId(){
-  const { data:{ session }, error: sessionError } = await supabase.auth.getSession();
-
-  if(sessionError){
-    throw new Error("Erro ao verificar sessão: " + sessionError.message);
-  }
-
-  if(!session){
-    location.href = "/auth/login.html";
-    return null;
-  }
-
-  const userId = session.user.id;
-
-  const { data:user, error:userError } = await supabase
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", userId)
-    .single();
-
-  if(userError){
-    throw new Error("Erro ao buscar app_id: " + userError.message);
-  }
-
-  if(!user || !user.app_id){
-    throw new Error("Usuário sem app_id vinculado");
-  }
-
-  return user.app_id;
-}
-
-/* =========================
-   CARREGAR POPS NO FILTRO
-========================= */
-async function carregarFiltroPops(){
-  const { data:pops, error } = await supabase
-    .from("pops_provedor")
-    .select("id,nome")
-    .eq("app_id", appId)
-    .order("nome", { ascending:true });
-
-  if(error){
-    throw new Error("Erro ao carregar filtro de POPs: " + error.message);
-  }
-
-  const filtro = document.getElementById("filtroPop");
-  filtro.innerHTML = `<option value="">Todos os POPs</option>`;
-
-  (pops || []).forEach(pop => {
-    filtro.innerHTML += `
-      <option value="${escaparHtml(pop.id)}">${escaparHtml(pop.nome || "")}</option>
-    `;
-  });
-}
-
-/* =========================
-   BUSCAR DADOS
-========================= */
-async function buscarDadosMapa(){
-  const popSelecionado = document.getElementById("filtroPop").value;
-
-  let queryPops = supabase
-    .from("pops_provedor")
-    .select("*")
-    .eq("app_id", appId)
-    .order("nome", { ascending:true });
-
-  if(popSelecionado){
-    queryPops = queryPops.eq("id", popSelecionado);
-  }
-
-  const { data:pops, error:errorPops } = await queryPops;
-
-  if(errorPops){
-    throw new Error("Erro ao carregar POPs: " + errorPops.message);
-  }
-
-  const { data:equipamentos, error:errorEquip } = await supabase
-    .from("equipamentos_provedor")
-    .select("*")
-    .eq("app_id", appId)
-    .order("nome", { ascending:true });
-
-  if(errorEquip){
-    throw new Error("Erro ao carregar equipamentos: " + errorEquip.message);
-  }
-
-  const { data:ips, error:errorIps } = await supabase
-    .from("ips_provedor")
-    .select("*")
-    .eq("app_id", appId)
-    .order("ip", { ascending:true });
-
-  if(errorIps){
-    throw new Error("Erro ao carregar IPs: " + errorIps.message);
-  }
-
-  return {
-    pops: pops || [],
-    equipamentos: equipamentos || [],
-    ips: ips || []
-  };
-}
-/* =========================
-   MONTAR MAPA
-========================= */
-async function desenharMapa(){
-  try{
-    mostrarStatus("Carregando mapa...", "ok");
-    iniciarMapa();
-    camadaMarcadores.clearLayers();
-    camadaLinhas.clearLayers();
-
-    const { pops, equipamentos, ips } = await buscarDadosMapa();
-
-    const mapaEquipPorPop = {};
-    equipamentos.forEach(eq => {
-      const popId = String(eq.pop_id || "");
-      if(!popId) return;
-
-      if(!mapaEquipPorPop[popId]){
-        mapaEquipPorPop[popId] = [];
-      }
-
-      mapaEquipPorPop[popId].push(eq);
+    marker.bindPopup(popupHtml(pop), {
+      maxWidth: 320
     });
 
-    const mapaIpsPorEquip = {};
-    ips.forEach(ipItem => {
-      const equipId = String(ipItem.equipamento || "");
-      if(!equipId) return;
+    marker.addTo(markersLayer);
+    bounds.push([Number(lat), Number(lng)]);
 
-      if(!mapaIpsPorEquip[equipId]){
-        mapaIpsPorEquip[equipId] = [];
-      }
+    pop.__marker = marker;
+  }
 
-      mapaIpsPorEquip[equipId].push(ipItem);
-    });
+  if (bounds.length === 1) {
+    mapa.setView(bounds[0], 13);
+  } else if (bounds.length > 1) {
+    mapa.fitBounds(bounds, { padding: [40, 40] });
+  }
+}
 
-    const pontos = [];
+/* =========================
+   LISTA LATERAL
+========================= */
+function renderizarLista(pops) {
+  const lista = document.getElementById("listaPops");
 
-    for(const pop of pops){
-      let coords = null;
+  if (!pops.length) {
+    lista.innerHTML = `<div class="sem-dados">Nenhum POP com localização encontrada.</div>`;
+    atualizarResumo([]);
+    return;
+  }
 
-      if(pop.latitude && pop.longitude){
-        coords = {
-          lat: Number(pop.latitude),
-          lng: Number(pop.longitude)
-        };
-      }else if(pop.localizacao){
-        const localizacaoTexto = String(pop.localizacao || "").trim();
+  lista.innerHTML = pops.map((pop, index) => {
+    const nome = escaparHtml(obterNome(pop));
+    const ip = escaparHtml(obterIp(pop) || "Sem IP");
+    const status = obterStatus(pop);
+    const statusClass = classeStatus(status);
 
-        coords = extrairLatLng(localizacaoTexto);
-
-        if(!coords){
-          coords = extrairCoordenadaDeLink(localizacaoTexto);
-        }
-
-        if(!coords && !ehLinkMapa(localizacaoTexto)){
-          coords = await geocodificarEndereco(localizacaoTexto);
-        }
-      }
-
-      if(!coords){
-        console.warn("POP sem coordenadas/localização válida:", pop.nome, pop.localizacao);
-        continue;
-      }
-
-      const listaEquip = mapaEquipPorPop[String(pop.id)] || [];
-
-      const ipsDoPop = [];
-      listaEquip.forEach(eq => {
-        const listaIpsEquip = mapaIpsPorEquip[String(eq.id)] || [];
-        listaIpsEquip.forEach(ipItem => {
-          const ipTratado = normalizarIp(ipItem.ip || "");
-          if(ipTratado){
-            ipsDoPop.push(ipTratado);
-          }
-        });
-      });
-
-      pontos.push({
-        id: pop.id,
-        nome: pop.nome || "Sem nome",
-        localizacao: pop.localizacao || "",
-        lat: coords.lat,
-        lng: coords.lng,
-        equipamentos: listaEquip,
-        ips: [...new Set(ipsDoPop)]
-      });
-    }
-
-    if(!pontos.length){
-      mostrarStatus("Nenhum POP com localização válida encontrado.", "erro");
-      mapa.setView([-14.235, -51.9253], 4);
-      document.getElementById("resumo").innerHTML = `
-        <div class="card-resumo">Nenhum POP com localização válida para mostrar no mapa.</div>
-      `;
-      return;
-    }
-
-    const bounds = [];
-    let totalEquip = 0;
-    let totalIps = 0;
-
-    pontos.forEach((pop, index) => {
-      totalEquip += pop.equipamentos.length;
-      totalIps += pop.ips.length;
-
-      const equipamentosHtml = pop.equipamentos.length
-        ? pop.equipamentos.map(eq => `
-            <div class="item-popup">
-              <strong>${escaparHtml(eq.nome || "Sem nome")}</strong>
-              <span>${escaparHtml(eq.modelo || "Sem modelo")}</span>
-            </div>
-          `).join("")
-        : `<div class="item-popup muted-popup">Sem equipamentos</div>`;
-
-      const ipsHtml = pop.ips.length
-        ? pop.ips.slice(0, 10).map(ip => `
-            <div class="ip-popup">${escaparHtml(ip)}</div>
-          `).join("")
-        : `<div class="muted-popup">Sem IP cadastrado</div>`;
-
-      const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
-
-      const marker = L.marker([pop.lat, pop.lng]).addTo(camadaMarcadores);
-
-      marker.bindPopup(`
-        <div class="popup-mapa">
-          <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
-          <div><b>Localização:</b> ${escaparHtml(pop.localizacao || "Não informada")}</div>
-          <div><b>Latitude:</b> ${escaparHtml(pop.lat)}</div>
-          <div><b>Longitude:</b> ${escaparHtml(pop.lng)}</div>
-          <div><b>Equipamentos:</b> ${pop.equipamentos.length}</div>
-          <div><b>IPs:</b> ${pop.ips.length}</div>
-
-          <div class="sub-popup">Equipamentos</div>
-          ${equipamentosHtml}
-
-          <div class="sub-popup">IPs</div>
-          ${ipsHtml}
-
-          <div style="margin-top:10px;">
-            <a
-              href="${escaparHtml(linkMapa)}"
-              target="_blank"
-              class="btn-popup-mapa"
-            >
-              Abrir no Google Maps
-            </a>
-          </div>
+    return `
+      <div class="pop-card" onclick="window.irParaPop(${index})">
+        <div class="pop-card-topo">
+          <div class="pop-nome">${nome}</div>
+          <div class="badge ${statusClass}">${status}</div>
         </div>
-      `);
-
-      bounds.push([pop.lat, pop.lng]);
-
-      if(index > 0){
-        const anterior = pontos[index - 1];
-
-        L.polyline(
-          [
-            [anterior.lat, anterior.lng],
-            [pop.lat, pop.lng]
-          ],
-          {
-            color: "#38bdf8",
-            weight: 3,
-            opacity: 0.85
-          }
-        ).addTo(camadaLinhas);
-      }
-    });
-
-    mapa.fitBounds(bounds, { padding:[30,30] });
-
-    document.getElementById("resumo").innerHTML = `
-      <div class="card-resumo">
-        <strong>POPs no mapa:</strong> ${pontos.length}
-      </div>
-      <div class="card-resumo">
-        <strong>Equipamentos encontrados:</strong> ${totalEquip}
-      </div>
-      <div class="card-resumo">
-        <strong>IPs encontrados:</strong> ${totalIps}
+        <div class="pop-ip">${ip}</div>
       </div>
     `;
+  }).join("");
 
-    mostrarStatus("Mapa carregado com sucesso.", "sucesso");
+  atualizarResumo(pops);
+}
 
-  }catch(erro){
-    console.error(erro);
-    mostrarStatus(erro.message || "Erro ao carregar mapa", "erro");
-  }
+function atualizarResumo(pops) {
+  const total = pops.length;
+  const up = pops.filter(p => obterStatus(p) === "UP").length;
+  const down = pops.filter(p => obterStatus(p) === "DOWN").length;
+  const sem = pops.filter(p => obterStatus(p) === "SEM STATUS").length;
+
+  document.getElementById("totalPops").textContent = total;
+  document.getElementById("totalUp").textContent = up;
+  document.getElementById("totalDown").textContent = down;
+  document.getElementById("totalSem").textContent = sem;
+}
+
+window.irParaPop = function(index) {
+  const pop = popsCache[index];
+  if (!pop || !pop.__marker) return;
+
+  const lat = Number(obterLatitude(pop));
+  const lng = Number(obterLongitude(pop));
+
+  mapa.setView([lat, lng], 15, { animate: true });
+  pop.__marker.openPopup();
+};
+
+function filtrarLista() {
+  const termo = document.getElementById("busca").value.trim().toLowerCase();
+  const filtroStatus = document.getElementById("filtroStatus").value;
+
+  const filtrados = popsCache.filter(pop => {
+    const nome = obterNome(pop).toLowerCase();
+    const ip = obterIp(pop).toLowerCase();
+    const status = obterStatus(pop);
+
+    const bateTexto =
+      !termo ||
+      nome.includes(termo) ||
+      ip.includes(termo);
+
+    const bateStatus =
+      !filtroStatus || status === filtroStatus;
+
+    return bateTexto && bateStatus;
+  });
+
+  renderizarMapa(filtrados);
+  renderizarLista(filtrados);
 }
 
 /* =========================
-   INICIAR
+   SUPABASE
 ========================= */
-async function iniciar(){
-  try{
-    appId = await obterAppId();
-    await carregarFiltroPops();
-    await desenharMapa();
-  }catch(erro){
-    console.error("Erro ao iniciar:", erro);
-    mostrarStatus(erro.message || "Erro ao iniciar página", "erro");
+async function carregarPops() {
+  document.getElementById("listaPops").innerHTML =
+    `<div class="sem-dados">Carregando POPs...</div>`;
+
+  const { data, error } = await supabase
+    .from(TABELA_POPS)
+    .select("*")
+    .order("nome", { ascending: true });
+
+  if (error) {
+    console.error(error);
+    document.getElementById("listaPops").innerHTML =
+      `<div class="sem-dados">Erro ao carregar POPs.</div>`;
+    return;
   }
+
+  const popsComLocal = (data || []).filter(pop => {
+    return numeroValido(obterLatitude(pop)) && numeroValido(obterLongitude(pop));
+  });
+
+  popsCache = popsComLocal;
+
+  renderizarMapa(popsCache);
+  renderizarLista(popsCache);
 }
 
-window.recarregarMapa = desenharMapa;
+/* =========================
+   INIT
+========================= */
+window.addEventListener("load", async () => {
+  iniciarMapa();
 
-iniciar();
+  document.getElementById("busca").addEventListener("input", filtrarLista);
+  document.getElementById("filtroStatus").addEventListener("change", filtrarLista);
+
+  await carregarPops();
+});
 </script>
 
 <style>
-*{
-  box-sizing:border-box;
+* {
+  box-sizing: border-box;
 }
 
-body{
-  margin:0;
-  background:#020617;
-  color:#fff;
-  font-family:Arial, sans-serif;
-  padding:20px;
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #020617;
+  color: #fff;
 }
 
-.topo{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-bottom:16px;
+.app {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  height: 100vh;
 }
 
-h2{
-  margin:0;
+.sidebar {
+  background: linear-gradient(180deg, #0f172a, #111827);
+  border-right: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.painel{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  align-items:center;
+.sidebar-topo {
+  padding: 18px;
+  border-bottom: 1px solid #1e293b;
 }
 
-select, button{
-  border:none;
-  border-radius:10px;
-  padding:10px 14px;
-  font-size:14px;
+.titulo {
+  font-size: 22px;
+  font-weight: bold;
+  margin-bottom: 6px;
 }
 
-select{
-  min-width:220px;
+.subtitulo {
+  color: #94a3b8;
+  font-size: 13px;
+  margin-bottom: 16px;
 }
 
-button{
-  background:#2563eb;
-  color:#fff;
-  font-weight:bold;
-  cursor:pointer;
+.resumo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-button:hover{
-  background:#1d4ed8;
+.box-resumo {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 12px;
 }
 
-.status{
-  margin-bottom:16px;
-  padding:12px 14px;
-  border-radius:12px;
-  border:1px solid #1e293b;
-  background:#0f172a;
+.box-resumo .rotulo {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-bottom: 4px;
 }
 
-.status.ok{
-  color:#cbd5e1;
+.box-resumo .valor {
+  font-size: 22px;
+  font-weight: bold;
 }
 
-.status.sucesso{
-  color:#86efac;
-  border-color:#14532d;
+.filtros {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.status.erro{
-  color:#fca5a5;
-  border-color:#7f1d1d;
+.filtros input,
+.filtros select {
+  width: 100%;
+  background: #020617;
+  color: #fff;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 12px;
+  outline: none;
 }
 
-#resumo{
-  display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(220px,1fr));
-  gap:12px;
-  margin-bottom:16px;
+.lista-pops {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
 }
 
-.card-resumo{
-  background:#0f172a;
-  border:1px solid #1e293b;
-  border-radius:14px;
-  padding:14px;
+.pop-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: 0.2s;
 }
 
-.box-mapa{
-  background:#0f172a;
-  border:1px solid #1e293b;
-  border-radius:16px;
-  padding:16px;
+.pop-card:hover {
+  transform: translateY(-2px);
+  border-color: #334155;
+  background: rgba(255,255,255,0.06);
 }
 
-#mapaPops{
-  width:100%;
-  height:520px;
-  border-radius:12px;
-  overflow:hidden;
+.pop-card-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.popup-mapa{
-  min-width:250px;
-  line-height:1.45;
-  color:#111827;
+.pop-nome {
+  font-weight: bold;
+  font-size: 15px;
 }
 
-.titulo-popup{
-  font-weight:bold;
-  font-size:16px;
-  margin-bottom:8px;
+.pop-ip {
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 13px;
+  word-break: break-word;
 }
 
-.sub-popup{
-  margin-top:10px;
-  margin-bottom:6px;
-  font-weight:bold;
+.badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: bold;
+  white-space: nowrap;
 }
 
-.item-popup{
-  margin-bottom:6px;
-  padding:6px 8px;
-  background:#f8fafc;
-  border-radius:8px;
+.badge.up {
+  background: rgba(34,197,94,0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34,197,94,0.35);
 }
 
-.item-popup span{
-  display:block;
-  font-size:12px;
-  color:#475569;
-  margin-top:2px;
+.badge.down {
+  background: rgba(239,68,68,0.15);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,0.35);
 }
 
-.ip-popup{
-  display:inline-block;
-  margin:3px 4px 3px 0;
-  padding:4px 8px;
-  background:#e2e8f0;
-  border-radius:999px;
-  font-size:12px;
+.badge.warn {
+  background: rgba(245,158,11,0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245,158,11,0.35);
 }
 
-.muted-popup{
-  color:#64748b;
-  font-size:12px;
+.mapa-area {
+  position: relative;
 }
 
-.btn-popup-mapa{
-  display:inline-block;
-  text-decoration:none;
-  background:#2563eb;
-  color:#fff;
-  padding:8px 12px;
-  border-radius:8px;
-  font-size:12px;
+#mapa {
+  width: 100%;
+  height: 100%;
 }
 
-@media(max-width:700px){
-  body{
-    padding:14px;
+.topo-mapa {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 999;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  padding: 12px 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+.topo-mapa strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.topo-mapa span {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.custom-marker-wrapper {
+  background: transparent;
+  border: none;
+}
+
+.marker-pin {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.12), 0 8px 20px rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.marker-core {
+  width: 6px;
+  height: 6px;
+  background: #fff;
+  border-radius: 50%;
+}
+
+.popup-box {
+  min-width: 220px;
+}
+
+.popup-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.popup-titulo {
+  font-size: 15px;
+  font-weight: bold;
+  color: #0f172a;
+}
+
+.popup-linha {
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: #334155;
+}
+
+.sem-dados {
+  color: #94a3b8;
+  text-align: center;
+  padding: 30px 10px;
+}
+
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 
-  .topo{
-    flex-direction:column;
-    align-items:stretch;
+  .sidebar {
+    height: auto;
+    max-height: 50vh;
   }
 
-  .painel{
-    flex-direction:column;
-    align-items:stretch;
-  }
-
-  select, button{
-    width:100%;
-  }
-
-  #mapaPops{
-    height:380px;
+  .lista-pops {
+    max-height: 220px;
   }
 }
 </style>
 </head>
 <body>
 
-<div class="topo">
-  <h2>Mapa Automático dos POPs</h2>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-topo">
+      <div class="titulo">Mapa dos POPs</div>
+      <div class="subtitulo">Visual moderno com nome, IP e status em tempo real</div>
 
-  <div class="painel">
-    <select id="filtroPop" onchange="recarregarMapa()">
-      <option value="">Todos os POPs</option>
-    </select>
+      <div class="resumo">
+        <div class="box-resumo">
+          <div class="rotulo">Total</div>
+          <div class="valor" id="totalPops">0</div>
+        </div>
+        <div class="box-resumo">
+          <div class="rotulo">UP</div>
+          <div class="valor" id="totalUp">0</div>
+        </div>
+        <div class="box-resumo">
+          <div class="rotulo">DOWN</div>
+          <div class="valor" id="totalDown">0</div>
+        </div>
+        <div class="box-resumo">
+          <div class="rotulo">Sem status</div>
+          <div class="valor" id="totalSem">0</div>
+        </div>
+      </div>
 
-    <button onclick="recarregarMapa()">Atualizar mapa</button>
-  </div>
-</div>
+      <div class="filtros">
+        <input type="text" id="busca" placeholder="Buscar por nome ou IP..." />
+        <select id="filtroStatus">
+          <option value="">Todos os status</option>
+          <option value="UP">Somente UP</option>
+          <option value="DOWN">Somente DOWN</option>
+          <option value="SEM STATUS">Sem status</option>
+        </select>
+      </div>
+    </div>
 
-<div id="status" class="status ok">Iniciando...</div>
+    <div class="lista-pops" id="listaPops"></div>
+  </aside>
 
-<div id="resumo"></div>
-
-<div class="box-mapa">
-  <div id="mapaPops"></div>
+  <main class="mapa-area">
+    <div class="topo-mapa">
+      <strong>Rede de POPs</strong>
+      <span>Clique em um POP na lista ou no mapa para ver detalhes</span>
+    </div>
+    <div id="mapa"></div>
+  </main>
 </div>
 
 </body>
