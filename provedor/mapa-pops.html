@@ -517,10 +517,25 @@ async function buscarDadosMapa(){
   if(errorEquip){
     throw new Error("Erro ao carregar equipamentos: " + errorEquip.message);
   }
+
+  const { data:ips, error:errorIps } = await supabase
+    .from("ips_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("ip", { ascending:true });
+
+  if(errorIps){
+    throw new Error("Erro ao carregar IPs: " + errorIps.message);
+  }
+
+  return {
+    pops: pops || [],
+    equipamentos: equipamentos || [],
+    ips: ips || []
+  };
+}
 async function definirPopPrincipal(){
-
   try{
-
     const popId = document.getElementById("selectPopPrincipal").value;
 
     if(!popId){
@@ -530,20 +545,18 @@ async function definirPopPrincipal(){
 
     mostrarStatus("Atualizando POP principal...", "ok");
 
-    // Remove principal atual
     const { error:error1 } = await supabase
       .from("pops_provedor")
-      .update({ principal:false })
+      .update({ principal: false })
       .eq("app_id", appId);
 
     if(error1){
       throw new Error(error1.message);
     }
 
-    // Define novo principal
     const { error:error2 } = await supabase
       .from("pops_provedor")
-      .update({ principal:true })
+      .update({ principal: true })
       .eq("id", popId)
       .eq("app_id", appId);
 
@@ -552,16 +565,13 @@ async function definirPopPrincipal(){
     }
 
     mostrarStatus("POP principal atualizado.", "sucesso");
-
+    await carregarFiltroPops();
     await desenharMapa();
 
   }catch(erro){
-
     console.error(erro);
     mostrarStatus("Erro ao definir principal: " + erro.message, "erro");
-
   }
-
 }
   const { data:ips, error:errorIps } = await supabase
     .from("ips_provedor")
@@ -801,131 +811,123 @@ async function desenharMapa(){
     let totalWarning = 0;
     let totalUnknown = 0;
 
-    pontos.forEach((pop, index) => {
+    pontos.forEach((pop) => {
+  totalEquip += pop.equipamentos.length;
+  totalIps += pop.ips.length;
 
+  if(pop.status === "up") totalUp++;
+  else if(pop.status === "down") totalDown++;
+  else if(pop.status === "warning") totalWarning++;
+  else totalUnknown++;
+
+  const equipamentosHtml = pop.detalhesEquipStatus.length
+    ? pop.detalhesEquipStatus.map(eq => `
+        <div class="item-popup">
+          <div class="item-popup-linha-topo">
+            <div>
+              <div class="item-popup-titulo">${escaparHtml(eq.nome || "Sem nome")}</div>
+              <div class="item-popup-sub">${escaparHtml(eq.modelo || "Sem modelo")}</div>
+            </div>
+            <div class="mini-badge ${badgeClassStatus(eq.status)}">${textoStatus(eq.status)}</div>
+          </div>
+          ${
+            eq.host || eq.mensagem
+              ? `<div class="item-popup-msg">${escaparHtml(eq.host || eq.mensagem)}</div>`
+              : ""
+          }
+        </div>
+      `).join("")
+    : `<div class="item-popup-vazio">Sem equipamentos</div>`;
+
+  const ipsHtml = pop.ips.length
+    ? pop.ips.slice(0, 12).map(ip => `
+        <span class="ip-popup">${escaparHtml(ip)}</span>
+      `).join("")
+    : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
+
+  const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
   const ehPrincipal = String(pop.id) === String(popPrincipal?.id);
   const nomeMarker = ehPrincipal ? `${pop.nome} ⭐` : pop.nome;
 
   const marker = L.marker([pop.lat, pop.lng], {
     icon: criarIconePop(pop.status, nomeMarker, ehPrincipal)
   }).addTo(camadaMarcadores);
-      totalEquip += pop.equipamentos.length;
-      totalIps += pop.ips.length;
 
-      if(pop.status === "up") totalUp++;
-      else if(pop.status === "down") totalDown++;
-      else if(pop.status === "warning") totalWarning++;
-      else totalUnknown++;
-
-      const equipamentosHtml = pop.detalhesEquipStatus.length
-        ? pop.detalhesEquipStatus.map(eq => `
-            <div class="item-popup">
-              <div class="item-popup-linha-topo">
-                <div>
-                  <div class="item-popup-titulo">${escaparHtml(eq.nome || "Sem nome")}</div>
-                  <div class="item-popup-sub">${escaparHtml(eq.modelo || "Sem modelo")}</div>
-                </div>
-                <div class="mini-badge ${badgeClassStatus(eq.status)}">${textoStatus(eq.status)}</div>
-              </div>
-              ${
-                eq.host || eq.mensagem
-                  ? `<div class="item-popup-msg">${escaparHtml(eq.host || eq.mensagem)}</div>`
-                  : ""
-              }
-            </div>
-          `).join("")
-        : `<div class="item-popup-vazio">Sem equipamentos</div>`;
-
-      const ipsHtml = pop.ips.length
-        ? pop.ips.slice(0, 12).map(ip => `
-            <span class="ip-popup">${escaparHtml(ip)}</span>
-          `).join("")
-        : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
-
-      const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
-      const ehPrincipal = pop.principal === true;
-      const nomeMarker = ehPrincipal ? `${pop.nome} ⭐` : pop.nome;
-      const ehPrincipal = String(pop.id) === String(popPrincipal?.id);
-
-      const marker = L.marker([pop.lat, pop.lng], {
-        icon: criarIconePop(pop.status, nomeMarker, ehPrincipal)
-      }).addTo(camadaMarcadores);
-
-      marker.bindPopup(`
-        <div class="popup-mapa">
-          <div class="popup-topo">
-            <div>
-              <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
-              <div class="badge-popup ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
-            </div>
-          </div>
-
-          <div class="bloco-popup">
-            <div class="linha-popup"><span>Tipo</span><strong>${ehPrincipal ? "POP PRINCIPAL" : "POP INTERLIGADO"}</strong></div>
-            <div class="linha-popup"><span>Localização</span><strong>${escaparHtml(pop.localizacao || "Não informada")}</strong></div>
-            <div class="linha-popup"><span>Latitude</span><strong>${escaparHtml(pop.lat)}</strong></div>
-            <div class="linha-popup"><span>Longitude</span><strong>${escaparHtml(pop.lng)}</strong></div>
-            <div class="linha-popup"><span>Equipamentos</span><strong>${pop.equipamentos.length}</strong></div>
-            <div class="linha-popup"><span>IPs</span><strong>${pop.ips.length}</strong></div>
-            <div class="linha-popup"><span>Status do POP</span><strong style="color:${corStatus(pop.status)}">${textoStatus(pop.status)}</strong></div>
-            <div class="linha-popup"><span>Fonte do status</span><strong>${statusPRTG.ok ? "PRTG" : "Sem conexão com PRTG"}</strong></div>
-          </div>
-
-          <div class="sub-popup">Equipamentos</div>
-          <div class="lista-popup">${equipamentosHtml}</div>
-
-          <div class="sub-popup">IPs</div>
-          <div class="lista-ips-popup">${ipsHtml}</div>
-
-          <div class="acoes-popup">
-            <a
-              href="${escaparHtml(linkMapa)}"
-              target="_blank"
-              class="btn-popup-mapa"
-            >
-              Abrir no Google Maps
-            </a>
-          </div>
+  marker.bindPopup(`
+    <div class="popup-mapa">
+      <div class="popup-topo">
+        <div>
+          <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
+          <div class="badge-popup ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
         </div>
-      `);
+      </div>
 
-      bounds.push([pop.lat, pop.lng]);
+      <div class="bloco-popup">
+        <div class="linha-popup"><span>Tipo</span><strong>${ehPrincipal ? "POP PRINCIPAL" : "POP INTERLIGADO"}</strong></div>
+        <div class="linha-popup"><span>Localização</span><strong>${escaparHtml(pop.localizacao || "Não informada")}</strong></div>
+        <div class="linha-popup"><span>Latitude</span><strong>${escaparHtml(pop.lat)}</strong></div>
+        <div class="linha-popup"><span>Longitude</span><strong>${escaparHtml(pop.lng)}</strong></div>
+        <div class="linha-popup"><span>Equipamentos</span><strong>${pop.equipamentos.length}</strong></div>
+        <div class="linha-popup"><span>IPs</span><strong>${pop.ips.length}</strong></div>
+        <div class="linha-popup"><span>Status do POP</span><strong style="color:${corStatus(pop.status)}">${textoStatus(pop.status)}</strong></div>
+        <div class="linha-popup"><span>Fonte do status</span><strong>${statusPRTG.ok ? "PRTG" : "Sem conexão com PRTG"}</strong></div>
+      </div>
 
-      if(!ehPrincipal && popPrincipal){
-        const statusLinha =
-          pop.status === "down" || popPrincipal.status === "down"
-            ? "down"
-            : (pop.status === "warning" || popPrincipal.status === "warning")
-              ? "warning"
-              : (pop.status === "up" && popPrincipal.status === "up" ? "up" : "unknown");
+      <div class="sub-popup">Equipamentos</div>
+      <div class="lista-popup">${equipamentosHtml}</div>
 
-        L.polyline(
-          [
-            [popPrincipal.lat, popPrincipal.lng],
-            [pop.lat, pop.lng]
-          ],
-          {
-            color:
-              statusLinha === "down"
-                ? "#ef4444"
-                : statusLinha === "warning"
-                  ? "#f59e0b"
-                  : statusLinha === "up"
-                    ? "#38bdf8"
-                    : "#94a3b8",
-            weight: statusLinha === "down" ? 4 : 3,
-            opacity: 0.9,
-            dashArray: statusLinha === "unknown" ? "8, 10" : null
-          }
-        ).addTo(camadaLinhas);
+      <div class="sub-popup">IPs</div>
+      <div class="lista-ips-popup">${ipsHtml}</div>
 
-        animarFluxoEntrePontos(
-          [popPrincipal.lat, popPrincipal.lng],
-          [pop.lat, pop.lng],
-          statusLinha
-        );
+      <div class="acoes-popup">
+        <a
+          href="${escaparHtml(linkMapa)}"
+          target="_blank"
+          class="btn-popup-mapa"
+        >
+          Abrir no Google Maps
+        </a>
+      </div>
+    </div>
+  `);
+
+  bounds.push([pop.lat, pop.lng]);
+
+  if(!ehPrincipal && popPrincipal){
+    const statusLinha =
+      pop.status === "down" || popPrincipal.status === "down"
+        ? "down"
+        : (pop.status === "warning" || popPrincipal.status === "warning")
+          ? "warning"
+          : (pop.status === "up" && popPrincipal.status === "up" ? "up" : "unknown");
+
+    L.polyline(
+      [
+        [popPrincipal.lat, popPrincipal.lng],
+        [pop.lat, pop.lng]
+      ],
+      {
+        color:
+          statusLinha === "down"
+            ? "#ef4444"
+            : statusLinha === "warning"
+              ? "#f59e0b"
+              : statusLinha === "up"
+                ? "#38bdf8"
+                : "#94a3b8",
+        weight: statusLinha === "down" ? 4 : 3,
+        opacity: 0.9,
+        dashArray: statusLinha === "unknown" ? "8, 10" : null
       }
-    });
+    ).addTo(camadaLinhas);
+
+    animarFluxoEntrePontos(
+      [popPrincipal.lat, popPrincipal.lng],
+      [pop.lat, pop.lng],
+      statusLinha
+    );
+  }
+});
 
     mapa.fitBounds(bounds, { padding:[30,30] });
 
@@ -1958,26 +1960,27 @@ button:hover{
 </head>
 <body>
 
+<body>
+
 <div class="pagina">
   <div class="topo">
     <div class="topo-esq">
       <h2>Mapa Automático dos POPs</h2>
-      <div class="subtitulo">Primeiro POP cadastrado é o principal e todos os demais se interligam a ele</div>
+      <div class="subtitulo">Escolha no seletor qual POP será o principal e os demais se interligam a ele</div>
     </div>
 
-  <div class="painel">
+    <div class="painel">
+      <select id="filtroPop" onchange="recarregarMapa()">
+        <option value="">Todos os POPs</option>
+      </select>
 
-  <select id="filtroPop" onchange="recarregarMapa()">
-    <option value="">Todos os POPs</option>
-  </select>
+      <select id="selectPopPrincipal" onchange="definirPopPrincipal()">
+        <option value="">Definir POP principal</option>
+      </select>
 
-  <select id="selectPopPrincipal" onchange="definirPopPrincipal()">
-    <option value="">Definir POP principal</option>
-  </select>
-
-  <button onclick="recarregarMapa()">Atualizar mapa</button>
-
-</div>
+      <button onclick="recarregarMapa()">Atualizar mapa</button>
+    </div>
+  </div>
 
   <div id="status" class="status ok">Iniciando...</div>
 
