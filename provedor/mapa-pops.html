@@ -37,6 +37,34 @@ function escaparHtml(texto){
     .replace(/"/g,"&quot;")
     .replace(/'/g,"&#39;");
 }
+
+function normalizarIp(ip){
+  if(!ip) return "";
+  return String(ip)
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .trim();
+}
+
+function ehLatLngTexto(texto){
+  if(!texto) return false;
+  return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(String(texto).trim());
+}
+
+function extrairLatLng(texto){
+  if(!ehLatLngTexto(texto)) return null;
+
+  const partes = String(texto).split(",");
+  const lat = Number(partes[0].trim());
+  const lng = Number(partes[1].trim());
+
+  if(Number.isNaN(lat) || Number.isNaN(lng)) return null;
+
+  return { lat, lng };
+}
+
 function ehLinkMapa(texto){
   const valor = String(texto || "").trim().toLowerCase();
   return (
@@ -76,30 +104,44 @@ function montarLinkMapa(localizacao, lat = null, lng = null){
 
   return "";
 }
-function normalizarIp(ip){
-  if(!ip) return "";
-  return String(ip)
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/.*$/, "")
-    .replace(/:\d+$/, "")
-    .trim();
-}
 
-function ehLatLngTexto(texto){
-  if(!texto) return false;
-  return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(String(texto).trim());
-}
+function extrairCoordenadaDeLink(link){
+  const texto = String(link || "").trim();
+  if(!texto) return null;
 
-function extrairLatLng(texto){
-  if(!ehLatLngTexto(texto)) return null;
-  const partes = String(texto).split(",");
-  const lat = Number(partes[0].trim());
-  const lng = Number(partes[1].trim());
+  let match = texto.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
 
-  if(Number.isNaN(lat) || Number.isNaN(lng)) return null;
+  match = texto.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
 
-  return { lat, lng };
+  match = texto.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
+
+  match = texto.match(/[?&]ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
+
+  return null;
 }
 
 function mostrarStatus(texto, tipo="ok"){
@@ -233,8 +275,7 @@ async function buscarDadosMapa(){
   }
 
   const { data:pops, error:errorPops } = await queryPops;
-
-  if(errorPops){
+  if(error:errorPops){
     throw new Error("Erro ao carregar POPs: " + errorPops.message);
   }
 
@@ -312,14 +353,18 @@ async function desenharMapa(){
           lng: Number(pop.longitude)
         };
       }else if(pop.localizacao){
-  const localizacaoTexto = String(pop.localizacao || "").trim();
+        const localizacaoTexto = String(pop.localizacao || "").trim();
 
-  coords = extrairLatLng(localizacaoTexto);
+        coords = extrairLatLng(localizacaoTexto);
 
-  if(!coords && !ehLinkMapa(localizacaoTexto)){
-    coords = await geocodificarEndereco(localizacaoTexto);
-  }
-}
+        if(!coords){
+          coords = extrairCoordenadaDeLink(localizacaoTexto);
+        }
+
+        if(!coords && !ehLinkMapa(localizacaoTexto)){
+          coords = await geocodificarEndereco(localizacaoTexto);
+        }
+      }
 
       if(!coords){
         console.warn("POP sem coordenadas/localização válida:", pop.nome, pop.localizacao);
@@ -382,12 +427,16 @@ async function desenharMapa(){
           `).join("")
         : `<div class="muted-popup">Sem IP cadastrado</div>`;
 
+      const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
+
       const marker = L.marker([pop.lat, pop.lng]).addTo(camadaMarcadores);
 
       marker.bindPopup(`
         <div class="popup-mapa">
           <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
           <div><b>Localização:</b> ${escaparHtml(pop.localizacao || "Não informada")}</div>
+          <div><b>Latitude:</b> ${escaparHtml(pop.lat)}</div>
+          <div><b>Longitude:</b> ${escaparHtml(pop.lng)}</div>
           <div><b>Equipamentos:</b> ${pop.equipamentos.length}</div>
           <div><b>IPs:</b> ${pop.ips.length}</div>
 
@@ -399,7 +448,7 @@ async function desenharMapa(){
 
           <div style="margin-top:10px;">
             <a
-              href="https://www.google.com/maps/search/${encodeURIComponent(pop.localizacao || `${pop.lat},${pop.lng}`)}"
+              href="${escaparHtml(linkMapa)}"
               target="_blank"
               class="btn-popup-mapa"
             >
