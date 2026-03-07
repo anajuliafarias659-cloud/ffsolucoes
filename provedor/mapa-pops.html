@@ -3,18 +3,17 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Mapa NOC Provedor</title>
+<title>Mapa de POPs</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
-
-html, body{
+html,body{
 margin:0;
 padding:0;
 height:100%;
 background:#0f172a;
-font-family:Arial;
+font-family:Arial, Helvetica, sans-serif;
 }
 
 #mapa{
@@ -27,7 +26,6 @@ display:flex;
 align-items:center;
 justify-content:center;
 }
-
 </style>
 </head>
 
@@ -36,21 +34,20 @@ justify-content:center;
 <div id="mapa"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
 
-const supabaseUrl = "SEU_SUPABASE_URL"
-const supabaseKey = "SEU_SUPABASE_KEY"
+const SUPABASE_URL = "COLOQUE_SUA_URL_AQUI"
+const SUPABASE_KEY = "COLOQUE_SUA_KEY_AQUI"
+const APP_ID = "COLOQUE_SEU_APP_ID"
 
-const supabase = window.supabase.createClient(
-supabaseUrl,
-supabaseKey
+const supabaseClient = supabase.createClient(
+SUPABASE_URL,
+SUPABASE_KEY
 )
 
-const appId = "SEU_APP_ID"
-
-const mapa = L.map("mapa").setView([-14.235, -51.925], 4)
+const mapa = L.map("mapa").setView([-14.235,-51.925],4)
 
 L.tileLayer(
 "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -66,13 +63,20 @@ const bounds = []
 
 try{
 
-const { data:pops, error } = await supabase
+const { data:pops, error } = await supabaseClient
 .from("pops_provedor")
 .select("*")
-.eq("app_id", appId)
+.eq("app_id",APP_ID)
 
-if(error) throw error
-if(!pops) return
+if(error){
+console.error(error)
+return
+}
+
+if(!pops || pops.length===0){
+console.log("Nenhum POP encontrado")
+return
+}
 
 const pontos = []
 
@@ -102,6 +106,8 @@ bounds.push([lat,lng])
 
 })
 
+/* MARCADORES */
+
 pontos.forEach(pop=>{
 
 const cor =
@@ -128,13 +134,16 @@ iconSize:[16,16]
 
 L.marker([pop.lat,pop.lng],{icon:icone})
 .addTo(mapa)
-.bindPopup(`<b>${pop.nome}</b><br>Status: ${pop.status}`)
+.bindPopup("<b>"+pop.nome+"</b><br>Status: "+pop.status)
 
 })
 
+/* POP PRINCIPAL */
+
 const popPrincipal =
-pontos.find(p=>p.nome?.toUpperCase()==="CORE")
-|| pontos[0]
+pontos.find(p=>p.nome?.toUpperCase()==="CORE") || pontos[0]
+
+/* LINHAS */
 
 pontos.forEach(pop=>{
 
@@ -161,15 +170,15 @@ L.polyline(
 ],
 {
 color:corLinha,
-weight:statusLinha==="down"?4:3,
+weight:3,
 opacity:0.9
 }
 ).addTo(camadaLinhas)
 
-animarFluxoEntrePontos(
+animarFluxo(
 [popPrincipal.lat,popPrincipal.lng],
 [pop.lat,pop.lng],
-statusLinha
+corLinha
 )
 
 })
@@ -179,19 +188,12 @@ mapa.fitBounds(bounds,{padding:[40,40]})
 }
 
 }catch(err){
-console.error(err)
+console.error("Erro:",err)
 }
 
 }
 
-function animarFluxoEntrePontos(origem,destino,status){
-
-const cor =
-status==="down"
-? "#ef4444"
-: status==="warning"
-? "#f59e0b"
-: "#38bdf8"
+function animarFluxo(origem,destino,cor){
 
 const circulo = L.circleMarker(origem,{
 radius:4,
@@ -200,21 +202,21 @@ fillColor:cor,
 fillOpacity:1
 }).addTo(mapa)
 
-let passo = 0
+let passo=0
 
 setInterval(()=>{
 
-passo += 0.02
+passo+=0.02
 
-if(passo >= 1){
-passo = 0
+if(passo>=1){
+passo=0
 }
 
 const lat =
-origem[0] + (destino[0]-origem[0]) * passo
+origem[0] + (destino[0]-origem[0])*passo
 
 const lng =
-origem[1] + (destino[1]-origem[1]) * passo
+origem[1] + (destino[1]-origem[1])*passo
 
 circulo.setLatLng([lat,lng])
 
