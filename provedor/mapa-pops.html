@@ -1,15 +1,14 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
+<meta charset="UTF-8">
 <title>Mapa dos POPs</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <link
   rel="stylesheet"
   href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
 />
-
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script type="module">
@@ -20,602 +19,1080 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+let appId = null;
 let mapa = null;
-let markersLayer = null;
-let popsCache = [];
-
-/* =========================
-   CONFIG
-========================= */
-const TABELA_POPS = "pops";
+let camadaMarcadores = null;
+let camadaLinhas = null;
+let cacheGeocoding = {};
 
 /* =========================
    AUX
 ========================= */
-function escaparHtml(texto) {
-  if (texto === null || texto === undefined) return "";
+function escaparHtml(texto){
+  if(texto === null || texto === undefined) return "";
   return String(texto)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;");
 }
 
-function numeroValido(v) {
-  const n = Number(v);
-  return !isNaN(n) && isFinite(n);
+function normalizarIp(ip){
+  if(!ip) return "";
+  return String(ip)
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .trim();
 }
 
-function obterLatitude(pop) {
-  return pop.latitude ?? pop.lat ?? pop.local_lat ?? pop.latitude_pop;
+function ehLatLngTexto(texto){
+  if(!texto) return false;
+  return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(String(texto).trim());
 }
 
-function obterLongitude(pop) {
-  return pop.longitude ?? pop.lng ?? pop.lon ?? pop.local_lng ?? pop.longitude_pop;
+function extrairLatLng(texto){
+  if(!ehLatLngTexto(texto)) return null;
+
+  const partes = String(texto).split(",");
+  const lat = Number(partes[0].trim());
+  const lng = Number(partes[1].trim());
+
+  if(Number.isNaN(lat) || Number.isNaN(lng)) return null;
+
+  return { lat, lng };
 }
 
-function obterNome(pop) {
-  return pop.nome ?? pop.pop ?? pop.titulo ?? pop.descricao ?? "POP sem nome";
+function ehLinkMapa(texto){
+  const valor = String(texto || "").trim().toLowerCase();
+  return (
+    valor.startsWith("http://") ||
+    valor.startsWith("https://") ||
+    valor.startsWith("www.") ||
+    valor.includes("maps.app.goo.gl") ||
+    valor.includes("google.com/maps")
+  );
 }
 
-function obterIp(pop) {
-  return pop.ip ?? pop.equipamento ?? pop.host ?? pop.endereco_ip ?? "";
-}
+function montarLinkMapa(localizacao, lat = null, lng = null){
+  const valor = String(localizacao || "").trim();
 
-function obterStatus(pop) {
-  const bruto =
-    pop.status ??
-    pop.prtg_status ??
-    pop.estado ??
-    pop.situacao ??
-    "";
+  if(valor){
+    if(
+      valor.startsWith("http://") ||
+      valor.startsWith("https://")
+    ){
+      return valor;
+    }
 
-  const s = String(bruto).trim().toLowerCase();
+    if(
+      valor.startsWith("www.") ||
+      valor.includes("maps.app.goo.gl") ||
+      valor.includes("google.com/maps")
+    ){
+      return "https://" + valor.replace(/^https?:\/\//i, "");
+    }
 
-  if (
-    s.includes("up") ||
-    s.includes("online") ||
-    s.includes("ativo") ||
-    s.includes("ok")
-  ) {
-    return "UP";
+    return "https://www.google.com/maps/search/" + encodeURIComponent(valor);
   }
 
-  if (
-    s.includes("down") ||
-    s.includes("offline") ||
-    s.includes("inativo") ||
-    s.includes("erro")
-  ) {
-    return "DOWN";
+  if(lat !== null && lng !== null){
+    return "https://www.google.com/maps/search/" + encodeURIComponent(`${lat},${lng}`);
   }
 
-  return "SEM STATUS";
+  return "";
 }
 
-function corStatus(status) {
-  if (status === "UP") return "#22c55e";
-  if (status === "DOWN") return "#ef4444";
-  return "#f59e0b";
+function extrairCoordenadaDeLink(link){
+  const texto = String(link || "").trim();
+  if(!texto) return null;
+
+  let match = texto.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
+
+  match = texto.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
+
+  match = texto.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
+
+  match = texto.match(/[?&]ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if(match){
+    return {
+      lat: Number(match[1]),
+      lng: Number(match[2])
+    };
+  }
+
+  return null;
 }
 
-function classeStatus(status) {
-  if (status === "UP") return "up";
-  if (status === "DOWN") return "down";
-  return "warn";
+function mostrarStatus(texto, tipo="ok"){
+  const box = document.getElementById("status");
+  box.className = "status " + tipo;
+  box.innerText = texto || "";
 }
 
-function criarIcone(status) {
-  const cor = corStatus(status);
-
+function criarIconePop(){
   return L.divIcon({
-    className: "custom-marker-wrapper",
+    className: "marcador-pop-wrap",
     html: `
-      <div class="marker-pin" style="background:${cor}">
-        <div class="marker-core"></div>
+      <div class="marcador-pop">
+        <div class="marcador-pop-interno"></div>
       </div>
     `,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-    popupAnchor: [0, -8]
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -10]
   });
 }
 
-/* =========================
-   MAPA
-========================= */
-function iniciarMapa() {
-  mapa = L.map("mapa", {
+function iniciarMapa(){
+  if(mapa) return;
+
+  mapa = L.map("mapaPops", {
     zoomControl: true
-  }).setView([-9.015, -42.699], 6);
+  });
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap"
   }).addTo(mapa);
 
-  markersLayer = L.layerGroup().addTo(mapa);
+  camadaMarcadores = L.layerGroup().addTo(mapa);
+  camadaLinhas = L.layerGroup().addTo(mapa);
+
+  mapa.setView([-9.0, -42.7], 6);
 }
 
-function popupHtml(pop) {
-  const nome = escaparHtml(obterNome(pop));
-  const ip = escaparHtml(obterIp(pop) || "Não informado");
-  const status = obterStatus(pop);
-  const statusClass = classeStatus(status);
-  const lat = obterLatitude(pop);
-  const lng = obterLongitude(pop);
+/* =========================
+   GEOCODING
+========================= */
+async function geocodificarEndereco(endereco){
+  try{
+    if(!endereco) return null;
 
-  return `
-    <div class="popup-box">
-      <div class="popup-topo">
-        <div class="popup-titulo">${nome}</div>
-        <div class="badge ${statusClass}">${status}</div>
-      </div>
-      <div class="popup-linha"><strong>IP:</strong> ${ip}</div>
-      <div class="popup-linha"><strong>Latitude:</strong> ${escaparHtml(lat)}</div>
-      <div class="popup-linha"><strong>Longitude:</strong> ${escaparHtml(lng)}</div>
-    </div>
-  `;
-}
+    const chave = String(endereco).trim().toLowerCase();
+    if(cacheGeocoding[chave]) return cacheGeocoding[chave];
 
-function renderizarMapa(pops) {
-  markersLayer.clearLayers();
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(endereco)}`;
 
-  const bounds = [];
-
-  for (const pop of pops) {
-    const lat = obterLatitude(pop);
-    const lng = obterLongitude(pop);
-
-    if (!numeroValido(lat) || !numeroValido(lng)) continue;
-
-    const status = obterStatus(pop);
-
-    const marker = L.marker([Number(lat), Number(lng)], {
-      icon: criarIcone(status)
+    const resposta = await fetch(url, {
+      headers: {
+        "Accept": "application/json"
+      }
     });
 
-    marker.bindPopup(popupHtml(pop), {
-      maxWidth: 320
-    });
+    const dados = await resposta.json();
 
-    marker.addTo(markersLayer);
-    bounds.push([Number(lat), Number(lng)]);
+    if(!dados || !dados.length){
+      return null;
+    }
 
-    pop.__marker = marker;
-  }
+    const resultado = {
+      lat: Number(dados[0].lat),
+      lng: Number(dados[0].lon)
+    };
 
-  if (bounds.length === 1) {
-    mapa.setView(bounds[0], 13);
-  } else if (bounds.length > 1) {
-    mapa.fitBounds(bounds, { padding: [40, 40] });
+    cacheGeocoding[chave] = resultado;
+    return resultado;
+
+  }catch(erro){
+    console.error("Erro ao geocodificar:", endereco, erro);
+    return null;
   }
 }
 
 /* =========================
-   LISTA LATERAL
+   AUTH / APP ID
 ========================= */
-function renderizarLista(pops) {
-  const lista = document.getElementById("listaPops");
+async function obterAppId(){
+  const { data:{ session }, error: sessionError } = await supabase.auth.getSession();
 
-  if (!pops.length) {
-    lista.innerHTML = `<div class="sem-dados">Nenhum POP com localização encontrada.</div>`;
-    atualizarResumo([]);
-    return;
+  if(sessionError){
+    throw new Error("Erro ao verificar sessão: " + sessionError.message);
   }
 
-  lista.innerHTML = pops.map((pop, index) => {
-    const nome = escaparHtml(obterNome(pop));
-    const ip = escaparHtml(obterIp(pop) || "Sem IP");
-    const status = obterStatus(pop);
-    const statusClass = classeStatus(status);
+  if(!session){
+    location.href = "/auth/login.html";
+    return null;
+  }
 
-    return `
-      <div class="pop-card" onclick="window.irParaPop(${index})">
-        <div class="pop-card-topo">
-          <div class="pop-nome">${nome}</div>
-          <div class="badge ${statusClass}">${status}</div>
+  const userId = session.user.id;
+
+  const { data:user, error:userError } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  if(userError){
+    throw new Error("Erro ao buscar app_id: " + userError.message);
+  }
+
+  if(!user || !user.app_id){
+    throw new Error("Usuário sem app_id vinculado");
+  }
+
+  return user.app_id;
+}
+
+/* =========================
+   CARREGAR POPS NO FILTRO
+========================= */
+async function carregarFiltroPops(){
+  const { data:pops, error } = await supabase
+    .from("pops_provedor")
+    .select("id,nome")
+    .eq("app_id", appId)
+    .order("nome", { ascending:true });
+
+  if(error){
+    throw new Error("Erro ao carregar filtro de POPs: " + error.message);
+  }
+
+  const filtro = document.getElementById("filtroPop");
+  filtro.innerHTML = `<option value="">Todos os POPs</option>`;
+
+  (pops || []).forEach(pop => {
+    filtro.innerHTML += `
+      <option value="${escaparHtml(pop.id)}">${escaparHtml(pop.nome || "")}</option>
+    `;
+  });
+}
+
+/* =========================
+   BUSCAR DADOS
+========================= */
+async function buscarDadosMapa(){
+  const popSelecionado = document.getElementById("filtroPop").value;
+
+  let queryPops = supabase
+    .from("pops_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("nome", { ascending:true });
+
+  if(popSelecionado){
+    queryPops = queryPops.eq("id", popSelecionado);
+  }
+
+  const { data:pops, error:errorPops } = await queryPops;
+
+  if(errorPops){
+    throw new Error("Erro ao carregar POPs: " + errorPops.message);
+  }
+
+  const { data:equipamentos, error:errorEquip } = await supabase
+    .from("equipamentos_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("nome", { ascending:true });
+
+  if(errorEquip){
+    throw new Error("Erro ao carregar equipamentos: " + errorEquip.message);
+  }
+
+  const { data:ips, error:errorIps } = await supabase
+    .from("ips_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("ip", { ascending:true });
+
+  if(errorIps){
+    throw new Error("Erro ao carregar IPs: " + errorIps.message);
+  }
+
+  return {
+    pops: pops || [],
+    equipamentos: equipamentos || [],
+    ips: ips || []
+  };
+}
+
+/* =========================
+   MONTAR MAPA
+========================= */
+async function desenharMapa(){
+  try{
+    mostrarStatus("Carregando mapa...", "ok");
+    iniciarMapa();
+    camadaMarcadores.clearLayers();
+    camadaLinhas.clearLayers();
+
+    const { pops, equipamentos, ips } = await buscarDadosMapa();
+
+    const mapaEquipPorPop = {};
+    equipamentos.forEach(eq => {
+      const popId = String(eq.pop_id || "");
+      if(!popId) return;
+
+      if(!mapaEquipPorPop[popId]){
+        mapaEquipPorPop[popId] = [];
+      }
+
+      mapaEquipPorPop[popId].push(eq);
+    });
+
+    const mapaIpsPorEquip = {};
+    ips.forEach(ipItem => {
+      const equipId = String(ipItem.equipamento || "");
+      if(!equipId) return;
+
+      if(!mapaIpsPorEquip[equipId]){
+        mapaIpsPorEquip[equipId] = [];
+      }
+
+      mapaIpsPorEquip[equipId].push(ipItem);
+    });
+
+    const pontos = [];
+
+    for(const pop of pops){
+      let coords = null;
+
+      if(pop.latitude && pop.longitude){
+        coords = {
+          lat: Number(pop.latitude),
+          lng: Number(pop.longitude)
+        };
+      }else if(pop.localizacao){
+        const localizacaoTexto = String(pop.localizacao || "").trim();
+
+        coords = extrairLatLng(localizacaoTexto);
+
+        if(!coords){
+          coords = extrairCoordenadaDeLink(localizacaoTexto);
+        }
+
+        if(!coords && !ehLinkMapa(localizacaoTexto)){
+          coords = await geocodificarEndereco(localizacaoTexto);
+        }
+      }
+
+      if(!coords){
+        console.warn("POP sem coordenadas/localização válida:", pop.nome, pop.localizacao);
+        continue;
+      }
+
+      const listaEquip = mapaEquipPorPop[String(pop.id)] || [];
+
+      const ipsDoPop = [];
+      listaEquip.forEach(eq => {
+        const listaIpsEquip = mapaIpsPorEquip[String(eq.id)] || [];
+        listaIpsEquip.forEach(ipItem => {
+          const ipTratado = normalizarIp(ipItem.ip || "");
+          if(ipTratado){
+            ipsDoPop.push(ipTratado);
+          }
+        });
+      });
+
+      pontos.push({
+        id: pop.id,
+        nome: pop.nome || "Sem nome",
+        localizacao: pop.localizacao || "",
+        lat: coords.lat,
+        lng: coords.lng,
+        equipamentos: listaEquip,
+        ips: [...new Set(ipsDoPop)]
+      });
+    }
+
+    if(!pontos.length){
+      mostrarStatus("Nenhum POP com localização válida encontrado.", "erro");
+      mapa.setView([-14.235, -51.9253], 4);
+      document.getElementById("resumo").innerHTML = `
+        <div class="card-resumo">
+          <div class="card-icone">📍</div>
+          <div>
+            <div class="card-label">Mapa</div>
+            <div class="card-value-mini">Nenhum POP com localização válida para mostrar.</div>
+          </div>
         </div>
-        <div class="pop-ip">${ip}</div>
+      `;
+      return;
+    }
+
+    const bounds = [];
+    let totalEquip = 0;
+    let totalIps = 0;
+
+    pontos.forEach((pop, index) => {
+      totalEquip += pop.equipamentos.length;
+      totalIps += pop.ips.length;
+
+      const equipamentosHtml = pop.equipamentos.length
+        ? pop.equipamentos.map(eq => `
+            <div class="item-popup">
+              <div class="item-popup-titulo">${escaparHtml(eq.nome || "Sem nome")}</div>
+              <div class="item-popup-sub">${escaparHtml(eq.modelo || "Sem modelo")}</div>
+            </div>
+          `).join("")
+        : `<div class="item-popup-vazio">Sem equipamentos</div>`;
+
+      const ipsHtml = pop.ips.length
+        ? pop.ips.slice(0, 10).map(ip => `
+            <span class="ip-popup">${escaparHtml(ip)}</span>
+          `).join("")
+        : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
+
+      const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
+
+      const marker = L.marker([pop.lat, pop.lng], {
+        icon: criarIconePop()
+      }).addTo(camadaMarcadores);
+
+      marker.bindPopup(`
+        <div class="popup-mapa">
+          <div class="popup-topo">
+            <div>
+              <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
+              <div class="badge-popup">POP</div>
+            </div>
+          </div>
+
+          <div class="bloco-popup">
+            <div class="linha-popup"><span>Localização</span><strong>${escaparHtml(pop.localizacao || "Não informada")}</strong></div>
+            <div class="linha-popup"><span>Latitude</span><strong>${escaparHtml(pop.lat)}</strong></div>
+            <div class="linha-popup"><span>Longitude</span><strong>${escaparHtml(pop.lng)}</strong></div>
+            <div class="linha-popup"><span>Equipamentos</span><strong>${pop.equipamentos.length}</strong></div>
+            <div class="linha-popup"><span>IPs</span><strong>${pop.ips.length}</strong></div>
+          </div>
+
+          <div class="sub-popup">Equipamentos</div>
+          <div class="lista-popup">
+            ${equipamentosHtml}
+          </div>
+
+          <div class="sub-popup">IPs</div>
+          <div class="lista-ips-popup">
+            ${ipsHtml}
+          </div>
+
+          <div class="acoes-popup">
+            <a
+              href="${escaparHtml(linkMapa)}"
+              target="_blank"
+              class="btn-popup-mapa"
+            >
+              Abrir no Google Maps
+            </a>
+          </div>
+        </div>
+      `);
+
+      bounds.push([pop.lat, pop.lng]);
+
+      if(index > 0){
+        const anterior = pontos[index - 1];
+
+        L.polyline(
+          [
+            [anterior.lat, anterior.lng],
+            [pop.lat, pop.lng]
+          ],
+          {
+            color: "#38bdf8",
+            weight: 3,
+            opacity: 0.85
+          }
+        ).addTo(camadaLinhas);
+      }
+    });
+
+    mapa.fitBounds(bounds, { padding:[30,30] });
+
+    document.getElementById("resumo").innerHTML = `
+      <div class="card-resumo">
+        <div class="card-icone">📍</div>
+        <div>
+          <div class="card-label">POPs no mapa</div>
+          <div class="card-value">${pontos.length}</div>
+        </div>
+      </div>
+
+      <div class="card-resumo">
+        <div class="card-icone">🖧</div>
+        <div>
+          <div class="card-label">Equipamentos encontrados</div>
+          <div class="card-value">${totalEquip}</div>
+        </div>
+      </div>
+
+      <div class="card-resumo">
+        <div class="card-icone">🌐</div>
+        <div>
+          <div class="card-label">IPs encontrados</div>
+          <div class="card-value">${totalIps}</div>
+        </div>
       </div>
     `;
-  }).join("");
 
-  atualizarResumo(pops);
-}
+    mostrarStatus("Mapa carregado com sucesso.", "sucesso");
 
-function atualizarResumo(pops) {
-  const total = pops.length;
-  const up = pops.filter(p => obterStatus(p) === "UP").length;
-  const down = pops.filter(p => obterStatus(p) === "DOWN").length;
-  const sem = pops.filter(p => obterStatus(p) === "SEM STATUS").length;
-
-  document.getElementById("totalPops").textContent = total;
-  document.getElementById("totalUp").textContent = up;
-  document.getElementById("totalDown").textContent = down;
-  document.getElementById("totalSem").textContent = sem;
-}
-
-window.irParaPop = function(index) {
-  const pop = popsCache[index];
-  if (!pop || !pop.__marker) return;
-
-  const lat = Number(obterLatitude(pop));
-  const lng = Number(obterLongitude(pop));
-
-  mapa.setView([lat, lng], 15, { animate: true });
-  pop.__marker.openPopup();
-};
-
-function filtrarLista() {
-  const termo = document.getElementById("busca").value.trim().toLowerCase();
-  const filtroStatus = document.getElementById("filtroStatus").value;
-
-  const filtrados = popsCache.filter(pop => {
-    const nome = obterNome(pop).toLowerCase();
-    const ip = obterIp(pop).toLowerCase();
-    const status = obterStatus(pop);
-
-    const bateTexto =
-      !termo ||
-      nome.includes(termo) ||
-      ip.includes(termo);
-
-    const bateStatus =
-      !filtroStatus || status === filtroStatus;
-
-    return bateTexto && bateStatus;
-  });
-
-  renderizarMapa(filtrados);
-  renderizarLista(filtrados);
-}
-
-/* =========================
-   SUPABASE
-========================= */
-async function carregarPops() {
-  document.getElementById("listaPops").innerHTML =
-    `<div class="sem-dados">Carregando POPs...</div>`;
-
-  const { data, error } = await supabase
-    .from(TABELA_POPS)
-    .select("*")
-    .order("nome", { ascending: true });
-
-  if (error) {
-    console.error(error);
-    document.getElementById("listaPops").innerHTML =
-      `<div class="sem-dados">Erro ao carregar POPs.</div>`;
-    return;
+  }catch(erro){
+    console.error(erro);
+    mostrarStatus(erro.message || "Erro ao carregar mapa", "erro");
   }
-
-  const popsComLocal = (data || []).filter(pop => {
-    return numeroValido(obterLatitude(pop)) && numeroValido(obterLongitude(pop));
-  });
-
-  popsCache = popsComLocal;
-
-  renderizarMapa(popsCache);
-  renderizarLista(popsCache);
 }
 
 /* =========================
-   INIT
+   INICIAR
 ========================= */
-window.addEventListener("load", async () => {
-  iniciarMapa();
+async function iniciar(){
+  try{
+    appId = await obterAppId();
+    await carregarFiltroPops();
+    await desenharMapa();
+  }catch(erro){
+    console.error("Erro ao iniciar:", erro);
+    mostrarStatus(erro.message || "Erro ao iniciar página", "erro");
+  }
+}
 
-  document.getElementById("busca").addEventListener("input", filtrarLista);
-  document.getElementById("filtroStatus").addEventListener("change", filtrarLista);
+window.recarregarMapa = desenharMapa;
 
-  await carregarPops();
-});
+iniciar();
 </script>
 
 <style>
-* {
-  box-sizing: border-box;
+*{
+  box-sizing:border-box;
 }
 
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-  background: #020617;
-  color: #fff;
+:root{
+  --bg:#020617;
+  --bg-soft:#0f172a;
+  --bg-soft-2:#111827;
+  --borda:#1e293b;
+  --borda-2:#334155;
+  --texto:#e5e7eb;
+  --texto-soft:#94a3b8;
+  --azul:#2563eb;
+  --azul-2:#38bdf8;
+  --verde:#22c55e;
+  --vermelho:#ef4444;
+  --sombra:0 18px 40px rgba(0,0,0,.28);
+  --radius:18px;
 }
 
-.app {
-  display: grid;
-  grid-template-columns: 360px 1fr;
-  height: 100vh;
+body{
+  margin:0;
+  min-height:100vh;
+  background:
+    radial-gradient(circle at top left, rgba(37,99,235,.14), transparent 28%),
+    radial-gradient(circle at top right, rgba(56,189,248,.10), transparent 25%),
+    linear-gradient(180deg, #020617 0%, #06101f 100%);
+  color:var(--texto);
+  font-family:Arial, sans-serif;
+  padding:24px;
 }
 
-.sidebar {
-  background: linear-gradient(180deg, #0f172a, #111827);
-  border-right: 1px solid #1e293b;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+.pagina{
+  max-width:1400px;
+  margin:0 auto;
 }
 
-.sidebar-topo {
-  padding: 18px;
-  border-bottom: 1px solid #1e293b;
+.topo{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+  margin-bottom:18px;
+  padding:20px;
+  border:1px solid rgba(255,255,255,.06);
+  background:rgba(15,23,42,.75);
+  backdrop-filter:blur(10px);
+  border-radius:24px;
+  box-shadow:var(--sombra);
 }
 
-.titulo {
-  font-size: 22px;
-  font-weight: bold;
-  margin-bottom: 6px;
+.topo-esq{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
 }
 
-.subtitulo {
-  color: #94a3b8;
-  font-size: 13px;
-  margin-bottom: 16px;
+h2{
+  margin:0;
+  font-size:28px;
+  line-height:1.1;
 }
 
-.resumo {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-bottom: 14px;
+.subtitulo{
+  color:var(--texto-soft);
+  font-size:14px;
 }
 
-.box-resumo {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid #1e293b;
-  border-radius: 14px;
-  padding: 12px;
+.painel{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
 }
 
-.box-resumo .rotulo {
-  color: #94a3b8;
-  font-size: 12px;
-  margin-bottom: 4px;
+select, button{
+  border:none;
+  border-radius:14px;
+  padding:12px 16px;
+  font-size:14px;
+  transition:.2s;
 }
 
-.box-resumo .valor {
-  font-size: 22px;
-  font-weight: bold;
+select{
+  min-width:240px;
+  background:#020617;
+  color:#fff;
+  border:1px solid var(--borda-2);
+  outline:none;
 }
 
-.filtros {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+select:focus{
+  border-color:#3b82f6;
+  box-shadow:0 0 0 3px rgba(59,130,246,.18);
 }
 
-.filtros input,
-.filtros select {
-  width: 100%;
-  background: #020617;
-  color: #fff;
-  border: 1px solid #334155;
-  border-radius: 12px;
-  padding: 12px;
-  outline: none;
+button{
+  background:linear-gradient(135deg, #2563eb, #1d4ed8);
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+  box-shadow:0 8px 24px rgba(37,99,235,.28);
 }
 
-.lista-pops {
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px;
+button:hover{
+  transform:translateY(-1px);
+  filter:brightness(1.05);
 }
 
-.pop-card {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid #1e293b;
-  border-radius: 16px;
-  padding: 14px;
-  margin-bottom: 12px;
-  cursor: pointer;
-  transition: 0.2s;
+.status{
+  margin-bottom:18px;
+  padding:14px 16px;
+  border-radius:16px;
+  border:1px solid var(--borda);
+  background:rgba(15,23,42,.78);
+  backdrop-filter:blur(8px);
+  box-shadow:var(--sombra);
+  font-weight:600;
 }
 
-.pop-card:hover {
-  transform: translateY(-2px);
-  border-color: #334155;
-  background: rgba(255,255,255,0.06);
+.status.ok{
+  color:#cbd5e1;
 }
 
-.pop-card-topo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+.status.sucesso{
+  color:#86efac;
+  border-color:rgba(34,197,94,.32);
+  background:rgba(6,28,18,.92);
 }
 
-.pop-nome {
-  font-weight: bold;
-  font-size: 15px;
+.status.erro{
+  color:#fecaca;
+  border-color:rgba(239,68,68,.30);
+  background:rgba(40,10,10,.92);
 }
 
-.pop-ip {
-  margin-top: 8px;
-  color: #94a3b8;
-  font-size: 13px;
-  word-break: break-word;
+#resumo{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(240px,1fr));
+  gap:14px;
+  margin-bottom:18px;
 }
 
-.badge {
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: bold;
-  white-space: nowrap;
+.card-resumo{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  background:rgba(15,23,42,.82);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:20px;
+  padding:18px;
+  box-shadow:var(--sombra);
+  min-height:90px;
 }
 
-.badge.up {
-  background: rgba(34,197,94,0.15);
-  color: #4ade80;
-  border: 1px solid rgba(34,197,94,0.35);
+.card-icone{
+  min-width:52px;
+  width:52px;
+  height:52px;
+  border-radius:16px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:24px;
+  background:linear-gradient(135deg, rgba(37,99,235,.24), rgba(56,189,248,.14));
+  border:1px solid rgba(56,189,248,.20);
 }
 
-.badge.down {
-  background: rgba(239,68,68,0.15);
-  color: #f87171;
-  border: 1px solid rgba(239,68,68,0.35);
+.card-label{
+  color:var(--texto-soft);
+  font-size:13px;
+  margin-bottom:4px;
 }
 
-.badge.warn {
-  background: rgba(245,158,11,0.15);
-  color: #fbbf24;
-  border: 1px solid rgba(245,158,11,0.35);
+.card-value{
+  font-size:28px;
+  font-weight:bold;
+  line-height:1;
 }
 
-.mapa-area {
-  position: relative;
+.card-value-mini{
+  font-size:15px;
+  color:#fff;
+  font-weight:600;
 }
 
-#mapa {
-  width: 100%;
-  height: 100%;
+.box-mapa{
+  position:relative;
+  background:rgba(15,23,42,.82);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:24px;
+  padding:18px;
+  box-shadow:var(--sombra);
+  overflow:hidden;
 }
 
-.topo-mapa {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 999;
-  background: rgba(15, 23, 42, 0.92);
-  border: 1px solid #1e293b;
-  border-radius: 16px;
-  padding: 12px 14px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+.box-mapa::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(180deg, rgba(255,255,255,.03), transparent 22%);
+  pointer-events:none;
 }
 
-.topo-mapa strong {
-  display: block;
-  margin-bottom: 4px;
+.topo-mapa-flutuante{
+  position:absolute;
+  top:28px;
+  left:28px;
+  z-index:999;
+  padding:12px 14px;
+  border-radius:16px;
+  background:rgba(2,6,23,.82);
+  border:1px solid rgba(255,255,255,.08);
+  color:#fff;
+  backdrop-filter:blur(10px);
+  box-shadow:var(--sombra);
 }
 
-.topo-mapa span {
-  color: #94a3b8;
-  font-size: 13px;
+.topo-mapa-flutuante strong{
+  display:block;
+  font-size:14px;
+  margin-bottom:4px;
 }
 
-.custom-marker-wrapper {
-  background: transparent;
-  border: none;
+.topo-mapa-flutuante span{
+  font-size:12px;
+  color:#cbd5e1;
 }
 
-.marker-pin {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 4px rgba(255,255,255,0.12), 0 8px 20px rgba(0,0,0,0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+#mapaPops{
+  width:100%;
+  height:580px;
+  border-radius:18px;
+  overflow:hidden;
 }
 
-.marker-core {
-  width: 6px;
-  height: 6px;
-  background: #fff;
-  border-radius: 50%;
+/* Marcador */
+.marcador-pop-wrap{
+  background:transparent;
+  border:none;
 }
 
-.popup-box {
-  min-width: 220px;
+.marcador-pop{
+  width:24px;
+  height:24px;
+  border-radius:50%;
+  background:linear-gradient(135deg, #38bdf8, #2563eb);
+  border:3px solid #fff;
+  box-shadow:
+    0 0 0 6px rgba(56,189,248,.16),
+    0 10px 24px rgba(37,99,235,.45);
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 
-.popup-topo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
+.marcador-pop-interno{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#fff;
 }
 
-.popup-titulo {
-  font-size: 15px;
-  font-weight: bold;
-  color: #0f172a;
+/* Popup */
+.popup-mapa{
+  min-width:280px;
+  max-width:320px;
+  line-height:1.45;
+  color:#0f172a;
+  font-family:Arial, sans-serif;
 }
 
-.popup-linha {
-  font-size: 13px;
-  margin-bottom: 6px;
-  color: #334155;
+.popup-topo{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
 }
 
-.sem-dados {
-  color: #94a3b8;
-  text-align: center;
-  padding: 30px 10px;
+.titulo-popup{
+  font-weight:700;
+  font-size:17px;
+  line-height:1.2;
+  margin-bottom:6px;
+  color:#0f172a;
 }
 
-@media (max-width: 900px) {
-  .app {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+.badge-popup{
+  display:inline-flex;
+  align-items:center;
+  padding:5px 10px;
+  border-radius:999px;
+  background:#dbeafe;
+  color:#1d4ed8;
+  font-size:11px;
+  font-weight:700;
+  border:1px solid #bfdbfe;
+}
+
+.bloco-popup{
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+  border-radius:14px;
+  padding:10px 12px;
+  margin-bottom:12px;
+}
+
+.linha-popup{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding:6px 0;
+  border-bottom:1px solid #e2e8f0;
+}
+
+.linha-popup:last-child{
+  border-bottom:none;
+}
+
+.linha-popup span{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.5px;
+  color:#64748b;
+  font-weight:700;
+}
+
+.linha-popup strong{
+  font-size:13px;
+  color:#0f172a;
+  word-break:break-word;
+}
+
+.sub-popup{
+  margin-top:10px;
+  margin-bottom:8px;
+  font-weight:700;
+  color:#0f172a;
+  font-size:13px;
+}
+
+.lista-popup{
+  margin-bottom:12px;
+}
+
+.item-popup{
+  margin-bottom:8px;
+  padding:10px 12px;
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+}
+
+.item-popup-titulo{
+  font-weight:700;
+  font-size:13px;
+  color:#0f172a;
+}
+
+.item-popup-sub{
+  display:block;
+  font-size:12px;
+  color:#64748b;
+  margin-top:3px;
+}
+
+.item-popup-vazio{
+  padding:10px 12px;
+  background:#f8fafc;
+  border:1px dashed #cbd5e1;
+  border-radius:12px;
+  color:#64748b;
+  font-size:12px;
+}
+
+.lista-ips-popup{
+  margin-bottom:14px;
+}
+
+.ip-popup{
+  display:inline-block;
+  margin:4px 6px 4px 0;
+  padding:6px 10px;
+  background:#e2e8f0;
+  border-radius:999px;
+  font-size:12px;
+  color:#0f172a;
+  border:1px solid #cbd5e1;
+}
+
+.acoes-popup{
+  margin-top:8px;
+}
+
+.btn-popup-mapa{
+  display:inline-block;
+  text-decoration:none;
+  background:linear-gradient(135deg, #2563eb, #1d4ed8);
+  color:#fff;
+  padding:10px 14px;
+  border-radius:12px;
+  font-size:12px;
+  font-weight:700;
+  box-shadow:0 8px 20px rgba(37,99,235,.25);
+}
+
+/* Leaflet tweaks */
+.leaflet-popup-content-wrapper{
+  border-radius:18px;
+  box-shadow:0 20px 45px rgba(2,6,23,.28);
+}
+
+.leaflet-popup-content{
+  margin:14px 14px 12px 14px;
+}
+
+.leaflet-control-zoom{
+  border:none !important;
+  box-shadow:var(--sombra) !important;
+}
+
+.leaflet-control-zoom a{
+  background:rgba(15,23,42,.92) !important;
+  color:#fff !important;
+  border:none !important;
+}
+
+.leaflet-control-attribution{
+  background:rgba(15,23,42,.82) !important;
+  color:#cbd5e1 !important;
+}
+
+/* Responsivo */
+@media(max-width:900px){
+  h2{
+    font-size:24px;
   }
 
-  .sidebar {
-    height: auto;
-    max-height: 50vh;
+  #mapaPops{
+    height:460px;
   }
 
-  .lista-pops {
-    max-height: 220px;
+  .topo-mapa-flutuante{
+    left:22px;
+    right:22px;
+    top:22px;
+  }
+}
+
+@media(max-width:700px){
+  body{
+    padding:14px;
+  }
+
+  .topo{
+    flex-direction:column;
+    align-items:stretch;
+    padding:16px;
+  }
+
+  .painel{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  select, button{
+    width:100%;
+  }
+
+  #mapaPops{
+    height:380px;
+  }
+
+  .box-mapa{
+    padding:12px;
+  }
+
+  .topo-mapa-flutuante{
+    position:relative;
+    top:auto;
+    left:auto;
+    right:auto;
+    margin-bottom:12px;
   }
 }
 </style>
 </head>
 <body>
 
-<div class="app">
-  <aside class="sidebar">
-    <div class="sidebar-topo">
-      <div class="titulo">Mapa dos POPs</div>
-      <div class="subtitulo">Visual moderno com nome, IP e status em tempo real</div>
-
-      <div class="resumo">
-        <div class="box-resumo">
-          <div class="rotulo">Total</div>
-          <div class="valor" id="totalPops">0</div>
-        </div>
-        <div class="box-resumo">
-          <div class="rotulo">UP</div>
-          <div class="valor" id="totalUp">0</div>
-        </div>
-        <div class="box-resumo">
-          <div class="rotulo">DOWN</div>
-          <div class="valor" id="totalDown">0</div>
-        </div>
-        <div class="box-resumo">
-          <div class="rotulo">Sem status</div>
-          <div class="valor" id="totalSem">0</div>
-        </div>
-      </div>
-
-      <div class="filtros">
-        <input type="text" id="busca" placeholder="Buscar por nome ou IP..." />
-        <select id="filtroStatus">
-          <option value="">Todos os status</option>
-          <option value="UP">Somente UP</option>
-          <option value="DOWN">Somente DOWN</option>
-          <option value="SEM STATUS">Sem status</option>
-        </select>
-      </div>
+<div class="pagina">
+  <div class="topo">
+    <div class="topo-esq">
+      <h2>Mapa Automático dos POPs</h2>
+      <div class="subtitulo">Visual moderno mantendo sua lógica original e lendo as informações do banco</div>
     </div>
 
-    <div class="lista-pops" id="listaPops"></div>
-  </aside>
+    <div class="painel">
+      <select id="filtroPop" onchange="recarregarMapa()">
+        <option value="">Todos os POPs</option>
+      </select>
 
-  <main class="mapa-area">
-    <div class="topo-mapa">
+      <button onclick="recarregarMapa()">Atualizar mapa</button>
+    </div>
+  </div>
+
+  <div id="status" class="status ok">Iniciando...</div>
+
+  <div id="resumo"></div>
+
+  <div class="box-mapa">
+    <div class="topo-mapa-flutuante">
       <strong>Rede de POPs</strong>
-      <span>Clique em um POP na lista ou no mapa para ver detalhes</span>
+      <span>Mapa com localização, equipamentos e IPs carregados do banco</span>
     </div>
-    <div id="mapa"></div>
-  </main>
+
+    <div id="mapaPops"></div>
+  </div>
 </div>
 
 </body>
