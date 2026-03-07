@@ -23,6 +23,9 @@ let camadaLinhas = null;
 let camadaFluxo = null;
 let cacheGeocoding = {};
 let animacoesFluxo = [];
+let pontosGlobais = [];
+let autoRefreshTimer = null;
+let ultimoAtualizadoEm = null;
 
 /* =========================
    AUX
@@ -133,6 +136,11 @@ function mostrarStatus(texto, tipo="ok"){
   box.innerText = texto || "";
 }
 
+function formatarHora(date){
+  const d = date instanceof Date ? date : new Date();
+  return d.toLocaleTimeString("pt-BR");
+}
+
 /* =========================
    STATUS
 ========================= */
@@ -200,15 +208,20 @@ function calcularStatusPop(listaIps){
 /* =========================
    MAPA / MARCADORES
 ========================= */
-function criarIconePop(status){
+function criarIconePop(status, nome){
   return L.divIcon({
     className: "marcador-pop-wrap",
     html: `
-      <div class="marcador-pop marcador-${status}">
-        <div class="marcador-core"></div>
+      <div class="marker-row">
+        <div class="marcador-pop marcador-${status}">
+          <div class="marcador-core"></div>
+        </div>
+        <div class="marker-label marker-label-${status}">
+          ${escaparHtml(nome || "POP")}
+        </div>
       </div>
     `,
-    iconSize: [26, 26],
+    iconSize: [220, 28],
     iconAnchor: [13, 13],
     popupAnchor: [0, -12]
   });
@@ -236,8 +249,24 @@ function iniciarMapa(){
 function limparAnimacoesFluxo(){
   animacoesFluxo.forEach(id => cancelAnimationFrame(id));
   animacoesFluxo = [];
-  camadaFluxo.clearLayers();
+  if(camadaFluxo) camadaFluxo.clearLayers();
 }
+
+function centralizarPop(index){
+  const pop = pontosGlobais[index];
+  if(!pop) return;
+
+  mapa.setView([pop.lat, pop.lng], 14, { animate: true });
+
+  if(pop.__marker){
+    pop.__marker.openPopup();
+  }
+
+  document.querySelectorAll(".pop-item").forEach(el => el.classList.remove("ativo"));
+  const item = document.getElementById("pop-item-" + index);
+  if(item) item.classList.add("ativo");
+}
+window.centralizarPop = centralizarPop;
 
 async function geocodificarEndereco(endereco){
   try{
@@ -415,11 +444,131 @@ function animarFluxoEntrePontos(origem, destino, statusLinha = "up"){
 }
 
 /* =========================
+   UI LATERAL
+========================= */
+function atualizarResumo(pontos){
+  const total = pontos.length;
+  const totalUp = pontos.filter(p => p.status === "up").length;
+  const totalDown = pontos.filter(p => p.status === "down").length;
+  const totalUnknown = pontos.filter(p => p.status === "unknown").length;
+  const totalEquip = pontos.reduce((s, p) => s + p.equipamentos.length, 0);
+  const totalIps = pontos.reduce((s, p) => s + p.ips.length, 0);
+
+  document.getElementById("resumo").innerHTML = `
+    <div class="card-resumo">
+      <div class="card-icone">📍</div>
+      <div>
+        <div class="card-label">POPs no mapa</div>
+        <div class="card-value">${total}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo">
+      <div class="card-icone">🟢</div>
+      <div>
+        <div class="card-label">POPs UP</div>
+        <div class="card-value">${totalUp}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo">
+      <div class="card-icone">🔴</div>
+      <div>
+        <div class="card-label">POPs DOWN</div>
+        <div class="card-value">${totalDown}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo">
+      <div class="card-icone">🟡</div>
+      <div>
+        <div class="card-label">Sem status</div>
+        <div class="card-value">${totalUnknown}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo">
+      <div class="card-icone">🖧</div>
+      <div>
+        <div class="card-label">Equipamentos</div>
+        <div class="card-value">${totalEquip}</div>
+      </div>
+    </div>
+
+    <div class="card-resumo">
+      <div class="card-icone">🌐</div>
+      <div>
+        <div class="card-label">IPs</div>
+        <div class="card-value">${totalIps}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderizarPainelLateral(pontos){
+  const busca = String(document.getElementById("buscaPop").value || "").trim().toLowerCase();
+  const filtroStatus = document.getElementById("filtroStatusLista").value;
+
+  const filtrados = pontos.filter(pop => {
+    const nomeOk = !busca || String(pop.nome).toLowerCase().includes(busca);
+    const statusOk = !filtroStatus || pop.status === filtroStatus;
+    return nomeOk && statusOk;
+  });
+
+  const lista = document.getElementById("listaPops");
+
+  if(!filtrados.length){
+    lista.innerHTML = `<div class="sem-pops">Nenhum POP encontrado.</div>`;
+    return;
+  }
+
+  lista.innerHTML = filtrados.map(pop => {
+    const indexReal = pontosGlobais.findIndex(p => String(p.id) === String(pop.id));
+    return `
+      <div class="pop-item ${badgeClassStatus(pop.status)}" id="pop-item-${indexReal}" onclick="centralizarPop(${indexReal})">
+        <div class="pop-item-topo">
+          <div class="pop-item-nome">${escaparHtml(pop.nome)}</div>
+          <div class="badge-popup ${badgeClassStatus(pop.status)}">${textoStatus(pop.status)}</div>
+        </div>
+        <div class="pop-item-linha">IPs: ${pop.ips.length}</div>
+        <div class="pop-item-linha">Equipamentos: ${pop.equipamentos.length}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function atualizarLegendaAtualizacao(){
+  const box = document.getElementById("ultimaAtualizacao");
+  if(!ultimoAtualizadoEm){
+    box.textContent = "Última atualização: --:--:--";
+    return;
+  }
+  box.textContent = "Última atualização: " + formatarHora(ultimoAtualizadoEm);
+}
+
+function iniciarAutoRefresh(){
+  if(autoRefreshTimer){
+    clearInterval(autoRefreshTimer);
+  }
+
+  autoRefreshTimer = setInterval(async () => {
+    try{
+      await desenharMapa(true);
+    }catch(e){
+      console.error("Erro no auto refresh:", e);
+    }
+  }, 30000);
+}
+
+/* =========================
    MONTAR MAPA
 ========================= */
-async function desenharMapa(){
+async function desenharMapa(silencioso = false){
   try{
-    mostrarStatus("Carregando mapa...", "ok");
+    if(!silencioso){
+      mostrarStatus("Carregando mapa...", "ok");
+    }
+
     iniciarMapa();
 
     camadaMarcadores.clearLayers();
@@ -512,56 +661,26 @@ async function desenharMapa(){
       });
     }
 
+    pontosGlobais = pontos;
+
     if(!pontos.length){
       mostrarStatus("Nenhum POP com localização válida encontrado.", "erro");
       mapa.setView([-14.235, -51.9253], 4);
-      document.getElementById("resumo").innerHTML = `
-        <div class="card-resumo">
-          <div class="card-icone">📍</div>
-          <div>
-            <div class="card-label">Mapa</div>
-            <div class="card-value-mini">Nenhum POP com localização válida para mostrar.</div>
-          </div>
-        </div>
-      `;
+      document.getElementById("resumo").innerHTML = "";
+      document.getElementById("listaPops").innerHTML = `<div class="sem-pops">Nenhum POP com localização válida.</div>`;
       return;
     }
 
     const bounds = [];
-    let totalEquip = 0;
-    let totalIps = 0;
-    let totalUp = 0;
-    let totalDown = 0;
-    let totalUnknown = 0;
 
     pontos.forEach((pop, index) => {
-      totalEquip += pop.equipamentos.length;
-      totalIps += pop.ips.length;
-
-      if(pop.status === "up") totalUp++;
-      else if(pop.status === "down") totalDown++;
-      else totalUnknown++;
-
-      const equipamentosHtml = pop.equipamentos.length
-        ? pop.equipamentos.map(eq => `
-            <div class="item-popup">
-              <div class="item-popup-titulo">${escaparHtml(eq.nome || "Sem nome")}</div>
-              <div class="item-popup-sub">${escaparHtml(eq.modelo || "Sem modelo")}</div>
-            </div>
-          `).join("")
-        : `<div class="item-popup-vazio">Sem equipamentos</div>`;
-
-      const ipsHtml = pop.ips.length
-        ? pop.ips.slice(0, 12).map(ip => `
-            <span class="ip-popup">${escaparHtml(ip)}</span>
-          `).join("")
-        : `<div class="item-popup-vazio">Sem IP cadastrado</div>`;
-
       const linkMapa = montarLinkMapa(pop.localizacao, pop.lat, pop.lng);
 
       const marker = L.marker([pop.lat, pop.lng], {
-        icon: criarIconePop(pop.status)
+        icon: criarIconePop(pop.status, pop.nome)
       }).addTo(camadaMarcadores);
+
+      pop.__marker = marker;
 
       marker.bindPopup(`
         <div class="popup-mapa">
@@ -581,18 +700,8 @@ async function desenharMapa(){
             <div class="linha-popup"><span>Status do POP</span><strong style="color:${corStatus(pop.status)}">${textoStatus(pop.status)}</strong></div>
           </div>
 
-          <div class="sub-popup">Equipamentos</div>
-          <div class="lista-popup">${equipamentosHtml}</div>
-
-          <div class="sub-popup">IPs</div>
-          <div class="lista-ips-popup">${ipsHtml}</div>
-
           <div class="acoes-popup">
-            <a
-              href="${escaparHtml(linkMapa)}"
-              target="_blank"
-              class="btn-popup-mapa"
-            >
+            <a href="${escaparHtml(linkMapa)}" target="_blank" class="btn-popup-mapa">
               Abrir no Google Maps
             </a>
           </div>
@@ -635,64 +744,37 @@ async function desenharMapa(){
       }
     });
 
-    mapa.fitBounds(bounds, { padding:[30,30] });
+    mapa.fitBounds(bounds, { padding:[40,40] });
 
-    document.getElementById("resumo").innerHTML = `
-      <div class="card-resumo">
-        <div class="card-icone">📍</div>
-        <div>
-          <div class="card-label">POPs no mapa</div>
-          <div class="card-value">${pontos.length}</div>
-        </div>
-      </div>
+    atualizarResumo(pontos);
+    renderizarPainelLateral(pontos);
 
-      <div class="card-resumo">
-        <div class="card-icone">🟢</div>
-        <div>
-          <div class="card-label">POPs UP</div>
-          <div class="card-value">${totalUp}</div>
-        </div>
-      </div>
+    ultimoAtualizadoEm = new Date();
+    atualizarLegendaAtualizacao();
 
-      <div class="card-resumo">
-        <div class="card-icone">🔴</div>
-        <div>
-          <div class="card-label">POPs DOWN</div>
-          <div class="card-value">${totalDown}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🖧</div>
-        <div>
-          <div class="card-label">Equipamentos encontrados</div>
-          <div class="card-value">${totalEquip}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🌐</div>
-        <div>
-          <div class="card-label">IPs encontrados</div>
-          <div class="card-value">${totalIps}</div>
-        </div>
-      </div>
-
-      <div class="card-resumo">
-        <div class="card-icone">🟡</div>
-        <div>
-          <div class="card-label">Sem status</div>
-          <div class="card-value">${totalUnknown}</div>
-        </div>
-      </div>
-    `;
-
-    mostrarStatus("Mapa carregado com sucesso.", "sucesso");
+    if(!silencioso){
+      mostrarStatus("Mapa carregado com sucesso.", "sucesso");
+    }else{
+      mostrarStatus("Mapa atualizado automaticamente.", "sucesso");
+    }
 
   }catch(erro){
     console.error(erro);
     mostrarStatus(erro.message || "Erro ao carregar mapa", "erro");
   }
+}
+
+/* =========================
+   EVENTOS
+========================= */
+function registrarEventosUI(){
+  document.getElementById("buscaPop").addEventListener("input", () => {
+    renderizarPainelLateral(pontosGlobais);
+  });
+
+  document.getElementById("filtroStatusLista").addEventListener("change", () => {
+    renderizarPainelLateral(pontosGlobais);
+  });
 }
 
 /* =========================
@@ -702,14 +784,17 @@ async function iniciar(){
   try{
     appId = await obterAppId();
     await carregarFiltroPops();
+    registrarEventosUI();
     await desenharMapa();
+    iniciarAutoRefresh();
   }catch(erro){
     console.error("Erro ao iniciar:", erro);
     mostrarStatus(erro.message || "Erro ao iniciar página", "erro");
   }
 }
 
-window.recarregarMapa = desenharMapa;
+window.recarregarMapa = () => desenharMapa(false);
+
 iniciar();
 </script>
 
@@ -732,7 +817,6 @@ iniciar();
   --vermelho:#ef4444;
   --amarelo:#f59e0b;
   --sombra:0 18px 40px rgba(0,0,0,.28);
-  --radius:18px;
 }
 
 body{
@@ -744,11 +828,11 @@ body{
     linear-gradient(180deg, #020617 0%, #06101f 100%);
   color:var(--texto);
   font-family:Arial, sans-serif;
-  padding:24px;
+  padding:18px;
 }
 
 .pagina{
-  max-width:1400px;
+  max-width:1600px;
   margin:0 auto;
 }
 
@@ -791,7 +875,7 @@ h2{
   align-items:center;
 }
 
-select, button{
+select, button, input{
   border:none;
   border-radius:14px;
   padding:12px 16px;
@@ -799,15 +883,14 @@ select, button{
   transition:.2s;
 }
 
-select{
-  min-width:240px;
+input, select{
   background:#020617;
   color:#fff;
   border:1px solid var(--borda-2);
   outline:none;
 }
 
-select:focus{
+input:focus, select:focus{
   border-color:#3b82f6;
   box-shadow:0 0 0 3px rgba(59,130,246,.18);
 }
@@ -836,16 +919,12 @@ button:hover{
   font-weight:600;
 }
 
-.status.ok{
-  color:#cbd5e1;
-}
-
+.status.ok{ color:#cbd5e1; }
 .status.sucesso{
   color:#86efac;
   border-color:rgba(34,197,94,.32);
   background:rgba(6,28,18,.92);
 }
-
 .status.erro{
   color:#fecaca;
   border-color:rgba(239,68,68,.30);
@@ -896,10 +975,109 @@ button:hover{
   line-height:1;
 }
 
-.card-value-mini{
-  font-size:15px;
-  color:#fff;
-  font-weight:600;
+.layout-mapa{
+  display:grid;
+  grid-template-columns: 340px 1fr;
+  gap:16px;
+}
+
+.sidebar{
+  background:rgba(15,23,42,.82);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:24px;
+  box-shadow:var(--sombra);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  min-height:650px;
+}
+
+.sidebar-topo{
+  padding:16px;
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+
+.sidebar-titulo{
+  font-size:18px;
+  font-weight:bold;
+  margin-bottom:10px;
+}
+
+.sidebar-sub{
+  color:var(--texto-soft);
+  font-size:12px;
+  margin-bottom:12px;
+}
+
+.sidebar-filtros{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.ultima-atualizacao{
+  margin-top:12px;
+  font-size:12px;
+  color:#cbd5e1;
+  background:#020617;
+  border:1px solid var(--borda);
+  padding:10px 12px;
+  border-radius:12px;
+}
+
+.lista-pops{
+  padding:14px;
+  overflow-y:auto;
+  flex:1;
+}
+
+.pop-item{
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.06);
+  border-left:4px solid transparent;
+  border-radius:16px;
+  padding:12px;
+  margin-bottom:10px;
+  cursor:pointer;
+  transition:.2s;
+}
+
+.pop-item:hover{
+  transform:translateY(-1px);
+  background:rgba(255,255,255,.05);
+}
+
+.pop-item.ativo{
+  box-shadow:0 0 0 2px rgba(59,130,246,.35);
+}
+
+.pop-item.up{ border-left-color:#22c55e; }
+.pop-item.down{ border-left-color:#ef4444; }
+.pop-item.unknown{ border-left-color:#f59e0b; }
+
+.pop-item-topo{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+}
+
+.pop-item-nome{
+  font-weight:700;
+  font-size:14px;
+}
+
+.pop-item-linha{
+  color:#cbd5e1;
+  font-size:12px;
+  margin-top:4px;
+}
+
+.sem-pops{
+  color:#94a3b8;
+  text-align:center;
+  padding:25px 10px;
 }
 
 .box-mapa{
@@ -914,7 +1092,7 @@ button:hover{
 
 #mapaPops{
   width:100%;
-  height:580px;
+  height:650px;
   border-radius:18px;
   overflow:hidden;
 }
@@ -923,6 +1101,13 @@ button:hover{
 .marcador-pop-wrap{
   background:transparent;
   border:none;
+}
+
+.marker-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  white-space:nowrap;
 }
 
 .marcador-pop{
@@ -935,6 +1120,7 @@ button:hover{
   justify-content:center;
   position:relative;
   box-shadow:0 10px 24px rgba(0,0,0,.35);
+  flex:0 0 auto;
 }
 
 .marcador-core{
@@ -943,6 +1129,25 @@ button:hover{
   border-radius:50%;
   background:#fff;
 }
+
+.marker-label{
+  height:26px;
+  display:flex;
+  align-items:center;
+  padding:0 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+  color:#fff;
+  border:1px solid rgba(255,255,255,.18);
+  background:rgba(2,6,23,.78);
+  backdrop-filter:blur(8px);
+  box-shadow:0 10px 24px rgba(0,0,0,.25);
+}
+
+.marker-label-up{ border-color:rgba(34,197,94,.35); }
+.marker-label-down{ border-color:rgba(239,68,68,.35); }
+.marker-label-unknown{ border-color:rgba(245,158,11,.35); }
 
 .marcador-up{
   background:linear-gradient(135deg, #22c55e, #16a34a);
@@ -969,66 +1174,21 @@ button:hover{
 }
 
 @keyframes pulsoUp{
-  0%{
-    transform:scale(1);
-    box-shadow:
-      0 0 0 0 rgba(34,197,94,.55),
-      0 10px 24px rgba(22,163,74,.35);
-  }
-  70%{
-    transform:scale(1.06);
-    box-shadow:
-      0 0 0 14px rgba(34,197,94,0),
-      0 10px 24px rgba(22,163,74,.35);
-  }
-  100%{
-    transform:scale(1);
-    box-shadow:
-      0 0 0 0 rgba(34,197,94,0),
-      0 10px 24px rgba(22,163,74,.35);
-  }
+  0%{ transform:scale(1); box-shadow:0 0 0 0 rgba(34,197,94,.55), 0 10px 24px rgba(22,163,74,.35); }
+  70%{ transform:scale(1.06); box-shadow:0 0 0 14px rgba(34,197,94,0), 0 10px 24px rgba(22,163,74,.35); }
+  100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(34,197,94,0), 0 10px 24px rgba(22,163,74,.35); }
 }
 
 @keyframes pulsoDown{
-  0%{
-    transform:scale(1);
-    box-shadow:
-      0 0 0 0 rgba(239,68,68,.65),
-      0 10px 24px rgba(220,38,38,.4);
-  }
-  70%{
-    transform:scale(1.1);
-    box-shadow:
-      0 0 0 16px rgba(239,68,68,0),
-      0 10px 24px rgba(220,38,38,.4);
-  }
-  100%{
-    transform:scale(1);
-    box-shadow:
-      0 0 0 0 rgba(239,68,68,0),
-      0 10px 24px rgba(220,38,38,.4);
-  }
+  0%{ transform:scale(1); box-shadow:0 0 0 0 rgba(239,68,68,.65), 0 10px 24px rgba(220,38,38,.4); }
+  70%{ transform:scale(1.1); box-shadow:0 0 0 16px rgba(239,68,68,0), 0 10px 24px rgba(220,38,38,.4); }
+  100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(239,68,68,0), 0 10px 24px rgba(220,38,38,.4); }
 }
 
 @keyframes pulsoUnknown{
-  0%{
-    transform:scale(1);
-    box-shadow:
-      0 0 0 0 rgba(245,158,11,.5),
-      0 10px 24px rgba(217,119,6,.35);
-  }
-  70%{
-    transform:scale(1.04);
-    box-shadow:
-      0 0 0 12px rgba(245,158,11,0),
-      0 10px 24px rgba(217,119,6,.35);
-  }
-  100%{
-    transform:scale(1);
-    box-shadow:
-      0 0 0 0 rgba(245,158,11,0),
-      0 10px 24px rgba(217,119,6,.35);
-  }
+  0%{ transform:scale(1); box-shadow:0 0 0 0 rgba(245,158,11,.5), 0 10px 24px rgba(217,119,6,.35); }
+  70%{ transform:scale(1.04); box-shadow:0 0 0 12px rgba(245,158,11,0), 0 10px 24px rgba(217,119,6,.35); }
+  100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(245,158,11,0), 0 10px 24px rgba(217,119,6,.35); }
 }
 
 /* Popup */
@@ -1118,67 +1278,6 @@ button:hover{
   word-break:break-word;
 }
 
-.sub-popup{
-  margin-top:10px;
-  margin-bottom:8px;
-  font-weight:700;
-  color:#0f172a;
-  font-size:13px;
-}
-
-.lista-popup{
-  margin-bottom:12px;
-}
-
-.item-popup{
-  margin-bottom:8px;
-  padding:10px 12px;
-  background:#f8fafc;
-  border:1px solid #e2e8f0;
-  border-radius:12px;
-}
-
-.item-popup-titulo{
-  font-weight:700;
-  font-size:13px;
-  color:#0f172a;
-}
-
-.item-popup-sub{
-  display:block;
-  font-size:12px;
-  color:#64748b;
-  margin-top:3px;
-}
-
-.item-popup-vazio{
-  padding:10px 12px;
-  background:#f8fafc;
-  border:1px dashed #cbd5e1;
-  border-radius:12px;
-  color:#64748b;
-  font-size:12px;
-}
-
-.lista-ips-popup{
-  margin-bottom:14px;
-}
-
-.ip-popup{
-  display:inline-block;
-  margin:4px 6px 4px 0;
-  padding:6px 10px;
-  background:#e2e8f0;
-  border-radius:999px;
-  font-size:12px;
-  color:#0f172a;
-  border:1px solid #cbd5e1;
-}
-
-.acoes-popup{
-  margin-top:8px;
-}
-
 .btn-popup-mapa{
   display:inline-block;
   text-decoration:none;
@@ -1217,43 +1316,39 @@ button:hover{
   color:#cbd5e1 !important;
 }
 
-/* Responsivo */
-@media(max-width:900px){
-  h2{
-    font-size:24px;
+@media(max-width:1100px){
+  .layout-mapa{
+    grid-template-columns:1fr;
+  }
+
+  .sidebar{
+    min-height:auto;
   }
 
   #mapaPops{
-    height:460px;
+    height:500px;
   }
 }
 
 @media(max-width:700px){
-  body{
-    padding:14px;
-  }
-
+  body{ padding:12px; }
   .topo{
     flex-direction:column;
     align-items:stretch;
     padding:16px;
   }
-
   .painel{
     flex-direction:column;
     align-items:stretch;
   }
-
-  select, button{
-    width:100%;
-  }
-
-  #mapaPops{
-    height:380px;
-  }
-
-  .box-mapa{
-    padding:12px;
+  select, button{ width:100%; }
+  #mapaPops{ height:400px; }
+  .marker-label{
+    font-size:11px;
+    padding:0 8px;
+    max-width:120px;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
 }
 </style>
@@ -1264,7 +1359,7 @@ button:hover{
   <div class="topo">
     <div class="topo-esq">
       <h2>Mapa Automático dos POPs</h2>
-      <div class="subtitulo">Com status animado, marcador pulsando e fluxo visual entre POPs</div>
+      <div class="subtitulo">Com nome fixo no marcador, painel lateral e atualização automática a cada 30 segundos</div>
     </div>
 
     <div class="painel">
@@ -1280,8 +1375,31 @@ button:hover{
 
   <div id="resumo"></div>
 
-  <div class="box-mapa">
-    <div id="mapaPops"></div>
+  <div class="layout-mapa">
+    <aside class="sidebar">
+      <div class="sidebar-topo">
+        <div class="sidebar-titulo">POPs da rede</div>
+        <div class="sidebar-sub">Clique em um POP para centralizar no mapa</div>
+
+        <div class="sidebar-filtros">
+          <input type="text" id="buscaPop" placeholder="Buscar POP pelo nome...">
+          <select id="filtroStatusLista">
+            <option value="">Todos os status</option>
+            <option value="up">Somente UP</option>
+            <option value="down">Somente DOWN</option>
+            <option value="unknown">Sem status</option>
+          </select>
+        </div>
+
+        <div class="ultima-atualizacao" id="ultimaAtualizacao">Última atualização: --:--:--</div>
+      </div>
+
+      <div class="lista-pops" id="listaPops"></div>
+    </aside>
+
+    <div class="box-mapa">
+      <div id="mapaPops"></div>
+    </div>
   </div>
 </div>
 
