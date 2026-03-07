@@ -317,6 +317,62 @@ input{
   color:#fff;
   cursor:pointer;
 }
+.sugestoes-carrinho{
+  margin-top:15px;
+}
+
+.sugestoes-carrinho h3{
+  margin:0 0 10px 0;
+  font-size:16px;
+}
+
+.lista-sugestoes{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:10px;
+}
+
+@media(min-width:768px){
+  .lista-sugestoes{
+    grid-template-columns:repeat(3,1fr);
+  }
+}
+
+.sugestao-item{
+  background:#f8f8f8;
+  border:1px solid #e5e5e5;
+  border-radius:12px;
+  padding:10px;
+  text-align:center;
+}
+
+.sugestao-item img{
+  width:100%;
+  height:90px;
+  object-fit:contain;
+  margin-bottom:8px;
+}
+
+.sugestao-item .nome{
+  font-size:13px;
+  font-weight:bold;
+  min-height:32px;
+}
+
+.sugestao-item .preco{
+  font-size:14px;
+  margin:6px 0;
+}
+
+.sugestao-item button{
+  width:100%;
+  padding:8px;
+  border:none;
+  border-radius:8px;
+  background:#0071e3;
+  color:#fff;
+  cursor:pointer;
+}
 </style>
 </head>
 
@@ -358,13 +414,13 @@ input{
     <h2>Finalizar Pedido</h2>
 
     <!-- ITENS -->
-    <div id="itensCarrinho" style="margin-bottom:15px;"></div>
-    <!-- SUGESTÕES -->
+<div id="itensCarrinho" style="margin-bottom:15px;"></div>
+
 <div id="sugestoesCarrinhoArea" style="margin:15px 0;"></div>
 
-    <hr style="margin:10px 0;">
+<hr style="margin:10px 0;">
 
-    <h3>Dados do Cliente</h3>
+<h3>Dados do Cliente</h3>
 
     <input id="clienteNome" placeholder="Seu nome" required>
     <input id="clienteTelefone" placeholder="Telefone / WhatsApp" required>
@@ -652,6 +708,104 @@ function renderizar(lista){
   });
 }
 
+function obterImagemProduto(produto){
+  let imgs = [];
+  try {
+    imgs = JSON.parse(produto.imagens || "[]");
+  } catch {}
+  return imgs[0] || "";
+}
+
+function obterIdsComplementares(produto){
+  try {
+    const ids = JSON.parse(produto.produtos_complementares || "[]");
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];
+  }
+}
+
+function adicionarSugestaoDireto(produto){
+  let variacoes = [];
+  try { variacoes = JSON.parse(produto.variacoes || "[]"); } catch {}
+
+  // se tiver variação/cor, abre o modal normal
+  if(variacoes.length > 0){
+    let imgs = [];
+    try { imgs = JSON.parse(produto.imagens || "[]"); } catch {}
+    abrirModal(produto, imgs);
+    return;
+  }
+
+  const existente = carrinho.find(i => i.id === produto.id && i.cor === "Sem cor");
+
+  if(existente){
+    existente.qtd++;
+  } else {
+    carrinho.push({ ...produto, qtd: 1, cor: "Sem cor" });
+  }
+
+  salvar();
+  abrirCarrinho();
+}
+
+window.adicionarSugestaoDiretoPorId = function(id){
+  const produto = todosProdutos.find(p => String(p.id) === String(id));
+  if(!produto) return;
+  adicionarSugestaoDireto(produto);
+}
+
+function renderizarSugestoesCarrinho(){
+  const area = document.getElementById("sugestoesCarrinhoArea");
+  if(!area) return;
+
+  if(!carrinho.length){
+    area.innerHTML = "";
+    return;
+  }
+
+  const idsNoCarrinho = carrinho.map(i => String(i.id));
+  let sugestoes = [];
+
+  carrinho.forEach(item => {
+    const idsComplementares = obterIdsComplementares(item);
+
+    idsComplementares.forEach(idComp => {
+      const prod = todosProdutos.find(p => String(p.id) === String(idComp));
+
+      if(
+        prod &&
+        !idsNoCarrinho.includes(String(prod.id)) &&
+        !sugestoes.some(s => String(s.id) === String(prod.id))
+      ){
+        sugestoes.push(prod);
+      }
+    });
+  });
+
+  sugestoes = sugestoes.slice(0, 6);
+
+  if(!sugestoes.length){
+    area.innerHTML = "";
+    return;
+  }
+
+  area.innerHTML = `
+    <div class="sugestoes-carrinho">
+      <h3>🔥 Leve também</h3>
+      <div class="lista-sugestoes">
+        ${sugestoes.map(p => `
+          <div class="sugestao-item">
+            ${obterImagemProduto(p) ? `<img src="${obterImagemProduto(p)}" alt="${p.nome}">` : ""}
+            <div class="nome">${p.nome}</div>
+            <div class="preco">${formatarReal(p.preco)}</div>
+            <button onclick="adicionarSugestaoDiretoPorId('${p.id}')">Adicionar</button>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
 /* ================= MODAL PRODUTO ================= */
 
 function abrirModal(produto,imgs){
@@ -875,9 +1029,9 @@ function abrirCarrinho(){
     <h3>Total: ${formatarReal(total)}</h3>
   `;
 
+  renderizarSugestoesCarrinho();
   modalCarrinho.style.display="flex";
 }
-
 window.aumentarQtd = function(index){
   carrinho[index].qtd++;
   salvar();
