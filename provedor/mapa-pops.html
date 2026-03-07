@@ -2,8 +2,14 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Equipamentos</title>
+<title>Mapa dos POPs</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
@@ -13,13 +19,15 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const COLUNA_EQUIPAMENTO_IP = "equipamento";
-
 let appId = null;
+let mapa = null;
+let camadaMarcadores = null;
+let camadaLinhas = null;
+let cacheGeocoding = {};
 
-/* ========================
-   AUXILIARES
-======================== */
+/* =========================
+   AUX
+========================= */
 function escaparHtml(texto){
   if(texto === null || texto === undefined) return "";
   return String(texto)
@@ -28,23 +36,6 @@ function escaparHtml(texto){
     .replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;")
     .replace(/'/g,"&#39;");
-}
-
-function normalizarTexto(texto){
-  if(!texto) return "";
-  return String(texto)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
-}
-
-function limparHtmlTexto(texto){
-  if(!texto) return "";
-  return String(texto)
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function normalizarIp(ip){
@@ -57,593 +48,383 @@ function normalizarIp(ip){
     .trim();
 }
 
-function abrirModalEdicao(){
-  document.getElementById("modalEditar").style.display = "flex";
+function ehLatLngTexto(texto){
+  if(!texto) return false;
+  return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(String(texto).trim());
 }
 
-function fecharModalEdicao(){
-  document.getElementById("modalEditar").style.display = "none";
+function extrairLatLng(texto){
+  if(!ehLatLngTexto(texto)) return null;
+  const partes = String(texto).split(",");
+  const lat = Number(partes[0].trim());
+  const lng = Number(partes[1].trim());
+
+  if(Number.isNaN(lat) || Number.isNaN(lng)) return null;
+
+  return { lat, lng };
 }
 
-function classeStatusPRTG(status){
-  const s = normalizarTexto(status);
-
-  if(
-    s.includes("down") ||
-    s.includes("offline") ||
-    s.includes("error") ||
-    s.includes("erro")
-  ) return "status-offline";
-
-  if(
-    s.includes("warning") ||
-    s.includes("alarme") ||
-    s.includes("alerta")
-  ) return "status-alerta";
-
-  if(
-    s.includes("up") ||
-    s.includes("online") ||
-    s.includes("ok")
-  ) return "status-online";
-
-  return "status-desconhecido";
+function mostrarStatus(texto, tipo="ok"){
+  const box = document.getElementById("status");
+  box.className = "status " + tipo;
+  box.innerText = texto || "";
 }
 
-function textoStatusPRTG(status){
-  const s = normalizarTexto(status);
+function iniciarMapa(){
+  if(mapa) return;
 
-  if(
-    s.includes("down") ||
-    s.includes("offline") ||
-    s.includes("error") ||
-    s.includes("erro")
-  ) return "Offline";
+  mapa = L.map("mapaPops");
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(mapa);
 
-  if(
-    s.includes("warning") ||
-    s.includes("alarme") ||
-    s.includes("alerta")
-  ) return "Alerta";
+  camadaMarcadores = L.layerGroup().addTo(mapa);
+  camadaLinhas = L.layerGroup().addTo(mapa);
 
-  if(
-    s.includes("up") ||
-    s.includes("online") ||
-    s.includes("ok")
-  ) return "Online";
-
-  return "Desconhecido";
+  mapa.setView([-9.0, -42.7], 6);
 }
 
-/* ========================
-   PRTG
-======================== */
-async function carregarStatusPRTG(){
+async function geocodificarEndereco(endereco){
   try{
-    const url = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/PRTG";
+    if(!endereco) return null;
 
-    const resposta = await fetch(url);
-    const textoBruto = await resposta.text();
+    const chave = String(endereco).trim().toLowerCase();
+    if(cacheGeocoding[chave]) return cacheGeocoding[chave];
 
-    let dados = {};
-    try{
-      dados = textoBruto ? JSON.parse(textoBruto) : {};
-    }catch{
-      dados = { erro: textoBruto || "Resposta inválida da function" };
-    }
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(endereco)}`;
 
-    if(!resposta.ok){
-      throw new Error(dados.erro || ("Function respondeu com status " + resposta.status));
-    }
-
-    const devices = dados.devices || [];
-
-    const mapaPorIp = {};
-    const mapaPorNome = {};
-
-    devices.forEach(item => {
-      const hostOriginal = String(item.host || "").trim();
-      const hostNormalizado = normalizarIp(hostOriginal);
-
-      const nomeDevice = String(item.device || "").trim();
-      const nomeNormalizado = normalizarTexto(nomeDevice);
-
-      const statusInfo = {
-        status: item.status || "",
-        message: limparHtmlTexto(item.message || ""),
-        device: nomeDevice || "",
-        host: hostNormalizado || hostOriginal || ""
-      };
-
-      if(hostNormalizado){
-        mapaPorIp[hostNormalizado] = statusInfo;
-      }
-
-      if(nomeNormalizado){
-        mapaPorNome[nomeNormalizado] = statusInfo;
+    const resposta = await fetch(url, {
+      headers: {
+        "Accept": "application/json"
       }
     });
 
-    console.log("PRTG devices:", devices);
-    console.log("PRTG mapaPorIp:", mapaPorIp);
-    console.log("PRTG mapaPorNome:", mapaPorNome);
+    const dados = await resposta.json();
 
-    return {
-      ok: true,
-      porIp: mapaPorIp,
-      porNome: mapaPorNome
+    if(!dados || !dados.length){
+      return null;
+    }
+
+    const resultado = {
+      lat: Number(dados[0].lat),
+      lng: Number(dados[0].lon)
     };
 
+    cacheGeocoding[chave] = resultado;
+    return resultado;
+
   }catch(erro){
-    console.error("Erro ao buscar status no PRTG:", erro);
-    return {
-      ok: false,
-      porIp: {},
-      porNome: {},
-      erro: erro.message || "Erro ao consultar PRTG"
-    };
+    console.error("Erro ao geocodificar:", endereco, erro);
+    return null;
   }
 }
 
-/* ========================
-   INICIAR
-======================== */
-async function iniciar(){
-  try{
-    const { data:{ session }, error: sessionError } = await supabase.auth.getSession();
+/* =========================
+   AUTH / APP ID
+========================= */
+async function obterAppId(){
+  const { data:{ session }, error: sessionError } = await supabase.auth.getSession();
 
-    if(sessionError){
-      console.error("Erro ao verificar sessão:", sessionError);
-      alert("Erro ao verificar login");
-      return;
-    }
-
-    if(!session){
-      location.href = "/auth/login.html";
-      return;
-    }
-
-    const userId = session.user.id;
-
-    const { data:user, error:userError } = await supabase
-      .from("usuarios")
-      .select("app_id")
-      .eq("id", userId)
-      .single();
-
-    if(userError){
-      console.error("Erro ao buscar app_id:", userError);
-      alert("Erro ao carregar usuário: " + userError.message);
-      return;
-    }
-
-    if(!user || !user.app_id){
-      alert("Usuário sem app_id vinculado");
-      return;
-    }
-
-    appId = user.app_id;
-
-    await carregarPops();
-    await carregarEquipamentos();
-
-  }catch(erro){
-    console.error("Erro ao iniciar:", erro);
-    alert("Erro ao abrir tela de equipamentos");
+  if(sessionError){
+    throw new Error("Erro ao verificar sessão: " + sessionError.message);
   }
+
+  if(!session){
+    location.href = "/auth/login.html";
+    return null;
+  }
+
+  const userId = session.user.id;
+
+  const { data:user, error:userError } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  if(userError){
+    throw new Error("Erro ao buscar app_id: " + userError.message);
+  }
+
+  if(!user || !user.app_id){
+    throw new Error("Usuário sem app_id vinculado");
+  }
+
+  return user.app_id;
 }
 
-/* ========================
-   CARREGAR POPS
-======================== */
-async function carregarPops(){
+/* =========================
+   CARREGAR POPS NO FILTRO
+========================= */
+async function carregarFiltroPops(){
+  const { data:pops, error } = await supabase
+    .from("pops_provedor")
+    .select("id,nome")
+    .eq("app_id", appId)
+    .order("nome", { ascending:true });
+
+  if(error){
+    throw new Error("Erro ao carregar filtro de POPs: " + error.message);
+  }
+
+  const filtro = document.getElementById("filtroPop");
+  filtro.innerHTML = `<option value="">Todos os POPs</option>`;
+
+  (pops || []).forEach(pop => {
+    filtro.innerHTML += `
+      <option value="${escaparHtml(pop.id)}">${escaparHtml(pop.nome || "")}</option>
+    `;
+  });
+}
+
+/* =========================
+   BUSCAR DADOS
+========================= */
+async function buscarDadosMapa(){
+  const popSelecionado = document.getElementById("filtroPop").value;
+
+  let queryPops = supabase
+    .from("pops_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("nome", { ascending:true });
+
+  if(popSelecionado){
+    queryPops = queryPops.eq("id", popSelecionado);
+  }
+
+  const { data:pops, error:errorPops } = await queryPops;
+
+  if(errorPops){
+    throw new Error("Erro ao carregar POPs: " + errorPops.message);
+  }
+
+  const { data:equipamentos, error:errorEquip } = await supabase
+    .from("equipamentos_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("nome", { ascending:true });
+
+  if(errorEquip){
+    throw new Error("Erro ao carregar equipamentos: " + errorEquip.message);
+  }
+
+  const { data:ips, error:errorIps } = await supabase
+    .from("ips_provedor")
+    .select("*")
+    .eq("app_id", appId)
+    .order("ip", { ascending:true });
+
+  if(errorIps){
+    throw new Error("Erro ao carregar IPs: " + errorIps.message);
+  }
+
+  return {
+    pops: pops || [],
+    equipamentos: equipamentos || [],
+    ips: ips || []
+  };
+}
+
+/* =========================
+   MONTAR MAPA
+========================= */
+async function desenharMapa(){
   try{
-    const { data:pops, error } = await supabase
-      .from("pops_provedor")
-      .select("id,nome")
-      .eq("app_id", appId)
-      .order("nome", { ascending:true });
+    mostrarStatus("Carregando mapa...", "ok");
+    iniciarMapa();
+    camadaMarcadores.clearLayers();
+    camadaLinhas.clearLayers();
 
-    if(error){
-      console.error("Erro ao carregar POPs:", error);
-      alert("Erro ao carregar POPs");
-      return;
-    }
+    const { pops, equipamentos, ips } = await buscarDadosMapa();
 
-    const filtro = document.getElementById("filtroPop");
-    const selectEditar = document.getElementById("editarPop");
+    const mapaEquipPorPop = {};
+    equipamentos.forEach(eq => {
+      const popId = String(eq.pop_id || "");
+      if(!popId) return;
 
-    filtro.innerHTML = `<option value="">Todos os POPs</option>`;
-    selectEditar.innerHTML = `<option value="">Selecione o POP</option>`;
+      if(!mapaEquipPorPop[popId]){
+        mapaEquipPorPop[popId] = [];
+      }
 
-    (pops || []).forEach(p => {
-      const id = escaparHtml(p.id);
-      const nome = escaparHtml(p.nome || "");
-      filtro.innerHTML += `<option value="${id}">${nome}</option>`;
-      selectEditar.innerHTML += `<option value="${id}">${nome}</option>`;
+      mapaEquipPorPop[popId].push(eq);
     });
 
-  }catch(erro){
-    console.error("Erro geral ao carregar POPs:", erro);
-  }
-}
-
-/* ========================
-   CARREGAR EQUIPAMENTOS
-======================== */
-async function carregarEquipamentos(){
-  try{
-    const popSelecionado = document.getElementById("filtroPop").value;
-
-    let query = supabase
-      .from("equipamentos_provedor")
-      .select("*")
-      .eq("app_id", appId)
-      .order("nome", { ascending:true });
-
-    if(popSelecionado){
-      query = query.eq("pop_id", popSelecionado);
-    }
-
-    const { data:equip, error:equipError } = await query;
-
-    if(equipError){
-      console.error("Erro ao carregar equipamentos:", equipError);
-      alert("Erro ao carregar equipamentos");
-      return;
-    }
-
-    const { data:pops, error:popsError } = await supabase
-      .from("pops_provedor")
-      .select("*")
-      .eq("app_id", appId);
-
-    if(popsError){
-      console.error("Erro ao carregar POPs:", popsError);
-      alert("Erro ao carregar POPs");
-      return;
-    }
-
-    const { data:ips, error:ipsError } = await supabase
-      .from("ips_provedor")
-      .select("*")
-      .eq("app_id", appId)
-      .order("ip", { ascending:true });
-
-    if(ipsError){
-      console.error("Erro ao carregar IPs:", ipsError);
-      alert("Erro ao carregar IPs");
-      return;
-    }
-
-    const statusPRTG = await carregarStatusPRTG();
-
-    const mapaPop = {};
-    (pops || []).forEach(p => {
-      mapaPop[String(p.id)] = p;
-    });
-
-    const mapaIpsPorEquipamento = {};
-    (ips || []).forEach(ipItem => {
-      const equipId = String(ipItem[COLUNA_EQUIPAMENTO_IP] || "");
+    const mapaIpsPorEquip = {};
+    ips.forEach(ipItem => {
+      const equipId = String(ipItem.equipamento || "");
       if(!equipId) return;
 
-      if(!mapaIpsPorEquipamento[equipId]){
-        mapaIpsPorEquipamento[equipId] = [];
+      if(!mapaIpsPorEquip[equipId]){
+        mapaIpsPorEquip[equipId] = [];
       }
 
-      mapaIpsPorEquipamento[equipId].push({
-        id: ipItem.id || "",
-        ip: ipItem.ip || "",
-        cidr: ipItem.cidr || "",
-        porta: ipItem.porta || ""
-      });
+      mapaIpsPorEquip[equipId].push(ipItem);
     });
 
-    const tabela = document.getElementById("lista");
-    tabela.innerHTML = "";
+    const pontos = [];
 
-    (equip || []).forEach(e => {
-      const pop = mapaPop[String(e.pop_id)] || null;
-      const nomePop = pop?.nome || "";
-      const localizacao = pop?.localizacao || "";
-      const ipsEquip = mapaIpsPorEquipamento[String(e.id)] || [];
+    for(const pop of pops){
+      let coords = null;
 
-      const nomeSeguro = escaparHtml(e.nome || "");
-      const modeloSeguro = escaparHtml(e.modelo || "");
-      const popSeguro = escaparHtml(nomePop);
-      const localizacaoSegura = escaparHtml(localizacao);
+      if(pop.latitude && pop.longitude){
+        coords = {
+          lat: Number(pop.latitude),
+          lng: Number(pop.longitude)
+        };
+      }else if(pop.localizacao){
+        coords = extrairLatLng(pop.localizacao);
 
-      let infoStatus = null;
-
-      for(const item of ipsEquip){
-        const ipBase = normalizarIp(item.ip || "");
-        if(ipBase && statusPRTG.porIp[ipBase]){
-          infoStatus = statusPRTG.porIp[ipBase];
-          break;
+        if(!coords){
+          coords = await geocodificarEndereco(pop.localizacao);
         }
       }
 
-      if(!infoStatus){
-        const nomeNormalizado = normalizarTexto(e.nome || "");
-        if(nomeNormalizado && statusPRTG.porNome[nomeNormalizado]){
-          infoStatus = statusPRTG.porNome[nomeNormalizado];
-        }
+      if(!coords){
+        console.warn("POP sem coordenadas/localização válida:", pop.nome, pop.localizacao);
+        continue;
       }
 
-      let htmlStatus = `
-        <div class="status-box">
-          <span class="status-badge status-desconhecido">Desconhecido</span>
-          <div class="status-msg">Não localizado no PRTG</div>
-        </div>
+      const listaEquip = mapaEquipPorPop[String(pop.id)] || [];
+
+      const ipsDoPop = [];
+      listaEquip.forEach(eq => {
+        const listaIpsEquip = mapaIpsPorEquip[String(eq.id)] || [];
+        listaIpsEquip.forEach(ipItem => {
+          const ipTratado = normalizarIp(ipItem.ip || "");
+          if(ipTratado){
+            ipsDoPop.push(ipTratado);
+          }
+        });
+      });
+
+      pontos.push({
+        id: pop.id,
+        nome: pop.nome || "Sem nome",
+        localizacao: pop.localizacao || "",
+        lat: coords.lat,
+        lng: coords.lng,
+        equipamentos: listaEquip,
+        ips: [...new Set(ipsDoPop)]
+      });
+    }
+
+    if(!pontos.length){
+      mostrarStatus("Nenhum POP com localização válida encontrado.", "erro");
+      mapa.setView([-14.235, -51.9253], 4);
+      document.getElementById("resumo").innerHTML = `
+        <div class="card-resumo">Nenhum POP com localização válida para mostrar no mapa.</div>
       `;
+      return;
+    }
 
-      if(statusPRTG.ok && infoStatus){
-        htmlStatus = `
-          <div class="status-box">
-            <span class="status-badge ${classeStatusPRTG(infoStatus.status)}">
-              ${escaparHtml(textoStatusPRTG(infoStatus.status))}
-            </span>
-            <div class="status-msg">${escaparHtml(infoStatus.message || infoStatus.device || "")}</div>
-          </div>
-        `;
-      }else if(!statusPRTG.ok){
-        htmlStatus = `
-          <div class="status-box">
-            <span class="status-badge status-desconhecido">Sem conexão</span>
-            <div class="status-msg">${escaparHtml(statusPRTG.erro || "Não foi possível consultar o PRTG")}</div>
-          </div>
-        `;
-      }
+    const bounds = [];
+    let totalEquip = 0;
+    let totalIps = 0;
 
-      const htmlIps = ipsEquip.length
-        ? ipsEquip.map(item => {
-            const ipBase = item.ip || "";
-            const ipExibido = item.cidr ? `${ipBase}/${item.cidr}` : ipBase;
-            const ipSeguro = escaparHtml(ipExibido);
-            const hrefSeguro = escaparHtml(ipBase);
-            const portaHtml = item.porta
-              ? `<div class="texto-porta">Porta: ${escaparHtml(item.porta)}</div>`
-              : "";
+    pontos.forEach((pop, index) => {
+      totalEquip += pop.equipamentos.length;
+      totalIps += pop.ips.length;
 
-            return `
-              <div class="bloco-ip">
-                <a href="http://${hrefSeguro}" target="_blank" class="link-ip">${ipSeguro}</a>
-                ${portaHtml}
-              </div>
-            `;
-          }).join("")
-        : `<span class="muted">Sem IP</span>`;
+      const equipamentosHtml = pop.equipamentos.length
+        ? pop.equipamentos.map(eq => `
+            <div class="item-popup">
+              <strong>${escaparHtml(eq.nome || "Sem nome")}</strong>
+              <span>${escaparHtml(eq.modelo || "Sem modelo")}</span>
+            </div>
+          `).join("")
+        : `<div class="item-popup muted-popup">Sem equipamentos</div>`;
 
-      const htmlLocalizacao = localizacao
-        ? `
-            <a href="https://www.google.com/maps/search/${encodeURIComponent(localizacao)}" target="_blank" class="btn-localizacao">
-              📍 Ver localização
+      const ipsHtml = pop.ips.length
+        ? pop.ips.slice(0, 10).map(ip => `
+            <div class="ip-popup">${escaparHtml(ip)}</div>
+          `).join("")
+        : `<div class="muted-popup">Sem IP cadastrado</div>`;
+
+      const marker = L.marker([pop.lat, pop.lng]).addTo(camadaMarcadores);
+
+      marker.bindPopup(`
+        <div class="popup-mapa">
+          <div class="titulo-popup">${escaparHtml(pop.nome)}</div>
+          <div><b>Localização:</b> ${escaparHtml(pop.localizacao || "Não informada")}</div>
+          <div><b>Equipamentos:</b> ${pop.equipamentos.length}</div>
+          <div><b>IPs:</b> ${pop.ips.length}</div>
+
+          <div class="sub-popup">Equipamentos</div>
+          ${equipamentosHtml}
+
+          <div class="sub-popup">IPs</div>
+          ${ipsHtml}
+
+          <div style="margin-top:10px;">
+            <a
+              href="https://www.google.com/maps/search/${encodeURIComponent(pop.localizacao || `${pop.lat},${pop.lng}`)}"
+              target="_blank"
+              class="btn-popup-mapa"
+            >
+              Abrir no Google Maps
             </a>
-            <div class="texto-localizacao">${localizacaoSegura}</div>
-          `
-        : `<span class="muted">Sem localização</span>`;
+          </div>
+        </div>
+      `);
 
-      const idJs = JSON.stringify(String(e.id || ""));
-      const nomeJs = JSON.stringify(String(e.nome || ""));
-      const modeloJs = JSON.stringify(String(e.modelo || ""));
-      const popJs = JSON.stringify(String(e.pop_id || ""));
+      bounds.push([pop.lat, pop.lng]);
 
-      tabela.innerHTML += `
-        <tr>
-          <td data-label="Nome">${nomeSeguro}</td>
-          <td data-label="Modelo">${modeloSeguro}</td>
-          <td data-label="POP">${popSeguro}</td>
-          <td data-label="Status">${htmlStatus}</td>
-          <td data-label="IP">${htmlIps}</td>
-          <td data-label="Localização">${htmlLocalizacao}</td>
-          <td data-label="Ações">
-            <div class="acoes-linha">
-              <button class="btn-editar" onclick='abrirEditarEquipamento(${idJs}, ${nomeJs}, ${modeloJs}, ${popJs})'>Editar</button>
-              <button class="btn-excluir" onclick='excluirEquipamento(${idJs}, ${nomeJs})'>Excluir</button>
-            </div>
-          </td>
-        </tr>
-      `;
+      if(index > 0){
+        const anterior = pontos[index - 1];
+
+        L.polyline(
+          [
+            [anterior.lat, anterior.lng],
+            [pop.lat, pop.lng]
+          ],
+          {
+            color: "#38bdf8",
+            weight: 3,
+            opacity: 0.85
+          }
+        ).addTo(camadaLinhas);
+      }
     });
 
-    if(!(equip || []).length){
-      tabela.innerHTML = `
-        <tr>
-          <td colspan="7" class="muted center">Nenhum equipamento encontrado</td>
-        </tr>
-      `;
-    }
+    mapa.fitBounds(bounds, { padding:[30,30] });
+
+    document.getElementById("resumo").innerHTML = `
+      <div class="card-resumo">
+        <strong>POPs no mapa:</strong> ${pontos.length}
+      </div>
+      <div class="card-resumo">
+        <strong>Equipamentos encontrados:</strong> ${totalEquip}
+      </div>
+      <div class="card-resumo">
+        <strong>IPs encontrados:</strong> ${totalIps}
+      </div>
+    `;
+
+    mostrarStatus("Mapa carregado com sucesso.", "sucesso");
 
   }catch(erro){
-    console.error("Erro geral ao carregar equipamentos:", erro);
-    alert("Erro ao carregar equipamentos");
+    console.error(erro);
+    mostrarStatus(erro.message || "Erro ao carregar mapa", "erro");
   }
 }
 
-/* ========================
-   EDITAR EQUIPAMENTO + ESCOLHER IP
-======================== */
-async function abrirEditarEquipamento(id, nome, modelo, popId){
+/* =========================
+   INICIAR
+========================= */
+async function iniciar(){
   try{
-    document.getElementById("editarId").value = id || "";
-    document.getElementById("editarNome").value = nome || "";
-    document.getElementById("editarModelo").value = modelo || "";
-    document.getElementById("editarPop").value = popId || "";
-
-    document.getElementById("editarIpId").value = "";
-    document.getElementById("editarIp").value = "";
-    document.getElementById("editarPorta").value = "";
-
-    const { data: ips, error } = await supabase
-      .from("ips_provedor")
-      .select("*")
-      .eq("app_id", appId)
-      .eq(COLUNA_EQUIPAMENTO_IP, id)
-      .order("ip", { ascending:true });
-
-    if(error){
-      console.error("Erro ao buscar IPs do equipamento:", error);
-      alert("Erro ao carregar IPs do equipamento");
-      return;
-    }
-
-    const box = document.getElementById("listaIpsEditar");
-    box.innerHTML = "";
-
-    if(!ips || ips.length === 0){
-      box.innerHTML = `<div class="muted">Sem IP vinculado</div>`;
-    }else{
-      ips.forEach(ip => {
-        const ipSeguro = escaparHtml(ip.ip || "");
-        const portaSeguro = escaparHtml(ip.porta || "-");
-        const idSeguro = JSON.stringify(String(ip.id || ""));
-        const ipValorSeguro = JSON.stringify(String(ip.ip || ""));
-        const portaValorSeguro = JSON.stringify(String(ip.porta || ""));
-
-        box.innerHTML += `
-          <div class="linha-ip-editar">
-            <div class="info-ip-editar">
-              <strong>${ipSeguro}</strong>
-              <span class="porta-ip">${portaSeguro}</span>
-            </div>
-
-            <button
-              type="button"
-              class="btn-editar-ip"
-              onclick='selecionarIpEditar(${idSeguro}, ${ipValorSeguro}, ${portaValorSeguro})'>
-              Editar
-            </button>
-          </div>
-        `;
-      });
-    }
-
-    abrirModalEdicao();
-
+    appId = await obterAppId();
+    await carregarFiltroPops();
+    await desenharMapa();
   }catch(erro){
-    console.error("Erro ao abrir edição:", erro);
-    alert("Erro ao abrir edição");
+    console.error("Erro ao iniciar:", erro);
+    mostrarStatus(erro.message || "Erro ao iniciar página", "erro");
   }
 }
 
-function selecionarIpEditar(id, ip, porta){
-  document.getElementById("editarIpId").value = id || "";
-  document.getElementById("editarIp").value = ip || "";
-  document.getElementById("editarPorta").value = porta || "";
-}
-
-async function salvarEdicaoEquipamento(){
-  try{
-    const id = document.getElementById("editarId").value;
-    const nome = document.getElementById("editarNome").value.trim();
-    const modelo = document.getElementById("editarModelo").value.trim();
-    const popId = document.getElementById("editarPop").value;
-
-    const ipId = document.getElementById("editarIpId").value;
-    const ip = document.getElementById("editarIp").value.trim();
-    const porta = document.getElementById("editarPorta").value.trim();
-
-    if(!id || !nome || !modelo || !popId){
-      alert("Preencha nome, modelo e POP");
-      return;
-    }
-
-    const { error: erroEquip } = await supabase
-      .from("equipamentos_provedor")
-      .update({
-        nome,
-        modelo,
-        pop_id: popId
-      })
-      .eq("id", id)
-      .eq("app_id", appId);
-
-    if(erroEquip){
-      console.error("Erro ao editar equipamento:", erroEquip);
-      alert("Erro ao editar equipamento: " + erroEquip.message);
-      return;
-    }
-
-    if(ipId){
-      if(!ip){
-        alert("Preencha o IP selecionado");
-        return;
-      }
-
-      const { error: erroIp } = await supabase
-        .from("ips_provedor")
-        .update({
-          ip: ip,
-          porta: porta || null
-        })
-        .eq("id", ipId)
-        .eq("app_id", appId);
-
-      if(erroIp){
-        console.error("Erro ao editar IP:", erroIp);
-        alert("Equipamento salvo, mas deu erro ao atualizar IP: " + erroIp.message);
-        return;
-      }
-    }
-
-    alert("Equipamento atualizado com sucesso");
-    fecharModalEdicao();
-    await carregarEquipamentos();
-
-  }catch(erro){
-    console.error("Erro geral ao editar equipamento:", erro);
-    alert("Erro ao editar equipamento");
-  }
-}
-
-/* ========================
-   EXCLUIR EQUIPAMENTO
-======================== */
-async function excluirEquipamento(id, nome){
-  try{
-    const confirmar = confirm(`Deseja excluir o equipamento "${nome}"?\n\nOs IPs vinculados também serão excluídos.`);
-    if(!confirmar) return;
-
-    const { error: erroExcluirIps } = await supabase
-      .from("ips_provedor")
-      .delete()
-      .eq("app_id", appId)
-      .eq(COLUNA_EQUIPAMENTO_IP, id);
-
-    if(erroExcluirIps){
-      console.error("Erro ao excluir IPs vinculados:", erroExcluirIps);
-      alert("Erro ao excluir IPs vinculados: " + erroExcluirIps.message);
-      return;
-    }
-
-    const { error: erroExcluirEquip } = await supabase
-      .from("equipamentos_provedor")
-      .delete()
-      .eq("id", id)
-      .eq("app_id", appId);
-
-    if(erroExcluirEquip){
-      console.error("Erro ao excluir equipamento:", erroExcluirEquip);
-      alert("Erro ao excluir equipamento: " + erroExcluirEquip.message);
-      return;
-    }
-
-    alert("Equipamento e IPs vinculados excluídos com sucesso");
-    await carregarEquipamentos();
-
-  }catch(erro){
-    console.error("Erro geral ao excluir equipamento:", erro);
-    alert("Erro ao excluir equipamento");
-  }
-}
-
-window.carregarEquipamentos = carregarEquipamentos;
-window.abrirEditarEquipamento = abrirEditarEquipamento;
-window.selecionarIpEditar = selecionarIpEditar;
-window.salvarEdicaoEquipamento = salvarEdicaoEquipamento;
-window.excluirEquipamento = excluirEquipamento;
-window.fecharModalEdicao = fecharModalEdicao;
+window.recarregarMapa = desenharMapa;
 
 iniciar();
 </script>
@@ -654,19 +435,11 @@ iniciar();
 }
 
 body{
+  margin:0;
   background:#020617;
   color:#fff;
   font-family:Arial, sans-serif;
-  padding:30px;
-  margin:0;
-}
-
-h2{
-  margin-bottom:20px;
-}
-
-h4{
-  margin:0 0 10px 0;
+  padding:20px;
 }
 
 .topo{
@@ -675,248 +448,151 @@ h4{
   align-items:center;
   gap:10px;
   flex-wrap:wrap;
-  margin-bottom:20px;
+  margin-bottom:16px;
 }
 
-select,input{
-  padding:10px;
-  border-radius:8px;
+h2{
+  margin:0;
+}
+
+.painel{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+
+select, button{
   border:none;
+  border-radius:10px;
+  padding:10px 14px;
+  font-size:14px;
+}
+
+select{
   min-width:220px;
 }
 
-table{
-  width:100%;
-  border-collapse:collapse;
-  background:#0f172a;
-  border:1px solid #1e293b;
-}
-
-td,th{
-  padding:12px;
-  border-bottom:1px solid #1e293b;
-  text-align:left;
-  vertical-align:top;
-}
-
-th{
-  background:#020617;
-}
-
-tr:hover{
-  background:#172036;
-}
-
-.link-ip{
-  color:#38bdf8;
-  text-decoration:none;
-  word-break:break-all;
-}
-
-.link-ip:hover{
-  text-decoration:underline;
-}
-
-.bloco-ip + .bloco-ip{
-  margin-top:8px;
-}
-
-.texto-porta{
-  margin-top:4px;
-  font-size:12px;
-  color:#94a3b8;
-  line-height:1.4;
-}
-
-.btn-localizacao{
-  display:inline-block;
+button{
   background:#2563eb;
   color:#fff;
-  text-decoration:none;
-  padding:6px 10px;
-  border-radius:6px;
-  font-size:12px;
+  font-weight:bold;
+  cursor:pointer;
 }
 
-.btn-localizacao:hover{
+button:hover{
   background:#1d4ed8;
 }
 
-.texto-localizacao{
-  margin-top:6px;
-  font-size:12px;
-  color:#94a3b8;
-  line-height:1.4;
-  word-break:break-word;
+.status{
+  margin-bottom:16px;
+  padding:12px 14px;
+  border-radius:12px;
+  border:1px solid #1e293b;
+  background:#0f172a;
 }
 
-.muted{
-  color:#94a3b8;
+.status.ok{
+  color:#cbd5e1;
 }
 
-.center{
-  text-align:center;
+.status.sucesso{
+  color:#86efac;
+  border-color:#14532d;
 }
 
-.acoes-linha{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
+.status.erro{
+  color:#fca5a5;
+  border-color:#7f1d1d;
 }
 
-.btn-editar{
-  background:#f59e0b;
-  color:#000;
-  border:none;
-  padding:8px 12px;
-  border-radius:6px;
-  cursor:pointer;
-  font-weight:bold;
+#resumo{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px,1fr));
+  gap:12px;
+  margin-bottom:16px;
 }
 
-.btn-excluir{
-  background:#ef4444;
-  color:#fff;
-  border:none;
-  padding:8px 12px;
-  border-radius:6px;
-  cursor:pointer;
-  font-weight:bold;
-}
-
-.modal{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.65);
-  display:none;
-  align-items:center;
-  justify-content:center;
-  padding:20px;
-}
-
-.modal-box{
-  width:100%;
-  max-width:560px;
+.card-resumo{
   background:#0f172a;
   border:1px solid #1e293b;
   border-radius:14px;
-  padding:20px;
+  padding:14px;
 }
 
-.modal-box h3{
-  margin-top:0;
-}
-
-.modal-acoes{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-top:10px;
-}
-
-.btn-salvar{
-  background:#22c55e;
-  color:#000;
-  border:none;
-  padding:10px 14px;
-  border-radius:8px;
-  cursor:pointer;
-  font-weight:bold;
-}
-
-.btn-cancelar{
-  background:#475569;
-  color:#fff;
-  border:none;
-  padding:10px 14px;
-  border-radius:8px;
-  cursor:pointer;
-  font-weight:bold;
-}
-
-.linha-ip-editar{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:10px;
-  background:#020617;
+.box-mapa{
+  background:#0f172a;
   border:1px solid #1e293b;
-  padding:10px;
-  border-radius:8px;
-  margin-bottom:8px;
+  border-radius:16px;
+  padding:16px;
 }
 
-.info-ip-editar{
-  display:flex;
-  flex-direction:column;
-  gap:4px;
-  min-width:0;
+#mapaPops{
+  width:100%;
+  height:520px;
+  border-radius:12px;
+  overflow:hidden;
 }
 
-.porta-ip{
-  font-size:12px;
-  color:#94a3b8;
-}
-
-.btn-editar-ip{
-  background:#2563eb;
-  color:#fff;
-  border:none;
-  padding:8px 12px;
-  border-radius:6px;
-  cursor:pointer;
-  font-weight:bold;
-  flex-shrink:0;
-}
-
-.status-box{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-
-.status-badge{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  width:max-content;
-  min-width:92px;
-  padding:6px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:bold;
-}
-
-.status-online{
-  background:#22c55e;
-  color:#052e16;
-}
-
-.status-alerta{
-  background:#f59e0b;
+.popup-mapa{
+  min-width:250px;
+  line-height:1.45;
   color:#111827;
 }
 
-.status-offline{
-  background:#ef4444;
-  color:#fff;
+.titulo-popup{
+  font-weight:bold;
+  font-size:16px;
+  margin-bottom:8px;
 }
 
-.status-desconhecido{
-  background:#475569;
-  color:#fff;
+.sub-popup{
+  margin-top:10px;
+  margin-bottom:6px;
+  font-weight:bold;
 }
 
-.status-msg{
+.item-popup{
+  margin-bottom:6px;
+  padding:6px 8px;
+  background:#f8fafc;
+  border-radius:8px;
+}
+
+.item-popup span{
+  display:block;
   font-size:12px;
-  color:#94a3b8;
-  line-height:1.4;
-  word-break:break-word;
+  color:#475569;
+  margin-top:2px;
+}
+
+.ip-popup{
+  display:inline-block;
+  margin:3px 4px 3px 0;
+  padding:4px 8px;
+  background:#e2e8f0;
+  border-radius:999px;
+  font-size:12px;
+}
+
+.muted-popup{
+  color:#64748b;
+  font-size:12px;
+}
+
+.btn-popup-mapa{
+  display:inline-block;
+  text-decoration:none;
+  background:#2563eb;
+  color:#fff;
+  padding:8px 12px;
+  border-radius:8px;
+  font-size:12px;
 }
 
 @media(max-width:700px){
   body{
-    padding:15px;
+    padding:14px;
   }
 
   .topo{
@@ -924,171 +600,41 @@ tr:hover{
     align-items:stretch;
   }
 
-  select,input{
-    width:100%;
-    min-width:100%;
-  }
-
-  table,
-  thead,
-  tbody,
-  tr,
-  td{
-    display:block;
-    width:100%;
-  }
-
-  thead{
-    display:none;
-  }
-
-  table{
-    background:transparent;
-    border:none;
-  }
-
-  tbody{
-    display:block;
-  }
-
-  tr{
-    background:#0f172a;
-    border:1px solid #1e293b;
-    border-radius:14px;
-    margin-bottom:14px;
-    padding:10px;
-  }
-
-  tr:hover{
-    background:#0f172a;
-  }
-
-  td{
-    border:none;
-    padding:8px 6px;
-  }
-
-  td::before{
-    content:attr(data-label);
-    display:block;
-    font-size:12px;
-    color:#94a3b8;
-    margin-bottom:4px;
-    font-weight:bold;
-    text-transform:uppercase;
-  }
-
-  td:nth-child(4){
-    padding-bottom:12px;
-    border-bottom:1px solid #1e293b;
-    margin-bottom:8px;
-  }
-
-  td:nth-child(5){
-    padding-top:12px;
-  }
-
-  .acoes-linha{
-    flex-direction:column;
-  }
-
-  .btn-editar,
-  .btn-excluir,
-  .btn-localizacao{
-    width:100%;
-    text-align:center;
-  }
-
-  .modal-box{
-    padding:16px;
-  }
-
-  .modal-acoes{
-    flex-direction:column;
-  }
-
-  .btn-salvar,
-  .btn-cancelar{
-    width:100%;
-  }
-
-  .linha-ip-editar{
+  .painel{
     flex-direction:column;
     align-items:stretch;
   }
 
-  .btn-editar-ip{
+  select, button{
     width:100%;
+  }
+
+  #mapaPops{
+    height:380px;
   }
 }
 </style>
 </head>
-
 <body>
 
 <div class="topo">
-  <h2>Equipamentos</h2>
+  <h2>Mapa Automático dos POPs</h2>
 
-  <select id="filtroPop" onchange="carregarEquipamentos()">
-    <option value="">Todos os POPs</option>
-  </select>
+  <div class="painel">
+    <select id="filtroPop" onchange="recarregarMapa()">
+      <option value="">Todos os POPs</option>
+    </select>
+
+    <button onclick="recarregarMapa()">Atualizar mapa</button>
+  </div>
 </div>
 
-<table>
-  <thead>
-    <tr>
-      <th>Nome</th>
-      <th>Modelo</th>
-      <th>POP</th>
-      <th>Status</th>
-      <th>IP</th>
-      <th>Localização</th>
-      <th>Ações</th>
-    </tr>
-  </thead>
+<div id="status" class="status ok">Iniciando...</div>
 
-  <tbody id="lista"></tbody>
-</table>
+<div id="resumo"></div>
 
-<div class="modal" id="modalEditar">
-  <div class="modal-box">
-    <h3>Editar equipamento</h3>
-
-    <input type="hidden" id="editarId">
-    <input type="hidden" id="editarIpId">
-
-    <div style="margin-bottom:10px;">
-      <input id="editarNome" placeholder="Nome do equipamento">
-    </div>
-
-    <div style="margin-bottom:10px;">
-      <input id="editarModelo" placeholder="Modelo">
-    </div>
-
-    <div style="margin-bottom:12px;">
-      <h4>IPs do equipamento</h4>
-      <div id="listaIpsEditar"></div>
-    </div>
-
-    <div style="margin-bottom:10px;">
-      <input id="editarIp" placeholder="IP selecionado">
-    </div>
-
-    <div style="margin-bottom:10px;">
-      <input id="editarPorta" placeholder="Porta (ether1 / sfp1)">
-    </div>
-
-    <div style="margin-bottom:10px;">
-      <select id="editarPop">
-        <option value="">Selecione o POP</option>
-      </select>
-    </div>
-
-    <div class="modal-acoes">
-      <button class="btn-salvar" onclick="salvarEdicaoEquipamento()">Salvar</button>
-      <button class="btn-cancelar" onclick="fecharModalEdicao()">Cancelar</button>
-    </div>
-  </div>
+<div class="box-mapa">
+  <div id="mapaPops"></div>
 </div>
 
 </body>
