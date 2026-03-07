@@ -353,6 +353,17 @@ input{
     <input id="clienteEstado" placeholder="Estado">
     <input id="clienteCep" placeholder="CEP">
     <input id="clienteLocalizacao" placeholder="Link da localização (Google Maps)">
+    <div id="areaFrete" style="margin-top:10px; padding:12px; border:1px solid #ddd; border-radius:10px; background:#fafafa;">
+  <div style="font-weight:bold; margin-bottom:8px;">Frete</div>
+
+  <button type="button" class="btn-add" style="margin-bottom:10px;" onclick="calcularFrete()">
+    🚚 Calcular frete
+  </button>
+
+  <div id="freteResultado" style="font-size:14px; color:#333;">
+    Informe o estado para calcular o frete.
+  </div>
+</div>
 
     <button 
       type="button" 
@@ -436,6 +447,9 @@ let numeroWhatsapp = "";
 let chavePix = "";
 let corSelecionada = null;
 let produtoAtual = null;
+let valorFrete = 0;
+let subtotalCarrinhoAtual = 0;
+let totalCarrinhoAtual = 0;
 
 function formatarReal(valor){
   return Number(valor).toLocaleString("pt-BR", {
@@ -680,6 +694,26 @@ function renderizarSugestoesCarrinho(){
     });
   });
 
+  const estadoInformado = document.getElementById("clienteEstado").value;
+const ufFrete = normalizarEstado(estadoInformado);
+
+if (!ufFrete) {
+  alert("Informe o estado para calcular o frete.");
+  return;
+}
+
+const pesoTotalPedido = calcularPesoCarrinho();
+const resultadoFrete = calcularValorFretePorPesoERegiao(ufFrete, pesoTotalPedido);
+
+if (resultadoFrete.erro) {
+  alert(resultadoFrete.erro);
+  return;
+}
+
+valorFrete = Number(resultadoFrete.valor || 0);
+
+const total = subtotal + valorFrete;
+
   sugestoes = sugestoes.slice(0, 6);
 
   if (!sugestoes.length) {
@@ -703,6 +737,173 @@ function renderizarSugestoesCarrinho(){
     </div>
   `;
 }
+
+function normalizarEstado(ufOuNome){
+  const valor = String(ufOuNome || "").trim().toUpperCase();
+
+  const mapa = {
+    "AC":"AC","ACRE":"AC",
+    "AL":"AL","ALAGOAS":"AL",
+    "AP":"AP","AMAPA":"AP","AMAPÁ":"AP",
+    "AM":"AM","AMAZONAS":"AM",
+    "BA":"BA","BAHIA":"BA",
+    "CE":"CE","CEARA":"CE","CEARÁ":"CE",
+    "DF":"DF","DISTRITO FEDERAL":"DF",
+    "ES":"ES","ESPIRITO SANTO":"ES","ESPÍRITO SANTO":"ES",
+    "GO":"GO","GOIAS":"GO","GOIÁS":"GO",
+    "MA":"MA","MARANHAO":"MA","MARANHÃO":"MA",
+    "MT":"MT","MATO GROSSO":"MT",
+    "MS":"MS","MATO GROSSO DO SUL":"MS",
+    "MG":"MG","MINAS GERAIS":"MG",
+    "PA":"PA","PARA":"PA","PARÁ":"PA",
+    "PB":"PB","PARAIBA":"PB","PARAÍBA":"PB",
+    "PR":"PR","PARANA":"PR","PARANÁ":"PR",
+    "PE":"PE","PERNAMBUCO":"PE",
+    "PI":"PI","PIAUI":"PI","PIAUÍ":"PI",
+    "RJ":"RJ","RIO DE JANEIRO":"RJ",
+    "RN":"RN","RIO GRANDE DO NORTE":"RN",
+    "RS":"RS","RIO GRANDE DO SUL":"RS",
+    "RO":"RO","RONDONIA":"RO","RONDÔNIA":"RO",
+    "RR":"RR","RORAIMA":"RR",
+    "SC":"SC","SANTA CATARINA":"SC",
+    "SP":"SP","SAO PAULO":"SP","SÃO PAULO":"SP",
+    "SE":"SE","SERGIPE":"SE",
+    "TO":"TO","TOCANTINS":"TO"
+  };
+
+  return mapa[valor] || "";
+}
+
+function obterRegiaoPorUF(uf){
+  const norte = ["AC","AP","AM","PA","RO","RR","TO"];
+  const nordeste = ["AL","BA","CE","MA","PB","PE","PI","RN","SE"];
+  const centroOeste = ["DF","GO","MT","MS"];
+  const sudeste = ["ES","MG","RJ","SP"];
+  const sul = ["PR","RS","SC"];
+
+  if (norte.includes(uf)) return "norte";
+  if (nordeste.includes(uf)) return "nordeste";
+  if (centroOeste.includes(uf)) return "centro-oeste";
+  if (sudeste.includes(uf)) return "sudeste";
+  if (sul.includes(uf)) return "sul";
+  return "";
+}
+
+function calcularPesoCarrinho(){
+  let pesoTotal = 0;
+
+  carrinho.forEach(item => {
+    const pesoItem = Number(item.peso || 0);
+    const qtdItem = Number(item.qtd || 1);
+    pesoTotal += pesoItem * qtdItem;
+  });
+
+  return pesoTotal;
+}
+
+function obterTabelaFrete(){
+  return {
+    "sudeste": [
+      { ate: 0.5, valor: 18 },
+      { ate: 1, valor: 22 },
+      { ate: 2, valor: 28 },
+      { ate: 5, valor: 40 },
+      { ate: 10, valor: 65 }
+    ],
+    "sul": [
+      { ate: 0.5, valor: 20 },
+      { ate: 1, valor: 24 },
+      { ate: 2, valor: 30 },
+      { ate: 5, valor: 45 },
+      { ate: 10, valor: 70 }
+    ],
+    "centro-oeste": [
+      { ate: 0.5, valor: 22 },
+      { ate: 1, valor: 28 },
+      { ate: 2, valor: 36 },
+      { ate: 5, valor: 52 },
+      { ate: 10, valor: 80 }
+    ],
+    "nordeste": [
+      { ate: 0.5, valor: 25 },
+      { ate: 1, valor: 32 },
+      { ate: 2, valor: 42 },
+      { ate: 5, valor: 60 },
+      { ate: 10, valor: 92 }
+    ],
+    "norte": [
+      { ate: 0.5, valor: 28 },
+      { ate: 1, valor: 36 },
+      { ate: 2, valor: 48 },
+      { ate: 5, valor: 70 },
+      { ate: 10, valor: 110 }
+    ]
+  };
+}
+
+function calcularValorFretePorPesoERegiao(uf, pesoTotal){
+  const regiao = obterRegiaoPorUF(uf);
+  const tabela = obterTabelaFrete();
+
+  if (!regiao || !tabela[regiao]) {
+    return { erro: "Estado inválido para cálculo de frete." };
+  }
+
+  const faixas = tabela[regiao];
+  const faixa = faixas.find(f => pesoTotal <= f.ate);
+
+  if (!faixa) {
+    return { erro: "Peso acima do limite de entrega automática." };
+  }
+
+  return {
+    uf,
+    regiao,
+    pesoTotal,
+    valor: faixa.valor
+  };
+}
+
+window.calcularFrete = function(){
+  const estadoInformado = document.getElementById("clienteEstado").value;
+  const uf = normalizarEstado(estadoInformado);
+  const pesoTotal = calcularPesoCarrinho();
+  const area = document.getElementById("freteResultado");
+
+  if (!uf) {
+    valorFrete = 0;
+    area.innerHTML = "Informe um estado válido para calcular o frete.";
+    atualizarResumoCarrinho();
+    return;
+  }
+
+  if (pesoTotal <= 0) {
+    valorFrete = 0;
+    area.innerHTML = "Os produtos ainda não têm peso cadastrado.";
+    atualizarResumoCarrinho();
+    return;
+  }
+
+  const resultado = calcularValorFretePorPesoERegiao(uf, pesoTotal);
+
+  if (resultado.erro) {
+    valorFrete = 0;
+    area.innerHTML = resultado.erro;
+    atualizarResumoCarrinho();
+    return;
+  }
+
+  valorFrete = Number(resultado.valor || 0);
+
+  area.innerHTML = `
+    <div>Estado: <strong>${resultado.uf}</strong></div>
+    <div>Região: <strong>${resultado.regiao}</strong></div>
+    <div>Peso total: <strong>${resultado.pesoTotal.toFixed(2)} kg</strong></div>
+    <div>Frete: <strong>${formatarReal(valorFrete)}</strong></div>
+  `;
+
+  atualizarResumoCarrinho();
+};
 
 /* ================= MODAL PRODUTO ================= */
 
@@ -799,20 +1000,49 @@ function adicionarCarrinho(){
   fecharModal();
 }
 
+function atualizarResumoCarrinho(){
+  let subtotal = 0;
+
+  carrinho.forEach(i => {
+    subtotal += Number(i.preco || 0) * Number(i.qtd || 1);
+  });
+
+  subtotalCarrinhoAtual = subtotal;
+  totalCarrinhoAtual = subtotal + valorFrete;
+
+  const resumoExistente = document.getElementById("resumoCarrinhoTotais");
+  if (resumoExistente) {
+    resumoExistente.innerHTML = `
+      <hr>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;">
+        <span>Subtotal:</span>
+        <strong>${formatarReal(subtotalCarrinhoAtual)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;">
+        <span>Frete:</span>
+        <strong>${formatarReal(valorFrete)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin:10px 0 0 0;font-size:18px;">
+        <span>Total:</span>
+        <strong>${formatarReal(totalCarrinhoAtual)}</strong>
+      </div>
+    `;
+  }
+}
+
 btnCarrinho.onclick = () => abrirCarrinho();
 
 function abrirCarrinho(){
   if (!carrinho.length) return alert("Carrinho vazio");
 
-  let total = 0;
-
   itensCarrinho.innerHTML = carrinho.map((i, index) => {
-    const subtotal = i.preco * i.qtd;
-    total += subtotal;
+    const subtotal = Number(i.preco || 0) * Number(i.qtd || 1);
 
     return `
       <div style="margin-bottom:12px;border-bottom:1px solid #eee;padding-bottom:8px;">
         <strong>${i.nome}</strong> (${i.cor})
+        <br>
+        <small>Peso unitário: ${Number(i.peso || 0).toFixed(2)} kg</small>
         <br>
         <div style="display:flex;align-items:center;gap:8px;margin-top:5px;">
           <button onclick="diminuirQtd(${index})">➖</button>
@@ -828,17 +1058,51 @@ function abrirCarrinho(){
   }).join("");
 
   itensCarrinho.innerHTML += `
-    <hr>
-    <h3>Total: ${formatarReal(total)}</h3>
+    <div id="resumoCarrinhoTotais">
+      <hr>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;">
+        <span>Subtotal:</span>
+        <strong>${formatarReal(0)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;">
+        <span>Frete:</span>
+        <strong>${formatarReal(valorFrete)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin:10px 0 0 0;font-size:18px;">
+        <span>Total:</span>
+        <strong>${formatarReal(0)}</strong>
+      </div>
+    </div>
   `;
 
   renderizarSugestoesCarrinho();
+  atualizarResumoCarrinho();
   modalCarrinho.style.display = "flex";
+}
+function calcularFreteSePossivel(){
+  const estadoInformado = document.getElementById("clienteEstado")?.value || "";
+  const uf = normalizarEstado(estadoInformado);
+
+  if (!uf) {
+    valorFrete = 0;
+    return;
+  }
+
+  const pesoTotal = calcularPesoCarrinho();
+  const resultado = calcularValorFretePorPesoERegiao(uf, pesoTotal);
+
+  if (resultado.erro) {
+    valorFrete = 0;
+    return;
+  }
+
+  valorFrete = Number(resultado.valor || 0);
 }
 
 window.aumentarQtd = function(index){
   carrinho[index].qtd++;
   salvarCarrinhoLocal();
+  calcularFreteSePossivel();
   abrirCarrinho();
 };
 
@@ -849,12 +1113,14 @@ window.diminuirQtd = function(index){
     carrinho.splice(index, 1);
   }
   salvarCarrinhoLocal();
+  calcularFreteSePossivel();
   abrirCarrinho();
 };
 
 window.removerItem = function(index){
   carrinho.splice(index, 1);
   salvarCarrinhoLocal();
+  calcularFreteSePossivel();
   abrirCarrinho();
 };
 
@@ -985,7 +1251,7 @@ window.finalizarPedido = async function (modoEscolhido){
     return;
   }
 
-  let total = 0;
+  let subtotal = 0;
 
   for (const item of carrinho) {
     const { data: produtoBanco, error: prodErr } = await supabase
@@ -1011,7 +1277,7 @@ window.finalizarPedido = async function (modoEscolhido){
       }
     }
 
-    total += Number(item.preco || 0) * Number(item.qtd || 1);
+    subtotal += Number(item.preco || 0) * Number(item.qtd || 1);
   }
 
   const statusInicial = (modoEscolhido === "pix") ? "aguardando_confirmacao_pix" : "aguardando_pagamento";
@@ -1034,7 +1300,12 @@ window.finalizarPedido = async function (modoEscolhido){
       cliente_localizacao: document.getElementById("clienteLocalizacao").value,
       itens: carrinho,
       total: total,
-      status: statusInicial,
+subtotal: subtotal,
+frete_valor: valorFrete,
+frete_uf: ufFrete,
+frete_regiao: resultadoFrete.regiao,
+frete_peso_total: pesoTotalPedido,
+status: statusInicial,
       pagamento_modo: pagamentoModoInicial,
       pagamento_tipo: pagamentoTipoInicial,
       pagamento_status: pagamentoStatusInicial
@@ -1143,7 +1414,9 @@ window.finalizarPedido = async function (modoEscolhido){
       texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
     });
 
-    texto += `\n💰 Total: ${formatarReal(total)}`;
+    texto += `\n📦 Subtotal: ${formatarReal(subtotal)}`;
+texto += `\n🚚 Frete: ${formatarReal(valorFrete)}`;
+texto += `\n💰 Total: ${formatarReal(total)}`;
 
     if (pixLinkFinal) texto += `\n\n🧾 Comprovante (link): ${pixLinkFinal}`;
     if (pixArquivoFinal) texto += `\n📎 Comprovante (arquivo): ${pixArquivoFinal}`;
