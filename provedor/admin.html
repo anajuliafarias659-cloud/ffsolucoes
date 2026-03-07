@@ -60,6 +60,12 @@ function limparFormularioIp(){
   document.getElementById("equipIp").value = "";
 }
 
+function limparFormularioEditarPop(){
+  document.getElementById("editarPopId").value = "";
+  document.getElementById("editarPopNome").value = "";
+  document.getElementById("editarPopLocal").value = "";
+}
+
 /* =========================
    LOGIN + APP
 ========================= */
@@ -82,7 +88,7 @@ async function carregarApp(){
 
     const { data: usuario, error: usuarioError } = await supabase
       .from("usuarios")
-      .select("app_id")
+      .select("app_id, validade")
       .eq("id", userId)
       .single();
 
@@ -99,11 +105,12 @@ async function carregarApp(){
 
     appId = usuario.app_id;
 
-    mostrarAvisoRenovacao("");
+    mostrarAvisoRenovacao(usuario.validade || "");
     await dashboard();
     await carregarSelects();
     await renderizarPopsTopo();
     await carregarTabela();
+    await carregarListaPopsGerenciar();
 
   }catch(erro){
     console.error("Erro geral ao carregar painel:", erro);
@@ -150,7 +157,7 @@ async function renderizarPopsTopo(){
 
     const { data: pops, error } = await supabase
       .from("pops_provedor")
-      .select("id,nome")
+      .select("id,nome,localizacao")
       .eq("app_id", appId)
       .order("nome", { ascending:true });
 
@@ -167,8 +174,9 @@ async function renderizarPopsTopo(){
 
     (pops || []).forEach(pop => {
       const ativo = String(popSelecionadoTopo) === String(pop.id) ? "ativo" : "";
+      const idSeguro = String(pop.id).replace(/'/g, "\\'");
       box.innerHTML += `
-        <button class="chip-pop ${ativo}" onclick="selecionarPopTopo('${String(pop.id).replace(/'/g, "\\'")}', this)">
+        <button class="chip-pop ${ativo}" onclick="selecionarPopTopo('${idSeguro}', this)">
           ${escaparHtml(pop.nome || "")}
         </button>
       `;
@@ -224,14 +232,135 @@ async function cadastrarPop(){
     limparFormularioPop();
     fecharModal("modalPop");
 
-    await dashboard();
-    await carregarSelects();
-    await renderizarPopsTopo();
-    await carregarTabela();
+    await atualizarTelaCompleta();
 
   }catch(erro){
     console.error("Erro geral ao cadastrar POP:", erro);
     alert("Erro ao cadastrar POP");
+  }
+}
+
+/* =========================
+   EDITAR POP
+========================= */
+function abrirEditarPop(id, nome, localizacao){
+  document.getElementById("editarPopId").value = id || "";
+  document.getElementById("editarPopNome").value = nome || "";
+  document.getElementById("editarPopLocal").value = localizacao || "";
+  abrirModal("modalEditarPop");
+}
+
+async function salvarEdicaoPop(){
+  try{
+    const id = document.getElementById("editarPopId").value;
+    const nome = document.getElementById("editarPopNome").value.trim();
+    const localizacao = document.getElementById("editarPopLocal").value.trim();
+
+    if(!id || !nome || !localizacao){
+      alert("Preencha nome e localização");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("pops_provedor")
+      .update({
+        nome,
+        localizacao
+      })
+      .eq("id", id)
+      .eq("app_id", appId);
+
+    if(error){
+      console.error("Erro ao editar POP:", error);
+      alert("Erro ao editar POP: " + error.message);
+      return;
+    }
+
+    alert("POP atualizado com sucesso");
+    fecharModal("modalEditarPop");
+    limparFormularioEditarPop();
+
+    await atualizarTelaCompleta();
+
+  }catch(erro){
+    console.error("Erro geral ao editar POP:", erro);
+    alert("Erro ao editar POP");
+  }
+}
+
+/* =========================
+   EXCLUIR POP
+========================= */
+async function excluirPop(id, nome){
+  try{
+    const confirmar = confirm(
+      `Deseja excluir o POP "${nome}"?\n\nIsso também vai excluir os equipamentos e IPs vinculados a ele.`
+    );
+
+    if(!confirmar) return;
+
+    const { data: equipamentos, error: erroEquipBusca } = await supabase
+      .from("equipamentos_provedor")
+      .select("id")
+      .eq("app_id", appId)
+      .eq("pop_id", id);
+
+    if(erroEquipBusca){
+      console.error("Erro ao buscar equipamentos do POP:", erroEquipBusca);
+      alert("Erro ao buscar equipamentos do POP: " + erroEquipBusca.message);
+      return;
+    }
+
+    const idsEquip = (equipamentos || []).map(e => e.id);
+
+    if(idsEquip.length){
+      const { error: erroExcluirIps } = await supabase
+        .from("ips_provedor")
+        .delete()
+        .eq("app_id", appId)
+        .in(COLUNA_EQUIPAMENTO_IP, idsEquip);
+
+      if(erroExcluirIps){
+        console.error("Erro ao excluir IPs do POP:", erroExcluirIps);
+        alert("Erro ao excluir IPs do POP: " + erroExcluirIps.message);
+        return;
+      }
+
+      const { error: erroExcluirEquip } = await supabase
+        .from("equipamentos_provedor")
+        .delete()
+        .eq("app_id", appId)
+        .eq("pop_id", id);
+
+      if(erroExcluirEquip){
+        console.error("Erro ao excluir equipamentos do POP:", erroExcluirEquip);
+        alert("Erro ao excluir equipamentos do POP: " + erroExcluirEquip.message);
+        return;
+      }
+    }
+
+    const { error: erroExcluirPop } = await supabase
+      .from("pops_provedor")
+      .delete()
+      .eq("id", id)
+      .eq("app_id", appId);
+
+    if(erroExcluirPop){
+      console.error("Erro ao excluir POP:", erroExcluirPop);
+      alert("Erro ao excluir POP: " + erroExcluirPop.message);
+      return;
+    }
+
+    if(String(popSelecionadoTopo) === String(id)){
+      popSelecionadoTopo = "";
+    }
+
+    alert("POP excluído com sucesso");
+    await atualizarTelaCompleta();
+
+  }catch(erro){
+    console.error("Erro geral ao excluir POP:", erro);
+    alert("Erro ao excluir POP");
   }
 }
 
@@ -268,9 +397,7 @@ async function cadastrarEquipamento(){
     limparFormularioEquip();
     fecharModal("modalEquip");
 
-    await dashboard();
-    await carregarSelects();
-    await carregarTabela();
+    await atualizarTelaCompleta();
 
   }catch(erro){
     console.error("Erro geral ao cadastrar equipamento:", erro);
@@ -339,7 +466,7 @@ async function carregarSelects(){
 
     const { data: pops, error: erroPops } = await supabase
       .from("pops_provedor")
-      .select("id,nome")
+      .select("id,nome,localizacao")
       .eq("app_id", appId)
       .order("nome", { ascending:true });
 
@@ -354,7 +481,7 @@ async function carregarSelects(){
 
     const { data: equipamentos, error: erroEquip } = await supabase
       .from("equipamentos_provedor")
-      .select("id,nome")
+      .select("id,nome,pop_id")
       .eq("app_id", appId)
       .order("nome", { ascending:true });
 
@@ -363,12 +490,76 @@ async function carregarSelects(){
       return;
     }
 
+    const mapaPop = {};
+    (pops || []).forEach(pop => {
+      mapaPop[String(pop.id)] = pop;
+    });
+
     (equipamentos || []).forEach(equip => {
-      equipSelect.innerHTML += `<option value="${escaparHtml(equip.id)}">${escaparHtml(equip.nome || "")}</option>`;
+      const pop = mapaPop[String(equip.pop_id)] || null;
+      const texto = pop
+        ? `${pop.nome || ""} - ${equip.nome || ""}`
+        : `${equip.nome || ""}`;
+
+      equipSelect.innerHTML += `
+        <option value="${escaparHtml(equip.id)}">${escaparHtml(texto)}</option>
+      `;
     });
 
   }catch(erro){
     console.error("Erro geral ao carregar selects:", erro);
+  }
+}
+
+/* =========================
+   LISTA POPS GERENCIAR
+========================= */
+async function carregarListaPopsGerenciar(){
+  try{
+    const box = document.getElementById("listaPopsGerenciar");
+    if(!box) return;
+
+    const { data: pops, error } = await supabase
+      .from("pops_provedor")
+      .select("id,nome,localizacao")
+      .eq("app_id", appId)
+      .order("nome", { ascending:true });
+
+    if(error){
+      console.error("Erro ao carregar lista de POPs:", error);
+      box.innerHTML = `<div class="muted">Erro ao carregar POPs</div>`;
+      return;
+    }
+
+    if(!pops || !pops.length){
+      box.innerHTML = `<div class="muted">Nenhum POP cadastrado</div>`;
+      return;
+    }
+
+    box.innerHTML = "";
+
+    pops.forEach(pop => {
+      const idJs = JSON.stringify(String(pop.id || ""));
+      const nomeJs = JSON.stringify(String(pop.nome || ""));
+      const localJs = JSON.stringify(String(pop.localizacao || ""));
+
+      box.innerHTML += `
+        <div class="item-pop-gerenciar">
+          <div class="item-pop-info">
+            <strong>${escaparHtml(pop.nome || "")}</strong>
+            <div class="texto-localizacao">${escaparHtml(pop.localizacao || "Sem localização")}</div>
+          </div>
+
+          <div class="item-pop-acoes">
+            <button class="btn-editar" onclick='abrirEditarPop(${idJs}, ${nomeJs}, ${localJs})'>Editar</button>
+            <button class="btn-excluir" onclick='excluirPop(${idJs}, ${nomeJs})'>Excluir</button>
+          </div>
+        </div>
+      `;
+    });
+
+  }catch(erro){
+    console.error("Erro geral ao carregar lista POPs:", erro);
   }
 }
 
@@ -504,6 +695,17 @@ function abrirEquipamentos(){
 }
 
 /* =========================
+   TELA COMPLETA
+========================= */
+async function atualizarTelaCompleta(){
+  await dashboard();
+  await carregarSelects();
+  await renderizarPopsTopo();
+  await carregarTabela();
+  await carregarListaPopsGerenciar();
+}
+
+/* =========================
    AVISO RENOVAÇÃO
 ========================= */
 function formatarDataBR(dataStr){
@@ -572,6 +774,9 @@ window.cadastrarIp = cadastrarIp;
 window.buscar = buscar;
 window.abrirEquipamentos = abrirEquipamentos;
 window.selecionarPopTopo = selecionarPopTopo;
+window.abrirEditarPop = abrirEditarPop;
+window.salvarEdicaoPop = salvarEdicaoPop;
+window.excluirPop = excluirPop;
 
 carregarApp();
 </script>
@@ -696,6 +901,7 @@ a{
   font-size:12px;
   color:#94a3b8;
   line-height:1.4;
+  word-break:break-word;
 }
 
 .btn-mapa-link{
@@ -771,6 +977,45 @@ a{
   margin-left:6px;
 }
 
+.lista-pops-gerenciar{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  margin-top:12px;
+}
+
+.item-pop-gerenciar{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  background:#020617;
+  border:1px solid #1e293b;
+  border-radius:12px;
+  padding:14px;
+}
+
+.item-pop-info{
+  flex:1;
+  min-width:0;
+}
+
+.item-pop-acoes{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.btn-editar{
+  background:#f59e0b;
+  color:#111827;
+}
+
+.btn-excluir{
+  background:#ef4444;
+  color:#fff;
+}
+
 @media(max-width:700px){
   body{
     padding:15px;
@@ -806,6 +1051,15 @@ a{
   table{
     display:block;
     overflow-x:auto;
+  }
+
+  .item-pop-gerenciar{
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  .item-pop-acoes{
+    flex-direction:column;
   }
 }
 </style>
@@ -846,6 +1100,11 @@ a{
     <button onclick="abrirModal('modalEquip')">+ Cadastrar Equipamento</button>
     <button onclick="abrirEquipamentos()">Abrir página de equipamentos</button>
   </div>
+</div>
+
+<div class="section">
+  <h3>Gerenciar POPs</h3>
+  <div id="listaPopsGerenciar" class="lista-pops-gerenciar"></div>
 </div>
 
 <div class="section">
@@ -903,6 +1162,27 @@ a{
     <div class="modal-acoes">
       <button onclick="cadastrarPop()">Salvar</button>
       <button class="btn-sec" onclick="fecharModal('modalPop')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modalEditarPop">
+  <div class="modal-box">
+    <h3>Editar POP</h3>
+
+    <input type="hidden" id="editarPopId">
+
+    <div class="linha">
+      <input id="editarPopNome" placeholder="Nome do POP">
+    </div>
+
+    <div class="linha">
+      <input id="editarPopLocal" placeholder="Localização">
+    </div>
+
+    <div class="modal-acoes">
+      <button onclick="salvarEdicaoPop()">Salvar alterações</button>
+      <button class="btn-sec" onclick="fecharModal('modalEditarPop')">Cancelar</button>
     </div>
   </div>
 </div>
