@@ -391,8 +391,15 @@ input{
 
 <div id="areaPixMP" style="display:none; margin-top:12px; padding:12px; border:1px solid #ddd; border-radius:10px;">
   <div style="font-weight:bold; margin-bottom:6px;">Pagamento via PIX</div>
+
+  <div id="statusPagamento" style="margin-bottom:10px; font-size:14px; color:#444;">
+    Aguardando geração do PIX...
+  </div>
+
   <div id="pixQrCodeArea" style="text-align:center; margin-top:10px;"></div>
+
   <textarea id="pixCopiaCola" readonly style="width:100%; min-height:90px; margin-top:10px; padding:10px; border-radius:8px; border:1px solid #ccc;"></textarea>
+
   <button type="button" class="btn-add" style="margin-top:10px; background:#16a34a;" onclick="copiarPixCopiaCola()">
     📋 Copiar código PIX
   </button>
@@ -544,6 +551,79 @@ async function carregar(){
   renderizar(todosProdutos);
 }
 
+async function verificarStatusPagamento(pedidoId){
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("pagamento_status,status")
+    .eq("id", pedidoId)
+    .single();
+
+  if (error || !data) return;
+
+  console.log("status pagamento:", data.pagamento_status);
+
+  const areaStatus = document.getElementById("statusPagamento");
+  if (!areaStatus) return;
+
+  if (data.pagamento_status === "approved") {
+    areaStatus.innerHTML = `
+      <div style="
+        background:#ecfdf5;
+        border:1px solid #10b981;
+        color:#065f46;
+        padding:16px;
+        border-radius:12px;
+        font-weight:bold;
+        margin-top:15px;
+      ">
+        ✅ Pagamento realizado com sucesso.<br>
+        📦 Pedido está sendo preparado para envio.
+      </div>
+    `;
+
+    carrinho = [];
+    valorFrete = 0;
+    salvarCarrinhoLocal();
+    atualizarResumoCarrinho();
+
+    clearInterval(window.verificacaoPix);
+    return;
+  }
+
+  if (data.pagamento_status === "pending") {
+    areaStatus.innerHTML = `
+      <div style="
+        background:#fff7ed;
+        border:1px solid #fdba74;
+        color:#9a3412;
+        padding:12px;
+        border-radius:12px;
+        margin-top:10px;
+      ">
+        ⏳ Aguardando pagamento do PIX...
+      </div>
+    `;
+    return;
+  }
+
+  if (data.pagamento_status === "rejected" || data.pagamento_status === "cancelled") {
+    areaStatus.innerHTML = `
+      <div style="
+        background:#fef2f2;
+        border:1px solid #f87171;
+        color:#991b1b;
+        padding:12px;
+        border-radius:12px;
+        margin-top:10px;
+      ">
+        ❌ Pagamento não aprovado.
+      </div>
+    `;
+
+    clearInterval(window.verificacaoPix);
+  }
+}
+
 async function criarPagamentoPixMP(pedidoId, total, cliente){
   const payload = {
     appId: APP_ID,
@@ -595,6 +675,15 @@ window.filtrarCategoria = function(cat){
   renderizar(cat === "Todas" ? todosProdutos : todosProdutos.filter(p => p.categoria === cat));
 };
 
+function iniciarVerificacaoPix(pedidoId){
+
+  verificarStatusPagamento(pedidoId);
+
+  window.verificacaoPix = setInterval(()=>{
+    verificarStatusPagamento(pedidoId);
+  },3000);
+
+}
 /* ================= PRODUTOS ================= */
 
 function renderizar(lista){
