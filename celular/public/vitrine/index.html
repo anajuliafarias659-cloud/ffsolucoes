@@ -727,9 +727,9 @@ button {
     }
 
     function salvarCarrinhoLocal() {
-  localStorage.setItem(CARRINHO_KEY, JSON.stringify(carrinho || []));
-  contadorCarrinho.innerText = (carrinho || []).reduce((acc, item) => acc + Number(item.qtd || 0), 0);
-}
+      localStorage.setItem(CARRINHO_KEY, JSON.stringify(carrinho));
+      contadorCarrinho.innerText = carrinho.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
+    }
 
     salvarCarrinhoLocal();
 
@@ -824,112 +824,54 @@ button {
       renderizar(todosProdutos);
     }
 
-    function limparCarrinhoAposPagamento() {
+    async function verificarStatusPagamento(pedidoId) {
+      const { data, error } = await supabase
+        .from("pedidos")
+        .select("pagamento_status,status")
+        .eq("id", pedidoId)
+        .single();
+
+      if (error || !data) return;
+
+      const areaStatus = document.getElementById("statusPagamento");
+      if (!areaStatus) return;
+
+      if (data.pagamento_status === "approved") {
+  areaStatus.innerHTML = `
+    <div style="
+      background:#ecfdf5;
+      border:1px solid #10b981;
+      color:#065f46;
+      padding:16px;
+      border-radius:12px;
+      font-weight:bold;
+      margin-top:15px;
+    ">
+      ✅ Pagamento realizado com sucesso.<br>
+      📦 Pedido está sendo preparado para envio.
+    </div>
+  `;
+
+  clearInterval(window.verificacaoPix);
+
   carrinho = [];
   valorFrete = 0;
   subtotalCarrinhoAtual = 0;
   totalCarrinhoAtual = 0;
 
   localStorage.removeItem(CARRINHO_KEY);
-  contadorCarrinho.innerText = "0";
+  salvarCarrinhoLocal();
 
   itensCarrinho.innerHTML = "";
+  document.getElementById("sugestoesCarrinhoArea").innerHTML = "";
+  document.getElementById("pixCopiaCola").value = "";
+  document.getElementById("pixQrCodeArea").innerHTML = "";
 
-  const sugestoes = document.getElementById("sugestoesCarrinhoArea");
-  if (sugestoes) sugestoes.innerHTML = "";
+  setTimeout(() => {
+    fecharCarrinho();
+  }, 1200);
 
-  const pixCopiaCola = document.getElementById("pixCopiaCola");
-  if (pixCopiaCola) pixCopiaCola.value = "";
-
-  const pixQrCodeArea = document.getElementById("pixQrCodeArea");
-  if (pixQrCodeArea) pixQrCodeArea.innerHTML = "";
-
-  const freteResultado = document.getElementById("freteResultado");
-  if (freteResultado) {
-    freteResultado.innerHTML = "Informe o estado para calcular o frete.";
-  }
-
-  const areaPixMP = document.getElementById("areaPixMP");
-  if (areaPixMP) areaPixMP.style.display = "none";
-
-  const btnGerarPixMP = document.getElementById("btnGerarPixMP");
-  if (btnGerarPixMP) btnGerarPixMP.style.display = "none";
-
-  salvarCarrinhoLocal();
-}
-
-async function verificarStatusPagamento(pedidoId) {
-  const { data, error } = await supabase
-    .from("pedidos")
-    .select("pagamento_status,status")
-    .eq("id", pedidoId)
-    .single();
-
-  if (error || !data) return;
-
-  const areaStatus = document.getElementById("statusPagamento");
-  if (!areaStatus) return;
-
-  const statusPagamento = String(data.pagamento_status || "").trim().toLowerCase();
-
-  if (statusPagamento === "approved") {
-    areaStatus.innerHTML = `
-      <div style="
-        background:#ecfdf5;
-        border:1px solid #10b981;
-        color:#065f46;
-        padding:16px;
-        border-radius:12px;
-        font-weight:bold;
-        margin-top:15px;
-      ">
-        ✅ Pagamento realizado com sucesso.<br>
-        📦 Pedido está sendo preparado para envio.
-      </div>
-    `;
-
-    clearInterval(window.verificacaoPix);
-    limparCarrinhoAposPagamento();
-
-    setTimeout(() => {
-      fecharCarrinho();
-    }, 1200);
-
-    return;
-  }
-
-  if (statusPagamento === "pending") {
-    areaStatus.innerHTML = `
-      <div style="
-        background:#fff7ed;
-        border:1px solid #fdba74;
-        color:#9a3412;
-        padding:12px;
-        border-radius:12px;
-        margin-top:10px;
-      ">
-        ⏳ Aguardando pagamento do PIX...
-      </div>
-    `;
-    return;
-  }
-
-  if (statusPagamento === "rejected" || statusPagamento === "cancelled") {
-    areaStatus.innerHTML = `
-      <div style="
-        background:#fef2f2;
-        border:1px solid #f87171;
-        color:#991b1b;
-        padding:12px;
-        border-radius:12px;
-        margin-top:10px;
-      ">
-        ❌ Pagamento não aprovado.
-      </div>
-    `;
-
-    clearInterval(window.verificacaoPix);
-  }
+  return;
 }
 
       if (data.pagamento_status === "pending") {
