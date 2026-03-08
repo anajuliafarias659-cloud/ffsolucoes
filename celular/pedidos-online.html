@@ -136,6 +136,7 @@ const supabase = createClient(
 
 let app_id = null;
 let pedidosCache = [];
+let pausadoAutoRefresh = false;
 
 const listaPedidos = document.getElementById("listaPedidos");
 const listaHistorico = document.getElementById("listaHistorico");
@@ -366,8 +367,11 @@ async function iniciar(){
   app_id = user.app_id;
   await carregarPedidos();
 
-  setInterval(carregarPedidos, 5000);
-}
+  setInterval(() => {
+  if (!pausadoAutoRefresh) {
+    carregarPedidos();
+  }
+}, 5000);
 
 async function carregarPedidos(){
   const { data, error } = await supabase
@@ -455,7 +459,7 @@ window.marcarPostado = async function(id){
   const infoEnvio = input?.value?.trim() || "";
 
   let statusEntrega = "Pedido enviado";
-  let transportadora = pedido.transportadora || "";
+  let transportadora = "";
 
   if (infoEnvio) {
     const textoLower = infoEnvio.toLowerCase();
@@ -463,8 +467,8 @@ window.marcarPostado = async function(id){
     if (
       textoLower.includes("entregador") ||
       textoLower.includes("motoboy") ||
-      textoLower.includes("bike") ||
-      textoLower.includes("uber")
+      textoLower.includes("uber") ||
+      textoLower.includes("bike")
     ) {
       statusEntrega = "Saiu para entrega";
       transportadora = "Entrega local";
@@ -474,20 +478,18 @@ window.marcarPostado = async function(id){
     }
   }
 
-  const dadosUpdate = {
-    status_entrega: statusEntrega,
-    codigo_rastreio: infoEnvio || null,
-    transportadora: transportadora || null
-  };
-
   const { error } = await supabase
     .from("pedidos")
-    .update(dadosUpdate)
+    .update({
+      status_entrega: statusEntrega,
+      codigo_rastreio: infoEnvio || null,
+      transportadora: transportadora || null
+    })
     .eq("id", id);
 
   if (error) {
     console.error(error);
-    alert("Erro ao salvar envio. Veja no console qual coluna está faltando.");
+    alert("Erro ao salvar envio.");
     return;
   }
 
@@ -502,7 +504,7 @@ window.marcarPostado = async function(id){
     texto += `Seu pedido foi enviado.\n`;
   } else if (transportadora === "Entrega local") {
     texto += `Seu pedido saiu para entrega local.\n`;
-    texto += `Informação do entregador: ${infoEnvio}\n`;
+    texto += `Informação da entrega: ${infoEnvio}\n`;
   } else {
     texto += `Seu pedido foi postado nos Correios.\n`;
     texto += `Código de rastreio: ${infoEnvio}\n`;
@@ -514,40 +516,6 @@ window.marcarPostado = async function(id){
 
   if (linkAcompanhamento) {
     texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
-  }
-
-  abrirWhats(pedido.cliente_telefone, texto);
-  carregarPedidos();
-};
-
-window.marcarSaiuEntrega = async function(id){
-  const pedido = pedidosCache.find(p => String(p.id) === String(id));
-  if (!pedido) return;
-
-  const input = document.getElementById(`rastreio_${id}`);
-  const infoEnvio = input?.value?.trim() || pedido.codigo_rastreio || "";
-
-  const { error } = await supabase
-    .from("pedidos")
-    .update({
-      status_entrega: "Saiu para entrega",
-      codigo_rastreio: infoEnvio || null,
-      transportadora: infoEnvio ? "Entrega local" : (pedido.transportadora || "Entrega local")
-    })
-    .eq("id", id);
-
-  if (error) {
-    console.error(error);
-    alert("Erro ao atualizar status.");
-    return;
-  }
-
-  let texto = `🚚 *SAIU PARA ENTREGA*\n\n`;
-  texto += `Olá ${pedido.cliente_nome}!\n\n`;
-  texto += `Seu pedido saiu para entrega.\n`;
-
-  if (infoEnvio) {
-    texto += `Informação da entrega: ${infoEnvio}\n`;
   }
 
   abrirWhats(pedido.cliente_telefone, texto);
@@ -632,6 +600,17 @@ window.excluirPedido = async function(id){
 }
 
 filtroHistorico.addEventListener("change", renderizarPedidos);
+document.addEventListener("focusin", (e) => {
+  if (e.target.classList.contains("rastreio-input")) {
+    pausadoAutoRefresh = true;
+  }
+});
+
+document.addEventListener("focusout", (e) => {
+  if (e.target.classList.contains("rastreio-input")) {
+    pausadoAutoRefresh = false;
+  }
+});
 
 iniciar();
 </script>
