@@ -301,22 +301,22 @@ function montarCardPedido(p, isHistorico){
 
       <div class="entrega-box">
         <strong>Status entrega:</strong> ${escapeHtml(statusEntrega)}<br>
-        <strong>Rastreio:</strong> ${escapeHtml(rastreio || "Ainda não informado")}<br>
-        <strong>Transportadora:</strong> ${escapeHtml(p.transportadora || "Correios")}<br>
+        <strong>Rastreio / Entregador:</strong> ${escapeHtml(rastreio || "Ainda não informado")}<br>
+<strong>Transportadora:</strong> ${escapeHtml(p.transportadora || "Não informada")}<br>
 
-        ${!isHistorico ? `
-          <input
-            id="rastreio_${p.id}"
-            class="rastreio-input"
-            placeholder="Digite o código de rastreio"
-            value="${escapeHtml(rastreio)}"
-          >
+${!isHistorico ? `
+  <input
+    id="rastreio_${p.id}"
+    class="rastreio-input"
+    placeholder="Ex: QN123456789BR ou Entregador Fulano"
+    value="${escapeHtml(rastreio)}"
+  >
 
-          <div class="linha-botoes">
-            <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar como postado</button>
-            <button class="btn-entrega" onclick="marcarSaiuEntrega('${p.id}')">Saiu para entrega</button>
-            <button class="btn-aceitar" onclick="marcarEntregue('${p.id}')">Entregue</button>
-          </div>
+  <div class="linha-botoes">
+    <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar envio</button>
+    <button class="btn-entrega" onclick="marcarSaiuEntrega('${p.id}')">Saiu para entrega</button>
+    <button class="btn-aceitar" onclick="marcarEntregue('${p.id}')">Entregue</button>
+  </div>
         ` : ""}
       </div>
 
@@ -452,26 +452,42 @@ window.marcarPostado = async function(id){
   if (!pedido) return;
 
   const input = document.getElementById(`rastreio_${id}`);
-  const codigoRastreio = input?.value?.trim() || "";
+  const infoEnvio = input?.value?.trim() || "";
 
-  if (!codigoRastreio) {
-    alert("Digite o código de rastreio.");
-    return;
+  let statusEntrega = "Pedido enviado";
+  let transportadora = pedido.transportadora || "";
+
+  if (infoEnvio) {
+    const textoLower = infoEnvio.toLowerCase();
+
+    if (
+      textoLower.includes("entregador") ||
+      textoLower.includes("motoboy") ||
+      textoLower.includes("bike") ||
+      textoLower.includes("uber")
+    ) {
+      statusEntrega = "Saiu para entrega";
+      transportadora = "Entrega local";
+    } else {
+      statusEntrega = "Postado nos Correios";
+      transportadora = "Correios";
+    }
   }
+
+  const dadosUpdate = {
+    status_entrega: statusEntrega,
+    codigo_rastreio: infoEnvio || null,
+    transportadora: transportadora || null
+  };
 
   const { error } = await supabase
     .from("pedidos")
-    .update({
-      status_entrega: "Postado nos Correios",
-      codigo_rastreio: codigoRastreio,
-      transportadora: "Correios",
-      data_envio: new Date().toISOString()
-    })
+    .update(dadosUpdate)
     .eq("id", id);
 
   if (error) {
     console.error(error);
-    alert("Erro ao salvar rastreio.");
+    alert("Erro ao salvar envio. Veja no console qual coluna está faltando.");
     return;
   }
 
@@ -479,11 +495,22 @@ window.marcarPostado = async function(id){
     ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
     : "";
 
-  let texto = `📦 *PEDIDO ENVIADO*\n\n`;
+  let texto = `📦 *PEDIDO EM ENVIO*\n\n`;
   texto += `Olá ${pedido.cliente_nome}!\n\n`;
-  texto += `Seu pedido foi postado nos Correios.\n\n`;
-  texto += `Código de rastreio: ${codigoRastreio}\n`;
-  texto += `Transportadora: Correios\n`;
+
+  if (!infoEnvio) {
+    texto += `Seu pedido foi enviado.\n`;
+  } else if (transportadora === "Entrega local") {
+    texto += `Seu pedido saiu para entrega local.\n`;
+    texto += `Informação do entregador: ${infoEnvio}\n`;
+  } else {
+    texto += `Seu pedido foi postado nos Correios.\n`;
+    texto += `Código de rastreio: ${infoEnvio}\n`;
+  }
+
+  if (transportadora) {
+    texto += `Transportadora: ${transportadora}\n`;
+  }
 
   if (linkAcompanhamento) {
     texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
@@ -491,16 +518,21 @@ window.marcarPostado = async function(id){
 
   abrirWhats(pedido.cliente_telefone, texto);
   carregarPedidos();
-}
+};
 
 window.marcarSaiuEntrega = async function(id){
   const pedido = pedidosCache.find(p => String(p.id) === String(id));
   if (!pedido) return;
 
+  const input = document.getElementById(`rastreio_${id}`);
+  const infoEnvio = input?.value?.trim() || pedido.codigo_rastreio || "";
+
   const { error } = await supabase
     .from("pedidos")
     .update({
-      status_entrega: "Saiu para entrega"
+      status_entrega: "Saiu para entrega",
+      codigo_rastreio: infoEnvio || null,
+      transportadora: infoEnvio ? "Entrega local" : (pedido.transportadora || "Entrega local")
     })
     .eq("id", id);
 
@@ -514,13 +546,13 @@ window.marcarSaiuEntrega = async function(id){
   texto += `Olá ${pedido.cliente_nome}!\n\n`;
   texto += `Seu pedido saiu para entrega.\n`;
 
-  if (pedido.codigo_rastreio) {
-    texto += `Código de rastreio: ${pedido.codigo_rastreio}\n`;
+  if (infoEnvio) {
+    texto += `Informação da entrega: ${infoEnvio}\n`;
   }
 
   abrirWhats(pedido.cliente_telefone, texto);
   carregarPedidos();
-}
+};
 
 window.marcarEntregue = async function(id){
   const pedido = pedidosCache.find(p => String(p.id) === String(id));
