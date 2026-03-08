@@ -29,7 +29,7 @@ h2{
   justify-content:center;
 }
 
-select{
+select, input{
   padding:10px;
   border:none;
   border-radius:8px;
@@ -61,6 +61,19 @@ select{
 .historico{ color:#94a3b8; }
 .cancelado{ color:#ef4444; }
 
+.entrega-box{
+  margin-top:12px;
+  padding:12px;
+  border:1px solid #334155;
+  border-radius:12px;
+  background:#111827;
+}
+
+.rastreio-input{
+  width:100%;
+  margin-top:8px;
+}
+
 button{
   padding:8px 12px;
   border:none;
@@ -76,6 +89,8 @@ button{
 .btn-historico{ background:#64748b; color:#fff; }
 .btn-excluir{ background:#ef4444; color:#fff; }
 .btn-cancelar{ background:#f97316; color:#fff; }
+.btn-envio{ background:#a855f7; color:#fff; }
+.btn-entrega{ background:#14b8a6; color:#fff; }
 
 .linha-botoes{
   display:flex;
@@ -112,7 +127,7 @@ button{
 <div id="listaHistorico"></div>
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
@@ -142,7 +157,18 @@ function escapeHtml(texto){
     .replaceAll("'", "&#039;");
 }
 
-/* ===== NORMALIZAR STATUS ===== */
+function limparNumero(numero){
+  let n = String(numero || "").replace(/\D/g, "");
+  if(n && !n.startsWith("55")) n = "55" + n;
+  return n;
+}
+
+function abrirWhats(numero, texto){
+  const numeroLimpo = limparNumero(numero);
+  if (!numeroLimpo) return;
+  window.open(`https://wa.me/${numeroLimpo}?text=${encodeURIComponent(texto)}`, "_blank");
+}
+
 function statusEfetivo(p){
   const status = String(p.status || "").toLowerCase();
   const pagamentoStatus = String(p.pagamento_status || p.mp_status || "").toLowerCase();
@@ -177,6 +203,11 @@ function statusBonito(status){
     case "cancelado": return "CANCELADO";
     default: return String(status || "").toUpperCase();
   }
+}
+
+function statusEntregaBonito(statusEntrega){
+  const s = String(statusEntrega || "").trim();
+  return s || "Pedido recebido";
 }
 
 function renderizarPedidos(){
@@ -219,6 +250,12 @@ function renderizarPedidos(){
 function montarCardPedido(p, isHistorico){
   const itens = montarItens(p.itens);
   const status = statusEfetivo(p);
+  const statusEntrega = statusEntregaBonito(p.status_entrega);
+  const codigoAcompanhamento = p.codigo_acompanhamento || "-";
+  const rastreio = p.codigo_rastreio || "";
+  const linkAcompanhamento = p.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(p.codigo_acompanhamento)}`
+    : "";
 
   return `
     <div class="pedido">
@@ -228,6 +265,13 @@ function montarCardPedido(p, isHistorico){
 
       <strong>Cliente:</strong> ${escapeHtml(p.cliente_nome)}<br>
       <strong>Telefone:</strong> ${escapeHtml(p.cliente_telefone)}<br>
+      <strong>Código acompanhamento:</strong> ${escapeHtml(codigoAcompanhamento)}<br>
+      ${linkAcompanhamento ? `
+        <strong>Link acompanhamento:</strong><br>
+        <a href="${escapeHtml(linkAcompanhamento)}" target="_blank" style="color:#38bdf8;word-break:break-all;">
+          ${escapeHtml(linkAcompanhamento)}
+        </a><br>
+      ` : ""}
 
       <hr>
 
@@ -252,13 +296,29 @@ function montarCardPedido(p, isHistorico){
       <hr>
 
       <strong>Total:</strong> ${formatarReal(p.total)}
-
       ${p.pagamento_modo ? `<br><strong>Pagamento:</strong> ${escapeHtml(p.pagamento_modo)}` : ""}
       ${p.pagamento_status ? `<br><strong>Status pagamento:</strong> ${escapeHtml(p.pagamento_status)}` : ""}
-      ${p.mp_status ? `<br><strong>MP status:</strong> ${escapeHtml(p.mp_status)}` : ""}
-      ${p.pix_chave ? `<br><strong>Chave PIX:</strong> ${escapeHtml(p.pix_chave)}` : ""}
-      ${p.pix_comprovante_url ? `<br><a href="${escapeHtml(p.pix_comprovante_url)}" target="_blank" style="color:#38bdf8;">🔗 Ver comprovante (link)</a>` : ""}
-      ${p.pix_comprovante_arquivo_url ? `<br><a href="${escapeHtml(p.pix_comprovante_arquivo_url)}" target="_blank" style="color:#38bdf8;">📎 Ver comprovante (arquivo)</a>` : ""}
+
+      <div class="entrega-box">
+        <strong>Status entrega:</strong> ${escapeHtml(statusEntrega)}<br>
+        <strong>Rastreio:</strong> ${escapeHtml(rastreio || "Ainda não informado")}<br>
+        <strong>Transportadora:</strong> ${escapeHtml(p.transportadora || "Correios")}<br>
+
+        ${!isHistorico ? `
+          <input
+            id="rastreio_${p.id}"
+            class="rastreio-input"
+            placeholder="Digite o código de rastreio"
+            value="${escapeHtml(rastreio)}"
+          >
+
+          <div class="linha-botoes">
+            <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar como postado</button>
+            <button class="btn-entrega" onclick="marcarSaiuEntrega('${p.id}')">Saiu para entrega</button>
+            <button class="btn-aceitar" onclick="marcarEntregue('${p.id}')">Entregue</button>
+          </div>
+        ` : ""}
+      </div>
 
       <div class="linha-botoes">
         ${!isHistorico && status === "novo" ? `
@@ -306,7 +366,6 @@ async function iniciar(){
   app_id = user.app_id;
   await carregarPedidos();
 
-  /* atualização automática da tela */
   setInterval(carregarPedidos, 5000);
 }
 
@@ -330,7 +389,10 @@ async function carregarPedidos(){
 window.marcarPago = async function(id){
   const { error } = await supabase
     .from("pedidos")
-    .update({ status:"pago" })
+    .update({
+      status:"pago",
+      status_entrega:"Pagamento aprovado"
+    })
     .eq("id", id);
 
   if (error) {
@@ -357,7 +419,10 @@ window.aceitarPedido = async function(id){
 
   const { error } = await supabase
     .from("pedidos")
-    .update({ status:"aceito" })
+    .update({
+      status:"aceito",
+      status_entrega:"Separando pedido"
+    })
     .eq("id", id);
 
   if (error) {
@@ -369,27 +434,118 @@ window.aceitarPedido = async function(id){
   let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
   texto += `Olá ${pedido.cliente_nome}!\n\n`;
   texto += `Seu pedido foi confirmado e aceito ✅\n\n`;
+  texto += `Código do pedido: ${pedido.codigo_acompanhamento || "-"}\n`;
 
-  (pedido.itens || []).forEach(i => {
-    texto += `• ${i.nome} (${i.cor || "Sem cor"}) x${i.qtd}\n`;
-  });
+  if (pedido.codigo_acompanhamento) {
+    texto += `Acompanhe aqui:\n${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}\n`;
+  }
 
   texto += `\n💰 Total: ${formatarReal(pedido.total)}`;
-  texto += `\n\n🚚 Em breve daremos andamento ao seu pedido.`;
+  texto += `\n\n📦 Status: Separando pedido`;
 
-  let numero = String(pedido.cliente_telefone || "").replace(/\D/g,'');
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+}
 
-  if(numero && !numero.startsWith("55")){
-    numero = "55" + numero;
+window.marcarPostado = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const input = document.getElementById(`rastreio_${id}`);
+  const codigoRastreio = input?.value?.trim() || "";
+
+  if (!codigoRastreio) {
+    alert("Digite o código de rastreio.");
+    return;
   }
 
-  if (numero) {
-    window.open(
-      `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
-      "_blank"
-    );
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: "Postado nos Correios",
+      codigo_rastreio: codigoRastreio,
+      transportadora: "Correios",
+      data_envio: new Date().toISOString()
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao salvar rastreio.");
+    return;
   }
 
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
+
+  let texto = `📦 *PEDIDO ENVIADO*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido foi postado nos Correios.\n\n`;
+  texto += `Código de rastreio: ${codigoRastreio}\n`;
+  texto += `Transportadora: Correios\n`;
+
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+}
+
+window.marcarSaiuEntrega = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: "Saiu para entrega"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao atualizar status.");
+    return;
+  }
+
+  let texto = `🚚 *SAIU PARA ENTREGA*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido saiu para entrega.\n`;
+
+  if (pedido.codigo_rastreio) {
+    texto += `Código de rastreio: ${pedido.codigo_rastreio}\n`;
+  }
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+}
+
+window.marcarEntregue = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: "Entregue",
+      status: "historico"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao marcar como entregue.");
+    return;
+  }
+
+  let texto = `✅ *PEDIDO ENTREGUE*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido foi entregue com sucesso.\n`;
+  texto += `Obrigado pela compra!`;
+
+  abrirWhats(pedido.cliente_telefone, texto);
   carregarPedidos();
 }
 
@@ -411,7 +567,10 @@ window.moverHistorico = async function(id){
 window.cancelarPedido = async function(id){
   const { error } = await supabase
     .from("pedidos")
-    .update({ status:"cancelado" })
+    .update({
+      status:"cancelado",
+      status_entrega:"Pedido cancelado"
+    })
     .eq("id", id);
 
   if (error) {
