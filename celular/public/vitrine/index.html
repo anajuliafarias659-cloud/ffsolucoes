@@ -1552,14 +1552,51 @@
           variacoes = JSON.parse(produtoBanco.variacoes || "[]");
         } catch {}
 
-        if (item.cor && item.cor !== "Sem cor") {
-          const idx = variacoes.findIndex((v) => v.cor === item.cor);
+        for (const item of pedido.itens || []) {
 
-          if (idx === -1 || Number(variacoes[idx].estoque) < Number(item.qtd)) {
-            alert(`Estoque insuficiente para ${item.nome} (${item.cor})`);
-            return;
-          }
-        }
+  const { data: produto, error: prodErr } = await supabase
+    .from("produtos")
+    .select("id, variacoes")
+    .eq("id", item.id)
+    .single();
+
+  if (prodErr || !produto) {
+    console.error("Erro ao buscar produto:", item.id);
+    continue;
+  }
+
+  let variacoes = [];
+
+  try {
+    variacoes = JSON.parse(produto.variacoes || "[]");
+  } catch {
+    variacoes = [];
+  }
+
+  const corItem = item.cor || "Sem cor";
+
+  const idx = variacoes.findIndex(v => v.cor === corItem);
+
+  if (idx >= 0) {
+
+    const estoqueAtual = Number(variacoes[idx].estoque || 0);
+    const qtdVendida = Number(item.qtd || 1);
+
+    variacoes[idx].estoque = Math.max(0, estoqueAtual - qtdVendida);
+
+    const { error: estoqueError } = await supabase
+      .from("produtos")
+      .update({
+        variacoes: JSON.stringify(variacoes)
+      })
+      .eq("id", item.id);
+
+    if (estoqueError) {
+      console.error("Erro ao atualizar estoque:", item.id, estoqueError);
+    }
+  }
+
+}
 
         subtotal += Number(item.preco || 0) * Number(item.qtd || 1);
       }
