@@ -379,44 +379,34 @@ input{
 
     <h3>Pagamento</h3>
 
-    <div style="display:flex; gap:10px; margin-top:10px;">
-      <button type="button" class="btn-add" style="flex:1; background:#16a34a;" onclick="selecionarPagamento('pix')">
-        PIX
-      </button>
+<div style="display:flex; gap:10px; margin-top:10px;">
+  <button type="button" class="btn-add" style="flex:1; background:#16a34a;" onclick="selecionarPagamento('pix_mp')">
+    PIX
+  </button>
 
-      <button type="button" class="btn-add" style="flex:1;" onclick="selecionarPagamento('mercadopago')">
-        Mercado Pago
-      </button>
-    </div>
+  <button type="button" class="btn-add" style="flex:1;" onclick="selecionarPagamento('mercadopago')">
+    Cartão / Mercado Pago
+  </button>
+</div>
 
-    <div id="areaPix" style="display:none; margin-top:12px; padding:12px; border:1px solid #ddd; border-radius:10px;">
-      <div style="font-weight:bold; margin-bottom:6px;">Pagamento via PIX</div>
+<div id="areaPixMP" style="display:none; margin-top:12px; padding:12px; border:1px solid #ddd; border-radius:10px;">
+  <div style="font-weight:bold; margin-bottom:6px;">Pagamento via PIX</div>
+  <div id="pixQrCodeArea" style="text-align:center; margin-top:10px;"></div>
+  <textarea id="pixCopiaCola" readonly style="width:100%; min-height:90px; margin-top:10px; padding:10px; border-radius:8px; border:1px solid #ccc;"></textarea>
+  <button type="button" class="btn-add" style="margin-top:10px; background:#16a34a;" onclick="copiarPixCopiaCola()">
+    📋 Copiar código PIX
+  </button>
+</div>
 
-      <input id="pixChave" type="hidden" />
+<button id="btnConfirmarMP" class="btn-add" style="display:none; font-size:16px; padding:12px; margin-top:12px;"
+  onclick="finalizarPedido('mercadopago')">
+  ✅ Confirmar e pagar no Mercado Pago
+</button>
 
-      <button type="button" class="btn-add" style="margin-top:10px; background:#16a34a;" onclick="copiarPix()">
-        📋 Copiar chave PIX
-      </button>
-
-      <hr style="margin:12px 0;">
-
-      <div style="font-weight:bold; margin-bottom:6px;">Comprovante PIX</div>
-
-      <input id="pixComprovanteLink" placeholder="Cole aqui o link do comprovante (Google Drive / Foto / PDF)" />
-      <input id="pixComprovanteArquivo" type="file" accept="image/*,application/pdf" />
-
-      <small style="display:block;margin-top:6px;color:#666;">
-        Você pode colar um link OU enviar um arquivo.
-      </small>
-
-      <div style="font-size:12px; color:#555; margin-top:8px;">
-        Depois de pagar no PIX, envie o comprovante no WhatsApp.
-      </div>
-
-      <button type="button" class="btn-add" style="margin-top:10px; background:#111827;" onclick="finalizarPedido('pix')">
-        ✅ Confirmar Pedido (PIX)
-      </button>
-    </div>
+<button id="btnGerarPixMP" class="btn-add" style="display:none; font-size:16px; padding:12px; margin-top:12px; background:#16a34a;"
+  onclick="finalizarPedido('pix_mp')">
+  ✅ Gerar PIX
+</button>
 
     <button id="btnConfirmarMP" class="btn-add" style="display:none; font-size:16px; padding:12px; margin-top:12px;"
       onclick="finalizarPedido('mercadopago')">
@@ -435,6 +425,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const APP_ID = new URLSearchParams(window.location.search).get("app_id");
 const URL_PAGAMENTO = `${SUPABASE_URL}/functions/v1/criar-pagamento-loja`;
+const URL_PAGAMENTO_PIX = `${SUPABASE_URL}/functions/v1/criar-pix-loja`;
 
 if (!APP_ID) alert("APP_ID não informado.");
 
@@ -537,7 +528,39 @@ async function carregar(){
         ` : ""}
       `;
     }
+async function criarPagamentoPixMP(pedidoId, total, cliente){
+  const payload = {
+    appId: APP_ID,
+    pedidoId,
+    transaction_amount: Number(total),
+    description: `Pedido ${pedidoId}`,
+    payer: {
+      first_name: cliente.nome || "Cliente",
+      email: cliente.email || `cliente_${pedidoId}@seudominio.com`,
+      identification: {
+        type: "CPF",
+        number: "19119119100"
+      }
+    }
+  };
 
+  const res = await fetch(URL_PAGAMENTO_PIX, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_ANON_KEY
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(json?.erro || "Erro ao gerar PIX");
+  }
+
+  return json;
+}
     document.body.classList.remove("tema-natal", "tema-anonovo", "tema-capivara");
 
     if (config.tema_site) {
@@ -1120,19 +1143,38 @@ window.pegarLocalizacao = function(){
 };
 
 window.selecionarPagamento = function(modo){
-  const areaPix = document.getElementById("areaPix");
+  const areaPixMP = document.getElementById("areaPixMP");
   const btnMP = document.getElementById("btnConfirmarMP");
+  const btnGerarPixMP = document.getElementById("btnGerarPixMP");
 
-  if (modo === "pix") {
-    document.getElementById("pixChave").value = chavePix || "";
-    areaPix.style.display = "block";
-    btnMP.style.display = "none";
+  areaPixMP.style.display = "none";
+  btnMP.style.display = "none";
+  btnGerarPixMP.style.display = "none";
 
-    if (!chavePix) {
-      alert("Chave PIX não configurada.");
-    }
+  if (modo === "pix_mp") {
+    areaPixMP.style.display = "block";
+    btnGerarPixMP.style.display = "block";
   }
 
+  if (modo === "mercadopago") {
+    btnMP.style.display = "block";
+  }
+};
+
+window.copiarPixCopiaCola = async function (){
+  const codigo = document.getElementById("pixCopiaCola").value || "";
+  if (!codigo) {
+    alert("Nenhum código PIX gerado.");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(codigo);
+    alert("✅ Código PIX copiado!");
+  } catch {
+    alert("Não foi possível copiar.");
+  }
+};
   if (modo === "mercadopago") {
     areaPix.style.display = "none";
     btnMP.style.display = "block";
@@ -1283,10 +1325,8 @@ window.finalizarPedido = async function (modoEscolhido){
   valorFrete = Number(resultadoFrete.valor || 0);
   const total = subtotal + valorFrete;
 
-  const statusInicial = (modoEscolhido === "pix") ? "aguardando_confirmacao_pix" : "aguardando_pagamento";
-  const pagamentoModoInicial = (modoEscolhido === "pix") ? "pix_manual" : "mercadopago";
-  const pagamentoTipoInicial = (modoEscolhido === "pix") ? "pix" : "checkout_online";
-  const pagamentoStatusInicial = (modoEscolhido === "pix") ? "aguardando_comprovante" : "pending";
+  const pagamentoModoInicial = modoEscolhido === "pix_mp" ? "mercadopago_pix" : "mercadopago";
+  const pagamentoTipoInicial = modoEscolhido === "pix_mp" ? "pix" : "checkout_online";
 
   const { data: pedidoCriado, error } = await supabase
     .from("pedidos")
@@ -1308,73 +1348,60 @@ window.finalizarPedido = async function (modoEscolhido){
       frete_uf: ufFrete,
       frete_regiao: resultadoFrete.regiao,
       frete_peso_total: pesoTotalPedido,
-      status: statusInicial,
+      status: "aguardando_pagamento",
       pagamento_modo: pagamentoModoInicial,
       pagamento_tipo: pagamentoTipoInicial,
-      pagamento_status: pagamentoStatusInicial
+      pagamento_status: "pending"
     }])
     .select("id")
     .single();
 
   if (error || !pedidoCriado) {
-    console.error("ERRO AO SALVAR PEDIDO:", error);
-    alert("Erro ao salvar pedido. Veja o console.");
+    console.error(error);
+    alert("Erro ao salvar pedido.");
     return;
   }
 
   const pedidoId = pedidoCriado.id;
-  let pixLinkFinal = "";
-  let pixArquivoFinal = "";
 
-  if (modoEscolhido === "pix") {
-    const link = document.getElementById("pixComprovanteLink")?.value?.trim() || "";
-    const fileInput = document.getElementById("pixComprovanteArquivo");
-    const file = fileInput?.files?.[0];
+  if (modoEscolhido === "pix_mp") {
+    try {
+      const pagamento = await criarPagamentoPixMP(pedidoId, total, { nome });
 
-    if (!link && !file) {
-      alert("Envie o comprovante: cole um link ou faça upload do arquivo.");
+      const qrBase64 =
+        pagamento?.point_of_interaction?.transaction_data?.qr_code_base64 || "";
+
+      const copiaCola =
+        pagamento?.point_of_interaction?.transaction_data?.qr_code || "";
+
+      const ticketUrl =
+        pagamento?.point_of_interaction?.transaction_data?.ticket_url || "";
+
+      await supabase
+        .from("pedidos")
+        .update({
+          pagamento_modo: "mercadopago_pix",
+          pagamento_tipo: "pix",
+          pagamento_status: pagamento.status || "pending",
+          mp_payment_id: pagamento.id || null,
+          mp_qr_code: copiaCola || null,
+          mp_ticket_url: ticketUrl || null,
+          status: "aguardando_pagamento"
+        })
+        .eq("id", pedidoId);
+
+      document.getElementById("pixCopiaCola").value = copiaCola || "";
+
+      document.getElementById("pixQrCodeArea").innerHTML = qrBase64
+        ? `<img src="data:image/png;base64,${qrBase64}" style="max-width:240px; width:100%;">`
+        : (ticketUrl ? `<a href="${ticketUrl}" target="_blank">Abrir pagamento PIX</a>` : "PIX gerado.");
+
+      return;
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao gerar PIX: " + e.message);
       return;
     }
-
-    let arquivoUrl = "";
-
-    if (file) {
-      try {
-        arquivoUrl = await uploadComprovantePix(file, pedidoId);
-      } catch (e) {
-        console.error(e);
-
-        await supabase
-          .from("pedidos")
-          .update({ status: "erro_upload_comprovante_pix" })
-          .eq("id", pedidoId);
-
-        alert("Falha ao enviar comprovante: " + (e.message || "erro no upload"));
-        return;
-      }
-    }
-
-    const { error: upPedidoErr } = await supabase
-      .from("pedidos")
-      .update({
-        pagamento_modo: "pix_manual",
-        pagamento_tipo: "pix",
-        pagamento_status: "aguardando_comprovante",
-        pix_chave: chavePix,
-        pix_comprovante_url: link || null,
-        pix_comprovante_arquivo_url: arquivoUrl || null,
-        status: "aguardando_confirmacao_pix"
-      })
-      .eq("id", pedidoId);
-
-    if (upPedidoErr) {
-      console.error(upPedidoErr);
-      alert("Não consegui salvar o comprovante no pedido.");
-      return;
-    }
-
-    pixLinkFinal = link;
-    pixArquivoFinal = arquivoUrl;
   }
 
   if (modoEscolhido === "mercadopago") {
@@ -1395,18 +1422,19 @@ window.finalizarPedido = async function (modoEscolhido){
       const linkPagamento = pagamento.init_point || pagamento.sandbox_init_point;
 
       if (!linkPagamento) {
-        alert("Mercado Pago não retornou o link de pagamento.");
+        alert("Mercado Pago não retornou o link.");
         return;
       }
 
       window.location.href = linkPagamento;
       return;
     } catch (e) {
-      alert("Erro ao gerar pagamento: " + e.message);
       console.error(e);
+      alert("Erro ao gerar pagamento: " + e.message);
       return;
     }
   }
+};
 
   if ((modoEscolhido === "pix" || modoEscolhido === "whatsapp") && numeroWhatsapp) {
     let texto = `🛒 *NOVO PEDIDO*\n\n`;
