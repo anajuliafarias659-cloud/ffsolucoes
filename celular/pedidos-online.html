@@ -479,6 +479,77 @@ window.marcarPostado = async function(id){
       transportadora = "Correios";
     }
   }
+window.marcarPostado = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const input = document.getElementById(`rastreio_${id}`);
+  const infoEnvio = input?.value?.trim() || "";
+
+  let statusEntrega = "Pedido enviado";
+  let transportadora = "";
+
+  if (infoEnvio) {
+    const textoLower = infoEnvio.toLowerCase();
+
+    if (
+      textoLower.includes("entregador") ||
+      textoLower.includes("motoboy") ||
+      textoLower.includes("uber") ||
+      textoLower.includes("bike")
+    ) {
+      statusEntrega = "Saiu para entrega";
+      transportadora = "Entrega local";
+    } else {
+      statusEntrega = "Postado nos Correios";
+      transportadora = "Correios";
+    }
+  }
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: statusEntrega,
+      codigo_rastreio: infoEnvio || null,
+      transportadora: transportadora || null
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao salvar envio.");
+    return;
+  }
+
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
+
+  let texto = `📦 *PEDIDO EM ENVIO*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+
+  if (!infoEnvio) {
+    texto += `Seu pedido foi enviado.\n`;
+  } else if (transportadora === "Entrega local") {
+    texto += `Seu pedido saiu para entrega local.\n`;
+    texto += `Informação da entrega: ${infoEnvio}\n`;
+  } else {
+    texto += `Seu pedido foi postado nos Correios.\n`;
+    texto += `Código de rastreio: ${infoEnvio}\n`;
+  }
+
+  if (transportadora) {
+    texto += `Transportadora: ${transportadora}\n`;
+  }
+
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+};
+
 window.marcarSaiuEntrega = async function(id){
   const pedido = pedidosCache.find(p => String(p.id) === String(id));
   if (!pedido) return;
@@ -495,12 +566,29 @@ window.marcarSaiuEntrega = async function(id){
     })
     .eq("id", id);
 
-  if (error){
+  if (error) {
     console.error(error);
-    alert("Erro ao atualizar entrega");
+    alert("Erro ao atualizar entrega.");
     return;
   }
 
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
+
+  let texto = `🚚 *SAIU PARA ENTREGA*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido saiu para entrega.\n`;
+
+  if (info) {
+    texto += `Entregador / observação: ${info}\n`;
+  }
+
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(pedido.cliente_telefone, texto);
   carregarPedidos();
 };
   const { error } = await supabase
