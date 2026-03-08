@@ -368,12 +368,14 @@ async function iniciar(){
   await carregarPedidos();
 
   setInterval(() => {
-  if (!pausadoAutoRefresh) {
-    carregarPedidos();
-  }
-}, 5000);
+    if (!pausadoAutoRefresh) {
+      carregarPedidos();
+    }
+  }, 5000);
+}
 
 async function carregarPedidos(){
+
   const { data, error } = await supabase
     .from("pedidos")
     .select("*")
@@ -477,7 +479,47 @@ window.marcarPostado = async function(id){
       transportadora = "Correios";
     }
   }
+window.marcarSaiuEntrega = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
 
+  const input = document.getElementById(`rastreio_${id}`);
+  const infoEnvio = input?.value?.trim() || "";
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: "Saiu para entrega",
+      codigo_rastreio: infoEnvio || null,
+      transportadora: "Entrega local"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao marcar saída para entrega.");
+    return;
+  }
+
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
+
+  let texto = `🚚 *SAIU PARA ENTREGA*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido saiu para entrega.\n`;
+
+  if (infoEnvio) {
+    texto += `Entregador / observação: ${infoEnvio}\n`;
+  }
+
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+};
   const { error } = await supabase
     .from("pedidos")
     .update({
