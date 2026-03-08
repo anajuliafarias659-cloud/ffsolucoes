@@ -252,6 +252,10 @@ function montarCardPedido(p, isHistorico){
   const itens = montarItens(p.itens);
   const status = statusEfetivo(p);
   const statusEntrega = statusEntregaBonito(p.status_entrega);
+const classeEntrega =
+  statusEntrega.toLowerCase() === "entregue" ? "novo" :
+  statusEntrega.toLowerCase().includes("cancelado") ? "cancelado" :
+  "";
   const codigoAcompanhamento = p.codigo_acompanhamento || "-";
   const rastreio = p.codigo_rastreio || "";
   const linkAcompanhamento = p.codigo_acompanhamento
@@ -301,23 +305,23 @@ function montarCardPedido(p, isHistorico){
       ${p.pagamento_status ? `<br><strong>Status pagamento:</strong> ${escapeHtml(p.pagamento_status)}` : ""}
 
       <div class="entrega-box">
-        <strong>Status entrega:</strong> ${escapeHtml(statusEntrega)}<br>
+        <strong>Status entrega:</strong> <span class="${classeEntrega}">${escapeHtml(statusEntrega)}</span><br>
         <strong>Rastreio / Entregador:</strong> ${escapeHtml(rastreio || "Ainda não informado")}<br>
-        <strong>Transportadora:</strong> ${escapeHtml(p.transportadora || "Não informada")}<br>
+<strong>Transportadora:</strong> ${escapeHtml(p.transportadora || "Não informada")}<br>
 
-        ${!isHistorico ? `
-          <input
-            id="rastreio_${p.id}"
-            class="rastreio-input"
-            placeholder="Ex: QN123456789BR ou Entregador Fulano"
-            value="${escapeHtml(rastreio)}"
-          >
+${!isHistorico ? `
+  <input
+    id="rastreio_${p.id}"
+    class="rastreio-input"
+    placeholder="Ex: QN123456789BR ou Entregador Fulano"
+    value="${escapeHtml(rastreio)}"
+  >
 
-          <div class="linha-botoes">
-            <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar envio</button>
-            <button class="btn-entrega" onclick="marcarSaiuEntrega('${p.id}')">Saiu para entrega</button>
-            <button class="btn-aceitar" onclick="marcarEntregue('${p.id}')">Entregue</button>
-          </div>
+  <div class="linha-botoes">
+    <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar envio</button>
+    <button class="btn-entrega" onclick="marcarSaiuEntrega('${p.id}')">Saiu para entrega</button>
+    <button class="btn-aceitar" onclick="marcarEntregue('${p.id}')">Entregue</button>
+  </div>
         ` : ""}
       </div>
 
@@ -375,6 +379,7 @@ async function iniciar(){
 }
 
 async function carregarPedidos(){
+
   const { data, error } = await supabase
     .from("pedidos")
     .select("*")
@@ -407,7 +412,7 @@ window.marcarPago = async function(id){
   }
 
   carregarPedidos();
-};
+}
 
 window.aceitarPedido = async function(id){
   const { data:pedido, error:pedidoErr } = await supabase
@@ -450,7 +455,7 @@ window.aceitarPedido = async function(id){
 
   abrirWhats(pedido.cliente_telefone, texto);
   carregarPedidos();
-};
+}
 
 window.marcarPostado = async function(id){
   const pedido = pedidosCache.find(p => String(p.id) === String(id));
@@ -475,7 +480,33 @@ window.marcarPostado = async function(id){
       transportadora = "Entrega local";
     } else {
       statusEntrega = "Postado nos Correios";
-      transportadora = "Correios";
+      transportadora = "///";
+    }
+  }
+window.marcarPostado = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const input = document.getElementById(`rastreio_${id}`);
+  const infoEnvio = input?.value?.trim() || "";
+
+  let statusEntrega = "Pedido enviado";
+  let transportadora = "";
+
+  if (infoEnvio) {
+    const textoLower = infoEnvio.toLowerCase();
+
+    if (
+      textoLower.includes("entregador") ||
+      textoLower.includes("motoboy") ||
+      textoLower.includes("uber") ||
+      textoLower.includes("bike")
+    ) {
+      statusEntrega = "Saiu para entrega";
+      transportadora = "Entrega local";
+    } else {
+      statusEntrega = "Postado nos Correios";
+      transportadora = "///";
     }
   }
 
@@ -507,7 +538,7 @@ window.marcarPostado = async function(id){
     texto += `Seu pedido saiu para entrega local.\n`;
     texto += `Informação da entrega: ${infoEnvio}\n`;
   } else {
-    texto += `Seu pedido foi postado nos Correios.\n`;
+    texto += `Seu pedido foi postado.\n`;
     texto += `Código de rastreio: ${infoEnvio}\n`;
   }
 
@@ -590,7 +621,7 @@ window.marcarEntregue = async function(id){
 
   abrirWhats(pedido.cliente_telefone, texto);
   carregarPedidos();
-};
+}
 
 window.moverHistorico = async function(id){
   const { error } = await supabase
@@ -605,7 +636,7 @@ window.moverHistorico = async function(id){
   }
 
   carregarPedidos();
-};
+}
 
 window.cancelarPedido = async function(id){
   const { error } = await supabase
@@ -623,7 +654,7 @@ window.cancelarPedido = async function(id){
   }
 
   carregarPedidos();
-};
+}
 
 window.excluirPedido = async function(id){
   if(!confirm("Tem certeza que deseja excluir este pedido?")) return;
@@ -640,10 +671,9 @@ window.excluirPedido = async function(id){
   }
 
   carregarPedidos();
-};
+}
 
 filtroHistorico.addEventListener("change", renderizarPedidos);
-
 document.addEventListener("focusin", (e) => {
   if (e.target.classList.contains("rastreio-input")) {
     pausadoAutoRefresh = true;
