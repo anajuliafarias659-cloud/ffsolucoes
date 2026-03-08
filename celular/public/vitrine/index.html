@@ -398,11 +398,6 @@ input{
   </button>
 </div>
 
-<button id="btnConfirmarMP" class="btn-add" style="display:none; font-size:16px; padding:12px; margin-top:12px;"
-  onclick="finalizarPedido('mercadopago')">
-  ✅ Confirmar e pagar no Mercado Pago
-</button>
-
 <button id="btnGerarPixMP" class="btn-add" style="display:none; font-size:16px; padding:12px; margin-top:12px; background:#16a34a;"
   onclick="finalizarPedido('pix_mp')">
   ✅ Gerar PIX
@@ -436,7 +431,6 @@ let carrinho = JSON.parse(localStorage.getItem(CARRINHO_KEY)) || [];
 let todosProdutos = [];
 let modoVenda = "whatsapp";
 let numeroWhatsapp = "";
-let chavePix = "";
 let corSelecionada = null;
 let produtoAtual = null;
 let valorFrete = 0;
@@ -444,7 +438,7 @@ let subtotalCarrinhoAtual = 0;
 let totalCarrinhoAtual = 0;
 
 function formatarReal(valor){
-  return Number(valor).toLocaleString("pt-BR", {
+  return Number(valor || 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL"
   });
@@ -528,6 +522,28 @@ async function carregar(){
         ` : ""}
       `;
     }
+
+    document.body.classList.remove("tema-natal", "tema-anonovo", "tema-capivara");
+
+    if (config.tema_site) {
+      document.body.classList.add("tema-" + config.tema_site);
+    }
+
+    modoVenda = config.modo_venda || "whatsapp";
+    numeroWhatsapp = config.whatsapp_numero || "";
+  }
+
+  const { data: prods } = await supabase
+    .from("produtos")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .eq("ativo", true);
+
+  todosProdutos = prods || [];
+  criarCategorias();
+  renderizar(todosProdutos);
+}
+
 async function criarPagamentoPixMP(pedidoId, total, cliente){
   const payload = {
     appId: APP_ID,
@@ -560,27 +576,6 @@ async function criarPagamentoPixMP(pedidoId, total, cliente){
   }
 
   return json;
-}
-    document.body.classList.remove("tema-natal", "tema-anonovo", "tema-capivara");
-
-    if (config.tema_site) {
-      document.body.classList.add("tema-" + config.tema_site);
-    }
-
-    modoVenda = config.modo_venda || "whatsapp";
-    numeroWhatsapp = config.whatsapp_numero || "";
-    chavePix = (config.pix_chave || "").trim();
-  }
-
-  const { data: prods } = await supabase
-    .from("produtos")
-    .select("*")
-    .eq("app_id", APP_ID)
-    .eq("ativo", true);
-
-  todosProdutos = prods || [];
-  criarCategorias();
-  renderizar(todosProdutos);
 }
 
 /* ================= CATEGORIAS ================= */
@@ -955,7 +950,7 @@ function abrirModal(produto, imgs){
     index = i;
     modalImg.src = imgs[i];
     document.querySelectorAll("#modalDots span")
-      .forEach((d, di) => d.style.background = di === i ? '#0071e3' : '#ccc');
+      .forEach((d, di) => d.style.background = di === i ? "#0071e3" : "#ccc");
   };
 
   let variacoes = [];
@@ -998,7 +993,9 @@ function abrirModal(produto, imgs){
   modalAdd.onclick = adicionarCarrinho;
 }
 
-window.fecharModal = () => modalProduto.style.display = "none";
+window.fecharModal = () => {
+  modalProduto.style.display = "none";
+};
 
 /* ================= CARRINHO ================= */
 
@@ -1131,7 +1128,9 @@ window.removerItem = function(index){
   abrirCarrinho();
 };
 
-window.fecharCarrinho = () => modalCarrinho.style.display = "none";
+window.fecharCarrinho = () => {
+  modalCarrinho.style.display = "none";
+};
 
 /* ================= GEOLOCALIZAÇÃO ================= */
 
@@ -1141,6 +1140,8 @@ window.pegarLocalizacao = function(){
       `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
   });
 };
+
+/* ================= PAGAMENTO ================= */
 
 window.selecionarPagamento = function(modo){
   const areaPixMP = document.getElementById("areaPixMP");
@@ -1175,56 +1176,6 @@ window.copiarPixCopiaCola = async function (){
     alert("Não foi possível copiar.");
   }
 };
-  if (modo === "mercadopago") {
-    areaPix.style.display = "none";
-    btnMP.style.display = "block";
-  }
-};
-
-window.copiarPix = async function (){
-  const chave = document.getElementById("pixChave").value || "";
-  if (!chave) {
-    alert("Sem chave PIX.");
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(chave);
-    alert("✅ Chave PIX copiada!");
-  } catch (e) {
-    const inp = document.getElementById("pixChave");
-    inp.focus();
-    inp.select();
-    document.execCommand("copy");
-    alert("✅ Chave PIX copiada!");
-  }
-};
-
-async function uploadComprovantePix(file, pedidoId){
-  const BUCKET = "comprovantes";
-  const MAX_MB = 5;
-  const MAX_BYTES = MAX_MB * 1024 * 1024;
-
-  if (!file) throw new Error("Arquivo não enviado.");
-  if (file.size > MAX_BYTES) throw new Error(`Arquivo muito grande. Envie no máximo ${MAX_MB}MB.`);
-
-  const nomeLimpo = (file.name || "arquivo")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "_");
-
-  const path = `${APP_ID}/${pedidoId}_${Date.now()}_${nomeLimpo}`;
-
-  const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
-    upsert: true,
-    contentType: file.type || undefined
-  });
-
-  if (upErr) throw new Error(upErr.message || "Erro ao enviar arquivo.");
-
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return data.publicUrl;
-}
 
 /* ================= FINALIZAR ================= */
 
@@ -1436,46 +1387,8 @@ window.finalizarPedido = async function (modoEscolhido){
   }
 };
 
-  if ((modoEscolhido === "pix" || modoEscolhido === "whatsapp") && numeroWhatsapp) {
-    let texto = `🛒 *NOVO PEDIDO*\n\n`;
-    texto += `👤 ${nome}\n`;
-    texto += `📞 ${telefone}\n\n`;
-
-    carrinho.forEach(i => {
-      texto += `• ${i.nome} (${i.cor}) x${i.qtd}\n`;
-    });
-
-    texto += `\n📦 Subtotal: ${formatarReal(subtotal)}`;
-    texto += `\n🚚 Frete: ${formatarReal(valorFrete)}`;
-    texto += `\n💰 Total: ${formatarReal(total)}`;
-
-    if (pixLinkFinal) texto += `\n\n🧾 Comprovante (link): ${pixLinkFinal}`;
-    if (pixArquivoFinal) texto += `\n📎 Comprovante (arquivo): ${pixArquivoFinal}`;
-
-    if (chavePix) {
-      texto += `\n\n💳 *PAGAMENTO VIA PIX*`;
-      texto += `\nChave: ${chavePix}`;
-    }
-
-    window.open(
-      `https://wa.me/${numeroWhatsapp}?text=${encodeURIComponent(texto)}`,
-      "_blank"
-    );
-  }
-
-  carrinho = [];
-  valorFrete = 0;
-  salvarCarrinhoLocal();
-  fecharCarrinho();
-  carregar();
-
-  if (modoVenda !== "whatsapp") {
-    alert("✅ Pedido enviado com sucesso!");
-  }
-};
-
 carregar();
-</script>
 
+</script>
 </body>
 </html>
