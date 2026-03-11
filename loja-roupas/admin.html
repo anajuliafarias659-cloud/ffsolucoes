@@ -50,7 +50,6 @@ body{
 .card h3{ margin:0 0 10px }
 .card p{ opacity:.8; font-size:14px }
 
-/* bloco do seletor */
 .modo{
   margin:20px 0 30px;
   padding:18px;
@@ -79,7 +78,6 @@ body{
     </small>
   </p>
 
-  <!-- 🔽 SELETOR DE MODO (LOJA) -->
   <div class="modo">
     <b>Modo do site:</b><br><br>
 
@@ -96,22 +94,22 @@ body{
 
   <div class="grid">
 
-    <div class="card" onclick="location.href='produtos.html'">
+    <div class="card" onclick="abrirPagina('produtos.html')">
       <h3>📦 Produtos</h3>
       <p>Cadastro e controle dos produtos</p>
     </div>
 
-    <div class="card" onclick="location.href='caixa.html'">
+    <div class="card" onclick="abrirPagina('caixa.html')">
       <h3>💰 Caixa</h3>
       <p>Entradas, saídas e saldo</p>
     </div>
 
-    <div class="card" onclick="location.href='admins.html'">
+    <div class="card" onclick="abrirPagina('admins.html')">
       <h3>👥 Admins</h3>
       <p>Usuários da loja</p>
     </div>
 
-    <div class="card" onclick="location.href='site-config.html'">
+    <div class="card" onclick="abrirConfigSite()">
       <h3>🌐 Configurar Site</h3>
       <p>Configurações da página pública</p>
     </div>
@@ -129,48 +127,105 @@ body{
   </div>
 </div>
 
-<script>
-/* ===== VALIDA SESSÃO ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
-if(!admin || admin.tipo !== "loja"){
-  alert("Sessão inválida");
-  location.href = "../auth/login.html";
-  throw new Error("Sessão inválida");
+let usuarioLogado = null;
+let app_id = null;
+
+async function verificarSessao(){
+  const { data: { session }, error } = await supabase.auth.getSession();
+
+  if(error || !session){
+    alert("Sessão inválida");
+    window.location.href = "../auth/login.html";
+    return null;
+  }
+
+  return session.user;
 }
 
-document.getElementById("nome").innerText = admin.usuario;
-document.getElementById("appId").innerText = admin.app_id;
+async function carregarUsuario(){
+  const user = await verificarSessao();
+  if(!user) return;
 
-/* ===== ABRIR SITE CONFORME MODO ===== */
-function abrirLoja(){
+  const { data: usuario, error } = await supabase
+    .from("usuarios")
+    .select("id, nome, app_id, tipo")
+    .eq("id", user.id)
+    .single();
+
+  if(error || !usuario){
+    alert("Usuário não encontrado");
+    window.location.href = "../auth/login.html";
+    return;
+  }
+
+  if(usuario.tipo && usuario.tipo !== "loja"){
+    alert("Acesso não permitido para este painel");
+    window.location.href = "../auth/login.html";
+    return;
+  }
+
+  usuarioLogado = usuario;
+  app_id = usuario.app_id;
+
+  document.getElementById("nome").innerText = usuario.nome || "";
+  document.getElementById("appId").innerText = usuario.app_id || "";
+}
+
+window.abrirPagina = function(pagina){
+  if(!app_id){
+    alert("Loja não identificada");
+    return;
+  }
+
+  const voltar = encodeURIComponent(window.location.pathname);
+  window.location.href = `${pagina}?app_id=${app_id}&voltar=${voltar}`;
+};
+
+window.abrirConfigSite = function(){
+  if(!app_id){
+    alert("Loja não identificada");
+    return;
+  }
+
+  const url = `https://www.ffsolucoes.com.br/config-site.html?app_id=${app_id}`;
+  window.open(url, "_blank");
+};
+
+window.abrirLoja = function(){
+  if(!app_id){
+    alert("Loja não identificada");
+    return;
+  }
+
   const modo = document.querySelector('input[name="modo"]:checked').value;
 
-  // páginas da loja
-  const pagina = (modo === "vendas")
-    ? "vendas.html"   // site de vendas
-    : "index.html";   // vitrine
+  let url = "";
 
+  if(modo === "vendas"){
+    url = `https://www.ffsolucoes.com.br/public/vitrine/?app_id=${app_id}&modo=vendas`;
+  }else{
+    url = `https://www.ffsolucoes.com.br/public/vitrine/?app_id=${app_id}&modo=vitrine`;
+  }
+
+  window.open(url, "_blank");
+};
+
+window.abrirSuporte = function(){
   window.open(
-    "https://anajuliafarias659-cloud.github.io/ffsolucoes/loja-roupas/"
-    + pagina + "?app=" + admin.app_id,
+    "https://www.ffsolucoes.com.br/chat-admin.html",
     "_blank"
   );
-}
+};
 
-/* ===== SUPORTE ===== */
-function abrirSuporte(){
-  window.open(
-    "https://anajuliafarias659-cloud.github.io/ffsolucoes/chat-admin.html",
-    "_blank"
-  );
-}
+window.logout = async function(){
+  await supabase.auth.signOut();
+  window.location.href = "../auth/login.html";
+};
 
-/* ===== LOGOUT ===== */
-function logout(){
-  localStorage.clear();
-  location.href = "../auth/login.html";
-}
+carregarUsuario();
 </script>
 
 </body>
