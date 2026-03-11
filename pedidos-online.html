@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Pedidos Online</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+  margin:0;
+  font-family:Arial;
+  background:#020617;
+  color:#fff;
+  padding:20px;
+}
+
+h2{
+  text-align:center;
+  margin-top:40px;
+}
+
+.topo-filtro{
+  max-width:900px;
+  margin:0 auto 20px auto;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:center;
+}
+
+select, input{
+  padding:10px;
+  border:none;
+  border-radius:8px;
+  background:#0f172a;
+  color:#fff;
+  border:1px solid #1e293b;
+}
+
+.pedido{
+  background:#0f172a;
+  border:1px solid #1e293b;
+  padding:15px;
+  border-radius:15px;
+  margin-bottom:15px;
+  max-width:900px;
+  margin-left:auto;
+  margin-right:auto;
+}
+
+.status{
+  font-weight:bold;
+  margin-bottom:10px;
+  font-size:15px;
+}
+
+.novo{ color:#22c55e; }
+.pago{ color:#38bdf8; }
+.aceito{ color:#facc15; }
+.historico{ color:#94a3b8; }
+.cancelado{ color:#ef4444; }
+
+.entrega-box{
+  margin-top:12px;
+  padding:12px;
+  border:1px solid #334155;
+  border-radius:12px;
+  background:#111827;
+}
+
+.rastreio-input{
+  width:100%;
+  margin-top:8px;
+}
+
+button{
+  padding:8px 12px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+  margin-top:6px;
+  margin-right:5px;
+  font-weight:bold;
+}
+
+.btn-pago{ background:#38bdf8; color:#000; }
+.btn-aceitar{ background:#22c55e; color:#000; }
+.btn-historico{ background:#64748b; color:#fff; }
+.btn-excluir{ background:#ef4444; color:#fff; }
+.btn-cancelar{ background:#f97316; color:#fff; }
+.btn-envio{ background:#a855f7; color:#fff; }
+.btn-entrega{ background:#14b8a6; color:#fff; }
+
+.linha-botoes{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:10px;
+}
+
+.vazio{
+  text-align:center;
+  color:#94a3b8;
+  margin-top:20px;
+}
+</style>
+</head>
+<body>
+
+<h2>📦 Pedidos Ativos</h2>
+<div id="listaPedidos"></div>
+
+<h2>📁 Histórico</h2>
+
+<div class="topo-filtro">
+  <label for="filtroHistorico">Filtrar histórico:</label>
+  <select id="filtroHistorico">
+    <option value="todos">Todos</option>
+    <option value="pago">Pago</option>
+    <option value="aceito">Aceito</option>
+    <option value="historico">Histórico</option>
+    <option value="cancelado">Cancelado</option>
+  </select>
+</div>
+
+<div id="listaHistorico"></div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const supabase = createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let app_id = null;
+let pedidosCache = [];
+let pausadoAutoRefresh = false;
+
+const listaPedidos = document.getElementById("listaPedidos");
+const listaHistorico = document.getElementById("listaHistorico");
+const filtroHistorico = document.getElementById("filtroHistorico");
+
+function formatarReal(valor){
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
+function escapeHtml(texto){
+  return String(texto || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function limparNumero(numero){
+  let n = String(numero || "").replace(/\D/g, "");
+  if(n && !n.startsWith("55")) n = "55" + n;
+  return n;
+}
+
+function abrirWhats(numero, texto){
+  const numeroLimpo = limparNumero(numero);
+  if (!numeroLimpo) return;
+  window.open(`https://wa.me/${numeroLimpo}?text=${encodeURIComponent(texto)}`, "_blank");
+}
+
+function statusEfetivo(p){
+  const status = String(p.status || "").toLowerCase();
+  const pagamentoStatus = String(p.pagamento_status || p.mp_status || "").toLowerCase();
+
+  if (pagamentoStatus === "approved") return "pago";
+  if (status === "approved") return "pago";
+  if (status === "aguardando_confirmacao_pix") return "pago";
+
+  if (status === "novo") return "novo";
+  if (status === "pago") return "pago";
+  if (status === "aceito") return "aceito";
+  if (status === "historico") return "historico";
+  if (status === "cancelado") return "cancelado";
+
+  return status || "novo";
+}
+
+function montarItens(itens){
+  if (!Array.isArray(itens) || !itens.length) return "Sem itens";
+
+  return itens.map(i =>
+    `• ${escapeHtml(i.nome)} (${escapeHtml(i.cor || "Sem cor")}) x${Number(i.qtd || 0)}`
+  ).join("<br>");
+}
+
+function statusBonito(status){
+  switch(status){
+    case "novo": return "NOVO";
+    case "pago": return "PAGO";
+    case "aceito": return "ACEITO";
+    case "historico": return "HISTÓRICO";
+    case "cancelado": return "CANCELADO";
+    default: return String(status || "").toUpperCase();
+  }
+}
+
+function statusEntregaBonito(statusEntrega){
+  const s = String(statusEntrega || "").trim();
+  return s || "Pedido recebido";
+}
+
+function renderizarPedidos(){
+  listaPedidos.innerHTML = "";
+  listaHistorico.innerHTML = "";
+
+  const filtro = filtroHistorico.value;
+
+  const ativos = pedidosCache.filter(p => {
+    const s = statusEfetivo(p);
+    return !["historico", "cancelado"].includes(s);
+  });
+
+  const historico = pedidosCache.filter(p => {
+    const s = statusEfetivo(p);
+
+    if (filtro === "todos") {
+      return ["historico", "aceito", "pago", "cancelado"].includes(s);
+    }
+    return s === filtro;
+  });
+
+  if (!ativos.length) {
+    listaPedidos.innerHTML = `<div class="vazio">Nenhum pedido ativo.</div>`;
+  }
+
+  if (!historico.length) {
+    listaHistorico.innerHTML = `<div class="vazio">Nenhum pedido no histórico com esse filtro.</div>`;
+  }
+
+  ativos.forEach(p => {
+    listaPedidos.innerHTML += montarCardPedido(p, false);
+  });
+
+  historico.forEach(p => {
+    listaHistorico.innerHTML += montarCardPedido(p, true);
+  });
+}
+
+function montarCardPedido(p, isHistorico){
+  const itens = montarItens(p.itens);
+  const status = statusEfetivo(p);
+  const statusEntrega = statusEntregaBonito(p.status_entrega);
+  const codigoAcompanhamento = p.codigo_acompanhamento || "-";
+  const rastreio = p.codigo_rastreio || "";
+  const linkAcompanhamento = p.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(p.codigo_acompanhamento)}`
+    : "";
+
+  return `
+    <div class="pedido">
+      <div class="status ${escapeHtml(status)}">
+        Status: ${statusBonito(status)}
+      </div>
+
+      <strong>Cliente:</strong> ${escapeHtml(p.cliente_nome)}<br>
+      <strong>Telefone:</strong> ${escapeHtml(p.cliente_telefone)}<br>
+      <strong>Código acompanhamento:</strong> ${escapeHtml(codigoAcompanhamento)}<br>
+      ${linkAcompanhamento ? `
+        <strong>Link acompanhamento:</strong><br>
+        <a href="${escapeHtml(linkAcompanhamento)}" target="_blank" style="color:#38bdf8;word-break:break-all;">
+          ${escapeHtml(linkAcompanhamento)}
+        </a><br>
+      ` : ""}
+
+      <hr>
+
+      <strong>Endereço:</strong><br>
+      ${escapeHtml(p.cliente_rua || "")}, ${escapeHtml(p.cliente_numero || "")}<br>
+      ${escapeHtml(p.cliente_bairro || "")} - ${escapeHtml(p.cliente_cidade || "")}/${escapeHtml(p.cliente_estado || "")}<br>
+      CEP: ${escapeHtml(p.cliente_cep || "")}<br>
+
+      ${p.cliente_localizacao ? `
+        <br>
+        <strong>Localização:</strong><br>
+        <a href="${escapeHtml(p.cliente_localizacao)}" target="_blank" style="color:#22c55e;">
+          📍 Abrir no Google Maps
+        </a>
+      ` : ""}
+
+      <hr>
+
+      <strong>Itens:</strong><br>
+      ${itens}
+
+      <hr>
+
+      <strong>Total:</strong> ${formatarReal(p.total)}
+      ${p.pagamento_modo ? `<br><strong>Pagamento:</strong> ${escapeHtml(p.pagamento_modo)}` : ""}
+      ${p.pagamento_status ? `<br><strong>Status pagamento:</strong> ${escapeHtml(p.pagamento_status)}` : ""}
+
+      <div class="entrega-box">
+        <strong>Status entrega:</strong> ${escapeHtml(statusEntrega)}<br>
+        <strong>Rastreio / Entregador:</strong> ${escapeHtml(rastreio || "Ainda não informado")}<br>
+        <strong>Transportadora:</strong> ${escapeHtml(p.transportadora || "Não informada")}<br>
+
+        ${!isHistorico ? `
+          <input
+            id="rastreio_${p.id}"
+            class="rastreio-input"
+            placeholder="Ex: QN123456789BR ou Entregador Fulano"
+            value="${escapeHtml(rastreio)}"
+          >
+
+          <div class="linha-botoes">
+            <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar envio</button>
+            <button class="btn-entrega" onclick="marcarSaiuEntrega('${p.id}')">Saiu para entrega</button>
+            <button class="btn-aceitar" onclick="marcarEntregue('${p.id}')">Entregue</button>
+          </div>
+        ` : ""}
+      </div>
+
+      <div class="linha-botoes">
+        ${!isHistorico && status === "novo" ? `
+          <button class="btn-pago" onclick="marcarPago('${p.id}')">Marcar Pago</button>
+          <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Aceitar</button>
+          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
+          <button class="btn-cancelar" onclick="cancelarPedido('${p.id}')">Cancelar</button>
+        ` : ""}
+
+        ${!isHistorico && status === "pago" ? `
+          <button class="btn-aceitar" onclick="aceitarPedido('${p.id}')">Confirmar dinheiro e aceitar</button>
+          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Histórico</button>
+          <button class="btn-cancelar" onclick="cancelarPedido('${p.id}')">Cancelar</button>
+        ` : ""}
+
+        ${!isHistorico && status === "aceito" ? `
+          <button class="btn-historico" onclick="moverHistorico('${p.id}')">Mover para Histórico</button>
+        ` : ""}
+
+        <button class="btn-excluir" onclick="excluirPedido('${p.id}')">Excluir</button>
+      </div>
+    </div>
+  `;
+}
+
+async function iniciar(){
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  if(!session){
+    alert("Faça login");
+    return;
+  }
+
+  const { data:user, error:userErr } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  if (userErr || !user?.app_id) {
+    alert("Não foi possível carregar o app_id.");
+    return;
+  }
+
+  app_id = user.app_id;
+  await carregarPedidos();
+
+  setInterval(() => {
+    if (!pausadoAutoRefresh) {
+      carregarPedidos();
+    }
+  }, 5000);
+}
+
+async function carregarPedidos(){
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("created_at", { ascending:false });
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao carregar pedidos.");
+    return;
+  }
+
+  pedidosCache = data || [];
+  renderizarPedidos();
+}
+
+window.marcarPago = async function(id){
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status:"pago",
+      status_entrega:"Pagamento aprovado"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao marcar como pago.");
+    return;
+  }
+
+  carregarPedidos();
+};
+
+window.aceitarPedido = async function(id){
+  const { data:pedido, error:pedidoErr } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (pedidoErr || !pedido) {
+    console.error(pedidoErr);
+    alert("Erro ao carregar pedido.");
+    return;
+  }
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status:"aceito",
+      status_entrega:"Separando pedido"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao aceitar pedido.");
+    return;
+  }
+
+  let texto = `🛍️ *PEDIDO ACEITO*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido foi confirmado e aceito ✅\n\n`;
+  texto += `Código do pedido: ${pedido.codigo_acompanhamento || "-"}\n`;
+
+  if (pedido.codigo_acompanhamento) {
+    texto += `Acompanhe aqui:\n${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}\n`;
+  }
+
+  texto += `\n💰 Total: ${formatarReal(pedido.total)}`;
+  texto += `\n\n📦 Status: Separando pedido`;
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+};
+
+window.marcarPostado = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const input = document.getElementById(`rastreio_${id}`);
+  const infoEnvio = input?.value?.trim() || "";
+
+  let statusEntrega = "Pedido enviado";
+  let transportadora = "";
+
+  if (infoEnvio) {
+    const textoLower = infoEnvio.toLowerCase();
+
+    if (
+      textoLower.includes("entregador") ||
+      textoLower.includes("motoboy") ||
+      textoLower.includes("uber") ||
+      textoLower.includes("bike")
+    ) {
+      statusEntrega = "Saiu para entrega";
+      transportadora = "Entrega local";
+    } else {
+      statusEntrega = "Postado nos Correios";
+      transportadora = "Correios";
+    }
+  }
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: statusEntrega,
+      codigo_rastreio: infoEnvio || null,
+      transportadora: transportadora || null
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao salvar envio.");
+    return;
+  }
+
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
+
+  let texto = `📦 *PEDIDO EM ENVIO*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+
+  if (!infoEnvio) {
+    texto += `Seu pedido foi enviado.\n`;
+  } else if (transportadora === "Entrega local") {
+    texto += `Seu pedido saiu para entrega local.\n`;
+    texto += `Informação da entrega: ${infoEnvio}\n`;
+  } else {
+    texto += `Seu pedido foi postado nos Correios.\n`;
+    texto += `Código de rastreio: ${infoEnvio}\n`;
+  }
+
+  if (transportadora) {
+    texto += `Transportadora: ${transportadora}\n`;
+  }
+
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+};
+
+window.marcarSaiuEntrega = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const input = document.getElementById(`rastreio_${id}`);
+  const info = input?.value?.trim() || "";
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: "Saiu para entrega",
+      codigo_rastreio: info || null,
+      transportadora: "Entrega local"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao atualizar entrega.");
+    return;
+  }
+
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
+
+  let texto = `🚚 *SAIU PARA ENTREGA*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido saiu para entrega.\n`;
+
+  if (info) {
+    texto += `Entregador / observação: ${info}\n`;
+  }
+
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+};
+
+window.marcarEntregue = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status_entrega: "Entregue",
+      status: "historico"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao marcar como entregue.");
+    return;
+  }
+
+  let texto = `✅ *PEDIDO ENTREGUE*\n\n`;
+  texto += `Olá ${pedido.cliente_nome}!\n\n`;
+  texto += `Seu pedido foi entregue com sucesso.\n`;
+  texto += `Obrigado pela compra!`;
+
+  abrirWhats(pedido.cliente_telefone, texto);
+  carregarPedidos();
+};
+
+window.moverHistorico = async function(id){
+  const { error } = await supabase
+    .from("pedidos")
+    .update({ status:"historico" })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao mover para histórico.");
+    return;
+  }
+
+  carregarPedidos();
+};
+
+window.cancelarPedido = async function(id){
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      status:"cancelado",
+      status_entrega:"Pedido cancelado"
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao cancelar pedido.");
+    return;
+  }
+
+  carregarPedidos();
+};
+
+window.excluirPedido = async function(id){
+  if(!confirm("Tem certeza que deseja excluir este pedido?")) return;
+
+  const { error } = await supabase
+    .from("pedidos")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao excluir pedido.");
+    return;
+  }
+
+  carregarPedidos();
+};
+
+filtroHistorico.addEventListener("change", renderizarPedidos);
+
+document.addEventListener("focusin", (e) => {
+  if (e.target.classList.contains("rastreio-input")) {
+    pausadoAutoRefresh = true;
+  }
+});
+
+document.addEventListener("focusout", (e) => {
+  if (e.target.classList.contains("rastreio-input")) {
+    pausadoAutoRefresh = false;
+  }
+});
+
+iniciar();
+</script>
+</body>
+</html>
