@@ -39,7 +39,6 @@ body{
   margin:auto;
 }
 
-/* GRID */
 .grid{
   display:grid;
   grid-template-columns:repeat(2,1fr);
@@ -64,6 +63,7 @@ body{
   justify-content:center;
   text-align:center;
   position:relative;
+  min-height:110px;
 }
 
 .card:hover{
@@ -71,7 +71,6 @@ body{
   background:#1e293b;
 }
 
-/* 🔔 BADGE */
 .badge{
   position:absolute;
   top:8px;
@@ -84,7 +83,6 @@ body{
   display:none;
 }
 
-/* ✨ ANIMAÇÃO */
 @keyframes piscar {
   0%{box-shadow:0 0 0 transparent;}
   50%{box-shadow:0 0 20px rgba(239,68,68,.9);}
@@ -95,24 +93,47 @@ body{
   animation:piscar 1s infinite;
 }
 
-select{
-  width:100%;
+.link-box{
+  margin-top:10px;
+  background:#111827;
+  border:1px solid rgba(255,255,255,.08);
   padding:10px;
-  border-radius:8px;
-  border:none;
-  background:#1e293b;
-  color:#fff;
-  margin-top:8px;
+  border-radius:10px;
+  font-size:12px;
+  color:#cbd5e1;
+  word-break:break-all;
+  text-align:left;
 }
 
 .botao-link{
   margin-top:10px;
   font-size:13px;
-  opacity:.8;
+  opacity:.9;
   cursor:pointer;
+  background:#2563eb;
+  border:none;
+  color:#fff;
+  padding:10px 12px;
+  border-radius:10px;
+  font-weight:bold;
 }
 
-.botao-link:hover{opacity:1}
+.botao-link:hover{
+  opacity:1;
+  background:#1d4ed8;
+}
+
+.titulo-card{
+  font-size:18px;
+  font-weight:bold;
+  margin-bottom:8px;
+}
+
+.subtexto{
+  font-size:13px;
+  opacity:.75;
+  line-height:1.4;
+}
 </style>
 </head>
 
@@ -139,7 +160,6 @@ select{
     <div class="card" onclick="irPara('mesas.html')">🪑 Mesas</div>
     <div class="card" onclick="irPara('cozinha.html')">🧾 Cozinha</div>
 
-    <!-- 🔔 PEDIDOS ONLINE -->
     <div class="card" id="cardPedidos" onclick="irPara('pedidos-online.html')">
       🧾 Pedidos Online
       <span class="badge" id="badgePedidos">0</span>
@@ -150,15 +170,19 @@ select{
     <div class="card" onclick="irPara('admins.html')">⚙️ Admins</div>
     <div class="card" onclick="irPara('mapa-mesas.html')">🗺️ Mapa pra Organiza mesas</div>
 
-    <div class="card">
-      <h3>🌍 Página Pública</h3>
-      <select id="modo_publico">
-        <option value="cardapio">🛒 Cardápio</option>
-        <option value="site">🌐 Site</option>
-      </select>
-      <div class="botao-link" onclick="compartilharPagina()">
-        🔗 Compartilhar Página
+    <div class="card" style="grid-column:1/-1; text-align:left; cursor:default;">
+      <div class="titulo-card">🌍 Página Pública</div>
+      <div class="subtexto">
+        Esse é o link público da sua loja para compartilhar com seus clientes.
       </div>
+
+      <div class="link-box" id="linkPublico">
+        Carregando link...
+      </div>
+
+      <button class="botao-link" onclick="compartilharPagina()">
+        🔗 Copiar link da loja
+      </button>
     </div>
 
   </div>
@@ -170,83 +194,91 @@ import { supabase } from "../js/supabase.js";
 
 let app_id = null;
 
-/* 🔐 SESSÃO */
 async function verificarSessao(){
   const { data:{ session } } = await supabase.auth.getSession();
+
   if(!session){
-    window.location.href="/auth/login.html";
+    window.location.href = "/auth/login.html";
     return null;
   }
+
   return session.user.id;
 }
 
-/* 👤 USUÁRIO */
 async function carregarUsuario(){
-
   const userId = await verificarSessao();
   if(!userId) return;
 
-  const { data: usuario } = await supabase
+  const { data: usuario, error } = await supabase
     .from("usuarios")
     .select("nome, app_id")
     .eq("id", userId)
     .single();
 
-  if(!usuario) return;
+  if(error || !usuario){
+    alert("Não foi possível carregar os dados do usuário.");
+    return;
+  }
 
   app_id = usuario.app_id;
 
-  nome.innerText = usuario.nome;
-  negocioId.innerText = usuario.app_id;
+  document.getElementById("nome").innerText = usuario.nome || "";
+  document.getElementById("negocioId").innerText = usuario.app_id || "";
+
+  const urlPublica = `${location.origin}/public/vitrine/?app_id=${usuario.app_id}`;
+  document.getElementById("linkPublico").innerText = urlPublica;
 
   verificarPedidos();
-  setInterval(verificarPedidos,5000);
+  setInterval(verificarPedidos, 5000);
 }
 
-/* 🔔 VERIFICAR PEDIDOS NOVOS */
 async function verificarPedidos(){
+  if(!app_id) return;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("pedidos")
     .select("id")
     .eq("app_id", app_id)
-    .eq("status","novo");
+    .eq("status", "novo");
+
+  if(error) return;
 
   const badge = document.getElementById("badgePedidos");
   const card = document.getElementById("cardPedidos");
 
   if(data && data.length > 0){
-
-    badge.style.display="inline-block";
+    badge.style.display = "inline-block";
     badge.innerText = data.length;
-
     card.classList.add("piscar");
-
   }else{
-
-    badge.style.display="none";
+    badge.style.display = "none";
     card.classList.remove("piscar");
   }
 }
 
-/* 🔗 COMPARTILHAR */
-window.compartilharPagina = function(){
-  const modo = document.getElementById("modo_publico").value;
-  const base = location.origin;
+window.compartilharPagina = async function(){
+  if(!app_id){
+    alert("Negócio não identificado");
+    return;
+  }
 
-  let url = modo==="cardapio"
-    ? `${base}/bar/public/cardapio/?app_id=${app_id}`
-    : `${base}/bar/public/site/?app_id=${app_id}`;
+  const url = `${location.origin}/public/vitrine/?app_id=${app_id}`;
 
-  navigator.clipboard.writeText(url);
-  alert("Link copiado 🔥");
+  try{
+    await navigator.clipboard.writeText(url);
+    alert("🔗 Link da loja copiado com sucesso!\n\n" + url);
+  }catch{
+    prompt("Copie o link da loja:", url);
+  }
 };
 
-window.irPara = pagina => window.location.href = pagina;
+window.irPara = function(pagina){
+  window.location.href = pagina;
+};
 
-window.logout = async ()=>{
+window.logout = async function(){
   await supabase.auth.signOut();
-  window.location.href="/auth/login.html";
+  window.location.href = "/auth/login.html";
 };
 
 carregarUsuario();
