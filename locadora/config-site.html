@@ -42,6 +42,12 @@ button{background:#22c55e;font-weight:700;margin-top:22px;cursor:pointer}
   background:#020617;
   padding:6px;
 }
+.info{
+  margin-top:12px;
+  font-size:13px;
+  color:#cbd5e1;
+  line-height:1.5;
+}
 @media(max-width:600px){
   .container{margin:16px;padding:16px;}
 }
@@ -76,7 +82,11 @@ button{background:#22c55e;font-weight:700;margin-top:22px;cursor:pointer}
 
   <label>Banner</label>
   <input type="file" id="bannerInput" accept="image/*">
-  <img id="bannerPreview" class="preview">
+  <img id="bannerPreview" class="preview" alt="Preview do banner">
+
+  <div class="info">
+    Sempre que trocar o banner, será enviado com nome único para evitar cache da imagem antiga.
+  </div>
 
   <button onclick="salvar()">💾 Salvar configurações</button>
 </div>
@@ -87,12 +97,11 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== NOVO PADRÃO ===== */
 const app_id = localStorage.getItem("app_id");
 
 if(!app_id){
   alert("Sessão inválida. Faça login novamente.");
-  window.location.href="../auth/login.html";
+  window.location.href = "../auth/login.html";
   throw new Error("sem app_id");
 }
 
@@ -105,7 +114,6 @@ const bannerPreview = document.getElementById("bannerPreview");
 
 let bannerAtual = null;
 
-/* ===== PREVIEW IMEDIATO ===== */
 bannerInput.addEventListener("change", () => {
   const file = bannerInput.files[0];
   if(file){
@@ -113,69 +121,118 @@ bannerInput.addEventListener("change", () => {
   }
 });
 
-/* ===== UPLOAD BANNER ===== */
 async function uploadBanner(file){
-  const ext = file.name.split(".").pop();
-  const path = `${app_id}/banner.${ext}`;
+  const nomeOriginal = file.name || "banner.png";
+  const ext = nomeOriginal.includes(".")
+    ? nomeOriginal.split(".").pop().toLowerCase()
+    : "png";
 
-  await sb.storage.from("banners").upload(path, file, {
-    upsert: true
-  });
+  const path = `${app_id}/banner_${Date.now()}.${ext}`;
 
-  return sb.storage.from("banners").getPublicUrl(path).data.publicUrl;
+  const { error: uploadError } = await sb.storage
+    .from("banners")
+    .upload(path, file, { upsert: true });
+
+  if(uploadError){
+    console.error("Erro no upload do banner:", uploadError);
+    throw uploadError;
+  }
+
+  const { data } = sb.storage.from("banners").getPublicUrl(path);
+  return data.publicUrl;
 }
 
-/* ===== SALVAR ===== */
 async function salvar(){
+  try{
+    let banner_url = bannerAtual;
 
-  let banner_url = bannerAtual;
+    if(bannerInput.files[0]){
+      banner_url = await uploadBanner(bannerInput.files[0]);
+    }
 
-  if(bannerInput.files[0]){
-    banner_url = await uploadBanner(bannerInput.files[0]);
+    const payload = {
+      app_id,
+      nome_site: nomeSite.value.trim(),
+      cor_primaria: corPrimaria.value || "#e30613",
+      tema_site: temaSite.value || "padrao",
+      fluxo_locacao: fluxoLocacao.value || "painel",
+      banner_url
+    };
+
+    const { data, error: erroBusca } = await sb
+      .from("config_site")
+      .select("id")
+      .eq("app_id", app_id)
+      .maybeSingle();
+
+    if(erroBusca){
+      console.error("Erro ao buscar config_site:", erroBusca);
+      alert("Erro ao buscar configuração.");
+      return;
+    }
+
+    let erroSalvar = null;
+
+    if(data){
+      const { error } = await sb
+        .from("config_site")
+        .update(payload)
+        .eq("app_id", app_id);
+
+      erroSalvar = error;
+    } else {
+      const { error } = await sb
+        .from("config_site")
+        .insert(payload);
+
+      erroSalvar = error;
+    }
+
+    if(erroSalvar){
+      console.error("Erro ao salvar configurações:", erroSalvar);
+      alert("Erro ao salvar configurações.");
+      return;
+    }
+
+    bannerAtual = banner_url;
+
+    if(bannerAtual){
+      bannerPreview.src = bannerAtual + (bannerAtual.includes("?") ? "&" : "?") + "v=" + Date.now();
+    }
+
+    alert("Configurações salvas com sucesso 🚀");
+  }catch(e){
+    console.error("Erro geral ao salvar:", e);
+    alert("Erro ao salvar banner/configurações.");
   }
-
-  const payload = {
-    app_id,
-    nome_site: nomeSite.value,
-    cor_primaria: corPrimaria.value,
-    tema_site: temaSite.value,
-    fluxo_locacao: fluxoLocacao.value,
-    banner_url
-  };
-
-  const { data } = await sb
-    .from("config_site")
-    .select("id")
-    .eq("app_id", app_id)
-    .maybeSingle();
-
-  if(data){
-    await sb.from("config_site").update(payload).eq("app_id", app_id);
-  }else{
-    await sb.from("config_site").insert(payload);
-  }
-
-  alert("Configurações salvas com sucesso 🚀");
 }
 
-/* ===== CARREGAR DADOS ===== */
-(async()=>{
-  const { data } = await sb
-    .from("config_site")
-    .select("*")
-    .eq("app_id", app_id)
-    .maybeSingle();
+(async () => {
+  try{
+    const { data, error } = await sb
+      .from("config_site")
+      .select("*")
+      .eq("app_id", app_id)
+      .maybeSingle();
 
-  if(!data) return;
+    if(error){
+      console.error("Erro ao carregar config_site:", error);
+      return;
+    }
 
-  nomeSite.value = data.nome_site || "";
-  corPrimaria.value = data.cor_primaria || "#e30613";
-  temaSite.value = data.tema_site || "padrao";
-  fluxoLocacao.value = data.fluxo_locacao || "painel";
+    if(!data) return;
 
-  if(data.banner_url){
-    bannerAtual = data.banner_url;
-    bannerPreview.src = data.banner_url;
+    nomeSite.value = data.nome_site || "";
+    corPrimaria.value = data.cor_primaria || "#e30613";
+    temaSite.value = data.tema_site || "padrao";
+    fluxoLocacao.value = data.fluxo_locacao || "painel";
+
+    if(data.banner_url){
+      bannerAtual = data.banner_url;
+      bannerPreview.src = data.banner_url + (data.banner_url.includes("?") ? "&" : "?") + "v=" + Date.now();
+    }
+  }catch(e){
+    console.error("Erro ao carregar dados:", e);
   }
 })();
 </script>
