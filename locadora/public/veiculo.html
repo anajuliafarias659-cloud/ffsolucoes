@@ -21,10 +21,48 @@ body{margin:0;background:var(--bg)}
 .status.alugado{color:#e30613}
 label{display:block;margin-top:14px;font-weight:600}
 input{width:100%;padding:12px;margin-top:6px;border-radius:10px;border:1px solid #ccc}
-.btn{margin-top:14px;background:var(--primaria);color:#fff;padding:12px;border-radius:12px;text-align:center;font-weight:700;cursor:pointer}
+.btn{
+  margin-top:14px;
+  background:var(--primaria);
+  color:#fff;
+  padding:12px;
+  border-radius:12px;
+  text-align:center;
+  font-weight:700;
+  cursor:pointer;
+  border:none;
+  width:100%;
+}
 .btn-sec{background:#222;color:#fff}
 .btn-sec.active{outline:3px solid var(--primaria)}
 video,img.preview,canvas{width:100%;margin-top:8px;border-radius:10px;display:none}
+.doc-box{
+  margin-top:18px;
+  padding:14px;
+  border:1px solid #ddd;
+  border-radius:14px;
+  background:#fafafa;
+}
+.doc-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+.doc-actions .btn{
+  width:auto;
+  flex:1;
+  min-width:160px;
+}
+.alerta{
+  margin-top:8px;
+  padding:10px;
+  border-radius:10px;
+  background:#fff7ed;
+  color:#9a3412;
+  border:1px solid #fdba74;
+  display:none;
+}
 </style>
 </head>
 
@@ -33,52 +71,52 @@ video,img.preview,canvas{width:100%;margin-top:8px;border-radius:10px;display:no
 <div class="topo">Detalhes do Veículo</div>
 
 <div class="container">
-<div class="card">
+  <div class="card">
 
-<div class="hero"><img id="imgVeiculo"></div>
-<h2 id="modelo"></h2>
-<div class="preco" id="preco"></div>
-<div id="status" class="status"></div>
+    <div class="hero"><img id="imgVeiculo"></div>
+    <h2 id="modelo"></h2>
+    <div class="preco" id="preco"></div>
+    <div id="status" class="status"></div>
 
-<div id="acaoAlugar" class="btn" style="display:none" onclick="abrirFormulario()">
-  Alugar este veículo
-</div>
+    <div id="acaoAlugar" class="btn" style="display:none" onclick="abrirFormulario()">
+      Alugar este veículo
+    </div>
 
-<div id="formSolicitacao" style="display:none">
+    <div id="formSolicitacao" style="display:none">
 
-<label>Nome completo</label>
-<input id="fNome">
+      <label>Nome completo</label>
+      <input id="fNome">
 
-<label>Telefone</label>
-<input id="fTelefone">
+      <label>Telefone</label>
+      <input id="fTelefone">
 
-<label>CPF</label>
-<input id="fCpf">
+      <label>CPF</label>
+      <input id="fCpf">
 
-<label>Dias</label>
-<input id="fDias" type="number" min="1" oninput="calcularTotal()">
+      <label>Dias</label>
+      <input id="fDias" type="number" min="1" oninput="calcularTotal()">
 
-<label>Total</label>
-<input id="fTotal" readonly>
+      <label>Total</label>
+      <input id="fTotal" readonly>
 
-<label>Forma de pagamento</label>
-<div style="display:flex;gap:10px;margin-top:6px">
-  <button type="button" class="btn btn-sec" onclick="setPagamento(this,'PIX')">PIX</button>
-  <button type="button" class="btn btn-sec" onclick="setPagamento(this,'Dinheiro')">Dinheiro</button>
-  <button type="button" class="btn btn-sec" onclick="setPagamento(this,'Cartão')">Cartão</button>
-</div>
+      <label>Forma de pagamento</label>
+      <div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap">
+        <button type="button" class="btn btn-sec" onclick="setPagamento(this,'PIX')">PIX</button>
+        <button type="button" class="btn btn-sec" onclick="setPagamento(this,'Dinheiro')">Dinheiro</button>
+        <button type="button" class="btn btn-sec" onclick="setPagamento(this,'Cartão')">Cartão</button>
+      </div>
 
-<input type="hidden" id="fPagamento">
-<p id="pagamentoEscolhido" style="font-weight:bold"></p>
+      <input type="hidden" id="fPagamento">
+      <p id="pagamentoEscolhido" style="font-weight:bold"></p>
 
-<hr style="margin:18px 0">
+      <hr style="margin:18px 0">
 
-<div id="docs"></div>
+      <div id="docs"></div>
 
-<div class="btn" onclick="enviarSolicitacao()">Enviar solicitação</div>
+      <div class="btn" onclick="enviarSolicitacao()">Enviar solicitação</div>
 
-</div>
-</div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -91,160 +129,364 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let DIARIA=null, arquivos={}, stream=null;
-let fluxo="painel", whatsapp="";
+let DIARIA = null;
+let arquivos = {};
+let stream = null;
+let fluxo = "painel";
+let whatsapp = "";
+let cameraAtual = null;
 
 /* CONFIG */
-(async()=>{
-  const { data } = await sb
-    .from("config_site")
-    .select("fluxo_locacao, whatsapp")
-    .eq("app_id", appId)
-    .maybeSingle();
+(async () => {
+  try {
+    const { data, error } = await sb
+      .from("config_site")
+      .select("fluxo_locacao, whatsapp")
+      .eq("app_id", appId)
+      .maybeSingle();
 
-  fluxo = data?.fluxo_locacao || "painel";
-  whatsapp = data?.whatsapp || "";
+    if (error) {
+      console.error("Erro ao carregar config_site:", error);
+      return;
+    }
+
+    fluxo = data?.fluxo_locacao || "painel";
+    whatsapp = data?.whatsapp || "";
+  } catch (e) {
+    console.error("Erro geral ao carregar config:", e);
+  }
 })();
 
 /* VEÍCULO */
-async function carregarVeiculo(){
-  const { data:v } = await sb.from("veiculos").select("*")
-    .eq("id",veiculoId).eq("app_id",appId).single();
+async function carregarVeiculo() {
+  try {
+    const { data: v, error } = await sb
+      .from("veiculos")
+      .select("*")
+      .eq("id", veiculoId)
+      .eq("app_id", appId)
+      .single();
 
-  if(!v) return;
+    if (error) {
+      console.error("Erro ao carregar veículo:", error);
+      alert("Erro ao carregar veículo.");
+      return;
+    }
 
-  DIARIA = v.diaria !== null ? Number(v.diaria) : null;
+    if (!v) return;
 
-  imgVeiculo.src = v.foto_url || "https://via.placeholder.com/800x400";
-  modelo.innerText = v.modelo;
-  preco.innerText = DIARIA ? `R$ ${DIARIA} / diária` : "Valor sob consulta";
+    DIARIA = v.diaria !== null ? Number(v.diaria) : null;
 
-  const statusEl = document.getElementById("status");
-  if(v.status === "alugado"){
-    statusEl.innerText = "🔒 Alugado";
-    statusEl.classList.add("alugado");
-  }else{
-    statusEl.innerText = "✅ Disponível";
-    statusEl.classList.add("disponivel");
-    acaoAlugar.style.display = "block";
+    document.getElementById("imgVeiculo").src = v.foto_url || "https://via.placeholder.com/800x400";
+    document.getElementById("modelo").innerText = v.modelo || "Veículo";
+    document.getElementById("preco").innerText = DIARIA ? `R$ ${DIARIA} / diária` : "Valor sob consulta";
+
+    const statusEl = document.getElementById("status");
+    if (v.status === "alugado") {
+      statusEl.innerText = "🔒 Alugado";
+      statusEl.classList.add("alugado");
+    } else {
+      statusEl.innerText = "✅ Disponível";
+      statusEl.classList.add("disponivel");
+      document.getElementById("acaoAlugar").style.display = "block";
+    }
+
+    criarCameras();
+  } catch (e) {
+    console.error("Erro geral ao carregar veículo:", e);
+    alert("Erro ao carregar os dados do veículo.");
   }
-
-  criarCameras();
 }
 carregarVeiculo();
 
 /* FORM */
-function abrirFormulario(){
-  formSolicitacao.style.display="block";
-  acaoAlugar.style.display="none";
+function abrirFormulario() {
+  document.getElementById("formSolicitacao").style.display = "block";
+  document.getElementById("acaoAlugar").style.display = "none";
 }
 
-function calcularTotal(){
-  fTotal.value = DIARIA ? Number(fDias.value||0)*DIARIA : "A combinar";
+function calcularTotal() {
+  const dias = Number(document.getElementById("fDias").value || 0);
+  document.getElementById("fTotal").value = DIARIA ? (dias * DIARIA).toFixed(2) : "A combinar";
 }
 
-function setPagamento(btn,v){
-  document.querySelectorAll(".btn-sec").forEach(b=>b.classList.remove("active"));
+function setPagamento(btn, valor) {
+  document.querySelectorAll(".btn-sec").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
-  fPagamento.value=v;
-  pagamentoEscolhido.innerText="Pagamento escolhido: "+v;
+  document.getElementById("fPagamento").value = valor;
+  document.getElementById("pagamentoEscolhido").innerText = "Pagamento escolhido: " + valor;
 }
 
-/* CÂMERAS */
-function criarCameras(){
-  const tipos=["selfie","rg_frente","rg_verso","cnh"];
-  docs.innerHTML="";
-  tipos.forEach(t=>{
-    docs.innerHTML+=`
-      <label>${t.toUpperCase()}</label>
-      <button class="btn btn-sec" onclick="abrirCamera('${t}')">Abrir câmera</button>
-      <video id="video-${t}"></video>
-      <button class="btn btn-sec" id="cap-${t}" onclick="capturar('${t}')" style="display:none">Capturar</button>
-      <img id="prev-${t}" class="preview">
-      <canvas id="canvas-${t}" hidden></canvas>`;
+/* DOCUMENTOS */
+function criarCameras() {
+  const tipos = [
+    { key: "selfie", label: "Selfie" },
+    { key: "rg_frente", label: "RG Frente" },
+    { key: "rg_verso", label: "RG Verso" },
+    { key: "cnh", label: "CNH" }
+  ];
+
+  const docs = document.getElementById("docs");
+  docs.innerHTML = "";
+
+  tipos.forEach(t => {
+    docs.innerHTML += `
+      <div class="doc-box">
+        <label>${t.label}</label>
+
+        <div class="doc-actions">
+          <button type="button" class="btn btn-sec" onclick="abrirCamera('${t.key}')">Abrir câmera</button>
+          <button type="button" class="btn btn-sec" onclick="document.getElementById('file-${t.key}').click()">Enviar foto</button>
+        </div>
+
+        <div id="alerta-${t.key}" class="alerta"></div>
+
+        <input
+          type="file"
+          id="file-${t.key}"
+          accept="image/*"
+          capture="environment"
+          style="display:none"
+          onchange="selecionarArquivo(event, '${t.key}')"
+        >
+
+        <video id="video-${t.key}" autoplay playsinline muted></video>
+
+        <button
+          type="button"
+          class="btn btn-sec"
+          id="cap-${t.key}"
+          onclick="capturar('${t.key}')"
+          style="display:none"
+        >
+          Capturar
+        </button>
+
+        <img id="prev-${t.key}" class="preview">
+        <canvas id="canvas-${t.key}" hidden></canvas>
+      </div>
+    `;
   });
 }
 
-async function abrirCamera(t){
-  fecharCamera();
-  const v=document.getElementById("video-"+t);
-  stream=await navigator.mediaDevices.getUserMedia({video:true});
-  v.srcObject=stream;v.style.display="block";
-  document.getElementById("cap-"+t).style.display="block";
-  await v.play();
+function mostrarAlerta(tipo, texto) {
+  const box = document.getElementById("alerta-" + tipo);
+  if (!box) return;
+  box.style.display = "block";
+  box.innerText = texto;
 }
 
-function capturar(t){
-  const v=document.getElementById("video-"+t);
-  const c=document.getElementById("canvas-"+t);
-  c.width=v.videoWidth;c.height=v.videoHeight;
-  c.getContext("2d").drawImage(v,0,0);
-  c.toBlob(b=>{
-    arquivos[t]=b;
-    const img=document.getElementById("prev-"+t);
-    img.src=URL.createObjectURL(b);
-    img.style.display="block";
-  });
-  fecharCamera();
+function esconderAlerta(tipo) {
+  const box = document.getElementById("alerta-" + tipo);
+  if (!box) return;
+  box.style.display = "none";
+  box.innerText = "";
 }
 
-function fecharCamera(){
-  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
-  document.querySelectorAll("video").forEach(v=>{v.pause();v.srcObject=null;v.style.display="none";});
-  document.querySelectorAll("[id^='cap-']").forEach(b=>b.style.display="none");
+async function abrirCamera(tipo) {
+  try {
+    fecharCamera();
+    esconderAlerta(tipo);
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      mostrarAlerta(tipo, "Seu navegador não suporta acesso à câmera. Use o botão 'Enviar foto'.");
+      return;
+    }
+
+    const video = document.getElementById("video-" + tipo);
+
+    let tentativaErro = null;
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false
+      });
+    } catch (e1) {
+      tentativaErro = e1;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      } catch (e2) {
+        tentativaErro = e2;
+      }
+    }
+
+    if (!stream) {
+      throw tentativaErro || new Error("Não foi possível acessar a câmera.");
+    }
+
+    cameraAtual = tipo;
+    video.srcObject = stream;
+    video.style.display = "block";
+    document.getElementById("cap-" + tipo).style.display = "block";
+
+    await video.play();
+  } catch (erro) {
+    console.error("Erro ao abrir câmera:", erro);
+
+    let msg = "Não foi possível abrir a câmera. Use o botão 'Enviar foto'.";
+
+    if (erro?.name === "NotFoundError" || erro?.name === "DevicesNotFoundError") {
+      msg = "Nenhuma câmera foi encontrada neste dispositivo. Use o botão 'Enviar foto'.";
+    } else if (erro?.name === "NotAllowedError" || erro?.name === "PermissionDeniedError") {
+      msg = "Permissão da câmera foi negada. Libere a câmera no navegador ou use 'Enviar foto'.";
+    } else if (erro?.name === "NotReadableError" || erro?.name === "TrackStartError") {
+      msg = "A câmera está ocupada por outro programa. Feche outros apps e tente novamente.";
+    }
+
+    mostrarAlerta(tipo, msg);
+    fecharCamera();
+  }
 }
 
-/* UPLOAD */
-async function uploadDocumento(file,pasta){
-  if(!file) return null;
-  const path=`${appId}/${pasta}/${Date.now()}.png`;
-  await sb.storage.from("documentos").upload(path,file,{upsert:true});
-  return sb.storage.from("documentos").getPublicUrl(path).data.publicUrl;
-}
+function capturar(tipo) {
+  const video = document.getElementById("video-" + tipo);
+  const canvas = document.getElementById("canvas-" + tipo);
 
-/* ENVIO */
-async function enviarSolicitacao(){
-
-  if(!fNome.value||!fTelefone.value||!fCpf.value||!fDias.value||!fPagamento.value){
-    alert("Preencha todos os campos");
+  if (!video.videoWidth || !video.videoHeight) {
+    alert("A câmera ainda não carregou. Tente novamente.");
     return;
   }
 
-  const payload={
-    app_id: appId,
-    status:"solicitada",
-    nome:fNome.value,
-    telefone:fTelefone.value,
-    cpf:fCpf.value,
-    dias:Number(fDias.value),
-    total:DIARIA?Number(fDias.value)*DIARIA:null,
-    forma_pagamento:fPagamento.value,
-    veiculo_modelo:modelo.innerText,
-    veiculo_diaria:DIARIA
-  };
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
 
-  payload.selfie_url = await uploadDocumento(arquivos.selfie,"selfie");
-  payload.rg_frente_url = await uploadDocumento(arquivos.rg_frente,"rg_frente");
-  payload.rg_verso_url = await uploadDocumento(arquivos.rg_verso,"rg_verso");
-  payload.cnh_url = await uploadDocumento(arquivos.cnh,"cnh");
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  if(fluxo==="painel"){
-    await sb.from("locacoes").insert(payload);
-    alert("Solicitação enviada! Aguarde aprovação.");
-  }else{
-    const msg = `
+  canvas.toBlob(blob => {
+    if (!blob) {
+      alert("Não foi possível capturar a imagem.");
+      return;
+    }
+
+    arquivos[tipo] = blob;
+
+    const img = document.getElementById("prev-" + tipo);
+    img.src = URL.createObjectURL(blob);
+    img.style.display = "block";
+  }, "image/png");
+
+  fecharCamera();
+}
+
+function selecionarArquivo(event, tipo) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  esconderAlerta(tipo);
+  arquivos[tipo] = file;
+
+  const img = document.getElementById("prev-" + tipo);
+  img.src = URL.createObjectURL(file);
+  img.style.display = "block";
+}
+
+function fecharCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+
+  document.querySelectorAll("video").forEach(v => {
+    v.pause();
+    v.srcObject = null;
+    v.style.display = "none";
+  });
+
+  document.querySelectorAll("[id^='cap-']").forEach(btn => {
+    btn.style.display = "none";
+  });
+
+  cameraAtual = null;
+}
+
+window.addEventListener("beforeunload", fecharCamera);
+
+/* UPLOAD */
+async function uploadDocumento(file, pasta) {
+  if (!file) return null;
+
+  const nomeArquivo = `${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+  const path = `${appId}/${pasta}/${nomeArquivo}`;
+
+  const { error: uploadError } = await sb.storage
+    .from("documentos")
+    .upload(path, file, { upsert: true });
+
+  if (uploadError) {
+    console.error("Erro upload:", uploadError);
+    throw uploadError;
+  }
+
+  const { data } = sb.storage.from("documentos").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/* ENVIO */
+async function enviarSolicitacao() {
+  try {
+    const nome = document.getElementById("fNome").value.trim();
+    const telefone = document.getElementById("fTelefone").value.trim();
+    const cpf = document.getElementById("fCpf").value.trim();
+    const dias = Number(document.getElementById("fDias").value || 0);
+    const pagamento = document.getElementById("fPagamento").value;
+
+    if (!nome || !telefone || !cpf || !dias || !pagamento) {
+      alert("Preencha todos os campos.");
+      return;
+    }
+
+    const payload = {
+      app_id: appId,
+      status: "solicitada",
+      nome,
+      telefone,
+      cpf,
+      dias,
+      total: DIARIA ? dias * DIARIA : null,
+      forma_pagamento: pagamento,
+      veiculo_modelo: document.getElementById("modelo").innerText,
+      veiculo_diaria: DIARIA
+    };
+
+    payload.selfie_url = await uploadDocumento(arquivos.selfie, "selfie");
+    payload.rg_frente_url = await uploadDocumento(arquivos.rg_frente, "rg_frente");
+    payload.rg_verso_url = await uploadDocumento(arquivos.rg_verso, "rg_verso");
+    payload.cnh_url = await uploadDocumento(arquivos.cnh, "cnh");
+
+    if (fluxo === "painel") {
+      const { error } = await sb.from("locacoes").insert(payload);
+
+      if (error) {
+        console.error("Erro ao salvar locação:", error);
+        alert("Erro ao enviar solicitação.");
+        return;
+      }
+
+      alert("Solicitação enviada! Aguarde aprovação.");
+    } else {
+      const msg = `
 🚗 *SOLICITAÇÃO DE LOCAÇÃO*
 
 🚘 Veículo: ${payload.veiculo_modelo}
 📅 Dias: ${payload.dias}
-💰 Total estimado: ${payload.total ? "R$ "+payload.total : "A combinar"}
+💰 Total estimado: ${payload.total ? "R$ " + payload.total : "A combinar"}
 💳 Pagamento: ${payload.forma_pagamento}
 
 👤 Cliente: ${payload.nome}
 📞 Telefone: ${payload.telefone}
 🆔 CPF: ${payload.cpf}
-`;
-    window.open(`https://wa.me/55${whatsapp}?text=${encodeURIComponent(msg)}`,"_blank");
+      `.trim();
+
+      window.open(`https://wa.me/55${whatsapp}?text=${encodeURIComponent(msg)}`, "_blank");
+    }
+  } catch (e) {
+    console.error("Erro ao enviar solicitação:", e);
+    alert("Erro ao enviar solicitação. Verifique o console.");
   }
 }
 </script>
