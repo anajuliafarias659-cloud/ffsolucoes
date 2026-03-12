@@ -769,95 +769,131 @@ function gerarCodigoAcompanhamento() {
 
     salvarCarrinhoLocal();
 
+   async function carregar() {
+  const { data: config } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .maybeSingle();
+
+  const { data: prods } = await supabase
+    .from("produtos")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .eq("ativo", true);
+
+  todosProdutos = prods || [];
+
+  if (config) {
+    nomeLoja.innerText = config.nome_site || "";
+
+    const rua = config.loja_rua || "";
+    const numero = config.loja_numero || "";
+    const cidade = config.loja_cidade || "";
+    const estado = config.loja_estado || "";
+    const telefoneLoja = config.telefone || "";
+
+    let endereco = "";
+
+    if (rua || cidade) {
+      endereco = `${rua}${numero ? ", " + numero : ""}`;
+      if (cidade) endereco += ` - ${cidade}`;
+      if (estado) endereco += `/${estado}`;
+    }
+
+    let infoFinal = "";
+
+    if (endereco && telefoneLoja) {
+      infoFinal = `${endereco} • 📞 ${telefoneLoja}`;
+    } else if (endereco) {
+      infoFinal = endereco;
+    } else if (telefoneLoja) {
+      infoFinal = `📞 ${telefoneLoja}`;
+    }
+
+    infoLoja.innerText = infoFinal;
+
+    if (config.logo_url) {
+      logoLoja.src = config.logo_url;
+      logoLoja.style.display = "block";
+    } else {
+      logoLoja.style.display = "none";
+    }
+
+    document.body.classList.remove("tema-natal", "tema-anonovo", "tema-capivara");
+
+    if (config.tema_site) {
+      document.body.classList.add("tema-" + config.tema_site);
+    }
+
+    modoVenda = config.modo_venda || "whatsapp";
+    numeroWhatsapp = config.whatsapp_numero || "";
+
     const temImagem = config.banner_url && config.banner_url.trim() !== "";
-const temTexto = config.banner_descricao && config.banner_descricao.trim() !== "";
+    const temTexto = config.banner_descricao && config.banner_descricao.trim() !== "";
 
-if (temImagem || temTexto) {
+    if (temImagem || temTexto) {
+      bannerArea.innerHTML = `
+        ${temImagem ? `<img src="${config.banner_url}" alt="Banner">` : ""}
+        ${temTexto ? `
+          <div style="
+            position:absolute;
+            width:100%;
+            height:100%;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:20px;
+            font-weight:bold;
+            padding:10px;
+            text-shadow:0 2px 5px rgba(0,0,0,0.6);
+          ">
+            ${config.banner_descricao}
+          </div>
+        ` : ""}
+      `;
+    } else {
+      const imagensProdutos = [];
 
-  bannerArea.innerHTML = `
-    ${temImagem ? `<img src="${config.banner_url}" alt="Banner">` : ""}
-    ${temTexto ? `
-      <div style="
-        position:absolute;
-        width:100%;
-        height:100%;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:20px;
-        font-weight:bold;
-        padding:10px;
-        text-shadow:0 2px 5px rgba(0,0,0,0.6);
-      ">
-        ${config.banner_descricao}
-      </div>
-    ` : ""}
-  `;
+      todosProdutos.forEach((p) => {
+        try {
+          const imgs = JSON.parse(p.imagens || "[]");
+          if (imgs[0]) imagensProdutos.push(imgs[0]);
+        } catch {}
+      });
 
-} else {
+      if (imagensProdutos.length > 0) {
+        bannerArea.innerHTML = `
+          <img id="bannerAuto" src="${imagensProdutos[0]}" alt="Banner automático" style="width:100%;height:100%;object-fit:cover;">
+        `;
 
-  // banner automático com imagens dos produtos
-  const imagensProdutos = [];
+        let index = 0;
 
-  todosProdutos.forEach(p => {
-    try {
-      const imgs = JSON.parse(p.imagens || "[]");
-      if (imgs[0]) imagensProdutos.push(imgs[0]);
-    } catch {}
-  });
-
-  if (imagensProdutos.length > 0) {
-
-    bannerArea.innerHTML = `
-      <img id="bannerAuto" src="${imagensProdutos[0]}" style="width:100%;height:100%;object-fit:cover;">
-    `;
-
-    let index = 0;
-
-    setInterval(() => {
-
-      index++;
-
-      if (index >= imagensProdutos.length) {
-        index = 0;
-      }
-
-      const banner = document.getElementById("bannerAuto");
-
-      if (banner) {
-        banner.src = imagensProdutos[index];
-      }
-
-    }, 4000);
-
-  } else {
-
-    bannerArea.innerHTML = "";
-
-  }
-
-}
-
-        document.body.classList.remove("tema-natal", "tema-anonovo", "tema-capivara");
-
-        if (config.tema_site) {
-          document.body.classList.add("tema-" + config.tema_site);
+        if (window.bannerInterval) {
+          clearInterval(window.bannerInterval);
         }
 
-        modoVenda = config.modo_venda || "whatsapp";
-        numeroWhatsapp = config.whatsapp_numero || "";
+        window.bannerInterval = setInterval(() => {
+          index++;
+          if (index >= imagensProdutos.length) index = 0;
+
+          const banner = document.getElementById("bannerAuto");
+          if (banner) banner.src = imagensProdutos[index];
+        }, 4000);
+      } else {
+        bannerArea.innerHTML = "";
       }
-
-      const { data: prods } = await supabase
-        .from("produtos")
-        .select("*")
-        .eq("app_id", APP_ID)
-        .eq("ativo", true);
-
-      todosProdutos = prods || [];
-      criarCategorias();
-      renderizar(todosProdutos);
     }
+  } else {
+    bannerArea.innerHTML = "";
+    logoLoja.style.display = "none";
+    nomeLoja.innerText = "";
+    infoLoja.innerText = "";
+  }
+
+  criarCategorias();
+  renderizar(todosProdutos);
+}
 
     async function verificarStatusPagamento(pedidoId, codigoAcompanhamento) {
       const { data, error } = await supabase
