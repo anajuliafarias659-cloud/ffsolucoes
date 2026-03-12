@@ -190,7 +190,6 @@ select{
   transform:translateY(-2px);
 }
 
-/* ALERTA PEDIDOS */
 .badge{
   position:absolute;
   top:10px;
@@ -406,6 +405,7 @@ import { supabase } from "/js/supabase.js";
 
 let APP_ID = null;
 let ultimoTotalPedidos = 0;
+let canalPedidos = null;
 
 async function verificarSessao(){
   const { data:{ session } } = await supabase.auth.getSession();
@@ -416,51 +416,20 @@ async function verificarSessao(){
   return session.user.id;
 }
 
-async function carregarUsuario(){
-  const userId = await verificarSessao();
-  if(!userId) return;
+function pedidoPrecisaAtencao(p){
+  const status = String(p.status || "").toLowerCase();
+  const pagamentoStatus = String(p.pagamento_status || p.mp_status || "").toLowerCase();
 
-  const { data: usuario } = await supabase
-    .from("usuarios")
-    .select("nome, app_id")
-    .eq("id", userId)
-    .single();
-
-  if(!usuario) return;
-
-  const { data: app } = await supabase
-    .from("apps")
-    .select("tipo")
-    .eq("id", usuario.app_id)
-    .single();
-
-  if(!app || app.tipo !== "celular"){
-    alert("Você não tem acesso a este painel.");
-    window.location.href="/painel.html";
-    return;
-  }
-
-  APP_ID = usuario.app_id;
-
-  document.getElementById("nome").innerText = usuario.nome || "";
-  document.getElementById("negocioId").innerText = usuario.app_id || "";
-
-  await verificarPedidos();
-  setInterval(verificarPedidos, 5000);
+  return (
+    status === "novo" ||
+    status === "pago" ||
+    status === "approved" ||
+    status === "aguardando_confirmacao_pix" ||
+    pagamentoStatus === "approved"
+  );
 }
 
-async function verificarPedidos(){
-  if(!APP_ID) return;
-
-  const { data, error } = await supabase
-    .from("pedidos")
-    .select("id,status")
-    .eq("app_id", APP_ID)
-    .eq("status", "novo");
-
-  if(error) return;
-
-  const total = data?.length || 0;
+function atualizarCardPedidos(total){
   const badge = document.getElementById("badgePedidos");
   const card = document.getElementById("cardPedidos");
 
@@ -481,6 +450,95 @@ async function verificarPedidos(){
   }
 
   ultimoTotalPedidos = total;
+}
+
+async function verificarPedidos(){
+  if(!APP_ID) return;
+
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id,status,pagamento_status,mp_status,app_id")
+    .eq("app_id", APP_ID);
+
+  if(error){
+    console.error("Erro ao verificar pedidos:", error);
+    return;
+  }
+
+  const total = (data || []).filter(pedidoPrecisaAtencao).length;
+  atualizarCardPedidos(total);
+}
+
+function ativarRealtimePedidos(){
+  if(canalPedidos){
+    supabase.removeChannel(canalPedidos);
+  }
+
+  canalPedidos = supabase
+    .channel("painel-celular-pedidos")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pedidos"
+      },
+      async (payload) => {
+        const novo = payload.new;
+        const antigo = payload.old;
+
+        const appNovo = novo?.app_id || null;
+        const appAntigo = antigo?.app_id || null;
+
+        if(String(appNovo) !== String(APP_ID) && String(appAntigo) !== String(APP_ID)){
+          return;
+        }
+
+        await verificarPedidos();
+      }
+    )
+    .subscribe((status) => {
+      console.log("Realtime painel pedidos:", status);
+    });
+}
+
+async function carregarUsuario(){
+  const userId = await verificarSessao();
+  if(!userId) return;
+
+  const { data: usuario, error: erroUsuario } = await supabase
+    .from("usuarios")
+    .select("nome, app_id")
+    .eq("id", userId)
+    .single();
+
+  if(erroUsuario || !usuario){
+    console.error("Erro usuario:", erroUsuario);
+    alert("Erro ao carregar usuário.");
+    return;
+  }
+
+  const { data: app, error: erroApp } = await supabase
+    .from("apps")
+    .select("tipo")
+    .eq("id", usuario.app_id)
+    .single();
+
+  if(erroApp || !app || app.tipo !== "celular"){
+    alert("Você não tem acesso a este painel.");
+    window.location.href="/painel.html";
+    return;
+  }
+
+  APP_ID = usuario.app_id;
+
+  document.getElementById("nome").innerText = usuario.nome || "";
+  document.getElementById("negocioId").innerText = usuario.app_id || "";
+
+  await verificarPedidos();
+  ativarRealtimePedidos();
+
+  setInterval(verificarPedidos, 5000);
 }
 
 window.compartilharPagina = function(){
@@ -508,6 +566,12 @@ window.logout = async () => {
   await supabase.auth.signOut();
   window.location.href = "/auth/login.html";
 };
+
+window.addEventListener("beforeunload", async () => {
+  if(canalPedidos){
+    await supabase.removeChannel(canalPedidos);
+  }
+});
 
 carregarUsuario();
 </script>
