@@ -202,10 +202,12 @@ body{
 
   </div>
 </div>
+
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
 let app_id = null;
+let modoPublico = "catalogo";
 
 async function verificarSessao(){
   const { data:{ session } } = await supabase.auth.getSession();
@@ -230,6 +232,7 @@ async function carregarUsuario(){
 
   if(error || !usuario){
     alert("Não foi possível carregar os dados do usuário.");
+    console.error("Erro ao carregar usuário:", error);
     return;
   }
 
@@ -237,7 +240,87 @@ async function carregarUsuario(){
 
   document.getElementById("nome").innerText = usuario.nome || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
+
+  const urlPublica = `${location.origin}/public/mercado/?app_id=${usuario.app_id}`;
+  document.getElementById("linkPublico").innerText = urlPublica;
+
+  await carregarModoPublico();
 }
+
+async function carregarModoPublico(){
+  if(!app_id) return;
+
+  const { data, error } = await supabase
+    .from("config_site")
+    .select("modo_publico")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!error && data && data.modo_publico){
+    modoPublico = data.modo_publico;
+  }
+
+  atualizarTextoModo();
+}
+
+function atualizarTextoModo(){
+  const el = document.getElementById("modoPublico");
+  el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
+}
+
+window.alternarPublico = async function(){
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  modoPublico = modoPublico === "catalogo" ? "vendas" : "catalogo";
+  atualizarTextoModo();
+
+  const { error } = await supabase
+    .from("config_site")
+    .upsert({
+      app_id,
+      modo_publico: modoPublico
+    }, { onConflict: "app_id" });
+
+  if(error){
+    alert("Erro ao salvar modo público.");
+    console.error(error);
+  }else{
+    alert("Modo público alterado para: " + (modoPublico === "vendas" ? "Vendas" : "Catálogo"));
+  }
+};
+
+window.abrirSite = function(){
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  const url = `${location.origin}/public/mercado/?app_id=${app_id}`;
+  window.open(url, "_blank");
+};
+
+window.compartilharPagina = async function(){
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  const url = `${location.origin}/public/mercado/?app_id=${app_id}`;
+
+  try{
+    await navigator.clipboard.writeText(url);
+    alert("🔗 Link da loja copiado com sucesso!\n\n" + url);
+  }catch{
+    prompt("Copie o link da loja:", url);
+  }
+};
+
+window.irPara = function(pagina){
+  window.location.href = pagina;
+};
 
 window.logout = async function(){
   await supabase.auth.signOut();
@@ -247,8 +330,5 @@ window.logout = async function(){
 carregarUsuario();
 </script>
 
-</script>
-
 </body>
 </html>
-
