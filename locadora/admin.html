@@ -57,22 +57,68 @@ body{
   margin:auto;
 }
 
+/* ===== BOX PLANO ===== */
+.box-plano{
+  margin-top:16px;
+  background:#0f172a;
+  border-radius:16px;
+  padding:18px;
+  border:1px solid #1e293b;
+}
+
+.box-plano h3{
+  margin:0 0 10px;
+  font-size:16px;
+}
+
+.box-plano p{
+  margin:6px 0;
+  opacity:.95;
+}
+
+.status-plano{
+  display:inline-block;
+  padding:6px 12px;
+  border-radius:999px;
+  font-size:13px;
+  font-weight:bold;
+  margin-top:8px;
+}
+
+.status-ativo{
+  background:#14532d;
+  color:#86efac;
+}
+
+.status-vencendo{
+  background:#78350f;
+  color:#fcd34d;
+}
+
+.status-expirado{
+  background:#7f1d1d;
+  color:#fca5a5;
+}
+
+.status-sem-data{
+  background:#334155;
+  color:#e2e8f0;
+}
+
 /* ===== GRID ===== */
 .grid{
   display:grid;
-  grid-template-columns: repeat(2, 1fr); /* 📱 2 no celular */
+  grid-template-columns: repeat(2, 1fr);
   gap:16px;
   margin-top:24px;
 }
 
-/* Tablet */
 @media (min-width:768px){
   .grid{
     grid-template-columns: repeat(3, 1fr);
   }
 }
 
-/* Desktop */
 @media (min-width:1024px){
   .grid{
     grid-template-columns: repeat(4, 1fr);
@@ -124,6 +170,14 @@ body{
     </small>
   </p>
 
+  <div class="box-plano">
+    <h3>📅 Status do Plano</h3>
+    <p><b>Plano:</b> <span id="tipoPlano">Carregando...</span></p>
+    <p><b>Expira em:</b> <span id="dataExpiracao">Carregando...</span></p>
+    <p><b>Tempo restante:</b> <span id="tempoRestante">Carregando...</span></p>
+    <div id="statusPlano" class="status-plano status-sem-data">Verificando...</div>
+  </div>
+
   <div class="grid">
 
     <div class="card" onclick="location.href='veiculos.html'">
@@ -167,9 +221,128 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+let APP_ID = null;
+let dadosAppGlobal = null;
+
+/* ===== AJUDANTES ===== */
+function primeiroValorValido(...valores){
+  for(const v of valores){
+    if(v !== null && v !== undefined && String(v).trim() !== ""){
+      return v;
+    }
+  }
+  return null;
+}
+
+function formatarData(dataStr){
+  if(!dataStr) return "Não informado";
+  const d = new Date(dataStr);
+  if(isNaN(d.getTime())) return "Não informado";
+  return d.toLocaleString("pt-BR");
+}
+
+function calcularTempoRestante(dataStr){
+  if(!dataStr) return {
+    texto: "Não informado",
+    status: "sem-data",
+    classe: "status-sem-data"
+  };
+
+  const agora = new Date();
+  const fim = new Date(dataStr);
+
+  if(isNaN(fim.getTime())){
+    return {
+      texto: "Não informado",
+      status: "sem-data",
+      classe: "status-sem-data"
+    };
+  }
+
+  const diff = fim.getTime() - agora.getTime();
+
+  if(diff <= 0){
+    return {
+      texto: "Expirado",
+      status: "expirado",
+      classe: "status-expirado"
+    };
+  }
+
+  const dias = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const horas = Math.floor((diff / (1000 * 60 * 60)) % 24);
+  const minutos = Math.floor((diff / (1000 * 60)) % 60);
+
+  let texto = "";
+  if(dias > 0){
+    texto = `${dias} dia(s), ${horas} hora(s)`;
+  } else if(horas > 0){
+    texto = `${horas} hora(s), ${minutos} minuto(s)`;
+  } else {
+    texto = `${minutos} minuto(s)`;
+  }
+
+  if(dias <= 3){
+    return {
+      texto,
+      status: "vencendo",
+      classe: "status-vencendo"
+    };
+  }
+
+  return {
+    texto,
+    status: "ativo",
+    classe: "status-ativo"
+  };
+}
+
+function atualizarBoxPlano(app){
+  const tipoPlanoEl = document.getElementById("tipoPlano");
+  const dataExpiracaoEl = document.getElementById("dataExpiracao");
+  const tempoRestanteEl = document.getElementById("tempoRestante");
+  const statusPlanoEl = document.getElementById("statusPlano");
+
+  const tipoPlano = primeiroValorValido(
+    app?.plano,
+    app?.tipo_plano,
+    app?.status_plano,
+    app?.tipo
+  ) || "Não informado";
+
+  const dataExpiracao = primeiroValorValido(
+    app?.expira_em,
+    app?.data_expiracao,
+    app?.vencimento,
+    app?.vencimento_em,
+    app?.trial_fim_em,
+    app?.demo_expira_em,
+    app?.plano_expira_em,
+    app?.fim_teste_em,
+    app?.teste_expira_em
+  );
+
+  const tempo = calcularTempoRestante(dataExpiracao);
+
+  tipoPlanoEl.textContent = tipoPlano;
+  dataExpiracaoEl.textContent = formatarData(dataExpiracao);
+  tempoRestanteEl.textContent = tempo.texto;
+
+  statusPlanoEl.className = "status-plano " + tempo.classe;
+
+  if(tempo.status === "ativo"){
+    statusPlanoEl.textContent = "Plano ativo";
+  } else if(tempo.status === "vencendo"){
+    statusPlanoEl.textContent = "Vencendo em breve";
+  } else if(tempo.status === "expirado"){
+    statusPlanoEl.textContent = "Plano expirado";
+  } else {
+    statusPlanoEl.textContent = "Sem data de expiração";
+  }
+}
+
 /* ===== VERIFICAR SESSÃO ===== */
 async function verificarSessao(){
-
   const { data: { session } } = await supabase.auth.getSession();
 
   if(!session){
@@ -195,12 +368,42 @@ async function verificarSessao(){
     return;
   }
 
-  if(usuario.app_id){
-    localStorage.setItem("app_id", usuario.app_id);
+  APP_ID = usuario.app_id || null;
+
+  if(APP_ID){
+    localStorage.setItem("app_id", APP_ID);
   }
 
-  document.getElementById("nome").innerText = usuario.email;
-  document.getElementById("appId").innerText = usuario.app_id || "não informado";
+  document.getElementById("nome").innerText = usuario.nome || usuario.email || "Admin";
+  document.getElementById("appId").innerText = APP_ID || "não informado";
+
+  if(APP_ID){
+    await carregarDadosPlano(APP_ID);
+    setInterval(() => {
+      if(dadosAppGlobal){
+        atualizarBoxPlano(dadosAppGlobal);
+      }
+    }, 60000);
+  } else {
+    atualizarBoxPlano(null);
+  }
+}
+
+async function carregarDadosPlano(appId){
+  const { data: app, error } = await supabase
+    .from("apps")
+    .select("*")
+    .eq("id", appId)
+    .single();
+
+  if(error || !app){
+    console.error("Erro ao buscar apps:", error);
+    atualizarBoxPlano(null);
+    return;
+  }
+
+  dadosAppGlobal = app;
+  atualizarBoxPlano(app);
 }
 
 verificarSessao();
@@ -214,7 +417,6 @@ window.logout = async function(){
 
 /* ===== SITE PÚBLICO ===== */
 window.abrirSitePublico = function(){
-
   const appId = localStorage.getItem("app_id");
 
   if(!appId){
@@ -231,4 +433,3 @@ window.abrirSitePublico = function(){
 
 </body>
 </html>
-
