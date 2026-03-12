@@ -28,6 +28,7 @@ input,button{
   margin-top:12px;
   border-radius:10px;
   border:none;
+  box-sizing:border-box;
 }
 button{
   background:#22c55e;
@@ -40,6 +41,53 @@ button{
   cursor:pointer;
   color:#22c55e;
 }
+
+.aviso-plano{
+  margin-top:18px;
+  background:#111827;
+  border:1px solid #1e293b;
+  padding:18px;
+  border-radius:16px;
+  text-align:left;
+  color:#fff;
+  font-size:14px;
+  line-height:1.45;
+}
+
+.aviso-titulo{
+  font-weight:bold;
+  margin-bottom:8px;
+  font-size:15px;
+}
+
+.aviso-texto{
+  color:#94a3b8;
+  margin-bottom:14px;
+}
+
+.btn-renovar{
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:12px;
+  background:#2563eb;
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+  margin-top:6px;
+}
+
+.btn-continuar{
+  width:100%;
+  padding:12px;
+  border:none;
+  border-radius:12px;
+  background:#334155;
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+  margin-top:10px;
+}
 </style>
 </head>
 
@@ -50,7 +98,7 @@ button{
 
   <input id="usuario" placeholder="E-mail">
   <input id="senha" type="password" placeholder="Senha">
-  <button onclick="login()">Entrar</button>
+  <button id="btnEntrar" onclick="login()">Entrar</button>
 
   <div class="link" onclick="resetSenha()">Esqueci minha senha</div>
 </div>
@@ -62,43 +110,36 @@ function getBasePath(){
   return location.pathname.split("/auth")[0];
 }
 
-function mostrarAvisoPlano(dias, basePath){
-  // evita duplicar
-  if(document.getElementById("avisoPlano")) return;
+function removerAvisoPlano(){
+  const aviso = document.getElementById("avisoPlano");
+  if(aviso) aviso.remove();
+}
+
+function mostrarAvisoPlano(dias, basePath, destinoPainel, expirado = false){
+  removerAvisoPlano();
 
   const box = document.createElement("div");
   box.id = "avisoPlano";
-  box.style.cssText = `
-    margin-top:14px;
-    background:#111827;
-    border:1px solid #1e293b;
-    padding:12px;
-    border-radius:12px;
-    text-align:left;
-    color:#fff;
-    font-size:14px;
-    line-height:1.35;
-  `;
+  box.className = "aviso-plano";
 
-  const cor = dias <= 3 ? "#f59e0b" : "#38bdf8";
+  const corTitulo = expirado ? "#f87171" : (dias <= 3 ? "#f59e0b" : "#38bdf8");
+  const titulo = expirado
+    ? "⚠️ Seu plano expirou"
+    : `⚠️ Seu plano vence em ${dias} dia(s)`;
+
+  const texto = expirado
+    ? "Seu acesso pode ser bloqueado. Renove agora para continuar usando o sistema."
+    : "Para evitar bloqueio, renove agora. Após o pagamento você recebe um código para ativar.";
 
   box.innerHTML = `
-    <div style="font-weight:bold; margin-bottom:6px; color:${cor}">
-      ⚠️ Seu plano vence em ${dias} dia(s)
+    <div class="aviso-titulo" style="color:${corTitulo}">
+      ${titulo}
     </div>
-    <div style="color:#94a3b8; margin-bottom:10px">
-      Para evitar bloqueio, renove agora. Após o pagamento você recebe um código para ativar.
+    <div class="aviso-texto">
+      ${texto}
     </div>
-    <button id="btnRenovarAgora" style="
-      width:100%;
-      padding:12px;
-      border:none;
-      border-radius:10px;
-      background:#2563eb;
-      color:#fff;
-      font-weight:bold;
-      cursor:pointer;
-    ">Renovar agora</button>
+    <button id="btnRenovarAgora" class="btn-renovar">Renovar agora</button>
+    ${!expirado ? '<button id="btnContinuarPainel" class="btn-continuar">Continuar para o painel</button>' : ''}
   `;
 
   const card = document.querySelector(".card");
@@ -107,89 +148,110 @@ function mostrarAvisoPlano(dias, basePath){
   document.getElementById("btnRenovarAgora").onclick = () => {
     window.location.href = basePath + "/pagamento/renovar.html";
   };
+
+  if(!expirado){
+    const btnContinuar = document.getElementById("btnContinuarPainel");
+    if(btnContinuar){
+      btnContinuar.onclick = () => {
+        window.location.href = destinoPainel;
+      };
+    }
+  }
 }
 
 async function login(){
+  removerAvisoPlano();
 
   const email = document.getElementById("usuario").value.trim().toLowerCase();
   const senha = document.getElementById("senha").value.trim();
+  const btnEntrar = document.getElementById("btnEntrar");
 
   if(!email || !senha){
     alert("Preencha e-mail e senha");
     return;
   }
 
-  // 🔐 Login Supabase
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password: senha
-  });
+  btnEntrar.disabled = true;
+  btnEntrar.textContent = "Entrando...";
 
-  if(error){
-    alert("Credenciais inválidas");
-    return;
+  try{
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: senha
+    });
+
+    if(error){
+      alert("Credenciais inválidas");
+      return;
+    }
+
+    const userId = data.user.id;
+
+    const { data: usuarioSistema, error: uErr } = await supabase
+      .from("usuarios")
+      .select("app_id")
+      .eq("id", userId)
+      .single();
+
+    if(uErr || !usuarioSistema?.app_id){
+      alert("Usuário não vinculado ao sistema.");
+      return;
+    }
+
+    const { data: app, error: aErr } = await supabase
+      .from("apps")
+      .select("*")
+      .eq("id", usuarioSistema.app_id)
+      .single();
+
+    if(aErr || !app){
+      alert("Aplicação não encontrada.");
+      return;
+    }
+
+    const basePath = getBasePath();
+    const destinoPainel = basePath + "/" + app.tipo + "/admin.html";
+
+    const dataExpiracao =
+      app.data_expiracao ||
+      app.expira_em ||
+      app.vencimento ||
+      app.vencimento_em ||
+      app.trial_fim_em ||
+      app.demo_expira_em ||
+      app.plano_expira_em ||
+      null;
+
+    const hoje = new Date();
+    const expiracao = dataExpiracao ? new Date(dataExpiracao) : null;
+
+    if(!expiracao || isNaN(expiracao.getTime()) || app.ativo === false){
+      mostrarAvisoPlano(0, basePath, destinoPainel, true);
+      return;
+    }
+
+    const diffMs = expiracao.getTime() - hoje.getTime();
+    const dias = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    if(dias <= 0){
+      mostrarAvisoPlano(0, basePath, destinoPainel, true);
+      return;
+    }
+
+    if(dias <= 15){
+      mostrarAvisoPlano(dias, basePath, destinoPainel, false);
+      return;
+    }
+
+    window.location.href = destinoPainel;
+
+  } finally {
+    btnEntrar.disabled = false;
+    btnEntrar.textContent = "Entrar";
   }
-
-  const userId = data.user.id;
-
-  // 🔎 Busca vínculo do usuário
-  const { data: usuarioSistema, error: uErr } = await supabase
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", userId)
-    .single();
-
-  if(uErr || !usuarioSistema?.app_id){
-    alert("Usuário não vinculado ao sistema.");
-    return;
-  }
-
-  // 🔎 Busca dados do app (vale para mercado/bar/restaurante/locadora/etc)
-  const { data: app, error: aErr } = await supabase
-    .from("apps")
-    .select("tipo, data_expiracao, ativo")
-    .eq("id", usuarioSistema.app_id)
-    .single();
-
-  if(aErr || !app){
-    alert("Aplicação não encontrada.");
-    return;
-  }
-
-  const basePath = getBasePath();
-
-  // 🔐 Verificação de plano
-  const hoje = new Date();
-  const expiracao = app.data_expiracao ? new Date(app.data_expiracao) : null;
-
-  // se não tiver data_expiracao, trata como expirado (mais seguro)
-  if(!expiracao || expiracao.getTime() <= hoje.getTime() || app.ativo === false){
-    window.location.href = basePath + "/pagamento/renovar.html";
-    return;
-  }
-
-  // ✅ Aviso desde o primeiro dia (15 dias de demo)
-const diffMs = expiracao.getTime() - hoje.getTime();
-const dias = Math.ceil(diffMs / (1000*60*60*24));
-
-if(dias <= 15){
-    // Mostra aviso e NÃO impede entrar (só avisa)
-    mostrarAvisoPlano(dias, basePath);
-
-    // opcional: dá 1s pro usuário ver o aviso e depois segue
-    setTimeout(() => {
-      window.location.href = basePath + "/" + app.tipo + "/admin.html";
-    }, 5000);
-
-    return;
-  }
-
-  // 🚀 Redirecionamento normal
-  window.location.href = basePath + "/" + app.tipo + "/admin.html";
 }
 
 async function resetSenha(){
-
   const email = document.getElementById("usuario").value.trim();
 
   if(!email){
@@ -210,6 +272,3 @@ window.resetSenha = resetSenha;
 
 </body>
 </html>
-
-
-
