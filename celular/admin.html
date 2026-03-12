@@ -190,6 +190,48 @@ select{
   transform:translateY(-2px);
 }
 
+/* ALERTA PEDIDOS */
+.badge{
+  position:absolute;
+  top:10px;
+  right:10px;
+  min-width:24px;
+  height:24px;
+  padding:0 7px;
+  border-radius:999px;
+  background:#ef4444;
+  color:#fff;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  font-weight:700;
+  box-shadow:0 0 0 3px rgba(239,68,68,.18);
+}
+
+@keyframes piscarPedido {
+  0%{
+    box-shadow:0 0 0 rgba(239,68,68,0);
+    border-color:rgba(255,255,255,.07);
+  }
+  50%{
+    box-shadow:0 0 24px rgba(239,68,68,.45);
+    border-color:rgba(239,68,68,.75);
+  }
+  100%{
+    box-shadow:0 0 0 rgba(239,68,68,0);
+    border-color:rgba(255,255,255,.07);
+  }
+}
+
+.card-alerta{
+  animation:piscarPedido 1s infinite;
+}
+
+.card-alerta::before{
+  background:linear-gradient(90deg,#ef4444,#f97316);
+}
+
 @media (max-width:950px){
   .grid{
     grid-template-columns:repeat(3,minmax(0,1fr));
@@ -304,7 +346,8 @@ select{
       <div class="sub">Vendas da loja</div>
     </div>
 
-    <div class="card" onclick="ir('https://www.ffsolucoes.com.br/pedidos-online.html')">
+    <div class="card" id="cardPedidos" onclick="ir('https://www.ffsolucoes.com.br/pedidos-online.html')">
+      <span class="badge" id="badgePedidos">0</span>
       <div class="icone">🛒</div>
       <div class="titulo-card">Vendas Online</div>
       <div class="sub">Pedidos da vitrine</div>
@@ -362,6 +405,7 @@ select{
 import { supabase } from "/js/supabase.js";
 
 let APP_ID = null;
+let ultimoTotalPedidos = 0;
 
 async function verificarSessao(){
   const { data:{ session } } = await supabase.auth.getSession();
@@ -400,6 +444,43 @@ async function carregarUsuario(){
 
   document.getElementById("nome").innerText = usuario.nome || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
+
+  await verificarPedidos();
+  setInterval(verificarPedidos, 5000);
+}
+
+async function verificarPedidos(){
+  if(!APP_ID) return;
+
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id,status")
+    .eq("app_id", APP_ID)
+    .eq("status", "novo");
+
+  if(error) return;
+
+  const total = data?.length || 0;
+  const badge = document.getElementById("badgePedidos");
+  const card = document.getElementById("cardPedidos");
+
+  if(total > 0){
+    badge.style.display = "flex";
+    badge.innerText = total;
+    card.classList.add("card-alerta");
+
+    if(total > ultimoTotalPedidos){
+      try{
+        if(navigator.vibrate) navigator.vibrate([200,100,200]);
+      }catch{}
+    }
+  }else{
+    badge.style.display = "none";
+    badge.innerText = "0";
+    card.classList.remove("card-alerta");
+  }
+
+  ultimoTotalPedidos = total;
 }
 
 window.compartilharPagina = function(){
