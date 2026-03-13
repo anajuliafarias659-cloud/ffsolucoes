@@ -8,7 +8,7 @@
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px}
-.container{max-width:600px;margin:auto;padding:24px}
+.container{max-width:700px;margin:auto;padding:24px}
 .box{background:#0f172a;padding:20px;border-radius:16px}
 button{
   width:100%;
@@ -24,15 +24,39 @@ button:disabled{
   opacity:.6;
   cursor:not-allowed;
 }
-input,select{
+input,select,textarea{
   width:100%;
   padding:12px;
   margin-top:10px;
   border-radius:10px;
   border:none;
+  box-sizing:border-box;
 }
 .alert{color:#facc15;margin-top:8px}
 .info-ok{color:#22c55e;margin-top:8px}
+.area-online{
+  margin-top:14px;
+  padding:14px;
+  border-radius:12px;
+  background:#111827;
+  border:1px solid rgba(255,255,255,.08);
+}
+.pix-box{
+  display:none;
+  margin-top:12px;
+  padding:14px;
+  border-radius:12px;
+  background:#0b1220;
+  border:1px solid rgba(255,255,255,.08);
+}
+.linha-botoes{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+@media(max-width:640px){
+  .linha-botoes{grid-template-columns:1fr}
+}
 </style>
 </head>
 
@@ -51,20 +75,40 @@ input,select{
     <label>Forma de Pagamento</label>
     <select id="formaPagamento">
       <option value="Dinheiro">Dinheiro</option>
-      <option value="Pix">Pix</option>
+      <option value="Pix">Pix manual</option>
       <option value="Cartão Crédito">Cartão Crédito</option>
       <option value="Cartão Débito">Cartão Débito</option>
+      <option value="Pix MP">PIX Mercado Pago</option>
+      <option value="Checkout MP">Checkout Mercado Pago</option>
     </select>
 
-    <label>Valor pago</label>
-    <input type="number" id="valorRecebido" step="0.01" min="0">
+    <div id="areaManual">
+      <label>Valor pago</label>
+      <input type="number" id="valorRecebido" step="0.01" min="0">
+      <p id="info" class="alert"></p>
+      <p>Troco</p>
+      <h3 id="troco">R$ 0,00</h3>
+      <button id="btnConfirmar">Confirmar pagamento manual</button>
+    </div>
 
-    <p id="info" class="alert"></p>
+    <div id="areaOnline" class="area-online" style="display:none;">
+      <div id="statusPagamento" style="margin-bottom:10px;">Selecione uma opção online para gerar a cobrança.</div>
 
-    <p>Troco</p>
-    <h3 id="troco">R$ 0,00</h3>
+      <div id="areaPixMP" class="pix-box">
+        <div id="pixQrCodeArea" style="text-align:center;"></div>
+        <textarea id="pixCopiaCola" readonly placeholder="Código PIX copia e cola"></textarea>
+        <button type="button" id="btnCopiarPix">📋 Copiar código PIX</button>
+      </div>
 
-    <button id="btnConfirmar">Confirmar</button>
+      <div class="linha-botoes">
+        <button id="btnGerarPixMP" type="button" style="display:none;background:#16a34a;">
+          ✅ Gerar PIX Mercado Pago
+        </button>
+        <button id="btnCheckoutMP" type="button" style="display:none;background:#2563eb;color:#fff;">
+          ✅ Ir para checkout Mercado Pago
+        </button>
+      </div>
+    </div>
 
   </div>
 </div>
@@ -82,16 +126,59 @@ const infoEl = document.getElementById("info");
 const trocoEl = document.getElementById("troco");
 const btnConfirmar = document.getElementById("btnConfirmar");
 
+const areaManual = document.getElementById("areaManual");
+const areaOnline = document.getElementById("areaOnline");
+const statusPagamentoEl = document.getElementById("statusPagamento");
+const areaPixMP = document.getElementById("areaPixMP");
+const pixQrCodeArea = document.getElementById("pixQrCodeArea");
+const pixCopiaCola = document.getElementById("pixCopiaCola");
+const btnCopiarPix = document.getElementById("btnCopiarPix");
+const btnGerarPixMP = document.getElementById("btnGerarPixMP");
+const btnCheckoutMP = document.getElementById("btnCheckoutMP");
+
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+
+const URL_PAGAMENTO_MESA = `${SUPABASE_URL}/functions/v1/criar-pagamento-mesa`;
+const URL_PAGAMENTO_PIX_MESA = `${SUPABASE_URL}/functions/v1/criar-pix-mesa`;
+
 let totalPedido = 0;
 let mesaId = null;
 let appId = null;
 let processando = false;
+let verificacaoPix = null;
 
 function formatarMoeda(valor){
   return Number(valor || 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL"
   });
+}
+
+function ehPagamentoOnline(forma){
+  return forma === "Pix MP" || forma === "Checkout MP";
+}
+
+function atualizarModoPagamento(){
+  const forma = formaPagamentoEl.value;
+
+  areaManual.style.display = ehPagamentoOnline(forma) ? "none" : "block";
+  areaOnline.style.display = ehPagamentoOnline(forma) ? "block" : "none";
+
+  btnGerarPixMP.style.display = "none";
+  btnCheckoutMP.style.display = "none";
+  areaPixMP.style.display = "none";
+
+  if(forma === "Pix MP"){
+    btnGerarPixMP.style.display = "block";
+    areaPixMP.style.display = "block";
+    statusPagamentoEl.innerText = "Clique em gerar PIX para criar a cobrança.";
+  }
+
+  if(forma === "Checkout MP"){
+    btnCheckoutMP.style.display = "block";
+    statusPagamentoEl.innerText = "Clique no botão para abrir o checkout online.";
+  }
 }
 
 async function iniciar(){
@@ -132,12 +219,13 @@ async function iniciar(){
 
   await carregarPedido();
   calcular();
+  atualizarModoPagamento();
 }
 
 async function carregarPedido(){
   const { data: pedido, error: pedidoError } = await supabase
     .from("pedidos")
-    .select("id, mesa_id, status")
+    .select("id, mesa_id, status, total, subtotal, valor_total")
     .eq("id", pedidoId)
     .eq("app_id", appId)
     .single();
@@ -151,23 +239,28 @@ async function carregarPedido(){
 
   mesaId = pedido.mesa_id;
 
-  const { data: itens, error: itensError } = await supabase
-    .from("pedido_itens")
-    .select("produto_id, preco, quantidade")
-    .eq("pedido_id", pedidoId);
+  if (pedido.total != null) {
+    totalPedido = Number(pedido.total || 0);
+  } else if (pedido.valor_total != null) {
+    totalPedido = Number(pedido.valor_total || 0);
+  } else {
+    const { data: itens, error: itensError } = await supabase
+      .from("pedido_itens")
+      .select("produto_id, preco, quantidade")
+      .eq("pedido_id", pedidoId);
 
-  if(itensError){
-    console.error("Erro ao carregar itens:", itensError);
-    alert("Erro ao carregar itens do pedido.");
-    location.href = "caixa.html";
-    return;
+    if(itensError){
+      console.error("Erro ao carregar itens:", itensError);
+      alert("Erro ao carregar itens do pedido.");
+      location.href = "caixa.html";
+      return;
+    }
+
+    totalPedido = 0;
+    (itens || []).forEach(i => {
+      totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
+    });
   }
-
-  totalPedido = 0;
-
-  (itens || []).forEach(i => {
-    totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
-  });
 
   totalPedidoEl.innerText = formatarMoeda(totalPedido);
 }
@@ -182,6 +275,11 @@ function calcular(){
   let troco = 0;
   infoEl.className = "alert";
   infoEl.innerText = "";
+
+  if(ehPagamentoOnline(formaPagamento)){
+    trocoEl.innerText = formatarMoeda(0);
+    return;
+  }
 
   if(valorRecebido <= 0){
     trocoEl.innerText = formatarMoeda(0);
@@ -211,12 +309,110 @@ function calcular(){
   trocoEl.innerText = formatarMoeda(troco);
 }
 
+formaPagamentoEl.addEventListener("change", () => {
+  calcular();
+  atualizarModoPagamento();
+});
+
 valorRecebidoEl.addEventListener("input", calcular);
-formaPagamentoEl.addEventListener("change", calcular);
 
-btnConfirmar.addEventListener("click", confirmarPagamento);
+btnConfirmar.addEventListener("click", confirmarPagamentoManual);
+btnGerarPixMP.addEventListener("click", gerarPixMesa);
+btnCheckoutMP.addEventListener("click", checkoutMesa);
 
-async function confirmarPagamento(){
+btnCopiarPix.addEventListener("click", async () => {
+  const codigo = pixCopiaCola.value || "";
+  if(!codigo){
+    alert("Nenhum código PIX gerado.");
+    return;
+  }
+
+  try{
+    await navigator.clipboard.writeText(codigo);
+    alert("✅ Código PIX copiado!");
+  }catch{
+    alert("Não foi possível copiar.");
+  }
+});
+
+async function finalizarPedidoPago(dadosExtras = {}){
+  const { data: sessao } = await supabase.auth.getSession();
+  const nomeUsuario = sessao?.session?.user?.email || "Sistema";
+
+  const valorPago = Number(dadosExtras.valor_pago ?? totalPedido);
+  const troco = Number(dadosExtras.troco ?? 0);
+  const desconto = Number(dadosExtras.desconto ?? 0);
+
+  const dadosUpdate = {
+    status: "pago",
+    pagamento_status: "approved",
+    recebido_em: new Date().toISOString(),
+    recebido_por: nomeUsuario,
+    valor_total: totalPedido,
+    valor_pago: valorPago,
+    troco: troco,
+    desconto: desconto,
+    ...dadosExtras
+  };
+
+  const { error: erroUpdate } = await supabase
+    .from("pedidos")
+    .update(dadosUpdate)
+    .eq("id", pedidoId)
+    .eq("app_id", appId);
+
+  if(erroUpdate){
+    console.error("Erro ao finalizar pedido:", erroUpdate);
+    throw new Error("Erro ao finalizar pedido.");
+  }
+
+  let erroEstoqueGeral = false;
+
+  const { data: itens, error: erroItens } = await supabase
+    .from("pedido_itens")
+    .select("produto_id, quantidade")
+    .eq("pedido_id", pedidoId);
+
+  if(erroItens){
+    console.error("Erro ao buscar itens para estoque:", erroItens);
+    erroEstoqueGeral = true;
+  } else {
+    for(const item of (itens || [])){
+      if(!item.produto_id) continue;
+
+      const { error: erroEstoque } = await supabase.rpc("baixar_estoque", {
+        produto_id_input: item.produto_id,
+        quantidade_input: Number(item.quantidade || 0)
+      });
+
+      if(erroEstoque){
+        erroEstoqueGeral = true;
+        console.error("Erro ao baixar estoque:", erroEstoque);
+      }
+    }
+  }
+
+  if(mesaId){
+    const { error: erroMesa } = await supabase
+      .from("mesas")
+      .update({ status: "livre" })
+      .eq("id", mesaId);
+
+    if(erroMesa){
+      console.error("Erro ao liberar mesa:", erroMesa);
+    }
+  }
+
+  if(erroEstoqueGeral){
+    alert("Pagamento confirmado e mesa liberada, mas houve erro ao baixar estoque.");
+  } else {
+    alert("Pagamento confirmado com sucesso!");
+  }
+
+  location.href = "caixa.html";
+}
+
+async function confirmarPagamentoManual(){
   if(processando) return;
 
   const valorPago = Number(valorRecebidoEl.value || 0);
@@ -240,89 +436,221 @@ async function confirmarPagamento(){
   btnConfirmar.innerText = "Processando...";
 
   try{
-    const { data: sessao } = await supabase.auth.getSession();
-    const nomeUsuario = sessao?.session?.user?.email || "Sistema";
-
     const troco = valorPago > totalPedido ? valorPago - totalPedido : 0;
     const desconto = valorPago < totalPedido ? totalPedido - valorPago : 0;
 
-    const dadosUpdate = {
-      status: "pago",
+    await finalizarPedidoPago({
       forma_pagamento: formaPagamento,
-      recebido_em: new Date().toISOString(),
-      recebido_por: nomeUsuario,
-      valor_total: totalPedido,
+      pagamento_modo: "manual",
+      pagamento_tipo: formaPagamento,
       valor_pago: valorPago,
-      troco: troco,
-      desconto: desconto
+      troco,
+      desconto
+    });
+  }catch(e){
+    console.error("Erro inesperado:", e);
+    alert(e.message || "Erro inesperado ao confirmar pagamento.");
+    processando = false;
+    btnConfirmar.disabled = false;
+    btnConfirmar.innerText = "Confirmar pagamento manual";
+  }
+}
+
+async function gerarPixMesa(){
+  if(processando) return;
+
+  processando = true;
+  btnGerarPixMP.disabled = true;
+  btnGerarPixMP.innerText = "Gerando PIX...";
+  statusPagamentoEl.innerText = "Gerando PIX...";
+
+  try{
+    const payload = {
+      appId: appId,
+      pedidoId: pedidoId,
+      transaction_amount: Number(totalPedido),
+      description: `Pedido mesa ${pedidoId}`
     };
 
-    const { error: erroUpdate } = await supabase
+    const res = await fetch(URL_PAGAMENTO_PIX_MESA, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if(!res.ok){
+      throw new Error(json?.erro || "Erro ao gerar PIX.");
+    }
+
+    const qrBase64 = json?.point_of_interaction?.transaction_data?.qr_code_base64 || "";
+    const copiaCola = json?.point_of_interaction?.transaction_data?.qr_code || "";
+    const ticketUrl = json?.point_of_interaction?.transaction_data?.ticket_url || "";
+
+    await supabase
       .from("pedidos")
-      .update(dadosUpdate)
+      .update({
+        forma_pagamento: "Pix MP",
+        pagamento_modo: "mercadopago_pix",
+        pagamento_tipo: "pix",
+        pagamento_status: json.status || "pending",
+        mp_payment_id: json.id || null,
+        mp_qr_code: copiaCola || null,
+        mp_ticket_url: ticketUrl || null,
+        status: "aguardando_pagamento"
+      })
       .eq("id", pedidoId)
       .eq("app_id", appId);
 
-    if(erroUpdate){
-      console.error("Erro ao finalizar pedido:", erroUpdate);
-      alert("Erro ao finalizar pedido.");
-      processando = false;
-      btnConfirmar.disabled = false;
-      btnConfirmar.innerText = "Confirmar";
-      return;
-    }
+    pixCopiaCola.value = copiaCola || "";
 
-    let erroEstoqueGeral = false;
+    pixQrCodeArea.innerHTML = qrBase64
+      ? `<img src="data:image/png;base64,${qrBase64}" style="max-width:240px;width:100%;">`
+      : ticketUrl
+        ? `<a href="${ticketUrl}" target="_blank" style="color:#93c5fd;">Abrir pagamento PIX</a>`
+        : "PIX gerado.";
 
+    statusPagamentoEl.innerHTML = `
+      ⏳ PIX gerado com sucesso.<br>
+      Valor: <strong>${formatarMoeda(totalPedido)}</strong><br>
+      Aguardando pagamento...
+    `;
+
+    iniciarVerificacaoPix();
+  }catch(e){
+    console.error(e);
+    alert("Erro ao gerar PIX: " + e.message);
+  }finally{
+    processando = false;
+    btnGerarPixMP.disabled = false;
+    btnGerarPixMP.innerText = "✅ Gerar PIX Mercado Pago";
+  }
+}
+
+async function checkoutMesa(){
+  if(processando) return;
+
+  processando = true;
+  btnCheckoutMP.disabled = true;
+  btnCheckoutMP.innerText = "Gerando checkout...";
+  statusPagamentoEl.innerText = "Gerando checkout...";
+
+  try{
     const { data: itens, error: erroItens } = await supabase
       .from("pedido_itens")
-      .select("produto_id, quantidade")
+      .select("nome_produto, preco, quantidade")
       .eq("pedido_id", pedidoId);
 
     if(erroItens){
-      console.error("Erro ao buscar itens para estoque:", erroItens);
-      erroEstoqueGeral = true;
-    } else {
-      for(const item of (itens || [])){
-        if(!item.produto_id) continue;
-
-        const { error: erroEstoque } = await supabase.rpc("baixar_estoque", {
-          produto_id_input: item.produto_id,
-          quantidade_input: Number(item.quantidade || 0)
-        });
-
-        if(erroEstoque){
-          erroEstoqueGeral = true;
-          console.error("Erro ao baixar estoque:", erroEstoque);
-        }
-      }
+      throw new Error("Erro ao buscar itens do pedido.");
     }
 
-    if(mesaId){
-      const { error: erroMesa } = await supabase
-        .from("mesas")
-        .update({ status: "livre" })
-        .eq("id", mesaId);
+    const payload = {
+      appId: appId,
+      pedidoId: pedidoId,
+      items: (itens || []).map(i => ({
+        title: String(i.nome_produto || "Produto").slice(0,120),
+        quantity: Number(i.quantidade || 1),
+        unit_price: Number(i.preco || 0)
+      })).filter(i => i.quantity > 0 && i.unit_price > 0)
+    };
 
-      if(erroMesa){
-        console.error("Erro ao liberar mesa:", erroMesa);
-      }
+    const res = await fetch(URL_PAGAMENTO_MESA, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if(!res.ok){
+      throw new Error(json?.erro || "Erro ao gerar checkout.");
     }
 
-    if(erroEstoqueGeral){
-      alert("Pagamento confirmado e mesa liberada, mas houve erro ao baixar estoque.");
-    } else {
-      alert("Pagamento confirmado com sucesso!");
+    await supabase
+      .from("pedidos")
+      .update({
+        forma_pagamento: "Checkout MP",
+        pagamento_modo: "mercadopago",
+        pagamento_tipo: "checkout_online",
+        pagamento_status: "pending",
+        mp_preference_id: json.id || null,
+        status: "aguardando_pagamento"
+      })
+      .eq("id", pedidoId)
+      .eq("app_id", appId);
+
+    const linkPagamento = json.init_point || json.sandbox_init_point;
+
+    if(!linkPagamento){
+      throw new Error("Mercado Pago não retornou o link.");
     }
 
-    location.href = "caixa.html";
-
-  } catch(e){
-    console.error("Erro inesperado:", e);
-    alert("Erro inesperado ao confirmar pagamento.");
+    window.location.href = linkPagamento;
+  }catch(e){
+    console.error(e);
+    alert("Erro ao gerar checkout: " + e.message);
     processando = false;
-    btnConfirmar.disabled = false;
-    btnConfirmar.innerText = "Confirmar";
+    btnCheckoutMP.disabled = false;
+    btnCheckoutMP.innerText = "✅ Ir para checkout Mercado Pago";
+  }
+}
+
+function iniciarVerificacaoPix(){
+  clearInterval(verificacaoPix);
+  verificarStatusPagamento();
+
+  verificacaoPix = setInterval(() => {
+    verificarStatusPagamento();
+  }, 5000);
+}
+
+async function verificarStatusPagamento(){
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("pagamento_status, status, mp_payment_id")
+    .eq("id", pedidoId)
+    .eq("app_id", appId)
+    .single();
+
+  if(error || !data) return;
+
+  const status = String(data.pagamento_status || "").toLowerCase();
+
+  if(status === "approved"){
+    clearInterval(verificacaoPix);
+    statusPagamentoEl.innerHTML = `✅ Pagamento aprovado. Finalizando pedido...`;
+
+    try{
+      await finalizarPedidoPago({
+        forma_pagamento: "Pix MP",
+        pagamento_modo: "mercadopago_pix",
+        pagamento_tipo: "pix",
+        valor_pago: totalPedido,
+        troco: 0,
+        desconto: 0,
+        mp_payment_id: data.mp_payment_id || null
+      });
+    }catch(e){
+      console.error(e);
+      alert("Pagamento aprovado, mas houve erro ao finalizar internamente.");
+    }
+  }
+
+  if(status === "pending"){
+    statusPagamentoEl.innerHTML = `⏳ PIX gerado. Aguardando pagamento...`;
+  }
+
+  if(status === "rejected" || status === "cancelled"){
+    clearInterval(verificacaoPix);
+    statusPagamentoEl.innerHTML = `❌ Pagamento não aprovado.`;
   }
 }
 
