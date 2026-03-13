@@ -272,6 +272,8 @@ async function confirmarPagamento(){
       return;
     }
 
+    let erroEstoqueGeral = false;
+
     const { data: itens, error: erroItens } = await supabase
       .from("pedido_itens")
       .select("produto_id, quantidade")
@@ -279,28 +281,20 @@ async function confirmarPagamento(){
 
     if(erroItens){
       console.error("Erro ao buscar itens para estoque:", erroItens);
-      alert("Pagamento salvo, mas houve erro ao buscar itens para baixar estoque.");
-      processando = false;
-      btnConfirmar.disabled = false;
-      btnConfirmar.innerText = "Confirmar";
-      return;
-    }
+      erroEstoqueGeral = true;
+    } else {
+      for(const item of (itens || [])){
+        if(!item.produto_id) continue;
 
-    for(const item of (itens || [])){
-      if(!item.produto_id) continue;
+        const { error: erroEstoque } = await supabase.rpc("baixar_estoque", {
+          produto_id_input: item.produto_id,
+          quantidade_input: Number(item.quantidade || 0)
+        });
 
-      const { error: erroEstoque } = await supabase.rpc("baixar_estoque", {
-        produto_id_input: item.produto_id,
-        quantidade_input: Number(item.quantidade || 0)
-      });
-
-      if(erroEstoque){
-        console.error("Erro ao baixar estoque:", erroEstoque);
-        alert("Pagamento salvo, mas houve erro ao baixar estoque.");
-        processando = false;
-        btnConfirmar.disabled = false;
-        btnConfirmar.innerText = "Confirmar";
-        return;
+        if(erroEstoque){
+          erroEstoqueGeral = true;
+          console.error("Erro ao baixar estoque:", erroEstoque);
+        }
       }
     }
 
@@ -321,7 +315,12 @@ async function confirmarPagamento(){
       }
     }
 
-    alert("Pagamento confirmado com sucesso!");
+    if(erroEstoqueGeral){
+      alert("Pagamento confirmado e mesa liberada, mas houve erro ao baixar estoque.");
+    } else {
+      alert("Pagamento confirmado com sucesso!");
+    }
+
     location.href = "caixa.html";
 
   } catch(e){
