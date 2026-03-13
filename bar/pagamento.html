@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Pagamento</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
@@ -54,6 +55,22 @@ input,select,textarea{
   grid-template-columns:1fr 1fr;
   gap:10px;
 }
+#pixQrCodeArea img{
+  background:#fff;
+  padding:10px;
+  border-radius:12px;
+}
+#debugPix{
+  margin-top:10px;
+  font-size:12px;
+  color:#94a3b8;
+  white-space:pre-wrap;
+  word-break:break-word;
+  background:#020617;
+  border-radius:10px;
+  padding:10px;
+  display:none;
+}
 @media(max-width:640px){
   .linha-botoes{grid-template-columns:1fr}
 }
@@ -98,6 +115,7 @@ input,select,textarea{
         <div id="pixQrCodeArea" style="text-align:center;"></div>
         <textarea id="pixCopiaCola" readonly placeholder="Código PIX copia e cola"></textarea>
         <button type="button" id="btnCopiarPix">📋 Copiar código PIX</button>
+        <div id="debugPix"></div>
       </div>
 
       <div class="linha-botoes">
@@ -135,6 +153,7 @@ const pixCopiaCola = document.getElementById("pixCopiaCola");
 const btnCopiarPix = document.getElementById("btnCopiarPix");
 const btnGerarPixMP = document.getElementById("btnGerarPixMP");
 const btnCheckoutMP = document.getElementById("btnCheckoutMP");
+const debugPix = document.getElementById("debugPix");
 
 const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
@@ -168,6 +187,10 @@ function atualizarModoPagamento(){
   btnGerarPixMP.style.display = "none";
   btnCheckoutMP.style.display = "none";
   areaPixMP.style.display = "none";
+  pixQrCodeArea.innerHTML = "";
+  pixCopiaCola.value = "";
+  debugPix.style.display = "none";
+  debugPix.innerText = "";
 
   if(forma === "Pix MP"){
     btnGerarPixMP.style.display = "block";
@@ -179,6 +202,75 @@ function atualizarModoPagamento(){
     btnCheckoutMP.style.display = "block";
     statusPagamentoEl.innerText = "Clique no botão para abrir o checkout online.";
   }
+}
+
+async function obterTokenSessao(){
+  const { data: sessaoData, error: sessaoError } = await supabase.auth.getSession();
+
+  if(sessaoError || !sessaoData.session){
+    throw new Error("Sessão inválida. Faça login novamente.");
+  }
+
+  return sessaoData.session.access_token;
+}
+
+function extrairDadosPix(json){
+  const transactionData = json?.point_of_interaction?.transaction_data || {};
+  const interaction = json?.point_of_interaction || {};
+  const additionalData = json?.additional_data || {};
+
+  const qrBase64 =
+    transactionData?.qr_code_base64 ||
+    interaction?.qr_code_base64 ||
+    additionalData?.qr_code_base64 ||
+    "";
+
+  const copiaCola =
+    transactionData?.qr_code ||
+    interaction?.qr_code ||
+    additionalData?.qr_code ||
+    json?.qr_code ||
+    "";
+
+  const ticketUrl =
+    transactionData?.ticket_url ||
+    interaction?.ticket_url ||
+    additionalData?.ticket_url ||
+    json?.ticket_url ||
+    "";
+
+  return { qrBase64, copiaCola, ticketUrl };
+}
+
+async function renderizarQrPix(copiaCola, qrBase64, ticketUrl){
+  pixQrCodeArea.innerHTML = "";
+
+  if(qrBase64){
+    pixQrCodeArea.innerHTML = `<img src="data:image/png;base64,${qrBase64}" style="max-width:240px;width:100%;">`;
+    return "base64";
+  }
+
+  if(copiaCola){
+    try{
+      const qrDataUrl = await window.QRCode.toDataURL(copiaCola, {
+        width: 240,
+        margin: 1
+      });
+
+      pixQrCodeArea.innerHTML = `<img src="${qrDataUrl}" style="max-width:240px;width:100%;">`;
+      return "copia_cola";
+    }catch(e){
+      console.error("Erro ao gerar QR local:", e);
+    }
+  }
+
+  if(ticketUrl){
+    pixQrCodeArea.innerHTML = `<a href="${ticketUrl}" target="_blank" style="color:#93c5fd;">Abrir pagamento PIX</a>`;
+    return "ticket_url";
+  }
+
+  pixQrCodeArea.innerHTML = "PIX gerado, mas sem QR visual.";
+  return "vazio";
 }
 
 async function iniciar(){
@@ -225,7 +317,7 @@ async function iniciar(){
 async function carregarPedido(){
   const { data: pedido, error: pedidoError } = await supabase
     .from("pedidos")
-    .select("id, mesa_id, status, total, subtotal, valor_total")
+    .select("id, mesa_id, status, total, subtotal, valor_total, pagamento_status, mp_qr_code, mp_ticket_url")
     .eq("id", pedidoId)
     .eq("app_id", appId)
     .single();
@@ -263,6 +355,18 @@ async function carregarPedido(){
   }
 
   totalPedidoEl.innerText = formatarMoeda(totalPedido);
+
+  if(
+    String(pedido.pagamento_status || "").toLowerCase() === "pending" &&
+    (pedido.mp_qr_code || pedido.mp_ticket_url)
+  ){
+    formaPagamentoEl.value = "Pix MP";
+    atualizarModoPagamento();
+    pixCopiaCola.value = pedido.mp_qr_code || "";
+    await renderizarQrPix(pedido.mp_qr_code || "", "", pedido.mp_ticket_url || "");
+    statusPagamentoEl.innerHTML = `⏳ PIX já gerado anteriormente. Aguardando pagamento...`;
+    iniciarVerificacaoPix();
+  }
 }
 
 function calcular(){
@@ -463,8 +567,14 @@ async function gerarPixMesa(){
   btnGerarPixMP.disabled = true;
   btnGerarPixMP.innerText = "Gerando PIX...";
   statusPagamentoEl.innerText = "Gerando PIX...";
+  pixQrCodeArea.innerHTML = "";
+  pixCopiaCola.value = "";
+  debugPix.style.display = "none";
+  debugPix.innerText = "";
 
   try{
+    const accessToken = await obterTokenSessao();
+
     const payload = {
       appId: appId,
       pedidoId: pedidoId,
@@ -476,7 +586,8 @@ async function gerarPixMesa(){
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: SUPABASE_ANON_KEY
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${accessToken}`
       },
       body: JSON.stringify(payload)
     });
@@ -484,12 +595,10 @@ async function gerarPixMesa(){
     const json = await res.json().catch(() => ({}));
 
     if(!res.ok){
-      throw new Error(json?.erro || "Erro ao gerar PIX.");
+      throw new Error(json?.erro || `Erro ao gerar PIX (${res.status})`);
     }
 
-    const qrBase64 = json?.point_of_interaction?.transaction_data?.qr_code_base64 || "";
-    const copiaCola = json?.point_of_interaction?.transaction_data?.qr_code || "";
-    const ticketUrl = json?.point_of_interaction?.transaction_data?.ticket_url || "";
+    const { qrBase64, copiaCola, ticketUrl } = extrairDadosPix(json);
 
     await supabase
       .from("pedidos")
@@ -508,11 +617,16 @@ async function gerarPixMesa(){
 
     pixCopiaCola.value = copiaCola || "";
 
-    pixQrCodeArea.innerHTML = qrBase64
-      ? `<img src="data:image/png;base64,${qrBase64}" style="max-width:240px;width:100%;">`
-      : ticketUrl
-        ? `<a href="${ticketUrl}" target="_blank" style="color:#93c5fd;">Abrir pagamento PIX</a>`
-        : "PIX gerado.";
+    const origemQr = await renderizarQrPix(copiaCola, qrBase64, ticketUrl);
+
+    debugPix.style.display = "block";
+    debugPix.innerText =
+`Origem QR: ${origemQr}
+payment_id: ${json?.id || ""}
+status: ${json?.status || ""}
+tem qr_base64: ${qrBase64 ? "sim" : "não"}
+tem copia_cola: ${copiaCola ? "sim" : "não"}
+tem ticket_url: ${ticketUrl ? "sim" : "não"}`;
 
     statusPagamentoEl.innerHTML = `
       ⏳ PIX gerado com sucesso.<br>
@@ -540,6 +654,8 @@ async function checkoutMesa(){
   statusPagamentoEl.innerText = "Gerando checkout...";
 
   try{
+    const accessToken = await obterTokenSessao();
+
     const { data: itens, error: erroItens } = await supabase
       .from("pedido_itens")
       .select("nome_produto, preco, quantidade")
@@ -563,7 +679,8 @@ async function checkoutMesa(){
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: SUPABASE_ANON_KEY
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${accessToken}`
       },
       body: JSON.stringify(payload)
     });
@@ -571,7 +688,7 @@ async function checkoutMesa(){
     const json = await res.json().catch(() => ({}));
 
     if(!res.ok){
-      throw new Error(json?.erro || "Erro ao gerar checkout.");
+      throw new Error(json?.erro || `Erro ao gerar checkout (${res.status})`);
     }
 
     await supabase
@@ -645,7 +762,11 @@ async function verificarStatusPagamento(){
   }
 
   if(status === "pending"){
-    statusPagamentoEl.innerHTML = `⏳ PIX gerado. Aguardando pagamento...`;
+    statusPagamentoEl.innerHTML = `
+      ⏳ PIX gerado.<br>
+      Valor: <strong>${formatarMoeda(totalPedido)}</strong><br>
+      Aguardando pagamento...
+    `;
   }
 
   if(status === "rejected" || status === "cancelled"){
