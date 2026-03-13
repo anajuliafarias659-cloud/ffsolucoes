@@ -32,7 +32,6 @@ small{opacity:.75}
   background:#0f172a;
   border:1px solid rgba(255,255,255,.08);
 }
-
 .produto{
   display:flex;
   justify-content:space-between;
@@ -63,7 +62,6 @@ small{opacity:.75}
   display:block;
   margin-bottom:4px;
 }
-
 .item{
   display:flex;
   justify-content:space-between;
@@ -235,15 +233,14 @@ function encerrarPedidoNaTela() {
 function obterImagemProduto(produto) {
   if (!produto) return "https://via.placeholder.com/80x80?text=Produto";
 
-  return (
-    produto.imagem ||
-    produto.foto ||
-    produto.url_imagem ||
-    produto.banner_url ||
-    produto.image ||
-    produto.img ||
-    "https://via.placeholder.com/80x80?text=Produto"
-  );
+  let imgs = [];
+  try {
+    imgs = JSON.parse(produto.imagens || "[]");
+  } catch {
+    imgs = [];
+  }
+
+  return imgs[0] || "https://via.placeholder.com/80x80?text=Produto";
 }
 
 function obterCategoriaProduto(produto) {
@@ -389,7 +386,6 @@ function montarCategoriasPelosProdutos() {
 
   produtosCache.forEach(p => {
     const chave = obterCategoriaProduto(p);
-
     if (!mapa.has(chave)) {
       mapa.set(chave, { id: chave, nome: chave });
     }
@@ -444,11 +440,13 @@ function aplicarFiltros() {
   }
 
   lista.forEach(p => {
+    const imgPrincipal = obterImagemProduto(p);
+
     const card = document.createElement("div");
     card.className = "produto";
     card.innerHTML = `
       <div class="produto-esquerda">
-        <img class="thumb-produto" src="${p.imagem_exibicao}" alt="${p.nome}" onerror="this.onerror=null;this.src='https://via.placeholder.com/80x80?text=Produto'">
+        <img class="thumb-produto" src="${imgPrincipal}" alt="${p.nome}" onerror="this.onerror=null;this.src='https://via.placeholder.com/80x80?text=Produto'">
         <div class="produto-info">
           <strong>${p.nome}</strong>
           <small>${formatarMoeda(p.preco)}</small>
@@ -466,7 +464,7 @@ async function addProduto(produtoId) {
   const ok = await criarPedidoSeNecessario();
   if (!ok) return;
 
-  const produto = produtosCache.find(p => p.id === produtoId);
+  const produto = produtosCache.find(p => String(p.id) === String(produtoId));
   if (!produto) return;
 
   if (pedidoAtual && podeLiberarMesa(pedidoAtual.status)) {
@@ -474,39 +472,82 @@ async function addProduto(produtoId) {
     return;
   }
 
-  const { error } = await supabase
+  const { data: itensExistentes, error: erroBusca } = await supabase
     .from("pedido_itens")
-    .insert({
-      app_id: APP_ID,
-      pedido_id: pedidoAtual.id,
-      produto_id: produto.id,
-      nome_produto: produto.nome,
-      preco: Number(produto.preco || 0),
-      quantidade: 1,
-      status: "novo"
-    });
+    .select("id, quantidade")
+    .eq("pedido_id", pedidoAtual.id)
+    .eq("produto_id", produto.id)
+    .order("created_at", { ascending: true });
 
-  if (error) {
-    console.error(error);
-    alert("Erro ao adicionar produto.");
+  if (erroBusca) {
+    console.error(erroBusca);
+    alert("Erro ao verificar item existente.");
     return;
+  }
+
+  if (itensExistentes && itensExistentes.length > 0) {
+    const itemPrincipal = itensExistentes[0];
+    const idsDuplicados = itensExistentes.slice(1).map(i => i.id);
+    const somaDuplicados = itensExistentes.slice(1).reduce((acc, i) => acc + Number(i.quantidade || 0), 0);
+    const novaQtd = Number(itemPrincipal.quantidade || 0) + somaDuplicados + 1;
+
+    const { error: erroUpdate } = await supabase
+      .from("pedido_itens")
+      .update({ quantidade: novaQtd })
+      .eq("id", itemPrincipal.id)
+      .eq("pedido_id", pedidoAtual.id);
+
+    if (erroUpdate) {
+      console.error(erroUpdate);
+      alert("Erro ao atualizar quantidade.");
+      return;
+    }
+
+    if (idsDuplicados.length > 0) {
+      const { error: erroDeleteDuplicados } = await supabase
+        .from("pedido_itens")
+        .delete()
+        .in("id", idsDuplicados);
+
+      if (erroDeleteDuplicados) {
+        console.error(erroDeleteDuplicados);
+      }
+    }
+  } else {
+    const { error: erroInsert } = await supabase
+      .from("pedido_itens")
+      .insert({
+        app_id: APP_ID,
+        pedido_id: pedidoAtual.id,
+        produto_id: produto.id,
+        nome_produto: produto.nome,
+        preco: Number(produto.preco || 0),
+        quantidade: 1,
+        status: "novo"
+      });
+
+    if (erroInsert) {
+      console.error(erroInsert);
+      alert("Erro ao adicionar produto.");
+      return;
+    }
   }
 
   await carregarPedido();
 }
 
-async function aumentarItem(itemId, qtdAtual) {
+async function aumentarItem(item) {
   if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
     alert("Não é possível alterar este pedido.");
     return;
   }
 
-  const novaQtd = Number(qtdAtual || 0) + 1;
+  const novaQtd = Number(item.quantidade || 0) + 1;
 
   const { error } = await supabase
     .from("pedido_itens")
     .update({ quantidade: novaQtd })
-    .eq("id", itemId)
+    .eq("id", item.id)
     .eq("pedido_id", pedidoAtual.id);
 
   if (error) {
@@ -518,16 +559,16 @@ async function aumentarItem(itemId, qtdAtual) {
   await carregarPedido();
 }
 
-async function diminuirItem(itemId, qtdAtual) {
+async function diminuirItem(item) {
   if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
     alert("Não é possível alterar este pedido.");
     return;
   }
 
-  const qtd = Number(qtdAtual || 0);
+  const qtd = Number(item.quantidade || 0);
 
   if (qtd <= 1) {
-    await removerItem(itemId);
+    await removerItem(item.id);
     return;
   }
 
@@ -536,7 +577,7 @@ async function diminuirItem(itemId, qtdAtual) {
   const { error } = await supabase
     .from("pedido_itens")
     .update({ quantidade: novaQtd })
-    .eq("id", itemId)
+    .eq("id", item.id)
     .eq("pedido_id", pedidoAtual.id);
 
   if (error) {
@@ -591,19 +632,58 @@ async function carregarPedido() {
     return;
   }
 
+  const mapa = new Map();
+
+  (data || []).forEach(i => {
+    const chave = String(i.produto_id || i.id);
+
+    if (!mapa.has(chave)) {
+      mapa.set(chave, {
+        ...i,
+        quantidade: Number(i.quantidade || 0)
+      });
+    } else {
+      const atual = mapa.get(chave);
+      atual.quantidade += Number(i.quantidade || 0);
+    }
+  });
+
+  const itens = Array.from(mapa.values());
+
+  for (const item of itens) {
+    const duplicados = (data || []).filter(d => String(d.produto_id) === String(item.produto_id));
+    if (duplicados.length > 1) {
+      const principal = duplicados[0];
+      const idsExcluir = duplicados.slice(1).map(d => d.id);
+      const qtdTotal = duplicados.reduce((acc, d) => acc + Number(d.quantidade || 0), 0);
+
+      const { error: erroUpdate } = await supabase
+        .from("pedido_itens")
+        .update({ quantidade: qtdTotal })
+        .eq("id", principal.id);
+
+      if (!erroUpdate && idsExcluir.length > 0) {
+        await supabase
+          .from("pedido_itens")
+          .delete()
+          .in("id", idsExcluir);
+      }
+    }
+  }
+
   const div = document.getElementById("pedido");
   div.innerHTML = "";
   let total = 0;
 
-  if (!data || data.length === 0) {
+  if (!itens || itens.length === 0) {
     div.innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
   }
 
-  (data || []).forEach(i => {
+  itens.forEach(i => {
     total += Number(i.preco || 0) * Number(i.quantidade || 0);
 
     const bloqueado = pedidoBloqueadoParaEdicao();
-    const produtoRel = produtosCache.find(p => p.id === i.produto_id) || null;
+    const produtoRel = produtosCache.find(p => String(p.id) === String(i.produto_id)) || null;
     const imgItem = produtoRel ? obterImagemProduto(produtoRel) : "https://via.placeholder.com/80x80?text=Produto";
 
     const item = document.createElement("div");
@@ -627,8 +707,8 @@ async function carregarPedido() {
     `;
 
     const botoes = item.querySelectorAll("button");
-    botoes[0].onclick = () => diminuirItem(i.id, i.quantidade);
-    botoes[1].onclick = () => aumentarItem(i.id, i.quantidade);
+    botoes[0].onclick = () => diminuirItem(i);
+    botoes[1].onclick = () => aumentarItem(i);
     botoes[2].onclick = () => removerItem(i.id);
 
     div.appendChild(item);
