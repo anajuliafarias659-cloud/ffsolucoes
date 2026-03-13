@@ -79,10 +79,6 @@ select,input{
   font-size:12px;
   font-weight:bold;
 }
-.tag-online{
-  background:#1d4ed8;
-  color:#fff;
-}
 .tag-vitrine{
   background:#0ea5e9;
   color:#00111a;
@@ -115,14 +111,8 @@ select,input{
   font-weight:bold;
   margin:4px 6px 0 0;
 }
-.tag-bar{
-  background:#7c3aed;
-  color:#fff;
-}
-.tag-cozinha{
-  background:#dc2626;
-  color:#fff;
-}
+.tag-bar{ background:#7c3aed; color:#fff; }
+.tag-cozinha{ background:#dc2626; color:#fff; }
 
 .bloco-setor{
   margin-top:10px;
@@ -175,6 +165,7 @@ button{
 .btn-entrega{ background:#14b8a6; color:#fff; }
 .btn-imprimir-bar{ background:#7c3aed; color:#fff; }
 .btn-imprimir-cozinha{ background:#dc2626; color:#fff; }
+.btn-imprimir-geral{ background:#f59e0b; color:#111827; }
 
 .linha-botoes{
   display:flex;
@@ -192,7 +183,7 @@ button{
 <body>
 
 <div class="topo">
-  <h2>📦 Pedidos Online</h2>
+  <h2>📦 Pedidos</h2>
   <button class="voltar" onclick="history.back()">⬅ Voltar</button>
 </div>
 
@@ -301,7 +292,19 @@ function pedidoEhMesa(p){
     ""
   ).trim().toLowerCase();
 
-  if(
+  const temCamposOnline =
+    !!p.cliente_rua ||
+    !!p.cliente_numero ||
+    !!p.cliente_bairro ||
+    !!p.cliente_cidade ||
+    !!p.cliente_estado ||
+    !!p.cliente_cep ||
+    !!p.cliente_localizacao ||
+    !!p.codigo_acompanhamento;
+
+  if (temCamposOnline) return false;
+
+  if (
     origem === "delivery" ||
     origem === "entrega" ||
     origem === "retirada" ||
@@ -312,13 +315,19 @@ function pedidoEhMesa(p){
     return false;
   }
 
-  return (
+  if (
     origem === "mesa" ||
     origem === "salão" ||
     origem === "salao" ||
     origem === "comanda" ||
     origem === "bar"
-  );
+  ){
+    return true;
+  }
+
+  if (p.mesa_id && !temCamposOnline) return true;
+
+  return false;
 }
 
 function numeroMesaPedido(p){
@@ -462,11 +471,12 @@ function montarItensDetalhadoMesa(itens){
     `;
   }
 
-  if (grupos.outros.length) {
+  if (grupos.outros.length || (!grupos.bar.length && !grupos.cozinha.length)) {
+    const base = grupos.outros.length ? grupos.outros : itens;
     html += `
       <div class="bloco-setor">
-        <h4>OUTROS</h4>
-        ${grupos.outros.map(i => `
+        <h4>COMANDA</h4>
+        ${base.map(i => `
           <div class="item-comanda">
             <strong>${escapeHtml(nomeItem(i))}</strong> x${qtdItem(i)}
             ${corItem(i) ? `<br><small>Variação: ${escapeHtml(corItem(i))}</small>` : ""}
@@ -530,6 +540,7 @@ function montarCardPedido(p, isHistorico){
 
   const podeImprimirBar = isMesa && pedidoTemSetor(p, "bar");
   const podeImprimirCozinha = isMesa && pedidoTemSetor(p, "cozinha");
+  const podeImprimirGeral = isMesa && !podeImprimirBar && !podeImprimirCozinha;
 
   const origemTexto = isMesa ? "PEDIDO DE MESA" : "PEDIDO VITRINE / DELIVERY";
   const origemClasse = isMesa ? "tag-mesa" : "tag-vitrine";
@@ -621,13 +632,14 @@ function montarCardPedido(p, isHistorico){
           <strong>Setores:</strong>
           ${podeImprimirBar ? `<span class="tag-setor tag-bar">BAR</span>` : ""}
           ${podeImprimirCozinha ? `<span class="tag-setor tag-cozinha">COZINHA</span>` : ""}
-          ${!podeImprimirBar && !podeImprimirCozinha ? `Sem setor definido` : ""}
+          ${podeImprimirGeral ? `<span class="tag-setor">COMANDA</span>` : ""}
         </div>
       `}
 
       <div class="linha-botoes">
         ${podeImprimirBar ? `<button class="btn-imprimir-bar" onclick="imprimirComanda('${p.id}','bar')">🖨 Imprimir Bar</button>` : ""}
         ${podeImprimirCozinha ? `<button class="btn-imprimir-cozinha" onclick="imprimirComanda('${p.id}','cozinha')">🖨 Imprimir Cozinha</button>` : ""}
+        ${podeImprimirGeral ? `<button class="btn-imprimir-geral" onclick="imprimirComanda('${p.id}','geral')">🖨 Imprimir Comanda</button>` : ""}
 
         ${!isHistorico && status === "novo" ? `
           <button class="btn-pago" onclick="marcarPago('${p.id}')">Marcar Pago</button>
@@ -1002,16 +1014,23 @@ window.imprimirComanda = function(id, setorDesejado){
   if (!pedido) return alert("Pedido não encontrado.");
 
   const itens = Array.isArray(pedido.itens_normalizados) ? pedido.itens_normalizados : [];
-  const itensFiltrados = itens.filter(i => setorItem(i) === setorDesejado);
+  let itensFiltrados = itens;
+
+  if (setorDesejado !== "geral") {
+    itensFiltrados = itens.filter(i => setorItem(i) === setorDesejado);
+  }
 
   if (!itensFiltrados.length) {
-    alert(`Esse pedido não possui itens para ${setorDesejado}.`);
+    alert("Esse pedido não possui itens para impressão.");
     return;
   }
 
   const dataHora = new Date().toLocaleString("pt-BR");
-  const setorTitulo = setorDesejado === "bar" ? "BAR" : "COZINHA";
   const mesaNumero = numeroMesaPedido(pedido);
+  const setorTitulo =
+    setorDesejado === "bar" ? "BAR" :
+    setorDesejado === "cozinha" ? "COZINHA" :
+    "COMANDA";
 
   const htmlItens = itensFiltrados.map(i => `
     <div style="border-bottom:1px dashed #000;padding:6px 0;">
