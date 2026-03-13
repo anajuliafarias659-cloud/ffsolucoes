@@ -46,6 +46,51 @@ small{opacity:.7}
   background:#0f172a;
   border:1px solid rgba(255,255,255,.08);
 }
+
+.item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.item-info{
+  flex:1;
+  min-width:180px;
+}
+.item-info strong{
+  display:block;
+  margin-bottom:4px;
+}
+.item-acoes{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.btn-menor{
+  background:#f59e0b;
+  color:#000;
+  font-weight:bold;
+}
+.btn-maior{
+  background:#22c55e;
+  color:#000;
+  font-weight:bold;
+}
+.btn-remover{
+  background:#ef4444;
+  color:#fff;
+  font-weight:bold;
+}
+.qtd-badge{
+  min-width:34px;
+  text-align:center;
+  font-weight:bold;
+  background:#1e293b;
+  padding:8px 10px;
+  border-radius:8px;
+}
 </style>
 </head>
 
@@ -129,6 +174,11 @@ function nomeStatus(status) {
 
 function podeLiberarMesa(status) {
   return status === "pago" || status === "finalizado" || status === "cancelado";
+}
+
+function pedidoBloqueadoParaEdicao() {
+  if (!pedidoAtual) return false;
+  return ["pago", "finalizado", "cancelado"].includes(pedidoAtual.status);
 }
 
 function atualizarBotaoLiberar() {
@@ -407,23 +457,95 @@ async function addProduto(produtoId) {
     return;
   }
 
-  const dadosInsert = {
-    app_id: APP_ID,
-    pedido_id: pedidoAtual.id,
-    produto_id: produto.id,
-    nome_produto: produto.nome,
-    preco: Number(produto.preco || 0),
-    quantidade: 1,
-    status: "novo"
-  };
-
   const { error } = await supabase
     .from("pedido_itens")
-    .insert(dadosInsert);
+    .insert({
+      app_id: APP_ID,
+      pedido_id: pedidoAtual.id,
+      produto_id: produto.id,
+      nome_produto: produto.nome,
+      preco: Number(produto.preco || 0),
+      quantidade: 1,
+      status: "novo"
+    });
 
   if (error) {
     console.error(error);
     alert("Erro ao adicionar produto.");
+    return;
+  }
+
+  await carregarPedido();
+}
+
+async function aumentarItem(itemId, qtdAtual) {
+  if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
+    alert("Não é possível alterar este pedido.");
+    return;
+  }
+
+  const novaQtd = Number(qtdAtual || 0) + 1;
+
+  const { error } = await supabase
+    .from("pedido_itens")
+    .update({ quantidade: novaQtd })
+    .eq("id", itemId)
+    .eq("pedido_id", pedidoAtual.id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao aumentar item.");
+    return;
+  }
+
+  await carregarPedido();
+}
+
+async function diminuirItem(itemId, qtdAtual) {
+  if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
+    alert("Não é possível alterar este pedido.");
+    return;
+  }
+
+  const qtd = Number(qtdAtual || 0);
+
+  if (qtd <= 1) {
+    await removerItem(itemId);
+    return;
+  }
+
+  const novaQtd = qtd - 1;
+
+  const { error } = await supabase
+    .from("pedido_itens")
+    .update({ quantidade: novaQtd })
+    .eq("id", itemId)
+    .eq("pedido_id", pedidoAtual.id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao diminuir item.");
+    return;
+  }
+
+  await carregarPedido();
+}
+
+async function removerItem(itemId) {
+  if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
+    alert("Não é possível remover item deste pedido.");
+    return;
+  }
+
+  const { error } = await supabase
+    .from("pedido_itens")
+    .delete()
+    .eq("id", itemId)
+    .eq("pedido_id", pedidoAtual.id);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao remover item.");
     return;
   }
 
@@ -457,10 +579,30 @@ async function carregarPedido() {
 
     const item = document.createElement("div");
     item.className = "item";
+
+    const bloqueado = pedidoBloqueadoParaEdicao();
+
     item.innerHTML = `
-      ${i.nome_produto} x ${i.quantidade}
-      ${i.categoria_nome ? `<br><small>${i.categoria_nome}</small>` : ""}
+      <div class="item-info">
+        <strong>${i.nome_produto}</strong>
+        <small>Valor unitário: ${formatarMoeda(i.preco)}</small>
+        <br>
+        <small>Subtotal: ${formatarMoeda(Number(i.preco || 0) * Number(i.quantidade || 0))}</small>
+      </div>
+
+      <div class="item-acoes">
+        <button class="btn-menor" ${bloqueado ? "disabled" : ""}>➖</button>
+        <div class="qtd-badge">${i.quantidade}</div>
+        <button class="btn-maior" ${bloqueado ? "disabled" : ""}>➕</button>
+        <button class="btn-remover" ${bloqueado ? "disabled" : ""}>🗑 Remover</button>
+      </div>
     `;
+
+    const botoes = item.querySelectorAll("button");
+    botoes[0].onclick = () => diminuirItem(i.id, i.quantidade);
+    botoes[1].onclick = () => aumentarItem(i.id, i.quantidade);
+    botoes[2].onclick = () => removerItem(i.id);
+
     div.appendChild(item);
   });
 
@@ -533,18 +675,6 @@ document.getElementById("btnLiberar").onclick = async () => {
 
   if (!podeLiberarMesa(pedidoAtual.status)) {
     alert("Não é possível liberar a mesa. Ainda existe pedido pendente. A mesa só pode ser liberada quando o pedido estiver pago, cancelado ou finalizado.");
-    return;
-  }
-
-  const { data: itens, error: erroItens } = await supabase
-    .from("pedido_itens")
-    .select("id")
-    .eq("pedido_id", pedidoAtual.id)
-    .limit(1);
-
-  if (erroItens) {
-    console.error(erroItens);
-    alert("Erro ao verificar itens do pedido.");
     return;
   }
 
