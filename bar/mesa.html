@@ -38,6 +38,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
   border-radius:14px;
   padding:14px;
 }
+small{opacity:.7}
 </style>
 </head>
 
@@ -97,7 +98,6 @@ if(!mesaId){
   history.back();
 }
 
-/* ===== SESSÃO ===== */
 async function validarSessao(){
   const { data, error } = await supabase.auth.getSession();
 
@@ -111,24 +111,17 @@ async function validarSessao(){
 
   const { data: usuario, error: erroUsuario } = await supabase
     .from("usuarios")
-    .select("id, app_id, nome, email")
+    .select("id, app_id")
     .eq("id", userId)
     .single();
 
   if(erroUsuario || !usuario){
-    console.error("Erro ao buscar usuário:", erroUsuario);
     alert("Usuário não encontrado.");
     location.href = "/auth/login.html";
     return false;
   }
 
   APP_ID = usuario.app_id;
-
-  if(!APP_ID){
-    alert("Negócio não identificado.");
-    return false;
-  }
-
   return true;
 }
 
@@ -138,42 +131,29 @@ async function iniciarSistema(){
 
   await carregarMesa();
   await verificarPedidoExistente();
-  await carregarCategorias();
   await carregarProdutos();
 }
 
-/* ===== MESA ===== */
 async function carregarMesa(){
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("mesas")
     .select("numero_mesa")
     .eq("id", mesaId)
     .maybeSingle();
-
-  if(error){
-    console.error("Erro ao carregar mesa:", error);
-    return;
-  }
 
   if(data){
     document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
   }
 }
 
-/* ===== VERIFICA PEDIDO ===== */
 async function verificarPedidoExistente(){
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("pedidos")
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
     .not("status", "in", '("finalizado","pago")')
     .maybeSingle();
-
-  if(error){
-    console.error("Erro ao verificar pedido:", error);
-    return;
-  }
 
   if(data){
     pedidoAtual = data;
@@ -186,7 +166,6 @@ async function verificarPedidoExistente(){
   }
 }
 
-/* ===== CRIAR PEDIDO ===== */
 async function criarPedidoSeNecessario(){
   if(pedidoAtual) return true;
 
@@ -202,7 +181,6 @@ async function criarPedidoSeNecessario(){
     .single();
 
   if(error){
-    console.error("Erro ao criar pedido:", error);
     alert("Erro ao criar pedido.");
     return false;
   }
@@ -213,20 +191,55 @@ async function criarPedidoSeNecessario(){
   return true;
 }
 
-/* ===== CATEGORIAS ===== */
-async function carregarCategorias(){
+/* ===== CARREGAR PRODUTOS E EXTRAIR CATEGORIAS ===== */
+async function carregarProdutos(){
   const { data, error } = await supabase
-    .from("categorias")
-    .select("id, nome")
+    .from("produtos")
+    .select("*")
     .eq("app_id", APP_ID)
+    .eq("ativo", true)
     .order("nome");
 
   if(error){
-    console.error("Erro ao carregar categorias:", error);
+    console.error(error);
+    document.getElementById("listaProdutos").innerHTML =
+      `<div class="msg-vazio">Erro ao carregar produtos</div>`;
     return;
   }
 
-  categoriasCache = data || [];
+  produtosCache = (data || []).map(p => ({
+    ...p,
+    categoria_exibicao:
+      p.categoria_nome ||
+      p.categoria ||
+      p.categoria_id ||
+      "Sem categoria"
+  }));
+
+  montarCategoriasPelosProdutos();
+  aplicarFiltros();
+}
+
+function montarCategoriasPelosProdutos(){
+  const mapa = new Map();
+
+  produtosCache.forEach(p => {
+    const chave = String(
+      p.categoria_nome ||
+      p.categoria ||
+      p.categoria_id ||
+      "Sem categoria"
+    );
+
+    if(!mapa.has(chave)){
+      mapa.set(chave, {
+        id: chave,
+        nome: chave
+      });
+    }
+  });
+
+  categoriasCache = Array.from(mapa.values());
 
   if(categoriasCache.length > 0 && !categoriaSelecionada){
     categoriaSelecionada = categoriasCache[0].id;
@@ -240,53 +253,43 @@ function renderizarBotoesCategorias(){
   div.innerHTML = "";
 
   if(categoriasCache.length === 0){
-    div.innerHTML = `<div class="msg-vazio">Nenhuma categoria cadastrada</div>`;
+    div.innerHTML = `<div class="msg-vazio">Nenhuma categoria encontrada nos produtos</div>`;
     return;
   }
 
   categoriasCache.forEach(cat => {
-    const ativo = categoriaSelecionada === cat.id ? "ativo" : "";
     div.innerHTML += `
-      <button class="${ativo}" onclick="selecionarCategoria('${cat.id}')">
+      <button
+        class="${categoriaSelecionada === cat.id ? "ativo" : ""}"
+        onclick="selecionarCategoria('${String(cat.id).replace(/'/g, "\\'")}')">
         ${cat.nome}
       </button>
     `;
   });
 }
 
-window.selecionarCategoria = function(categoriaId){
-  categoriaSelecionada = categoriaId;
+window.selecionarCategoria = function(catId){
+  categoriaSelecionada = catId;
   renderizarBotoesCategorias();
   aplicarFiltros();
 };
 
-/* ===== PRODUTOS ===== */
-async function carregarProdutos(){
-  const { data, error } = await supabase
-    .from("produtos")
-    .select("id,nome,preco,categoria_id,categorias(nome)")
-    .eq("app_id", APP_ID)
-    .eq("ativo", true)
-    .order("nome");
-
-  if(error){
-    console.error("Erro ao carregar produtos:", error);
-    document.getElementById("listaProdutos").innerHTML =
-      `<div class="msg-vazio">Erro ao carregar produtos</div>`;
-    return;
-  }
-
-  produtosCache = data || [];
-  aplicarFiltros();
-}
-
 function aplicarFiltros(){
   const texto = document.getElementById("busca").value?.toLowerCase() || "";
 
-  const lista = produtosCache.filter(p =>
-    (p.nome || "").toLowerCase().includes(texto) &&
-    (!categoriaSelecionada || p.categoria_id === categoriaSelecionada)
-  );
+  const lista = produtosCache.filter(p => {
+    const nomeOk = (p.nome || "").toLowerCase().includes(texto);
+    const categoriaAtual = String(
+      p.categoria_nome ||
+      p.categoria ||
+      p.categoria_id ||
+      "Sem categoria"
+    );
+
+    const categoriaOk = !categoriaSelecionada || categoriaAtual === categoriaSelecionada;
+
+    return nomeOk && categoriaOk;
+  });
 
   const div = document.getElementById("listaProdutos");
   div.innerHTML = "";
@@ -302,7 +305,7 @@ function aplicarFiltros(){
         <span>
           ${p.nome} - R$ ${Number(p.preco || 0).toFixed(2)}
           <br>
-          <small style="opacity:.7">${p.categorias?.nome || ""}</small>
+          <small>${p.categoria_exibicao}</small>
         </span>
         <button data-id="${p.id}">➕</button>
       </div>
@@ -314,7 +317,6 @@ function aplicarFiltros(){
   });
 }
 
-/* ===== ADICIONAR PRODUTO ===== */
 async function addProduto(produtoId){
   const ok = await criarPedidoSeNecessario();
   if(!ok) return;
@@ -322,7 +324,11 @@ async function addProduto(produtoId){
   const produto = produtosCache.find(p => p.id === produtoId);
   if(!produto) return;
 
-  const categoria = categoriasCache.find(c => c.id === produto.categoria_id);
+  const categoriaNome =
+    produto.categoria_nome ||
+    produto.categoria ||
+    produto.categoria_id ||
+    "Sem categoria";
 
   const { error } = await supabase.from("pedido_itens").insert({
     app_id: APP_ID,
@@ -331,13 +337,13 @@ async function addProduto(produtoId){
     nome_produto: produto.nome,
     preco: produto.preco,
     quantidade: 1,
-    categoria_id: produto.categoria_id,
-    categoria_nome: categoria?.nome || null,
-    status:"novo"
+    categoria_id: produto.categoria_id || null,
+    categoria_nome: categoriaNome,
+    status: "novo"
   });
 
   if(error){
-    console.error("Erro ao adicionar item:", error);
+    console.error(error);
     alert("Erro ao adicionar produto.");
     return;
   }
@@ -345,7 +351,6 @@ async function addProduto(produtoId){
   await carregarPedido();
 }
 
-/* ===== CARREGAR PEDIDO ===== */
 async function carregarPedido(){
   if(!pedidoAtual) return;
 
@@ -356,7 +361,7 @@ async function carregarPedido(){
     .order("created_at", { ascending: true });
 
   if(error){
-    console.error("Erro ao carregar itens:", error);
+    console.error(error);
     return;
   }
 
@@ -373,7 +378,7 @@ async function carregarPedido(){
     div.innerHTML += `
       <div class="item">
         ${i.nome_produto} x ${i.quantidade}
-        ${i.categoria_nome ? `<br><small style="opacity:.7">${i.categoria_nome}</small>` : ""}
+        ${i.categoria_nome ? `<br><small>${i.categoria_nome}</small>` : ""}
       </div>
     `;
   });
@@ -381,82 +386,66 @@ async function carregarPedido(){
   document.getElementById("totalPedido").innerText = `Total: R$ ${total.toFixed(2)}`;
 }
 
-/* ===== ENVIAR ===== */
-const btnEnviar = document.getElementById("btnEnviar");
-if(btnEnviar){
-  btnEnviar.onclick = async () => {
-    if(!pedidoAtual){
-      alert("Nenhum pedido criado.");
-      return;
-    }
+document.getElementById("btnEnviar").onclick = async () => {
+  if(!pedidoAtual){
+    alert("Nenhum pedido criado.");
+    return;
+  }
 
-    const { error } = await supabase
-      .from("pedidos")
-      .update({ status:"novo" })
-      .eq("id", pedidoAtual.id)
-      .eq("app_id", APP_ID);
+  const { error } = await supabase
+    .from("pedidos")
+    .update({ status:"novo" })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", APP_ID);
 
-    if(error){
-      console.error("Erro ao enviar pedido:", error);
-      alert("Erro ao enviar pedido.");
-      return;
-    }
+  if(error){
+    alert("Erro ao enviar pedido.");
+    return;
+  }
 
-    alert("Pedido enviado!");
-  };
-}
+  alert("Pedido enviado!");
+};
 
-/* ===== PEDIR CONTA ===== */
-const btnConta = document.getElementById("btnConta");
-if(btnConta){
-  btnConta.onclick = async () => {
-    if(!pedidoAtual){
-      alert("Nenhum pedido criado.");
-      return;
-    }
+document.getElementById("btnConta").onclick = async () => {
+  if(!pedidoAtual){
+    alert("Nenhum pedido criado.");
+    return;
+  }
 
-    const { error } = await supabase
-      .from("pedidos")
-      .update({ status:"conta_solicitada" })
-      .eq("id", pedidoAtual.id)
-      .eq("app_id", APP_ID);
+  const { error } = await supabase
+    .from("pedidos")
+    .update({ status:"conta_solicitada" })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", APP_ID);
 
-    if(error){
-      console.error("Erro ao pedir conta:", error);
-      alert("Erro ao solicitar conta.");
-      return;
-    }
+  if(error){
+    alert("Erro ao solicitar conta.");
+    return;
+  }
 
-    alert("Conta solicitada!");
-  };
-}
+  alert("Conta solicitada!");
+};
 
-/* ===== LIBERAR MESA ===== */
-const btnLiberar = document.getElementById("btnLiberar");
-if(btnLiberar){
-  btnLiberar.onclick = async () => {
-    if(!pedidoAtual){
-      location.href = "mesas.html";
-      return;
-    }
-
-    const { error } = await supabase
-      .from("pedidos")
-      .update({ status:"finalizado" })
-      .eq("id", pedidoAtual.id)
-      .eq("app_id", APP_ID);
-
-    if(error){
-      console.error("Erro ao liberar mesa:", error);
-      alert("Erro ao liberar mesa.");
-      return;
-    }
-
+document.getElementById("btnLiberar").onclick = async () => {
+  if(!pedidoAtual){
     location.href = "mesas.html";
-  };
-}
+    return;
+  }
 
-/* ===== 🔔 NOTIFICAÇÃO REALTIME ===== */
+  const { error } = await supabase
+    .from("pedidos")
+    .update({ status:"finalizado" })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", APP_ID);
+
+  if(error){
+    alert("Erro ao liberar mesa.");
+    return;
+  }
+
+  location.href = "mesas.html";
+};
+
 function ativarRealtimeNotificacao(){
   if(!pedidoAtual) return;
 
@@ -477,25 +466,15 @@ function ativarRealtimeNotificacao(){
       payload => {
         const status = payload.new.status;
 
-        if(status === "aceito"){
-          alert("👨‍🍳 Pedido em preparo!");
-        }
-
-        if(status === "pronto"){
-          alert("✅ Pedido pronto!");
-        }
-
-        if(status === "cancelado"){
-          alert("❌ Pedido cancelado!");
-        }
+        if(status === "aceito") alert("👨‍🍳 Pedido em preparo!");
+        if(status === "pronto") alert("✅ Pedido pronto!");
+        if(status === "cancelado") alert("❌ Pedido cancelado!");
       }
     )
     .subscribe();
 }
 
-/* EVENTOS */
 document.getElementById("busca").oninput = aplicarFiltros;
-
 document.addEventListener("DOMContentLoaded", iniciarSistema);
 </script>
 
