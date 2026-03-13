@@ -93,15 +93,22 @@ let categoriasCache = [];
 let categoriaSelecionada = null;
 let canalPedido = null;
 
-if(!mesaId){
+if (!mesaId) {
   alert("Mesa não informada.");
   history.back();
 }
 
-async function validarSessao(){
+function formatarMoeda(valor) {
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
+async function validarSessao() {
   const { data, error } = await supabase.auth.getSession();
 
-  if(error || !data.session){
+  if (error || !data.session) {
     alert("Sessão inválida");
     location.href = "/auth/login.html";
     return false;
@@ -115,7 +122,7 @@ async function validarSessao(){
     .eq("id", userId)
     .single();
 
-  if(erroUsuario || !usuario){
+  if (erroUsuario || !usuario) {
     alert("Usuário não encontrado.");
     location.href = "/auth/login.html";
     return false;
@@ -125,28 +132,28 @@ async function validarSessao(){
   return true;
 }
 
-async function iniciarSistema(){
+async function iniciarSistema() {
   const ok = await validarSessao();
-  if(!ok) return;
+  if (!ok) return;
 
   await carregarMesa();
   await verificarPedidoExistente();
   await carregarProdutos();
 }
 
-async function carregarMesa(){
+async function carregarMesa() {
   const { data } = await supabase
     .from("mesas")
     .select("numero_mesa")
     .eq("id", mesaId)
     .maybeSingle();
 
-  if(data){
+  if (data) {
     document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
   }
 }
 
-async function verificarPedidoExistente(){
+async function verificarPedidoExistente() {
   const { data } = await supabase
     .from("pedidos")
     .select("*")
@@ -155,19 +162,19 @@ async function verificarPedidoExistente(){
     .not("status", "in", '("finalizado","pago")')
     .maybeSingle();
 
-  if(data){
+  if (data) {
     pedidoAtual = data;
     document.getElementById("btnLiberar").classList.remove("bloqueado");
     ativarRealtimeNotificacao();
     await carregarPedido();
-  }else{
+  } else {
     document.getElementById("pedido").innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
-    document.getElementById("totalPedido").innerText = `Total: R$ 0,00`;
+    document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(0)}`;
   }
 }
 
-async function criarPedidoSeNecessario(){
-  if(pedidoAtual) return true;
+async function criarPedidoSeNecessario() {
+  if (pedidoAtual) return true;
 
   const { data, error } = await supabase
     .from("pedidos")
@@ -180,7 +187,8 @@ async function criarPedidoSeNecessario(){
     .select()
     .single();
 
-  if(error){
+  if (error) {
+    console.error(error);
     alert("Erro ao criar pedido.");
     return false;
   }
@@ -191,8 +199,7 @@ async function criarPedidoSeNecessario(){
   return true;
 }
 
-/* ===== CARREGAR PRODUTOS E EXTRAIR CATEGORIAS ===== */
-async function carregarProdutos(){
+async function carregarProdutos() {
   const { data, error } = await supabase
     .from("produtos")
     .select("*")
@@ -200,7 +207,7 @@ async function carregarProdutos(){
     .eq("ativo", true)
     .order("nome");
 
-  if(error){
+  if (error) {
     console.error(error);
     document.getElementById("listaProdutos").innerHTML =
       `<div class="msg-vazio">Erro ao carregar produtos</div>`;
@@ -220,7 +227,7 @@ async function carregarProdutos(){
   aplicarFiltros();
 }
 
-function montarCategoriasPelosProdutos(){
+function montarCategoriasPelosProdutos() {
   const mapa = new Map();
 
   produtosCache.forEach(p => {
@@ -231,7 +238,7 @@ function montarCategoriasPelosProdutos(){
       "Sem categoria"
     );
 
-    if(!mapa.has(chave)){
+    if (!mapa.has(chave)) {
       mapa.set(chave, {
         id: chave,
         nome: chave
@@ -241,44 +248,43 @@ function montarCategoriasPelosProdutos(){
 
   categoriasCache = Array.from(mapa.values());
 
-  if(categoriasCache.length > 0 && !categoriaSelecionada){
+  if (categoriasCache.length > 0 && !categoriaSelecionada) {
     categoriaSelecionada = categoriasCache[0].id;
   }
 
   renderizarBotoesCategorias();
 }
 
-function renderizarBotoesCategorias(){
+function renderizarBotoesCategorias() {
   const div = document.getElementById("filtrosCategorias");
   div.innerHTML = "";
 
-  if(categoriasCache.length === 0){
+  if (categoriasCache.length === 0) {
     div.innerHTML = `<div class="msg-vazio">Nenhuma categoria encontrada nos produtos</div>`;
     return;
   }
 
   categoriasCache.forEach(cat => {
-    div.innerHTML += `
-      <button
-        class="${categoriaSelecionada === cat.id ? "ativo" : ""}"
-        onclick="selecionarCategoria('${String(cat.id).replace(/'/g, "\\'")}')">
-        ${cat.nome}
-      </button>
-    `;
+    const btn = document.createElement("button");
+    btn.textContent = cat.nome;
+    if (categoriaSelecionada === cat.id) btn.classList.add("ativo");
+    btn.onclick = () => selecionarCategoria(cat.id);
+    div.appendChild(btn);
   });
 }
 
-window.selecionarCategoria = function(catId){
+window.selecionarCategoria = function(catId) {
   categoriaSelecionada = catId;
   renderizarBotoesCategorias();
   aplicarFiltros();
 };
 
-function aplicarFiltros(){
+function aplicarFiltros() {
   const texto = document.getElementById("busca").value?.toLowerCase() || "";
 
   const lista = produtosCache.filter(p => {
     const nomeOk = (p.nome || "").toLowerCase().includes(texto);
+
     const categoriaAtual = String(
       p.categoria_nome ||
       p.categoria ||
@@ -294,35 +300,33 @@ function aplicarFiltros(){
   const div = document.getElementById("listaProdutos");
   div.innerHTML = "";
 
-  if(lista.length === 0){
+  if (lista.length === 0) {
     div.innerHTML = `<div class="msg-vazio">Nenhum produto encontrado</div>`;
     return;
   }
 
   lista.forEach(p => {
-    div.innerHTML += `
-      <div class="produto">
-        <span>
-          ${p.nome} - R$ ${Number(p.preco || 0).toFixed(2)}
-          <br>
-          <small>${p.categoria_exibicao}</small>
-        </span>
-        <button data-id="${p.id}">➕</button>
-      </div>
+    const card = document.createElement("div");
+    card.className = "produto";
+    card.innerHTML = `
+      <span>
+        ${p.nome} - ${formatarMoeda(p.preco)}
+        <br>
+        <small>${p.categoria_exibicao}</small>
+      </span>
+      <button data-id="${p.id}">➕</button>
     `;
-  });
-
-  div.querySelectorAll("button").forEach(btn => {
-    btn.onclick = () => addProduto(btn.dataset.id);
+    card.querySelector("button").onclick = () => addProduto(p.id);
+    div.appendChild(card);
   });
 }
 
-async function addProduto(produtoId){
+async function addProduto(produtoId) {
   const ok = await criarPedidoSeNecessario();
-  if(!ok) return;
+  if (!ok) return;
 
   const produto = produtosCache.find(p => p.id === produtoId);
-  if(!produto) return;
+  if (!produto) return;
 
   const categoriaNome =
     produto.categoria_nome ||
@@ -330,20 +334,24 @@ async function addProduto(produtoId){
     produto.categoria_id ||
     "Sem categoria";
 
-  const { error } = await supabase.from("pedido_itens").insert({
+  const dadosInsert = {
     app_id: APP_ID,
     pedido_id: pedidoAtual.id,
     produto_id: produto.id,
     nome_produto: produto.nome,
-    preco: produto.preco,
+    preco: Number(produto.preco || 0),
     quantidade: 1,
-    categoria_id: produto.categoria_id || null,
-    categoria_nome: categoriaNome,
     status: "novo"
-  });
+  };
 
-  if(error){
+  const { error } = await supabase
+    .from("pedido_itens")
+    .insert(dadosInsert);
+
+  if (error) {
     console.error(error);
+
+    // Se sua tabela tiver categoria_nome e você quiser salvar, use este bloco no lugar do insert acima
     alert("Erro ao adicionar produto.");
     return;
   }
@@ -351,8 +359,8 @@ async function addProduto(produtoId){
   await carregarPedido();
 }
 
-async function carregarPedido(){
-  if(!pedidoAtual) return;
+async function carregarPedido() {
+  if (!pedidoAtual) return;
 
   const { data, error } = await supabase
     .from("pedido_itens")
@@ -360,7 +368,7 @@ async function carregarPedido(){
     .eq("pedido_id", pedidoAtual.id)
     .order("created_at", { ascending: true });
 
-  if(error){
+  if (error) {
     console.error(error);
     return;
   }
@@ -369,36 +377,39 @@ async function carregarPedido(){
   div.innerHTML = "";
   let total = 0;
 
-  if(!data || data.length === 0){
+  if (!data || data.length === 0) {
     div.innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
   }
 
   (data || []).forEach(i => {
     total += Number(i.preco || 0) * Number(i.quantidade || 0);
-    div.innerHTML += `
-      <div class="item">
-        ${i.nome_produto} x ${i.quantidade}
-        ${i.categoria_nome ? `<br><small>${i.categoria_nome}</small>` : ""}
-      </div>
+
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `
+      ${i.nome_produto} x ${i.quantidade}
+      ${i.categoria_nome ? `<br><small>${i.categoria_nome}</small>` : ""}
     `;
+    div.appendChild(item);
   });
 
-  document.getElementById("totalPedido").innerText = `Total: R$ ${total.toFixed(2)}`;
+  document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(total)}`;
 }
 
 document.getElementById("btnEnviar").onclick = async () => {
-  if(!pedidoAtual){
+  if (!pedidoAtual) {
     alert("Nenhum pedido criado.");
     return;
   }
 
   const { error } = await supabase
     .from("pedidos")
-    .update({ status:"novo" })
+    .update({ status: "novo" })
     .eq("id", pedidoAtual.id)
     .eq("app_id", APP_ID);
 
-  if(error){
+  if (error) {
+    console.error(error);
     alert("Erro ao enviar pedido.");
     return;
   }
@@ -407,18 +418,19 @@ document.getElementById("btnEnviar").onclick = async () => {
 };
 
 document.getElementById("btnConta").onclick = async () => {
-  if(!pedidoAtual){
+  if (!pedidoAtual) {
     alert("Nenhum pedido criado.");
     return;
   }
 
   const { error } = await supabase
     .from("pedidos")
-    .update({ status:"conta_solicitada" })
+    .update({ status: "conta_solicitada" })
     .eq("id", pedidoAtual.id)
     .eq("app_id", APP_ID);
 
-  if(error){
+  if (error) {
+    console.error(error);
     alert("Erro ao solicitar conta.");
     return;
   }
@@ -427,18 +439,19 @@ document.getElementById("btnConta").onclick = async () => {
 };
 
 document.getElementById("btnLiberar").onclick = async () => {
-  if(!pedidoAtual){
+  if (!pedidoAtual) {
     location.href = "mesas.html";
     return;
   }
 
   const { error } = await supabase
     .from("pedidos")
-    .update({ status:"finalizado" })
+    .update({ status: "finalizado" })
     .eq("id", pedidoAtual.id)
     .eq("app_id", APP_ID);
 
-  if(error){
+  if (error) {
+    console.error(error);
     alert("Erro ao liberar mesa.");
     return;
   }
@@ -446,29 +459,30 @@ document.getElementById("btnLiberar").onclick = async () => {
   location.href = "mesas.html";
 };
 
-function ativarRealtimeNotificacao(){
-  if(!pedidoAtual) return;
+function ativarRealtimeNotificacao() {
+  if (!pedidoAtual) return;
 
-  if(canalPedido){
+  if (canalPedido) {
     supabase.removeChannel(canalPedido);
     canalPedido = null;
   }
 
-  canalPedido = supabase.channel("mesa-notify-" + pedidoAtual.id)
+  canalPedido = supabase
+    .channel("mesa-notify-" + pedidoAtual.id)
     .on(
       "postgres_changes",
       {
-        event:"UPDATE",
-        schema:"public",
-        table:"pedidos",
-        filter:`id=eq.${pedidoAtual.id}`
+        event: "UPDATE",
+        schema: "public",
+        table: "pedidos",
+        filter: `id=eq.${pedidoAtual.id}`
       },
       payload => {
         const status = payload.new.status;
 
-        if(status === "aceito") alert("👨‍🍳 Pedido em preparo!");
-        if(status === "pronto") alert("✅ Pedido pronto!");
-        if(status === "cancelado") alert("❌ Pedido cancelado!");
+        if (status === "aceito") alert("👨‍🍳 Pedido em preparo!");
+        if (status === "pronto") alert("✅ Pedido pronto!");
+        if (status === "cancelado") alert("❌ Pedido cancelado!");
       }
     )
     .subscribe();
