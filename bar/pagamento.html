@@ -71,6 +71,29 @@ input,select,textarea{
   padding:10px;
   display:none;
 }
+.resumo-pagamento{
+  background:#111827;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;
+  padding:14px;
+  margin-bottom:16px;
+}
+.resumo-pagamento p{
+  margin:6px 0;
+  color:#cbd5e1;
+}
+.resumo-pagamento h2,
+.resumo-pagamento h3{
+  margin:4px 0 10px;
+}
+.resumo-pagamento .restante{
+  color:#22c55e;
+}
+.subtitulo{
+  margin-top:16px;
+  margin-bottom:8px;
+  font-weight:bold;
+}
 @media(max-width:640px){
   .linha-botoes{grid-template-columns:1fr}
 }
@@ -86,10 +109,28 @@ input,select,textarea{
 <div class="container">
   <div class="box">
 
-    <p>Total</p>
-    <h2 id="totalPedido">R$ 0,00</h2>
+    <div class="resumo-pagamento">
+      <p>Total da conta</p>
+      <h2 id="totalPedido">R$ 0,00</h2>
 
-    <label>Forma de Pagamento</label>
+      <p>Já pago</p>
+      <h3 id="totalPago">R$ 0,00</h3>
+
+      <p>Falta pagar</p>
+      <h3 id="valorRestante" class="restante">R$ 0,00</h3>
+    </div>
+
+    <div class="subtitulo">Dividir conta</div>
+    <div class="linha-botoes">
+      <button type="button" id="btnDividir2">Dividir em 2</button>
+      <button type="button" id="btnDividir3">Dividir em 3</button>
+    </div>
+    <div class="linha-botoes">
+      <button type="button" id="btnDividir4">Dividir em 4</button>
+      <button type="button" id="btnValorIntegral">Cobrar restante</button>
+    </div>
+
+    <label style="margin-top:16px;display:block;">Forma de Pagamento</label>
     <select id="formaPagamento">
       <option value="Dinheiro">Dinheiro</option>
       <option value="Pix">Pix manual</option>
@@ -100,7 +141,7 @@ input,select,textarea{
     </select>
 
     <div id="areaManual">
-      <label>Valor pago</label>
+      <label>Valor desta cobrança</label>
       <input type="number" id="valorRecebido" step="0.01" min="0">
       <p id="info" class="alert"></p>
       <p>Troco</p>
@@ -138,6 +179,9 @@ const params = new URLSearchParams(location.search);
 const pedidoId = params.get("pedido");
 
 const totalPedidoEl = document.getElementById("totalPedido");
+const totalPagoEl = document.getElementById("totalPago");
+const valorRestanteEl = document.getElementById("valorRestante");
+
 const formaPagamentoEl = document.getElementById("formaPagamento");
 const valorRecebidoEl = document.getElementById("valorRecebido");
 const infoEl = document.getElementById("info");
@@ -155,6 +199,11 @@ const btnGerarPixMP = document.getElementById("btnGerarPixMP");
 const btnCheckoutMP = document.getElementById("btnCheckoutMP");
 const debugPix = document.getElementById("debugPix");
 
+const btnDividir2 = document.getElementById("btnDividir2");
+const btnDividir3 = document.getElementById("btnDividir3");
+const btnDividir4 = document.getElementById("btnDividir4");
+const btnValorIntegral = document.getElementById("btnValorIntegral");
+
 const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
@@ -162,10 +211,13 @@ const URL_PAGAMENTO_MESA = `${SUPABASE_URL}/functions/v1/criar-pagamento-mesa`;
 const URL_PAGAMENTO_PIX_MESA = `${SUPABASE_URL}/functions/v1/criar-pix-mesa`;
 
 let totalPedido = 0;
+let totalPagoAtual = 0;
+let valorRestanteAtual = 0;
 let mesaId = null;
 let appId = null;
 let processando = false;
 let verificacaoPix = null;
+let valorPixAtual = Number(sessionStorage.getItem(`pix_valor_${pedidoId}`) || 0);
 
 function formatarMoeda(valor){
   return Number(valor || 0).toLocaleString("pt-BR", {
@@ -178,6 +230,18 @@ function ehPagamentoOnline(forma){
   return forma === "Pix MP" || forma === "Checkout MP";
 }
 
+function atualizarResumoPagamento(){
+  valorRestanteAtual = Math.max(Number(totalPedido || 0) - Number(totalPagoAtual || 0), 0);
+
+  totalPedidoEl.innerText = formatarMoeda(totalPedido);
+  totalPagoEl.innerText = formatarMoeda(totalPagoAtual);
+  valorRestanteEl.innerText = formatarMoeda(valorRestanteAtual);
+
+  if(valorRestanteAtual <= 0.009){
+    valorRestanteEl.innerText = "R$ 0,00";
+  }
+}
+
 function atualizarModoPagamento(){
   const forma = formaPagamentoEl.value;
 
@@ -187,21 +251,28 @@ function atualizarModoPagamento(){
   btnGerarPixMP.style.display = "none";
   btnCheckoutMP.style.display = "none";
   areaPixMP.style.display = "none";
-  pixQrCodeArea.innerHTML = "";
-  pixCopiaCola.value = "";
-  debugPix.style.display = "none";
-  debugPix.innerText = "";
 
   if(forma === "Pix MP"){
     btnGerarPixMP.style.display = "block";
     areaPixMP.style.display = "block";
-    statusPagamentoEl.innerText = "Clique em gerar PIX para criar a cobrança.";
+    statusPagamentoEl.innerText = "Informe um valor ou use dividir conta para gerar o PIX.";
   }
 
   if(forma === "Checkout MP"){
     btnCheckoutMP.style.display = "block";
-    statusPagamentoEl.innerText = "Clique no botão para abrir o checkout online.";
+    statusPagamentoEl.innerText = "Informe um valor ou use cobrar restante para abrir o checkout.";
   }
+}
+
+function preencherValorDivisao(qtdPessoas){
+  if(valorRestanteAtual <= 0){
+    alert("Essa conta já foi quitada.");
+    return;
+  }
+
+  const valor = valorRestanteAtual / qtdPessoas;
+  valorRecebidoEl.value = valor.toFixed(2);
+  calcular();
 }
 
 async function obterTokenSessao(){
@@ -223,6 +294,7 @@ function extrairDadosPix(json){
     transactionData?.qr_code_base64 ||
     interaction?.qr_code_base64 ||
     additionalData?.qr_code_base64 ||
+    json?.qr_code_base64 ||
     "";
 
   const copiaCola =
@@ -317,7 +389,7 @@ async function iniciar(){
 async function carregarPedido(){
   const { data: pedido, error: pedidoError } = await supabase
     .from("pedidos")
-    .select("id, mesa_id, status, total, subtotal, valor_total, pagamento_status, mp_qr_code, mp_ticket_url")
+    .select("id, mesa_id, status, total, subtotal, valor_total, valor_pago, pagamento_status, mp_qr_code, mp_ticket_url, mp_payment_id")
     .eq("id", pedidoId)
     .eq("app_id", appId)
     .single();
@@ -331,9 +403,9 @@ async function carregarPedido(){
 
   mesaId = pedido.mesa_id;
 
-  if (pedido.total != null) {
+  if(pedido.total != null) {
     totalPedido = Number(pedido.total || 0);
-  } else if (pedido.valor_total != null) {
+  } else if(pedido.valor_total != null) {
     totalPedido = Number(pedido.valor_total || 0);
   } else {
     const { data: itens, error: itensError } = await supabase
@@ -354,7 +426,12 @@ async function carregarPedido(){
     });
   }
 
-  totalPedidoEl.innerText = formatarMoeda(totalPedido);
+  totalPagoAtual = Number(pedido.valor_pago || 0);
+  atualizarResumoPagamento();
+
+  if(valorRestanteAtual <= 0.009){
+    statusPagamentoEl.innerHTML = "✅ Essa conta já foi quitada.";
+  }
 
   if(
     String(pedido.pagamento_status || "").toLowerCase() === "pending" &&
@@ -364,7 +441,17 @@ async function carregarPedido(){
     atualizarModoPagamento();
     pixCopiaCola.value = pedido.mp_qr_code || "";
     await renderizarQrPix(pedido.mp_qr_code || "", "", pedido.mp_ticket_url || "");
-    statusPagamentoEl.innerHTML = `⏳ PIX já gerado anteriormente. Aguardando pagamento...`;
+
+    if(!valorPixAtual || valorPixAtual <= 0){
+      valorPixAtual = valorRestanteAtual;
+      sessionStorage.setItem(`pix_valor_${pedidoId}`, String(valorPixAtual));
+    }
+
+    statusPagamentoEl.innerHTML = `
+      ⏳ PIX já gerado anteriormente.<br>
+      Valor desta cobrança: <strong>${formatarMoeda(valorPixAtual)}</strong><br>
+      Aguardando pagamento...
+    `;
     iniciarVerificacaoPix();
   }
 }
@@ -373,15 +460,20 @@ function calcular(){
   const formaPagamento = formaPagamentoEl.value;
   const valorRecebido = Number(valorRecebidoEl.value || 0);
 
-  const descontoMax = totalPedido * 0.10;
-  const minimo = totalPedido - descontoMax;
-
   let troco = 0;
   infoEl.className = "alert";
   infoEl.innerText = "";
 
   if(ehPagamentoOnline(formaPagamento)){
     trocoEl.innerText = formatarMoeda(0);
+
+    if(valorRecebido > valorRestanteAtual && valorRestanteAtual > 0){
+      infoEl.innerText = `O valor não pode ser maior que o restante: ${formatarMoeda(valorRestanteAtual)}`;
+    } else if(valorRecebido > 0){
+      infoEl.className = "info-ok";
+      infoEl.innerText = `Será cobrado: ${formatarMoeda(valorRecebido)}`;
+    }
+
     return;
   }
 
@@ -391,23 +483,17 @@ function calcular(){
   }
 
   if(formaPagamento === "Dinheiro"){
-    if(valorRecebido < minimo){
-      infoEl.innerText = `Desconto máximo permitido: ${formatarMoeda(descontoMax)}`;
-    } else if(valorRecebido < totalPedido){
-      infoEl.className = "info-ok";
-      infoEl.innerText = `Desconto aplicado: ${formatarMoeda(totalPedido - valorRecebido)}`;
-    }
-
-    troco = valorRecebido > totalPedido ? valorRecebido - totalPedido : 0;
+    troco = valorRecebido > valorRestanteAtual ? valorRecebido - valorRestanteAtual : 0;
   } else {
     troco = 0;
+  }
 
-    if(valorRecebido < minimo){
-      infoEl.innerText = `Desconto máximo permitido: ${formatarMoeda(descontoMax)}`;
-    } else if(valorRecebido < totalPedido){
-      infoEl.className = "info-ok";
-      infoEl.innerText = `Desconto aplicado: ${formatarMoeda(totalPedido - valorRecebido)}`;
-    }
+  if(valorRecebido < valorRestanteAtual){
+    infoEl.className = "info-ok";
+    infoEl.innerText = `Pagamento parcial. Ainda faltará ${formatarMoeda(valorRestanteAtual - valorRecebido)}.`;
+  } else if(valorRecebido >= valorRestanteAtual && valorRestanteAtual > 0){
+    infoEl.className = "info-ok";
+    infoEl.innerText = `Essa cobrança quita a conta.`;
   }
 
   trocoEl.innerText = formatarMoeda(troco);
@@ -419,6 +505,18 @@ formaPagamentoEl.addEventListener("change", () => {
 });
 
 valorRecebidoEl.addEventListener("input", calcular);
+
+btnDividir2.addEventListener("click", () => preencherValorDivisao(2));
+btnDividir3.addEventListener("click", () => preencherValorDivisao(3));
+btnDividir4.addEventListener("click", () => preencherValorDivisao(4));
+btnValorIntegral.addEventListener("click", () => {
+  if(valorRestanteAtual <= 0){
+    alert("Essa conta já foi quitada.");
+    return;
+  }
+  valorRecebidoEl.value = valorRestanteAtual.toFixed(2);
+  calcular();
+});
 
 btnConfirmar.addEventListener("click", confirmarPagamentoManual);
 btnGerarPixMP.addEventListener("click", gerarPixMesa);
@@ -439,35 +537,59 @@ btnCopiarPix.addEventListener("click", async () => {
   }
 });
 
-async function finalizarPedidoPago(dadosExtras = {}){
+async function registrarPagamentoParcial({
+  forma_pagamento,
+  pagamento_modo,
+  pagamento_tipo,
+  valor_pago,
+  troco = 0,
+  desconto = 0,
+  mp_payment_id = null
+}){
+  const novoTotalPago = Number(totalPagoAtual || 0) + Number(valor_pago || 0);
+  const restante = Math.max(Number(totalPedido || 0) - novoTotalPago, 0);
+  const quitado = restante <= 0.009;
+
   const { data: sessao } = await supabase.auth.getSession();
   const nomeUsuario = sessao?.session?.user?.email || "Sistema";
 
-  const valorPago = Number(dadosExtras.valor_pago ?? totalPedido);
-  const troco = Number(dadosExtras.troco ?? 0);
-  const desconto = Number(dadosExtras.desconto ?? 0);
-
   const dadosUpdate = {
-    status: "pago",
-    pagamento_status: "approved",
+    forma_pagamento,
+    pagamento_modo,
+    pagamento_tipo,
+    pagamento_status: quitado ? "approved" : "partial",
+    status: quitado ? "pago" : "pagamento_parcial",
     recebido_em: new Date().toISOString(),
     recebido_por: nomeUsuario,
     valor_total: totalPedido,
-    valor_pago: valorPago,
-    troco: troco,
-    desconto: desconto,
-    ...dadosExtras
+    valor_pago: novoTotalPago,
+    troco: quitado ? Number(troco || 0) : 0,
+    desconto: Number(desconto || 0),
+    mp_payment_id
   };
 
-  const { error: erroUpdate } = await supabase
+  const { error } = await supabase
     .from("pedidos")
     .update(dadosUpdate)
     .eq("id", pedidoId)
     .eq("app_id", appId);
 
-  if(erroUpdate){
-    console.error("Erro ao finalizar pedido:", erroUpdate);
-    throw new Error("Erro ao finalizar pedido.");
+  if(error){
+    console.error("Erro ao registrar pagamento:", error);
+    throw new Error("Erro ao registrar pagamento.");
+  }
+
+  totalPagoAtual = novoTotalPago;
+  atualizarResumoPagamento();
+
+  return { quitado, restante };
+}
+
+async function encerrarPedidoSeQuitado(){
+  const restante = Math.max(totalPedido - totalPagoAtual, 0);
+
+  if(restante > 0.009){
+    return;
   }
 
   let erroEstoqueGeral = false;
@@ -507,10 +629,12 @@ async function finalizarPedidoPago(dadosExtras = {}){
     }
   }
 
+  sessionStorage.removeItem(`pix_valor_${pedidoId}`);
+
   if(erroEstoqueGeral){
-    alert("Pagamento confirmado e mesa liberada, mas houve erro ao baixar estoque.");
+    alert("Conta quitada e mesa liberada, mas houve erro ao baixar estoque.");
   } else {
-    alert("Pagamento confirmado com sucesso!");
+    alert("Conta quitada com sucesso!");
   }
 
   location.href = "caixa.html";
@@ -519,19 +643,16 @@ async function finalizarPedidoPago(dadosExtras = {}){
 async function confirmarPagamentoManual(){
   if(processando) return;
 
-  const valorPago = Number(valorRecebidoEl.value || 0);
-  const formaPagamento = formaPagamentoEl.value;
-
-  if(!valorPago || valorPago <= 0){
-    alert("Informe o valor pago.");
+  if(valorRestanteAtual <= 0.009){
+    alert("Essa conta já foi quitada.");
     return;
   }
 
-  const descontoMax = totalPedido * 0.10;
-  const minimo = totalPedido - descontoMax;
+  const valorInformado = Number(valorRecebidoEl.value || 0);
+  const formaPagamento = formaPagamentoEl.value;
 
-  if(valorPago < minimo){
-    alert("Desconto acima do permitido.");
+  if(!valorInformado || valorInformado <= 0){
+    alert("Informe o valor pago.");
     return;
   }
 
@@ -540,20 +661,34 @@ async function confirmarPagamentoManual(){
   btnConfirmar.innerText = "Processando...";
 
   try{
-    const troco = valorPago > totalPedido ? valorPago - totalPedido : 0;
-    const desconto = valorPago < totalPedido ? totalPedido - valorPago : 0;
+    const valorConsiderado = Math.min(valorInformado, valorRestanteAtual);
+    const troco = formaPagamento === "Dinheiro" && valorInformado > valorRestanteAtual
+      ? valorInformado - valorRestanteAtual
+      : 0;
 
-    await finalizarPedidoPago({
+    const { quitado, restante } = await registrarPagamentoParcial({
       forma_pagamento: formaPagamento,
       pagamento_modo: "manual",
       pagamento_tipo: formaPagamento,
-      valor_pago: valorPago,
+      valor_pago: valorConsiderado,
       troco,
-      desconto
+      desconto: 0
     });
+
+    if(quitado){
+      statusPagamentoEl.innerHTML = `✅ Conta quitada. Finalizando pedido...`;
+      await encerrarPedidoSeQuitado();
+      return;
+    }
+
+    alert(`Pagamento parcial registrado. Falta ${formatarMoeda(restante)}.`);
+    valorRecebidoEl.value = "";
+    calcular();
+    atualizarResumoPagamento();
   }catch(e){
     console.error("Erro inesperado:", e);
     alert(e.message || "Erro inesperado ao confirmar pagamento.");
+  }finally{
     processando = false;
     btnConfirmar.disabled = false;
     btnConfirmar.innerText = "Confirmar pagamento manual";
@@ -562,6 +697,25 @@ async function confirmarPagamentoManual(){
 
 async function gerarPixMesa(){
   if(processando) return;
+
+  if(valorRestanteAtual <= 0.009){
+    alert("Essa conta já foi quitada.");
+    return;
+  }
+
+  const valorCobrado = Number(valorRecebidoEl.value || 0) > 0
+    ? Number(valorRecebidoEl.value || 0)
+    : Number(valorRestanteAtual);
+
+  if(valorCobrado <= 0){
+    alert("Informe um valor para cobrar.");
+    return;
+  }
+
+  if(valorCobrado > valorRestanteAtual){
+    alert("O valor não pode ser maior que o restante da conta.");
+    return;
+  }
 
   processando = true;
   btnGerarPixMP.disabled = true;
@@ -578,7 +732,7 @@ async function gerarPixMesa(){
     const payload = {
       appId: appId,
       pedidoId: pedidoId,
-      transaction_amount: Number(totalPedido),
+      transaction_amount: Number(valorCobrado.toFixed(2)),
       description: `Pedido mesa ${pedidoId}`
     };
 
@@ -599,6 +753,8 @@ async function gerarPixMesa(){
     }
 
     const { qrBase64, copiaCola, ticketUrl } = extrairDadosPix(json);
+    valorPixAtual = Number(valorCobrado);
+    sessionStorage.setItem(`pix_valor_${pedidoId}`, String(valorPixAtual));
 
     await supabase
       .from("pedidos")
@@ -624,13 +780,15 @@ async function gerarPixMesa(){
 `Origem QR: ${origemQr}
 payment_id: ${json?.id || ""}
 status: ${json?.status || ""}
+valor cobrança: ${formatarMoeda(valorCobrado)}
 tem qr_base64: ${qrBase64 ? "sim" : "não"}
 tem copia_cola: ${copiaCola ? "sim" : "não"}
 tem ticket_url: ${ticketUrl ? "sim" : "não"}`;
 
     statusPagamentoEl.innerHTML = `
       ⏳ PIX gerado com sucesso.<br>
-      Valor: <strong>${formatarMoeda(totalPedido)}</strong><br>
+      Valor desta cobrança: <strong>${formatarMoeda(valorCobrado)}</strong><br>
+      Restante atual da conta: <strong>${formatarMoeda(valorRestanteAtual)}</strong><br>
       Aguardando pagamento...
     `;
 
@@ -648,6 +806,25 @@ tem ticket_url: ${ticketUrl ? "sim" : "não"}`;
 async function checkoutMesa(){
   if(processando) return;
 
+  if(valorRestanteAtual <= 0.009){
+    alert("Essa conta já foi quitada.");
+    return;
+  }
+
+  const valorCobrado = Number(valorRecebidoEl.value || 0) > 0
+    ? Number(valorRecebidoEl.value || 0)
+    : Number(valorRestanteAtual);
+
+  if(valorCobrado <= 0){
+    alert("Informe um valor para cobrar.");
+    return;
+  }
+
+  if(valorCobrado > valorRestanteAtual){
+    alert("O valor não pode ser maior que o restante da conta.");
+    return;
+  }
+
   processando = true;
   btnCheckoutMP.disabled = true;
   btnCheckoutMP.innerText = "Gerando checkout...";
@@ -656,23 +833,16 @@ async function checkoutMesa(){
   try{
     const accessToken = await obterTokenSessao();
 
-    const { data: itens, error: erroItens } = await supabase
-      .from("pedido_itens")
-      .select("nome_produto, preco, quantidade")
-      .eq("pedido_id", pedidoId);
-
-    if(erroItens){
-      throw new Error("Erro ao buscar itens do pedido.");
-    }
-
     const payload = {
       appId: appId,
       pedidoId: pedidoId,
-      items: (itens || []).map(i => ({
-        title: String(i.nome_produto || "Produto").slice(0,120),
-        quantity: Number(i.quantidade || 1),
-        unit_price: Number(i.preco || 0)
-      })).filter(i => i.quantity > 0 && i.unit_price > 0)
+      items: [
+        {
+          title: `Pagamento parcial mesa ${pedidoId}`,
+          quantity: 1,
+          unit_price: Number(valorCobrado.toFixed(2))
+        }
+      ]
     };
 
     const res = await fetch(URL_PAGAMENTO_MESA, {
@@ -690,6 +860,8 @@ async function checkoutMesa(){
     if(!res.ok){
       throw new Error(json?.erro || `Erro ao gerar checkout (${res.status})`);
     }
+
+    sessionStorage.setItem(`pix_valor_${pedidoId}`, String(valorCobrado));
 
     await supabase
       .from("pedidos")
@@ -743,29 +915,64 @@ async function verificarStatusPagamento(){
 
   if(status === "approved"){
     clearInterval(verificacaoPix);
-    statusPagamentoEl.innerHTML = `✅ Pagamento aprovado. Finalizando pedido...`;
+    statusPagamentoEl.innerHTML = `✅ Pagamento aprovado. Registrando...`;
 
     try{
-      await finalizarPedidoPago({
+      const valorARegistrar = Number(sessionStorage.getItem(`pix_valor_${pedidoId}`) || valorPixAtual || 0);
+
+      if(valorARegistrar <= 0){
+        throw new Error("Valor do PIX não encontrado para registrar.");
+      }
+
+      const { quitado, restante } = await registrarPagamentoParcial({
         forma_pagamento: "Pix MP",
         pagamento_modo: "mercadopago_pix",
         pagamento_tipo: "pix",
-        valor_pago: totalPedido,
+        valor_pago: valorARegistrar,
         troco: 0,
         desconto: 0,
         mp_payment_id: data.mp_payment_id || null
       });
+
+      sessionStorage.removeItem(`pix_valor_${pedidoId}`);
+      pixQrCodeArea.innerHTML = "";
+      pixCopiaCola.value = "";
+      debugPix.style.display = "none";
+      debugPix.innerText = "";
+
+      if(quitado){
+        statusPagamentoEl.innerHTML = `✅ Conta quitada. Finalizando pedido...`;
+        await encerrarPedidoSeQuitado();
+      } else {
+        statusPagamentoEl.innerHTML = `
+          ✅ Pagamento parcial aprovado.<br>
+          Falta pagar: <strong>${formatarMoeda(restante)}</strong>
+        `;
+        alert(`Pagamento parcial aprovado. Falta ${formatarMoeda(restante)}.`);
+        valorRecebidoEl.value = "";
+        calcular();
+      }
     }catch(e){
       console.error(e);
-      alert("Pagamento aprovado, mas houve erro ao finalizar internamente.");
+      alert("Pagamento aprovado, mas houve erro ao registrar internamente.");
     }
   }
 
   if(status === "pending"){
+    const valorPendente = Number(sessionStorage.getItem(`pix_valor_${pedidoId}`) || valorPixAtual || 0);
+
     statusPagamentoEl.innerHTML = `
       ⏳ PIX gerado.<br>
-      Valor: <strong>${formatarMoeda(totalPedido)}</strong><br>
+      Valor desta cobrança: <strong>${formatarMoeda(valorPendente)}</strong><br>
       Aguardando pagamento...
+    `;
+  }
+
+  if(status === "partial"){
+    clearInterval(verificacaoPix);
+    statusPagamentoEl.innerHTML = `
+      ✅ Pagamento parcial registrado.<br>
+      Falta pagar: <strong>${formatarMoeda(valorRestanteAtual)}</strong>
     `;
   }
 
