@@ -5,16 +5,34 @@
 <title>Pagamento</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script type="module" src="../js/auth.js"></script>
-
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px 24px}
 .container{max-width:600px;margin:auto;padding:24px}
 .box{background:#0f172a;padding:20px;border-radius:16px}
-button{width:100%;padding:14px;border:none;border-radius:10px;background:#22c55e;font-weight:bold;cursor:pointer;margin-top:12px}
-input,select{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
+button{
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:10px;
+  background:#22c55e;
+  font-weight:bold;
+  cursor:pointer;
+  margin-top:12px
+}
+button:disabled{
+  opacity:.6;
+  cursor:not-allowed;
+}
+input,select{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border-radius:10px;
+  border:none
+}
 .alert{color:#facc15;margin-top:8px}
+.info-ok{color:#22c55e;margin-top:8px}
 </style>
 </head>
 
@@ -39,7 +57,7 @@ input,select{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:n
     </select>
 
     <label>Valor pago</label>
-    <input type="number" id="valorRecebido" step="0.01">
+    <input type="number" id="valorRecebido" step="0.01" min="0">
 
     <p id="info" class="alert"></p>
 
@@ -57,183 +75,268 @@ import { supabase } from "../js/supabase.js";
 const params = new URLSearchParams(location.search);
 const pedidoId = params.get("pedido");
 
+const totalPedidoEl = document.getElementById("totalPedido");
+const formaPagamentoEl = document.getElementById("formaPagamento");
+const valorRecebidoEl = document.getElementById("valorRecebido");
+const infoEl = document.getElementById("info");
+const trocoEl = document.getElementById("troco");
+const btnConfirmar = document.getElementById("btnConfirmar");
+
 let totalPedido = 0;
 let mesaId = null;
+let appId = null;
 let processando = false;
 
-/* 🔐 AGUARDA APP_ID */
-async function aguardarSessao(){
-  while(!window.APP_ID){
-    await new Promise(r=>setTimeout(r,100));
-  }
+function formatarMoeda(valor){
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
 
+async function iniciar(){
   if(!pedidoId){
-    location.href="caixa.html";
+    alert("Pedido não informado.");
+    location.href = "caixa.html";
     return;
   }
 
-  carregarPedido();
-}
-aguardarSessao();
+  const { data: sessaoData, error: sessaoError } = await supabase.auth.getSession();
 
-/* CARREGAR PEDIDO */
-async function carregarPedido(){
+  if(sessaoError || !sessaoData.session){
+    location.href = "/auth/login.html";
+    return;
+  }
 
-  const { data: pedido } = await supabase
-    .from("pedidos")
-    .select("mesa_id")
-    .eq("id", pedidoId)
-    .eq("app_id", window.APP_ID)
+  const userId = sessaoData.session.user.id;
+
+  const { data: usuario, error: usuarioError } = await supabase
+    .from("usuarios")
+    .select("id, app_id")
+    .eq("id", userId)
     .single();
 
-  if(!pedido){
-    alert("Pedido não encontrado");
-    location.href="caixa.html";
+  if(usuarioError || !usuario){
+    alert("Usuário não encontrado.");
+    location.href = "/auth/login.html";
+    return;
+  }
+
+  appId = usuario.app_id;
+
+  if(!appId){
+    alert("Negócio não identificado.");
+    location.href = "caixa.html";
+    return;
+  }
+
+  await carregarPedido();
+  calcular();
+}
+
+async function carregarPedido(){
+  const { data: pedido, error: pedidoError } = await supabase
+    .from("pedidos")
+    .select("id, mesa_id, status")
+    .eq("id", pedidoId)
+    .eq("app_id", appId)
+    .single();
+
+  if(pedidoError || !pedido){
+    console.error("Erro ao carregar pedido:", pedidoError);
+    alert("Pedido não encontrado.");
+    location.href = "caixa.html";
     return;
   }
 
   mesaId = pedido.mesa_id;
 
-  const { data: itens } = await supabase
+  const { data: itens, error: itensError } = await supabase
     .from("pedido_itens")
-    .select("preco,quantidade")
+    .select("produto_id, preco, quantidade")
     .eq("pedido_id", pedidoId);
+
+  if(itensError){
+    console.error("Erro ao carregar itens:", itensError);
+    alert("Erro ao carregar itens do pedido.");
+    location.href = "caixa.html";
+    return;
+  }
 
   totalPedido = 0;
 
-  (itens || []).forEach(i=>{
-    totalPedido += Number(i.preco) * Number(i.quantidade);
+  (itens || []).forEach(i => {
+    totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
   });
 
-  document.getElementById("totalPedido").innerText =
-    `R$ ${totalPedido.toFixed(2)}`;
+  totalPedidoEl.innerText = formatarMoeda(totalPedido);
 }
 
-/* CALCULAR TROCO */
 function calcular(){
-
-  const recebido =
-    Number(document.getElementById("valorRecebido").value || 0);
+  const formaPagamento = formaPagamentoEl.value;
+  const valorRecebido = Number(valorRecebidoEl.value || 0);
 
   const descontoMax = totalPedido * 0.10;
   const minimo = totalPedido - descontoMax;
 
-  const info = document.getElementById("info");
-  const trocoEl = document.getElementById("troco");
+  let troco = 0;
+  infoEl.className = "alert";
+  infoEl.innerText = "";
 
-  if(recebido < minimo){
-    info.innerText =
-      `Desconto máximo permitido: R$ ${descontoMax.toFixed(2)}`;
-  }
-  else if(recebido < totalPedido){
-    info.innerText =
-      `Desconto aplicado: R$ ${(totalPedido - recebido).toFixed(2)}`;
-  }
-  else{
-    info.innerText="";
+  if(valorRecebido <= 0){
+    trocoEl.innerText = formatarMoeda(0);
+    return;
   }
 
-  const troco =
-    recebido > totalPedido ? recebido - totalPedido : 0;
+  if(formaPagamento === "Dinheiro"){
+    if(valorRecebido < minimo){
+      infoEl.innerText = `Desconto máximo permitido: ${formatarMoeda(descontoMax)}`;
+    } else if(valorRecebido < totalPedido){
+      infoEl.className = "info-ok";
+      infoEl.innerText = `Desconto aplicado: ${formatarMoeda(totalPedido - valorRecebido)}`;
+    }
 
-  trocoEl.innerText = `R$ ${troco.toFixed(2)}`;
+    troco = valorRecebido > totalPedido ? valorRecebido - totalPedido : 0;
+  } else {
+    troco = 0;
+
+    if(valorRecebido < minimo){
+      infoEl.innerText = `Desconto máximo permitido: ${formatarMoeda(descontoMax)}`;
+    } else if(valorRecebido < totalPedido){
+      infoEl.className = "info-ok";
+      infoEl.innerText = `Desconto aplicado: ${formatarMoeda(totalPedido - valorRecebido)}`;
+    }
+  }
+
+  trocoEl.innerText = formatarMoeda(troco);
 }
 
-document
-  .getElementById("valorRecebido")
-  .addEventListener("input", calcular);
+valorRecebidoEl.addEventListener("input", calcular);
+formaPagamentoEl.addEventListener("change", calcular);
 
-/* CONFIRMAR PAGAMENTO */
-document
-  .getElementById("btnConfirmar")
-  .addEventListener("click", confirmarPagamento);
+btnConfirmar.addEventListener("click", confirmarPagamento);
 
 async function confirmarPagamento(){
-
   if(processando) return;
+
+  const valorPago = Number(valorRecebidoEl.value || 0);
+  const formaPagamento = formaPagamentoEl.value;
+
+  if(!valorPago || valorPago <= 0){
+    alert("Informe o valor pago.");
+    return;
+  }
+
+  const descontoMax = totalPedido * 0.10;
+  const minimo = totalPedido - descontoMax;
+
+  if(valorPago < minimo){
+    alert("Desconto acima do permitido.");
+    return;
+  }
+
   processando = true;
+  btnConfirmar.disabled = true;
+  btnConfirmar.innerText = "Processando...";
 
   try{
+    const { data: sessao } = await supabase.auth.getSession();
+    const nomeUsuario = sessao?.session?.user?.email || "Sistema";
 
-    const valorPago =
-      Number(document.getElementById("valorRecebido").value);
+    const troco = valorPago > totalPedido ? valorPago - totalPedido : 0;
+    const desconto = valorPago < totalPedido ? totalPedido - valorPago : 0;
 
-    const formaPagamento =
-      document.getElementById("formaPagamento").value;
+    const dadosUpdate = {
+      status: "pago",
+      forma_pagamento: formaPagamento,
+      recebido_em: new Date().toISOString(),
+      recebido_por: nomeUsuario
+    };
 
-    if(!valorPago || valorPago <= 0){
-      processando = false;
-      return;
-    }
-
-    const descontoMax = totalPedido * 0.10;
-    const minimo = totalPedido - descontoMax;
-
-    if(valorPago < minimo){
-      alert("Desconto acima do permitido");
-      processando = false;
-      return;
-    }
-
-    const { data:{ session } } =
-      await supabase.auth.getSession();
-
-    const nomeUsuario =
-      session?.user?.email || "Sistema";
-
-    /* 1️⃣ FINALIZA PEDIDO + SALVA PAGAMENTO */
+    // Só inclui essas colunas se existirem no seu banco.
+    // Se alguma não existir, remova daqui.
+    dadosUpdate.valor_total = totalPedido;
+    dadosUpdate.valor_pago = valorPago;
+    dadosUpdate.troco = troco;
+    dadosUpdate.desconto = desconto;
 
     const { error: erroUpdate } = await supabase
       .from("pedidos")
-      .update({
-        status: "finalizado",
-        forma_pagamento: formaPagamento,
-        recebido_em: new Date(),
-        recebido_por: nomeUsuario
-      })
+      .update(dadosUpdate)
       .eq("id", pedidoId)
-      .eq("app_id", window.APP_ID);
+      .eq("app_id", appId);
 
     if(erroUpdate){
-      alert("Erro ao finalizar pedido");
+      console.error("Erro ao finalizar pedido:", erroUpdate);
+      alert("Erro ao finalizar pedido.");
       processando = false;
+      btnConfirmar.disabled = false;
+      btnConfirmar.innerText = "Confirmar";
       return;
     }
 
-    /* 2️⃣ BAIXA ESTOQUE */
-
-    const { data: itens } = await supabase
+    const { data: itens, error: erroItens } = await supabase
       .from("pedido_itens")
-      .select("produto_id,quantidade")
+      .select("produto_id, quantidade")
       .eq("pedido_id", pedidoId);
 
-    if(itens){
-      for(const item of itens){
-        await supabase.rpc("baixar_estoque", {
-          p_produto_id: item.produto_id,
-          p_quantidade: item.quantidade
-        });
+    if(erroItens){
+      console.error("Erro ao buscar itens para estoque:", erroItens);
+      alert("Pagamento salvo, mas houve erro ao buscar itens para baixar estoque.");
+      processando = false;
+      btnConfirmar.disabled = false;
+      btnConfirmar.innerText = "Confirmar";
+      return;
+    }
+
+    for(const item of (itens || [])){
+      if(!item.produto_id) continue;
+
+      const { error: erroEstoque } = await supabase.rpc("baixar_estoque", {
+        p_produto_id: item.produto_id,
+        p_quantidade: item.quantidade
+      });
+
+      if(erroEstoque){
+        console.error("Erro ao baixar estoque:", erroEstoque);
+        alert("Pagamento salvo, mas houve erro ao baixar estoque.");
+        processando = false;
+        btnConfirmar.disabled = false;
+        btnConfirmar.innerText = "Confirmar";
+        return;
       }
     }
 
-    /* 3️⃣ LIBERA MESA */
-
     if(mesaId){
-      await supabase
+      const { error: erroMesa } = await supabase
         .from("mesas")
         .update({ status: "livre" })
         .eq("id", mesaId)
-        .eq("app_id", window.APP_ID);
+        .eq("app_id", appId);
+
+      if(erroMesa){
+        console.error("Erro ao liberar mesa:", erroMesa);
+        alert("Pagamento salvo, mas houve erro ao liberar a mesa.");
+        processando = false;
+        btnConfirmar.disabled = false;
+        btnConfirmar.innerText = "Confirmar";
+        return;
+      }
     }
 
-    location.href="caixa.html";
+    alert("Pagamento confirmado com sucesso!");
+    location.href = "caixa.html";
 
   } catch(e){
-    alert("Erro inesperado");
+    console.error("Erro inesperado:", e);
+    alert("Erro inesperado ao confirmar pagamento.");
+    processando = false;
+    btnConfirmar.disabled = false;
+    btnConfirmar.innerText = "Confirmar";
   }
-
-  processando = false;
 }
+
+iniciar();
 </script>
 
 </body>
