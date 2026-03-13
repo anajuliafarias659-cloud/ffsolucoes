@@ -11,35 +11,28 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
-<!-- 🔐 AUTH ADMIN -->
 <script type="module" src="../js/auth.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
 .container{padding:32px;max-width:1200px;margin:auto}
 .btn{border:none;padding:10px 16px;border-radius:10px;font-weight:bold;cursor:pointer}
-.btn-add{background:#22c55e;color:#fff}
-.btn-avulsa{background:#38bdf8;color:#fff}
+.btn-add{background:#22c55e}
+.btn-avulsa{background:#38bdf8}
 .btn-voltar{background:#1e293b;color:#fff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px}
 .card{background:#0f172a;padding:16px;border-radius:18px;text-align:center;border:2px solid transparent;cursor:pointer;transition:.15s}
 .card:hover{transform:scale(1.03)}
 .card.livre{border-color:#22c55e}
 .card.preparando{border-color:#eab308}
-.card.conta{border-color:#fde047;box-shadow:0 0 14px rgba(253,224,71,.35)}
-.status{display:inline-block;margin:6px 0 10px;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:13px}
+.card.conta{border-color:#fde047;box-shadow:0 0 14px rgba(253,224,71,.8)}
+.status{margin:6px 0 10px;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:13px}
 .status.livre{background:#22c55e;color:#022c22}
 .status.preparando{background:#eab308;color:#000}
 .status.conta{background:#fde047;color:#000}
 .qr{background:#020617;border-radius:14px;padding:10px;margin:12px 0;display:flex;justify-content:center}
 .btn-remover{margin-top:8px;width:100%;background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
-.info-extra{font-size:12px;color:#94a3b8;margin-top:6px}
-@media(max-width:700px){
-  .container{padding:18px}
-  .grid{grid-template-columns:repeat(2,1fr);gap:12px}
-  .card{padding:12px}
-}
 </style>
 </head>
 
@@ -67,263 +60,164 @@ const sb = supabase.createClient(
 let app_id = null;
 const SEGREDO_REMOVER_MESA = "4321";
 let criandoMesa = false;
-let carregandoMesas = false;
-let intervaloMesas = null;
 
-/* 🔐 ESPERA ADMIN OU FUNCIONÁRIO */
-function esperarSessao() {
+function esperarSessao(){
   const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
 
-  if (funcionario && funcionario.app_id) {
+  if(funcionario && funcionario.app_id){
     app_id = funcionario.app_id;
     iniciarSistema();
     return;
   }
 
-  if (window.APP_ID) {
+  if(window.APP_ID){
     app_id = window.APP_ID;
     iniciarSistema();
     return;
   }
 
-  setTimeout(esperarSessao, 100);
+  setTimeout(esperarSessao,100);
 }
 
-function iniciarSistema() {
-  if (!app_id) {
+function iniciarSistema(){
+  if(!app_id){
     alert("Sessão inválida");
-    location.href = "/auth/login.html";
+    location.href="/auth/login.html";
     return;
   }
 
   carregarMesas();
-
-  if (intervaloMesas) clearInterval(intervaloMesas);
-  intervaloMesas = setInterval(carregarMesas, 4000);
-}
-
-/* ===== SINCRONIZA CAMPO OCUPADA ===== */
-async function sincronizarOcupacaoMesas(mesas, pedidos) {
-  try {
-    const mesaTemPedidoAberto = {};
-
-    (pedidos || []).forEach(p => {
-      if (p.mesa_id) {
-        mesaTemPedidoAberto[p.mesa_id] = true;
-      }
-    });
-
-    const atualizacoes = [];
-
-    (mesas || []).forEach(m => {
-      const deveriaEstarOcupada = !!mesaTemPedidoAberto[m.id];
-      const ocupadaAtual = !!m.ocupada;
-
-      if (ocupadaAtual !== deveriaEstarOcupada) {
-        atualizacoes.push(
-          sb.from("mesas")
-            .update({ ocupada: deveriaEstarOcupada })
-            .eq("id", m.id)
-        );
-      }
-    });
-
-    if (atualizacoes.length) {
-      await Promise.all(atualizacoes);
-    }
-  } catch (erro) {
-    console.error("Erro ao sincronizar ocupação das mesas:", erro);
-  }
+  setInterval(carregarMesas,4000);
 }
 
 /* ===== CARREGAR MESAS ===== */
-async function carregarMesas() {
-  if (carregandoMesas) return;
-  carregandoMesas = true;
+async function carregarMesas(){
 
-  try {
-    const { data: mesas, error: erroMesas } = await sb
-      .from("mesas")
-      .select("id,numero_mesa,ativa,ocupada")
-      .eq("app_id", app_id)
-      .eq("ativa", true)
-      .order("numero_mesa");
+  const { data: mesas } = await sb
+    .from("mesas")
+    .select("id,numero_mesa,ocupada")
+    .eq("app_id", app_id)
+    .eq("ativa", true)
+    .order("numero_mesa");
 
-    if (erroMesas) {
-      console.error("Erro ao carregar mesas:", erroMesas);
-      carregandoMesas = false;
-      return;
+  const { data: pedidos } = await sb
+    .from("pedidos")
+    .select("mesa_id,status,created_at")
+    .eq("app_id", app_id)
+    .not("mesa_id","is",null)
+    .not("status","in",'("pago","finalizado")')
+    .order("created_at",{ ascending:false });
+
+  const pedidosPorMesa = {};
+  (pedidos || []).forEach(p=>{
+    if(!pedidosPorMesa[p.mesa_id]){
+      pedidosPorMesa[p.mesa_id] = p;
     }
+  });
 
-    const { data: pedidos, error: erroPedidos } = await sb
-      .from("pedidos")
-      .select("id,mesa_id,status,created_at")
-      .eq("app_id", app_id)
-      .not("mesa_id", "is", null)
-      .not("status", "in", '("pago","finalizado","cancelado")')
-      .order("created_at", { ascending: false });
+  const grid = document.getElementById("listaMesas");
+  grid.innerHTML="";
 
-    if (erroPedidos) {
-      console.error("Erro ao carregar pedidos:", erroPedidos);
-      carregandoMesas = false;
-      return;
-    }
+  for (const m of (mesas || [])) {
 
-    await sincronizarOcupacaoMesas(mesas || [], pedidos || []);
+    const pedido = pedidosPorMesa[m.id];
+    let classe = "livre";
+    let texto  = "LIVRE";
 
-    const pedidosPorMesa = {};
-    (pedidos || []).forEach(p => {
-      if (!pedidosPorMesa[p.mesa_id]) {
-        pedidosPorMesa[p.mesa_id] = p;
-      }
-    });
-
-    const grid = document.getElementById("listaMesas");
-    grid.innerHTML = "";
-
-    (mesas || []).forEach(m => {
-      const pedido = pedidosPorMesa[m.id];
-
-      let classe = "livre";
-      let texto = "LIVRE";
-
-      if (pedido) {
-        if (pedido.status === "conta_solicitada") {
-          classe = "conta";
-          texto = "PEDIU A CONTA";
-        } else {
-          classe = "preparando";
-          texto = "OCUPADA";
-        }
-      } else if (m.ocupada) {
-        // caso raro: se ainda estiver marcada ocupada no banco
-        classe = "preparando";
-        texto = "OCUPADA";
+    if(pedido){
+      if(pedido.status === "conta_solicitada"){
+        classe="conta";
+        texto="PEDIU A CONTA";
+      }else{
+        classe="preparando";
+        texto="OCUPADA";
       }
 
-      const div = document.createElement("div");
-      div.className = `card ${classe}`;
-      div.innerHTML = `
-        <h3>Mesa ${m.numero_mesa}</h3>
-        <span class="status ${classe}">${texto}</span>
-        <div class="qr">
-          <canvas id="qr-${m.id}"></canvas>
-        </div>
-        <div class="info-extra">
-          ${m.ocupada ? "Mesa marcada como ocupada" : "Mesa disponível"}
-        </div>
-        ${!pedido && !m.ocupada ? `<button class="btn-remover">Remover mesa</button>` : ``}
-      `;
+      if(!m.ocupada){
+        await sb.from("mesas").update({ ocupada:true }).eq("id",m.id);
+      }
 
-      div.onclick = () => {
-        location.href = `mesa.html?mesa=${m.id}`;
+    } else {
+      if(m.ocupada){
+        await sb.from("mesas").update({ ocupada:false }).eq("id",m.id);
+      }
+    }
+
+    const div = document.createElement("div");
+    div.className=`card ${classe}`;
+    div.innerHTML=`
+      <h3>Mesa ${m.numero_mesa}</h3>
+      <span class="status ${classe}">${texto}</span>
+      <div class="qr">
+        <canvas id="qr-${m.id}"></canvas>
+      </div>
+      ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ``}
+    `;
+
+    div.onclick=()=>{
+      location.href=`mesa.html?mesa=${m.id}`;
+    };
+
+    grid.appendChild(div);
+
+    QRCode.toCanvas(
+      document.getElementById(`qr-${m.id}`),
+      location.origin + `/bar/mesa.html?mesa=${m.id}`,
+      { width:120 }
+    );
+
+    const btn=div.querySelector(".btn-remover");
+    if(btn){
+      btn.onclick=async(e)=>{
+        e.stopPropagation();
+        const senha=prompt("Código para remover a mesa:");
+        if(senha!==SEGREDO_REMOVER_MESA) return;
+        await sb.from("mesas").update({ativa:false,ocupada:false}).eq("id",m.id);
+        carregarMesas();
       };
-
-      grid.appendChild(div);
-
-      const canvasQr = document.getElementById(`qr-${m.id}`);
-      if (canvasQr) {
-        QRCode.toCanvas(
-          canvasQr,
-          location.origin + `/bar/mesa.html?mesa=${m.id}`,
-          { width: 120 },
-          function(error) {
-            if (error) console.error("Erro ao gerar QR:", error);
-          }
-        );
-      }
-
-      const btn = div.querySelector(".btn-remover");
-      if (btn) {
-        btn.onclick = async (e) => {
-          e.stopPropagation();
-
-          const senha = prompt("Código para remover a mesa:");
-          if (senha !== SEGREDO_REMOVER_MESA) return;
-
-          const { error } = await sb
-            .from("mesas")
-            .update({
-              ativa: false,
-              ocupada: false
-            })
-            .eq("id", m.id);
-
-          if (error) {
-            console.error("Erro ao remover mesa:", error);
-            alert("Erro ao remover mesa.");
-            return;
-          }
-
-          carregarMesas();
-        };
-      }
-    });
-  } catch (erro) {
-    console.error("Erro geral ao carregar mesas:", erro);
+    }
   }
-
-  carregandoMesas = false;
 }
 
 /* ===== ADICIONAR MESA ===== */
-async function adicionarMesa() {
-  if (criandoMesa) return;
-  criandoMesa = true;
+async function adicionarMesa(){
+  if(criandoMesa) return;
+  criandoMesa=true;
 
-  try {
-    const { data, error } = await sb
-      .from("mesas")
-      .select("numero_mesa")
-      .eq("app_id", app_id)
-      .order("numero_mesa", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  const { data } = await sb
+    .from("mesas")
+    .select("numero_mesa")
+    .eq("app_id",app_id)
+    .order("numero_mesa",{ascending:false})
+    .limit(1)
+    .maybeSingle();
 
-    if (error) {
-      console.error("Erro ao buscar próxima mesa:", error);
-      criandoMesa = false;
-      return;
-    }
+  const prox=(data?.numero_mesa||0)+1;
 
-    const prox = (data?.numero_mesa || 0) + 1;
+  await sb.from("mesas").insert({
+    app_id,
+    numero_mesa:prox,
+    ativa:true,
+    ocupada:false
+  });
 
-    const { error: erroInsert } = await sb.from("mesas").insert({
-      app_id,
-      numero_mesa: prox,
-      ativa: true,
-      ocupada: false
-    });
-
-    if (erroInsert) {
-      console.error("Erro ao adicionar mesa:", erroInsert);
-      alert("Erro ao adicionar mesa.");
-      criandoMesa = false;
-      return;
-    }
-
-    carregarMesas();
-  } catch (erro) {
-    console.error("Erro geral ao adicionar mesa:", erro);
-  }
-
-  criandoMesa = false;
+  criandoMesa=false;
+  carregarMesas();
 }
 
-function vendaAvulsa() {
-  location.href = `venda-avulsa.html`;
+function vendaAvulsa(){
+  location.href=`venda-avulsa.html`;
 }
 
-function logout() {
+function logout(){
   localStorage.removeItem("funcionario_logado");
-  location.href = "/auth/login.html";
+  location.href="/auth/login.html";
 }
 
 esperarSessao();
 
-/* PWA */
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js");
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
 }
 </script>
 
