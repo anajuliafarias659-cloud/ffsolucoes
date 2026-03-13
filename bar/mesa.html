@@ -39,6 +39,13 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
   padding:14px;
 }
 small{opacity:.7}
+.info-status{
+  margin:10px 0 16px;
+  padding:12px 14px;
+  border-radius:12px;
+  background:#0f172a;
+  border:1px solid rgba(255,255,255,.08);
+}
 </style>
 </head>
 
@@ -56,6 +63,7 @@ small{opacity:.7}
 <div id="listaProdutos"></div>
 
 <h3>Pedido da mesa</h3>
+<div id="statusPedido" class="info-status" style="display:none;"></div>
 <div id="pedido"></div>
 
 <div class="total" id="totalPedido">Total: R$ 0,00</div>
@@ -103,6 +111,57 @@ function formatarMoeda(valor) {
     style: "currency",
     currency: "BRL"
   });
+}
+
+function nomeStatus(status) {
+  const mapa = {
+    aberto: "Aberto",
+    novo: "Enviado",
+    aceito: "Em preparo",
+    pronto: "Pronto",
+    conta_solicitada: "Conta solicitada",
+    pago: "Pago",
+    finalizado: "Finalizado",
+    cancelado: "Cancelado"
+  };
+  return mapa[status] || status || "-";
+}
+
+function podeLiberarMesa(status) {
+  return status === "pago" || status === "finalizado" || status === "cancelado";
+}
+
+function atualizarBotaoLiberar() {
+  const btn = document.getElementById("btnLiberar");
+
+  if (!pedidoAtual) {
+    btn.classList.remove("bloqueado");
+    return;
+  }
+
+  if (podeLiberarMesa(pedidoAtual.status)) {
+    btn.classList.remove("bloqueado");
+  } else {
+    btn.classList.add("bloqueado");
+  }
+}
+
+function atualizarInfoStatus() {
+  const div = document.getElementById("statusPedido");
+
+  if (!pedidoAtual) {
+    div.style.display = "none";
+    div.innerHTML = "";
+    return;
+  }
+
+  div.style.display = "block";
+
+  if (podeLiberarMesa(pedidoAtual.status)) {
+    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa já pode ser liberada.</small>`;
+  } else {
+    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa só pode ser liberada após pagamento, cancelamento ou finalização.</small>`;
+  }
 }
 
 async function validarSessao() {
@@ -154,27 +213,41 @@ async function carregarMesa() {
 }
 
 async function verificarPedidoExistente() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("pedidos")
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .not("status", "in", '("finalizado","pago")')
+    .not("status", "in", '("finalizado")')
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
+
+  if (error) {
+    console.error(error);
+  }
 
   if (data) {
     pedidoAtual = data;
-    document.getElementById("btnLiberar").classList.remove("bloqueado");
+    atualizarBotaoLiberar();
+    atualizarInfoStatus();
     ativarRealtimeNotificacao();
     await carregarPedido();
   } else {
+    pedidoAtual = null;
+    atualizarBotaoLiberar();
+    atualizarInfoStatus();
     document.getElementById("pedido").innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
     document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(0)}`;
   }
 }
 
 async function criarPedidoSeNecessario() {
-  if (pedidoAtual) return true;
+  if (pedidoAtual && !podeLiberarMesa(pedidoAtual.status)) return true;
+
+  if (pedidoAtual && podeLiberarMesa(pedidoAtual.status)) {
+    pedidoAtual = null;
+  }
 
   const { data, error } = await supabase
     .from("pedidos")
@@ -194,7 +267,8 @@ async function criarPedidoSeNecessario() {
   }
 
   pedidoAtual = data;
-  document.getElementById("btnLiberar").classList.remove("bloqueado");
+  atualizarBotaoLiberar();
+  atualizarInfoStatus();
   ativarRealtimeNotificacao();
   return true;
 }
@@ -328,11 +402,10 @@ async function addProduto(produtoId) {
   const produto = produtosCache.find(p => p.id === produtoId);
   if (!produto) return;
 
-  const categoriaNome =
-    produto.categoria_nome ||
-    produto.categoria ||
-    produto.categoria_id ||
-    "Sem categoria";
+  if (pedidoAtual && podeLiberarMesa(pedidoAtual.status)) {
+    alert("Esse pedido já foi encerrado. Atualize a página.");
+    return;
+  }
 
   const dadosInsert = {
     app_id: APP_ID,
@@ -350,8 +423,6 @@ async function addProduto(produtoId) {
 
   if (error) {
     console.error(error);
-
-    // Se sua tabela tiver categoria_nome e você quiser salvar, use este bloco no lugar do insert acima
     alert("Erro ao adicionar produto.");
     return;
   }
@@ -402,6 +473,11 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
+  if (podeLiberarMesa(pedidoAtual.status)) {
+    alert("Esse pedido já foi encerrado.");
+    return;
+  }
+
   const { error } = await supabase
     .from("pedidos")
     .update({ status: "novo" })
@@ -414,12 +490,20 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
+  pedidoAtual.status = "novo";
+  atualizarBotaoLiberar();
+  atualizarInfoStatus();
   alert("Pedido enviado!");
 };
 
 document.getElementById("btnConta").onclick = async () => {
   if (!pedidoAtual) {
     alert("Nenhum pedido criado.");
+    return;
+  }
+
+  if (podeLiberarMesa(pedidoAtual.status)) {
+    alert("Esse pedido já foi encerrado.");
     return;
   }
 
@@ -435,12 +519,32 @@ document.getElementById("btnConta").onclick = async () => {
     return;
   }
 
+  pedidoAtual.status = "conta_solicitada";
+  atualizarBotaoLiberar();
+  atualizarInfoStatus();
   alert("Conta solicitada!");
 };
 
 document.getElementById("btnLiberar").onclick = async () => {
   if (!pedidoAtual) {
     location.href = "mesas.html";
+    return;
+  }
+
+  if (!podeLiberarMesa(pedidoAtual.status)) {
+    alert("Não é possível liberar a mesa. Ainda existe pedido pendente. A mesa só pode ser liberada quando o pedido estiver pago, cancelado ou finalizado.");
+    return;
+  }
+
+  const { data: itens, error: erroItens } = await supabase
+    .from("pedido_itens")
+    .select("id")
+    .eq("pedido_id", pedidoAtual.id)
+    .limit(1);
+
+  if (erroItens) {
+    console.error(erroItens);
+    alert("Erro ao verificar itens do pedido.");
     return;
   }
 
@@ -477,12 +581,17 @@ function ativarRealtimeNotificacao() {
         table: "pedidos",
         filter: `id=eq.${pedidoAtual.id}`
       },
-      payload => {
+      async payload => {
         const status = payload.new.status;
+        pedidoAtual = { ...pedidoAtual, ...payload.new };
+
+        atualizarBotaoLiberar();
+        atualizarInfoStatus();
 
         if (status === "aceito") alert("👨‍🍳 Pedido em preparo!");
         if (status === "pronto") alert("✅ Pedido pronto!");
         if (status === "cancelado") alert("❌ Pedido cancelado!");
+        if (status === "pago") alert("💰 Pedido pago! Agora a mesa pode ser liberada.");
       }
     )
     .subscribe();
