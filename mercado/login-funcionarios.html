@@ -5,7 +5,6 @@
 <title>Ativação de Funcionário | Mercado</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- PWA -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#020617">
 
@@ -19,7 +18,8 @@ body{
   display:flex;
   justify-content:center;
   align-items:center;
-  height:100vh;
+  min-height:100vh;
+  padding:20px;
 }
 .card{
   width:100%;
@@ -43,6 +43,10 @@ button{
   font-weight:bold;
   cursor:pointer;
 }
+button:disabled{
+  opacity:.7;
+  cursor:not-allowed;
+}
 small{
   display:block;
   margin-top:16px;
@@ -57,65 +61,114 @@ small{
 <div class="card">
   <h2>🏪 Mercado — Ativação</h2>
 
-  <input id="email" placeholder="Usuário ou e-mail">
+  <input id="email" type="email" placeholder="Usuário ou e-mail">
   <input id="senha" type="password" placeholder="Senha">
 
-  <button onclick="ativar()">Ativar acesso</button>
+  <button id="btnAtivar" onclick="ativar()">Ativar acesso</button>
 
   <small>Esse acesso é usado apenas uma vez</small>
 </div>
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
 );
 
 /* 🔁 SE JÁ ESTIVER ATIVADO, PULA LOGIN */
 const sessao = localStorage.getItem("funcionario_logado");
 if(sessao){
-  const u = JSON.parse(sessao);
-  redirecionar(u.tipo);
+  try{
+    const u = JSON.parse(sessao);
+    if(u && u.tipo){
+      redirecionar(u.tipo);
+    }
+  }catch{
+    localStorage.removeItem("funcionario_logado");
+  }
 }
 
 /* 🔐 ATIVAÇÃO (LOGIN UMA VEZ) */
-window.ativar = async ()=>{
-  const { data } = await supabase
-    .from("usuarios")
-    .select("*")
-    .eq("email", email.value)
-    .eq("senha", senha.value)
-    .eq("ativo", true)
-    .maybeSingle();
+window.ativar = async () => {
+  const email = document.getElementById("email").value.trim().toLowerCase();
+  const senha = document.getElementById("senha").value.trim();
+  const btn = document.getElementById("btnAtivar");
 
-  if(!data){
-    alert("Usuário ou senha inválidos");
+  if(!email || !senha){
+    alert("Preencha e-mail e senha");
     return;
   }
 
-  /* salva sessão fixa do funcionário */
+  btn.disabled = true;
+  btn.innerText = "Entrando...";
+
+  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    email,
+    password: senha
+  });
+
+  if(authError || !authData?.user){
+    console.error("Erro login:", authError);
+    alert("Usuário ou senha inválidos");
+    btn.disabled = false;
+    btn.innerText = "Ativar acesso";
+    return;
+  }
+
+  const userId = authData.user.id;
+
+  const { data: usuario, error: usuarioError } = await supabase
+    .from("usuarios")
+    .select("id, nome, email, tipo, app_id, ativo")
+    .eq("id", userId)
+    .single();
+
+  if(usuarioError || !usuario){
+    console.error("Erro ao buscar usuário:", usuarioError);
+    alert("Usuário não encontrado na base.");
+    await supabase.auth.signOut();
+    btn.disabled = false;
+    btn.innerText = "Ativar acesso";
+    return;
+  }
+
+  if(usuario.ativo !== true){
+    alert("Usuário inativo.");
+    await supabase.auth.signOut();
+    btn.disabled = false;
+    btn.innerText = "Ativar acesso";
+    return;
+  }
+
   localStorage.setItem("funcionario_logado", JSON.stringify({
-    id: data.id,
-    nome: data.nome,
-    email: data.email,
-    tipo: data.tipo,
-    app_id: data.app_id
+    id: usuario.id,
+    nome: usuario.nome,
+    email: usuario.email,
+    tipo: usuario.tipo,
+    app_id: usuario.app_id
   }));
 
-  redirecionar(data.tipo);
+  redirecionar(usuario.tipo);
 };
 
 /* 🔀 REDIRECIONAMENTO AUTOMÁTICO */
 function redirecionar(tipo){
-  tipo = String(tipo).toLowerCase();
+  tipo = String(tipo || "").toLowerCase().trim();
 
   if(tipo === "admin"){
     window.location.replace("admin.html");
   }
   else if(tipo === "caixa"){
-    window.location.replace("vendas.html");
+    window.location.replace("caixa.html");
   }
   else if(tipo === "produtos"){
     window.location.replace("produtos.html");
@@ -125,7 +178,6 @@ function redirecionar(tipo){
     localStorage.removeItem("funcionario_logado");
   }
 }
-
 </script>
 
 </body>
