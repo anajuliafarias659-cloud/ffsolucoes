@@ -23,7 +23,16 @@ body{
   padding:24px;
   border-radius:20px;
 }
-h2{text-align:center;margin-top:0}
+.topo{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+h2{
+  margin:0;
+}
 .resumo{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
@@ -53,7 +62,7 @@ th{background:#020617}
   display:flex;
   gap:10px;
   flex-wrap:wrap;
-  margin-bottom:10px;
+  margin:18px 0 10px;
 }
 input[type=date]{
   padding:10px;
@@ -68,13 +77,35 @@ input[type=date]{
   font-weight:bold;
   cursor:pointer;
 }
+.btn-voltar{
+  padding:10px 16px;
+  border:none;
+  border-radius:10px;
+  background:#1e293b;
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+}
+.table-wrap{
+  overflow:auto;
+}
+.info-topo{
+  opacity:.7;
+  margin-top:8px;
+  font-size:13px;
+}
 </style>
 </head>
 
 <body>
 
 <div class="box">
-  <h2>📊 Relatório Geral</h2>
+  <div class="topo">
+    <h2>📊 Relatório Geral</h2>
+    <button class="btn-voltar" onclick="history.back()">Voltar</button>
+  </div>
+
+  <div class="info-topo" id="infoTopo">Carregando negócio...</div>
 
   <div class="filtros">
     <input type="date" id="filtroData">
@@ -92,20 +123,22 @@ input[type=date]{
     <div class="card"><small>Cartão</small><br><b id="totalCartao">R$ 0.00</b></div>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Produto</th>
-        <th>Qtd</th>
-        <th>Pagamento</th>
-        <th>Total</th>
-        <th>Pago</th>
-        <th>Devido</th>
-        <th>Data/Hora</th>
-      </tr>
-    </thead>
-    <tbody id="lista"></tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Produto</th>
+          <th>Qtd</th>
+          <th>Pagamento</th>
+          <th>Total</th>
+          <th>Pago</th>
+          <th>Devido</th>
+          <th>Data/Hora</th>
+        </tr>
+      </thead>
+      <tbody id="lista"></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -115,33 +148,83 @@ const supabaseClient = supabase.createClient(
 );
 
 let app_id = null;
+let nomeNegocio = "Mercado";
 const SENHA_APAGAR = "1234";
 
 const inputData = document.getElementById("filtroData");
 inputData.valueAsDate = new Date();
 
+function zerarTotais(){
+  document.getElementById("totalVendido").innerText = "R$ 0.00";
+  document.getElementById("totalRecebido").innerText = "R$ 0.00";
+  document.getElementById("totalFiado").innerText = "R$ 0.00";
+  document.getElementById("totalDinheiro").innerText = "R$ 0.00";
+  document.getElementById("totalPix").innerText = "R$ 0.00";
+  document.getElementById("totalCartao").innerText = "R$ 0.00";
+}
+
+function formatarDataHora(dataStr){
+  if(!dataStr) return "-";
+  const d = new Date(dataStr);
+  if(isNaN(d.getTime())) return "-";
+  return d.toLocaleString("pt-BR");
+}
+
 /* 🔐 VALIDAR SESSÃO REAL */
 async function validarSessao(){
-  const { data } = await supabaseClient.auth.getSession();
+  const { data, error } = await supabaseClient.auth.getSession();
 
-  if(!data.session){
+  if(error || !data.session){
     alert("Sessão inválida");
-    location.href = "login.html";
+    location.href = "/auth/login.html";
     return false;
   }
 
-  app_id = data.session.user.id;
+  const userId = data.session.user.id;
+
+  const { data: usuario, error: erroUsuario } = await supabaseClient
+    .from("usuarios")
+    .select("id, nome, email, app_id")
+    .eq("id", userId)
+    .single();
+
+  if(erroUsuario || !usuario){
+    console.error("Erro ao buscar usuário:", erroUsuario);
+    alert("Usuário não encontrado.");
+    location.href = "/auth/login.html";
+    return false;
+  }
+
+  app_id = usuario.app_id;
+
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return false;
+  }
+
+  const { data: config } = await supabaseClient
+    .from("config_site")
+    .select("nome_site")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(config && config.nome_site){
+    nomeNegocio = config.nome_site;
+  }
+
+  document.getElementById("infoTopo").innerText =
+    `${nomeNegocio} • ID do Negócio: ${app_id}`;
+
   return true;
 }
 
 /* RELATÓRIO */
 async function carregarRelatorio(){
-
   const dataFiltro = inputData.value;
-  if(!dataFiltro) return;
+  if(!dataFiltro || !app_id) return;
 
   document.getElementById("dataLabel").innerText =
-    "📅 " + new Date(dataFiltro+"T00:00:00").toLocaleDateString("pt-BR");
+    "📅 " + new Date(dataFiltro + "T00:00:00").toLocaleDateString("pt-BR");
 
   const inicio = dataFiltro + "T00:00:00";
   const fim = dataFiltro + "T23:59:59";
@@ -157,18 +240,29 @@ async function carregarRelatorio(){
     .lte("created_at", fim)
     .order("created_at", { ascending:false });
 
+  const lista = document.getElementById("lista");
+  lista.innerHTML = "";
+  zerarTotais();
+
   if(error){
-    console.error(error);
+    console.error("Erro ao carregar relatório:", error);
+    lista.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center;color:#f87171">
+          Erro ao carregar relatório
+        </td>
+      </tr>`;
     return;
   }
 
-  const lista = document.getElementById("lista");
-  lista.innerHTML = "";
+  let totalVendido = 0;
+  let totalRecebido = 0;
+  let totalFiado = 0;
+  let dinheiro = 0;
+  let pix = 0;
+  let cartao = 0;
 
-  let totalVendido=0,totalRecebido=0,totalFiado=0;
-  let dinheiro=0,pix=0,cartao=0;
-
-  if(!data || data.length===0){
+  if(!data || data.length === 0){
     lista.innerHTML = `
       <tr>
         <td colspan="7" style="text-align:center;opacity:.7">
@@ -177,40 +271,38 @@ async function carregarRelatorio(){
       </tr>`;
   }
 
-  data?.forEach(v=>{
+  (data || []).forEach(v => {
+    totalVendido += Number(v.valor_total || 0);
+    totalRecebido += Number(v.valor_pago || 0);
+    totalFiado += Number(v.valor_devido || 0);
 
-    totalVendido += Number(v.valor_total||0);
-    totalRecebido += Number(v.valor_pago||0);
-    totalFiado += Number(v.valor_devido||0);
+    if(v.forma_pagamento === "DINHEIRO") dinheiro += Number(v.valor_pago || 0);
+    if(v.forma_pagamento === "PIX") pix += Number(v.valor_pago || 0);
+    if(v.forma_pagamento === "CARTAO") cartao += Number(v.valor_pago || 0);
 
-    if(v.forma_pagamento==="DINHEIRO") dinheiro+=Number(v.valor_pago||0);
-    if(v.forma_pagamento==="PIX") pix+=Number(v.valor_pago||0);
-    if(v.forma_pagamento==="CARTAO") cartao+=Number(v.valor_pago||0);
-
-    lista.innerHTML+=`
+    lista.innerHTML += `
       <tr>
-        <td>${v.produtos?.nome || v.produto_id}</td>
-        <td>${v.quantidade}</td>
-        <td>${v.forma_pagamento}</td>
-        <td>R$ ${Number(v.valor_total||0).toFixed(2)}</td>
-        <td>R$ ${Number(v.valor_pago||0).toFixed(2)}</td>
-        <td class="fiado">R$ ${Number(v.valor_devido||0).toFixed(2)}</td>
-        <td>${new Date(v.created_at).toLocaleString("pt-BR")}</td>
+        <td>${v.produtos?.nome || v.produto_id || "-"}</td>
+        <td>${v.quantidade || 0}</td>
+        <td>${v.forma_pagamento || "-"}</td>
+        <td>R$ ${Number(v.valor_total || 0).toFixed(2)}</td>
+        <td>R$ ${Number(v.valor_pago || 0).toFixed(2)}</td>
+        <td class="fiado">R$ ${Number(v.valor_devido || 0).toFixed(2)}</td>
+        <td>${formatarDataHora(v.created_at)}</td>
       </tr>`;
   });
 
-  document.getElementById("totalVendido").innerText=`R$ ${totalVendido.toFixed(2)}`;
-  document.getElementById("totalRecebido").innerText=`R$ ${totalRecebido.toFixed(2)}`;
-  document.getElementById("totalFiado").innerText=`R$ ${totalFiado.toFixed(2)}`;
-  document.getElementById("totalDinheiro").innerText=`R$ ${dinheiro.toFixed(2)}`;
-  document.getElementById("totalPix").innerText=`R$ ${pix.toFixed(2)}`;
-  document.getElementById("totalCartao").innerText=`R$ ${cartao.toFixed(2)}`;
+  document.getElementById("totalVendido").innerText = `R$ ${totalVendido.toFixed(2)}`;
+  document.getElementById("totalRecebido").innerText = `R$ ${totalRecebido.toFixed(2)}`;
+  document.getElementById("totalFiado").innerText = `R$ ${totalFiado.toFixed(2)}`;
+  document.getElementById("totalDinheiro").innerText = `R$ ${dinheiro.toFixed(2)}`;
+  document.getElementById("totalPix").innerText = `R$ ${pix.toFixed(2)}`;
+  document.getElementById("totalCartao").innerText = `R$ ${cartao.toFixed(2)}`;
 }
 
 /* 🧨 APAGAR GERAL ESCONDIDO */
-document.addEventListener("keydown", async (e)=>{
-  if(e.ctrlKey && e.altKey && e.key.toLowerCase()==="l"){
-
+document.addEventListener("keydown", async (e) => {
+  if(e.ctrlKey && e.altKey && e.key.toLowerCase() === "l"){
     const senha = prompt("Acesso restrito. Digite a senha:");
     if(senha !== SENHA_APAGAR){
       alert("Senha incorreta");
@@ -219,10 +311,16 @@ document.addEventListener("keydown", async (e)=>{
 
     if(!confirm("APAGAR TODAS AS VENDAS? ISSO NÃO TEM VOLTA.")) return;
 
-    await supabaseClient
+    const { error } = await supabaseClient
       .from("vendas")
       .delete()
       .eq("app_id", app_id);
+
+    if(error){
+      console.error("Erro ao apagar vendas:", error);
+      alert("Erro ao apagar vendas.");
+      return;
+    }
 
     alert("Sistema limpo com sucesso.");
     carregarRelatorio();
@@ -230,7 +328,7 @@ document.addEventListener("keydown", async (e)=>{
 });
 
 /* 🚀 INICIAR */
-document.addEventListener("DOMContentLoaded", async ()=>{
+document.addEventListener("DOMContentLoaded", async () => {
   const ok = await validarSessao();
   if(!ok) return;
   carregarRelatorio();
@@ -239,5 +337,3 @@ document.addEventListener("DOMContentLoaded", async ()=>{
 
 </body>
 </html>
-
-
