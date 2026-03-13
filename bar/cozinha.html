@@ -152,6 +152,13 @@ const subinfo = document.getElementById("subinfo");
 let app_id = null;
 let canalRealtime = null;
 
+function formatarMoeda(valor){
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
 /* ===============================
    INICIAR
 ================================= */
@@ -193,32 +200,77 @@ async function iniciar(){
    CARREGAR PEDIDOS
 ================================= */
 async function carregarPedidos(){
-  const { data, error } = await supabase
+  lista.innerHTML = `<div class="empty">Carregando pedidos...</div>`;
+
+  const { data: pedidos, error: erroPedidos } = await supabase
     .from("pedidos")
-    .select(`
-      id,
-      status,
-      created_at,
-      mesas ( numero_mesa ),
-      pedido_itens (
-        id,
-        nome_produto,
-        quantidade,
-        preco,
-        destino
-      )
-    `)
+    .select("id, mesa_id, status, created_at")
     .eq("app_id", app_id)
     .in("status", ["novo","aberto","aceito"])
     .order("created_at", { ascending:true });
 
-  if(error){
-    console.error("Erro ao carregar pedidos:", error);
+  if(erroPedidos){
+    console.error("Erro ao carregar pedidos:", erroPedidos);
     lista.innerHTML = `<div class="empty">Erro ao carregar pedidos</div>`;
     return;
   }
 
-  renderizar(data || []);
+  if(!pedidos || pedidos.length === 0){
+    lista.innerHTML = `<div class="empty">Nenhum pedido da cozinha</div>`;
+    return;
+  }
+
+  const pedidoIds = pedidos.map(p => p.id);
+  const mesaIds = [...new Set(pedidos.map(p => p.mesa_id).filter(Boolean))];
+
+  const [
+    { data: itens, error: erroItens },
+    { data: mesas, error: erroMesas }
+  ] = await Promise.all([
+    supabase
+      .from("pedido_itens")
+      .select("id, pedido_id, nome_produto, quantidade, preco, destino, status")
+      .in("pedido_id", pedidoIds)
+      .order("created_at", { ascending: true }),
+
+    mesaIds.length > 0
+      ? supabase
+          .from("mesas")
+          .select("id, numero_mesa")
+          .in("id", mesaIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  if(erroItens){
+    console.error("Erro ao carregar itens:", erroItens);
+    lista.innerHTML = `<div class="empty">Erro ao carregar itens dos pedidos</div>`;
+    return;
+  }
+
+  if(erroMesas){
+    console.error("Erro ao carregar mesas:", erroMesas);
+    lista.innerHTML = `<div class="empty">Erro ao carregar mesas</div>`;
+    return;
+  }
+
+  const mapaMesas = new Map();
+  (mesas || []).forEach(m => mapaMesas.set(m.id, m));
+
+  const mapaItensPorPedido = new Map();
+  (itens || []).forEach(item => {
+    if(!mapaItensPorPedido.has(item.pedido_id)){
+      mapaItensPorPedido.set(item.pedido_id, []);
+    }
+    mapaItensPorPedido.get(item.pedido_id).push(item);
+  });
+
+  const pedidosMontados = pedidos.map(p => ({
+    ...p,
+    mesa: mapaMesas.get(p.mesa_id) || null,
+    pedido_itens: mapaItensPorPedido.get(p.id) || []
+  }));
+
+  renderizar(pedidosMontados);
 }
 
 /* ===============================
@@ -229,16 +281,22 @@ function renderizar(pedidos){
   let encontrou = false;
 
   pedidos.forEach(p => {
-    const itensCozinha = (p.pedido_itens || []).filter(i => i.destino === "cozinha");
+    const itensCozinha = (p.pedido_itens || []).filter(i => {
+      if(!i.destino) return true;
+      return String(i.destino).toLowerCase() === "cozinha";
+    });
 
     if(itensCozinha.length === 0) return;
 
     encontrou = true;
 
     let total = 0;
-    const numeroMesa = p.mesas?.numero_mesa || "-";
+    const numeroMesa = p.mesa?.numero_mesa || "-";
     const hora = p.created_at
-      ? new Date(p.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+      ? new Date(p.created_at).toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit"
+        })
       : "--:--";
 
     const card = document.createElement("div");
@@ -260,36 +318,39 @@ function renderizar(pedidos){
       const subtotal = Number(i.preco || 0) * Number(i.quantidade || 0);
       total += subtotal;
 
-      divItens.innerHTML += `
-        <div>
-          <span>${i.quantidade}x ${i.nome_produto}</span>
-          <span>R$ ${subtotal.toFixed(2)}</span>
-        </div>
+      const linha = document.createElement("div");
+      linha.innerHTML = `
+        <span>${i.quantidade}x ${i.nome_produto}</span>
+        <span>${formatarMoeda(subtotal)}</span>
       `;
+      divItens.appendChild(linha);
     });
 
-    card.querySelector(".total").innerText = `Total Cozinha: R$ ${total.toFixed(2)}`;
+    card.querySelector(".total").innerText = `Total Cozinha: ${formatarMoeda(total)}`;
 
     const actions = card.querySelector(".actions");
 
     if(p.status === "novo" || p.status === "aberto"){
-      actions.innerHTML += `
-        <button class="preparar" onclick="mudarStatus('${p.id}','aceito')">
-          Preparar
-        </button>`;
+      const btnPreparar = document.createElement("button");
+      btnPreparar.className = "preparar";
+      btnPreparar.textContent = "Preparar";
+      btnPreparar.onclick = () => mudarStatus(p.id, "aceito");
+      actions.appendChild(btnPreparar);
     }
 
     if(p.status === "aceito"){
-      actions.innerHTML += `
-        <button class="entregar" onclick="mudarStatus('${p.id}','pronto')">
-          Pronto
-        </button>`;
+      const btnPronto = document.createElement("button");
+      btnPronto.className = "entregar";
+      btnPronto.textContent = "Pronto";
+      btnPronto.onclick = () => mudarStatus(p.id, "pronto");
+      actions.appendChild(btnPronto);
     }
 
-    actions.innerHTML += `
-      <button class="cancelar" onclick="mudarStatus('${p.id}','cancelado')">
-        Cancelar
-      </button>`;
+    const btnCancelar = document.createElement("button");
+    btnCancelar.className = "cancelar";
+    btnCancelar.textContent = "Cancelar";
+    btnCancelar.onclick = () => mudarStatus(p.id, "cancelado");
+    actions.appendChild(btnCancelar);
 
     lista.appendChild(card);
   });
@@ -341,6 +402,24 @@ function ativarRealtime(){
     .on(
       "postgres_changes",
       { event:"UPDATE", schema:"public", table:"pedidos" },
+      payload => {
+        if(payload.new.app_id === app_id){
+          carregarPedidos();
+        }
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event:"INSERT", schema:"public", table:"pedido_itens" },
+      payload => {
+        if(payload.new.app_id === app_id){
+          carregarPedidos();
+        }
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event:"UPDATE", schema:"public", table:"pedido_itens" },
       payload => {
         if(payload.new.app_id === app_id){
           carregarPedidos();
