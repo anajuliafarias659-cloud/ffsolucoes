@@ -231,6 +231,23 @@ function pedidoBloqueadoParaEdicao() {
   return ["pago", "finalizado", "cancelado"].includes(pedidoAtual.status);
 }
 
+function limparTelaPedido() {
+  document.getElementById("pedido").innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
+  document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(0)}`;
+}
+
+function encerrarPedidoNaTela() {
+  pedidoAtual = null;
+  atualizarBotaoLiberar();
+  atualizarInfoStatus();
+  limparTelaPedido();
+
+  if (canalPedido) {
+    supabase.removeChannel(canalPedido);
+    canalPedido = null;
+  }
+}
+
 function atualizarBotaoLiberar() {
   const btn = document.getElementById("btnLiberar");
 
@@ -274,11 +291,6 @@ function obterImagemProduto(produto) {
     produto.banner_url ||
     "https://via.placeholder.com/80x80?text=Produto"
   );
-}
-
-function fallbackImagem(img) {
-  img.onerror = null;
-  img.src = "https://via.placeholder.com/80x80?text=Produto";
 }
 
 async function validarSessao() {
@@ -335,7 +347,7 @@ async function verificarPedidoExistente() {
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .not("status", "in", '("finalizado")')
+    .not("status", "in", '("finalizado","pago","cancelado")')
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -351,11 +363,7 @@ async function verificarPedidoExistente() {
     ativarRealtimeNotificacao();
     await carregarPedido();
   } else {
-    pedidoAtual = null;
-    atualizarBotaoLiberar();
-    atualizarInfoStatus();
-    document.getElementById("pedido").innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
-    document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(0)}`;
+    encerrarPedidoNaTela();
   }
 }
 
@@ -625,7 +633,15 @@ async function removerItem(itemId) {
 }
 
 async function carregarPedido() {
-  if (!pedidoAtual) return;
+  if (!pedidoAtual) {
+    limparTelaPedido();
+    return;
+  }
+
+  if (podeLiberarMesa(pedidoAtual.status)) {
+    encerrarPedidoNaTela();
+    return;
+  }
 
   const { data, error } = await supabase
     .from("pedido_itens")
@@ -764,6 +780,7 @@ document.getElementById("btnLiberar").onclick = async () => {
     return;
   }
 
+  encerrarPedidoNaTela();
   location.href = "mesas.html";
 };
 
@@ -789,13 +806,26 @@ function ativarRealtimeNotificacao() {
         const status = payload.new.status;
         pedidoAtual = { ...pedidoAtual, ...payload.new };
 
-        atualizarBotaoLiberar();
-        atualizarInfoStatus();
-
         if (status === "aceito") alert("👨‍🍳 Pedido em preparo!");
         if (status === "pronto") alert("✅ Pedido pronto!");
-        if (status === "cancelado") alert("❌ Pedido cancelado!");
-        if (status === "pago") alert("💰 Pedido pago! Agora a mesa pode ser liberada.");
+        if (status === "cancelado") {
+          alert("❌ Pedido cancelado!");
+          encerrarPedidoNaTela();
+          return;
+        }
+        if (status === "pago") {
+          alert("💰 Pedido pago! A mesa ficou livre.");
+          encerrarPedidoNaTela();
+          return;
+        }
+        if (status === "finalizado") {
+          encerrarPedidoNaTela();
+          return;
+        }
+
+        atualizarBotaoLiberar();
+        atualizarInfoStatus();
+        await carregarPedido();
       }
     )
     .subscribe();
