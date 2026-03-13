@@ -74,15 +74,38 @@ select,input{
 
 .tag-origem{
   display:inline-block;
-  padding:5px 10px;
+  padding:6px 10px;
   border-radius:999px;
   font-size:12px;
   font-weight:bold;
-  margin-bottom:10px;
-  margin-right:6px;
 }
-.tag-online{ background:#1d4ed8; color:#fff; }
-.tag-mesa{ background:#f59e0b; color:#111827; }
+.tag-online{
+  background:#1d4ed8;
+  color:#fff;
+}
+.tag-vitrine{
+  background:#0ea5e9;
+  color:#00111a;
+}
+.tag-mesa{
+  background:#f59e0b;
+  color:#111827;
+}
+.origem-box{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+.subtag{
+  display:inline-block;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:bold;
+  background:#1e293b;
+  color:#fff;
+}
 
 .tag-setor{
   display:inline-block;
@@ -92,8 +115,14 @@ select,input{
   font-weight:bold;
   margin:4px 6px 0 0;
 }
-.tag-bar{ background:#7c3aed; color:#fff; }
-.tag-cozinha{ background:#dc2626; color:#fff; }
+.tag-bar{
+  background:#7c3aed;
+  color:#fff;
+}
+.tag-cozinha{
+  background:#dc2626;
+  color:#fff;
+}
 
 .bloco-setor{
   margin-top:10px;
@@ -294,7 +323,13 @@ function pedidoEhMesa(p){
 
 function numeroMesaPedido(p){
   if (!pedidoEhMesa(p)) return "";
-  return p.numero_mesa || p.mesa || p.mesa_numero || p.mesa_id || "";
+  return (
+    p.numero_mesa_real ||
+    p.numero_mesa ||
+    p.mesa ||
+    p.mesa_numero ||
+    ""
+  );
 }
 
 function nomeClientePedido(p){
@@ -496,12 +531,24 @@ function montarCardPedido(p, isHistorico){
   const podeImprimirBar = isMesa && pedidoTemSetor(p, "bar");
   const podeImprimirCozinha = isMesa && pedidoTemSetor(p, "cozinha");
 
+  const origemTexto = isMesa ? "PEDIDO DE MESA" : "PEDIDO VITRINE / DELIVERY";
+  const origemClasse = isMesa ? "tag-mesa" : "tag-vitrine";
+  const mesaNumero = numeroMesaPedido(p);
+
   return `
     <div class="pedido ${isMesa ? "mesa" : ""}">
-      <div>
-        <span class="tag-origem ${isMesa ? "tag-mesa" : "tag-online"}">
-          ${isMesa ? "PEDIDO DE MESA" : "PEDIDO ONLINE / DELIVERY"}
+      <div class="origem-box">
+        <span class="tag-origem ${origemClasse}">
+          ${origemTexto}
         </span>
+
+        ${isMesa && mesaNumero ? `
+          <span class="subtag">Mesa ${escapeHtml(mesaNumero)}</span>
+        ` : ""}
+
+        ${!isMesa ? `
+          <span class="subtag">Acompanhamento: ${escapeHtml(codigoAcompanhamento)}</span>
+        ` : ""}
       </div>
 
       <div class="status ${escapeHtml(status)}">
@@ -510,7 +557,7 @@ function montarCardPedido(p, isHistorico){
 
       <strong>Cliente:</strong> ${escapeHtml(nomeClientePedido(p))}<br>
       <strong>Telefone:</strong> ${escapeHtml(telefoneClientePedido(p))}<br>
-      ${isMesa ? `<strong>Mesa:</strong> ${escapeHtml(numeroMesaPedido(p) || "-")}<br>` : ""}
+      ${isMesa ? `<strong>Mesa:</strong> ${escapeHtml(mesaNumero || "-")}<br>` : ""}
       <strong>Código acompanhamento:</strong> ${escapeHtml(codigoAcompanhamento)}<br>
 
       ${linkAcompanhamento && !isMesa ? `
@@ -645,14 +692,21 @@ async function carregarPedidos(){
     return;
   }
 
-  const ids = (pedidos || []).map(p => p.id);
-  let itensPorPedido = {};
+  const idsPedidos = (pedidos || []).map(p => p.id);
+  const idsMesas = [...new Set(
+    (pedidos || [])
+      .map(p => p.mesa_id)
+      .filter(Boolean)
+  )];
 
-  if (ids.length) {
+  let itensPorPedido = {};
+  let mapaMesas = {};
+
+  if (idsPedidos.length) {
     const { data: itensBanco, error: erroItens } = await supabase
       .from("pedido_itens")
       .select("*")
-      .in("pedido_id", ids);
+      .in("pedido_id", idsPedidos);
 
     if (erroItens) {
       console.error("Erro ao buscar pedido_itens:", erroItens);
@@ -665,8 +719,24 @@ async function carregarPedidos(){
     }
   }
 
+  if (idsMesas.length) {
+    const { data: mesasBanco, error: erroMesas } = await supabase
+      .from("mesas")
+      .select("id, numero_mesa")
+      .in("id", idsMesas);
+
+    if (erroMesas) {
+      console.error("Erro ao buscar mesas:", erroMesas);
+    } else {
+      (mesasBanco || []).forEach(m => {
+        mapaMesas[m.id] = m.numero_mesa;
+      });
+    }
+  }
+
   pedidosCache = (pedidos || []).map(p => ({
     ...p,
+    numero_mesa_real: p.mesa_id ? mapaMesas[p.mesa_id] || "" : "",
     itens_normalizados: normalizarItensPedido(p, itensPorPedido[p.id] || [])
   }));
 
@@ -941,6 +1011,7 @@ window.imprimirComanda = function(id, setorDesejado){
 
   const dataHora = new Date().toLocaleString("pt-BR");
   const setorTitulo = setorDesejado === "bar" ? "BAR" : "COZINHA";
+  const mesaNumero = numeroMesaPedido(pedido);
 
   const htmlItens = itensFiltrados.map(i => `
     <div style="border-bottom:1px dashed #000;padding:6px 0;">
@@ -976,7 +1047,7 @@ window.imprimirComanda = function(id, setorDesejado){
       </div>
 
       <div class="linha"><strong>Cliente:</strong> ${escapeHtml(nomeClientePedido(pedido))}</div>
-      <div class="linha"><strong>Mesa:</strong> ${escapeHtml(numeroMesaPedido(pedido) || "-")}</div>
+      <div class="linha"><strong>Mesa:</strong> ${escapeHtml(mesaNumero || "-")}</div>
       <div class="linha"><strong>Pedido ID:</strong> ${escapeHtml(pedido.id)}</div>
       <div class="linha"><strong>Data/Hora:</strong> ${escapeHtml(dataHora)}</div>
 
