@@ -209,6 +209,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
 const URL_PAGAMENTO_MESA = `${SUPABASE_URL}/functions/v1/criar-pagamento-mesa`;
 const URL_PAGAMENTO_PIX_MESA = `${SUPABASE_URL}/functions/v1/criar-pix-mesa`;
+const URL_CONSULTAR_PIX_MESA = `${SUPABASE_URL}/functions/v1/consultar-pix-mesa`;
 
 let totalPedido = 0;
 let totalPagoAtual = 0;
@@ -902,83 +903,99 @@ function iniciarVerificacaoPix(){
 }
 
 async function verificarStatusPagamento(){
-  const { data, error } = await supabase
-    .from("pedidos")
-    .select("pagamento_status, status, mp_payment_id")
-    .eq("id", pedidoId)
-    .eq("app_id", appId)
-    .single();
+  try{
 
-  if(error || !data) return;
+    const accessToken = await obterTokenSessao();
 
-  const status = String(data.pagamento_status || "").toLowerCase();
+    const res = await fetch(URL_CONSULTAR_PIX_MESA, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({
+        appId: appId,
+        pedidoId: pedidoId
+      })
+    });
 
-  if(status === "approved"){
-    clearInterval(verificacaoPix);
-    statusPagamentoEl.innerHTML = `✅ Pagamento aprovado. Registrando...`;
+    const json = await res.json().catch(() => ({}));
 
-    try{
-      const valorARegistrar = Number(sessionStorage.getItem(`pix_valor_${pedidoId}`) || valorPixAtual || 0);
-
-      if(valorARegistrar <= 0){
-        throw new Error("Valor do PIX não encontrado para registrar.");
-      }
-
-      const { quitado, restante } = await registrarPagamentoParcial({
-        forma_pagamento: "Pix MP",
-        pagamento_modo: "mercadopago_pix",
-        pagamento_tipo: "pix",
-        valor_pago: valorARegistrar,
-        troco: 0,
-        desconto: 0,
-        mp_payment_id: data.mp_payment_id || null
-      });
-
-      sessionStorage.removeItem(`pix_valor_${pedidoId}`);
-      pixQrCodeArea.innerHTML = "";
-      pixCopiaCola.value = "";
-      debugPix.style.display = "none";
-      debugPix.innerText = "";
-
-      if(quitado){
-        statusPagamentoEl.innerHTML = `✅ Conta quitada. Finalizando pedido...`;
-        await encerrarPedidoSeQuitado();
-      } else {
-        statusPagamentoEl.innerHTML = `
-          ✅ Pagamento parcial aprovado.<br>
-          Falta pagar: <strong>${formatarMoeda(restante)}</strong>
-        `;
-        alert(`Pagamento parcial aprovado. Falta ${formatarMoeda(restante)}.`);
-        valorRecebidoEl.value = "";
-        calcular();
-      }
-    }catch(e){
-      console.error(e);
-      alert("Pagamento aprovado, mas houve erro ao registrar internamente.");
+    if(!res.ok){
+      console.error("Erro ao consultar PIX:", json);
+      return;
     }
-  }
 
-  if(status === "pending"){
-    const valorPendente = Number(sessionStorage.getItem(`pix_valor_${pedidoId}`) || valorPixAtual || 0);
+    const status = String(json.pagamento_status || "").toLowerCase();
 
-    statusPagamentoEl.innerHTML = `
-      ⏳ PIX gerado.<br>
-      Valor desta cobrança: <strong>${formatarMoeda(valorPendente)}</strong><br>
-      Aguardando pagamento...
-    `;
-  }
+    if(status === "approved"){
+      clearInterval(verificacaoPix);
 
-  if(status === "partial"){
-    clearInterval(verificacaoPix);
-    statusPagamentoEl.innerHTML = `
-      ✅ Pagamento parcial registrado.<br>
-      Falta pagar: <strong>${formatarMoeda(valorRestanteAtual)}</strong>
-    `;
-  }
+      statusPagamentoEl.innerHTML = `✅ Pagamento aprovado. Registrando...`;
 
-  if(status === "rejected" || status === "cancelled"){
-    clearInterval(verificacaoPix);
-    statusPagamentoEl.innerHTML = `❌ Pagamento não aprovado.`;
+      try{
+
+        const valorARegistrar =
+          Number(sessionStorage.getItem(`pix_valor_${pedidoId}`)) ||
+          Number(valorPixAtual || 0) ||
+          Number(valorRestanteAtual || 0);
+
+        const { quitado, restante } = await registrarPagamentoParcial({
+          forma_pagamento: "Pix MP",
+          pagamento_modo: "mercadopago_pix",
+          pagamento_tipo: "pix",
+          valor_pago: valorARegistrar,
+          troco: 0,
+          desconto: 0,
+          mp_payment_id: json.mp_payment_id || null
+        });
+
+        sessionStorage.removeItem(`pix_valor_${pedidoId}`);
+
+        pixQrCodeArea.innerHTML = "";
+        pixCopiaCola.value = "";
+        debugPix.style.display = "none";
+
+        if(quitado){
+          statusPagamentoEl.innerHTML = `✅ Conta quitada. Finalizando pedido...`;
+          await encerrarPedidoSeQuitado();
+        }else{
+          statusPagamentoEl.innerHTML = `
+            ✅ Pagamento parcial aprovado.<br>
+            Falta pagar: <strong>${formatarMoeda(restante)}</strong>
+          `;
+
+          alert(`Pagamento parcial aprovado. Falta ${formatarMoeda(restante)}.`);
+          valorRecebidoEl.value = "";
+          calcular();
+        }
+
+      }catch(e){
+        console.error(e);
+        alert("Pagamento aprovado, mas houve erro ao registrar internamente.");
+      }
+    }
+
+    if(status === "pending"){
+      const valorPendente =
+        Number(sessionStorage.getItem(`pix_valor_${pedidoId}`)) ||
+        Number(valorPixAtual || 0);
+
+      statusPagamentoEl.innerHTML = `
+        ⏳ PIX gerado.<br>
+        Valor desta cobrança: <strong>${formatarMoeda(valorPendente)}</strong><br>
+        Aguardando pagamento...
+      `;
+    }
+
+    if(status === "rejected" || status === "cancelled"){
+      clearInterval(verificacaoPix);
+      statusPagamentoEl.innerHTML = `❌ Pagamento não aprovado.`;
+    }
+
+  }catch(e){
+    console.error("Erro ao verificar PIX:", e);
   }
 }
 
