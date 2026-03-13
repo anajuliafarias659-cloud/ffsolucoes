@@ -16,8 +16,8 @@ input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px}
 .produto{display:flex;justify-content:space-between;align-items:center;gap:10px}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
-.filtros{display:flex;gap:8px;margin-bottom:16px}
-.filtros button{flex:1;background:#1e293b;color:#fff}
+.filtros{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.filtros button{background:#1e293b;color:#fff}
 .filtros button.ativo{background:#2563eb}
 .bloqueado{opacity:.4;pointer-events:none}
 .acoes{
@@ -49,10 +49,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 
 <input id="busca" placeholder="🔍 Buscar produto">
 
-<div class="filtros">
-  <button id="fBar" class="ativo">🍹 Bar</button>
-  <button id="fCozinha">🍳 Cozinha</button>
-</div>
+<div class="filtros" id="filtrosCategorias"></div>
 
 <h3>Produtos</h3>
 <div id="listaProdutos"></div>
@@ -91,7 +88,8 @@ const mesaId = params.get("mesa");
 let APP_ID = null;
 let pedidoAtual = null;
 let produtosCache = [];
-let destinoSelecionado = "bar";
+let categoriasCache = [];
+let categoriaSelecionada = null;
 let canalPedido = null;
 
 if(!mesaId){
@@ -140,6 +138,7 @@ async function iniciarSistema(){
 
   await carregarMesa();
   await verificarPedidoExistente();
+  await carregarCategorias();
   await carregarProdutos();
 }
 
@@ -214,11 +213,58 @@ async function criarPedidoSeNecessario(){
   return true;
 }
 
+/* ===== CATEGORIAS ===== */
+async function carregarCategorias(){
+  const { data, error } = await supabase
+    .from("categorias")
+    .select("id, nome")
+    .eq("app_id", APP_ID)
+    .order("nome");
+
+  if(error){
+    console.error("Erro ao carregar categorias:", error);
+    return;
+  }
+
+  categoriasCache = data || [];
+
+  if(categoriasCache.length > 0 && !categoriaSelecionada){
+    categoriaSelecionada = categoriasCache[0].id;
+  }
+
+  renderizarBotoesCategorias();
+}
+
+function renderizarBotoesCategorias(){
+  const div = document.getElementById("filtrosCategorias");
+  div.innerHTML = "";
+
+  if(categoriasCache.length === 0){
+    div.innerHTML = `<div class="msg-vazio">Nenhuma categoria cadastrada</div>`;
+    return;
+  }
+
+  categoriasCache.forEach(cat => {
+    const ativo = categoriaSelecionada === cat.id ? "ativo" : "";
+    div.innerHTML += `
+      <button class="${ativo}" onclick="selecionarCategoria('${cat.id}')">
+        ${cat.nome}
+      </button>
+    `;
+  });
+}
+
+window.selecionarCategoria = function(categoriaId){
+  categoriaSelecionada = categoriaId;
+  renderizarBotoesCategorias();
+  aplicarFiltros();
+};
+
 /* ===== PRODUTOS ===== */
 async function carregarProdutos(){
   const { data, error } = await supabase
     .from("produtos")
-    .select("id,nome,preco,destino")
+    .select("id,nome,preco,categoria_id,categorias(nome)")
     .eq("app_id", APP_ID)
     .eq("ativo", true)
     .order("nome");
@@ -234,19 +280,12 @@ async function carregarProdutos(){
   aplicarFiltros();
 }
 
-function atualizarBotoesFiltro(){
-  document.getElementById("fBar").classList.toggle("ativo", destinoSelecionado === "bar");
-  document.getElementById("fCozinha").classList.toggle("ativo", destinoSelecionado === "cozinha");
-}
-
 function aplicarFiltros(){
-  atualizarBotoesFiltro();
-
   const texto = document.getElementById("busca").value?.toLowerCase() || "";
 
   const lista = produtosCache.filter(p =>
     (p.nome || "").toLowerCase().includes(texto) &&
-    p.destino === destinoSelecionado
+    (!categoriaSelecionada || p.categoria_id === categoriaSelecionada)
   );
 
   const div = document.getElementById("listaProdutos");
@@ -260,7 +299,11 @@ function aplicarFiltros(){
   lista.forEach(p => {
     div.innerHTML += `
       <div class="produto">
-        <span>${p.nome} - R$ ${Number(p.preco || 0).toFixed(2)}</span>
+        <span>
+          ${p.nome} - R$ ${Number(p.preco || 0).toFixed(2)}
+          <br>
+          <small style="opacity:.7">${p.categorias?.nome || ""}</small>
+        </span>
         <button data-id="${p.id}">➕</button>
       </div>
     `;
@@ -279,6 +322,8 @@ async function addProduto(produtoId){
   const produto = produtosCache.find(p => p.id === produtoId);
   if(!produto) return;
 
+  const categoria = categoriasCache.find(c => c.id === produto.categoria_id);
+
   const { error } = await supabase.from("pedido_itens").insert({
     app_id: APP_ID,
     pedido_id: pedidoAtual.id,
@@ -286,8 +331,9 @@ async function addProduto(produtoId){
     nome_produto: produto.nome,
     preco: produto.preco,
     quantidade: 1,
-    destino: produto.destino,
-    status: "novo"
+    categoria_id: produto.categoria_id,
+    categoria_nome: categoria?.nome || null,
+    status:"novo"
   });
 
   if(error){
@@ -327,6 +373,7 @@ async function carregarPedido(){
     div.innerHTML += `
       <div class="item">
         ${i.nome_produto} x ${i.quantidade}
+        ${i.categoria_nome ? `<br><small style="opacity:.7">${i.categoria_nome}</small>` : ""}
       </div>
     `;
   });
@@ -448,14 +495,6 @@ function ativarRealtimeNotificacao(){
 
 /* EVENTOS */
 document.getElementById("busca").oninput = aplicarFiltros;
-document.getElementById("fBar").onclick = () => {
-  destinoSelecionado = "bar";
-  aplicarFiltros();
-};
-document.getElementById("fCozinha").onclick = () => {
-  destinoSelecionado = "cozinha";
-  aplicarFiltros();
-};
 
 document.addEventListener("DOMContentLoaded", iniciarSistema);
 </script>
