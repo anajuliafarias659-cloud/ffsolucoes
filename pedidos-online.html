@@ -139,6 +139,38 @@ select,input{
   font-size:12px;
 }
 
+.novos-itens-box{
+  margin-top:10px;
+  margin-bottom:10px;
+  padding:10px;
+  background:#3f2f00;
+  border:1px solid #facc15;
+  border-radius:12px;
+}
+
+.novos-itens-titulo{
+  font-weight:bold;
+  color:#fde68a;
+  margin-bottom:8px;
+  font-size:12px;
+}
+
+.itens-antigos-box{
+  margin-top:10px;
+  margin-bottom:10px;
+  padding:10px;
+  background:#111827;
+  border:1px solid #334155;
+  border-radius:12px;
+}
+
+.itens-antigos-titulo{
+  font-weight:bold;
+  color:#cbd5e1;
+  margin-bottom:8px;
+  font-size:12px;
+}
+
 .tag-setor{
   display:inline-block;
   padding:4px 8px;
@@ -213,6 +245,8 @@ button{
 .btn-imprimir-bar{ background:#7c3aed; color:#fff; }
 .btn-imprimir-cozinha{ background:#dc2626; color:#fff; }
 .btn-imprimir-geral{ background:#f59e0b; color:#111827; }
+.btn-imprimir-novos{ background:#fde047; color:#111827; }
+.btn-marcar-novos{ background:#eab308; color:#111827; }
 
 .linha-botoes{
   display:grid;
@@ -491,23 +525,31 @@ function setorItem(item){
 function normalizarItensPedido(pedido, itensPedidoItens){
   if (Array.isArray(itensPedidoItens) && itensPedidoItens.length) {
     return itensPedidoItens.map(i => ({
+      id: i.id || "",
       nome: i.nome || i.nome_produto || i.produto_nome || i.descricao || i.titulo || "Item",
       qtd: Number(i.qtd || i.quantidade || 0),
       cor: i.cor || i.variacao || i.sabor || "",
       observacao: i.observacao || i.obs || i.detalhes || "",
       setor: i.setor || i.categoria || i.local_preparo || "",
-      preco: Number(i.preco || 0)
+      preco: Number(i.preco || 0),
+      impresso: i.impresso === true,
+      pedido_id: i.pedido_id || pedido.id || "",
+      created_at: i.created_at || null
     }));
   }
 
   if (Array.isArray(pedido.itens) && pedido.itens.length) {
     return pedido.itens.map(i => ({
+      id: i.id || "",
       nome: i.nome || i.nome_produto || i.produto_nome || i.descricao || i.titulo || "Item",
       qtd: Number(i.qtd || i.quantidade || 0),
       cor: i.cor || i.variacao || i.sabor || "",
       observacao: i.observacao || i.obs || i.detalhes || "",
       setor: i.setor || i.categoria || i.local_preparo || "",
-      preco: Number(i.preco || 0)
+      preco: Number(i.preco || 0),
+      impresso: i.impresso === true,
+      pedido_id: i.pedido_id || pedido.id || "",
+      created_at: i.created_at || null
     }));
   }
 
@@ -540,6 +582,14 @@ function quantidadeItensPedido(p){
   });
 
   return qtd;
+}
+
+function separarItensMesa(p){
+  const itens = Array.isArray(p.itens_normalizados) ? p.itens_normalizados : [];
+  const novos = itens.filter(i => i.impresso !== true);
+  const antigos = itens.filter(i => i.impresso === true);
+
+  return { novos, antigos };
 }
 
 function agruparItensPorSetor(itens){
@@ -626,6 +676,16 @@ function pedidoTemSetor(p, setor){
   return itens.some(i => setorItem(i) === setor);
 }
 
+function pedidoTemNovosItens(p){
+  const { novos } = separarItensMesa(p);
+  return novos.length > 0;
+}
+
+function pedidoTemNovosItensSetor(p, setor){
+  const { novos } = separarItensMesa(p);
+  return novos.some(i => setorItem(i) === setor);
+}
+
 function renderizarPedidos(){
   listaPedidos.innerHTML = "";
   listaHistorico.innerHTML = "";
@@ -659,7 +719,11 @@ function renderizarPedidos(){
 function montarCardPedido(p, isHistorico){
   const isMesa = pedidoEhMesa(p);
   const itens = Array.isArray(p.itens_normalizados) ? p.itens_normalizados : [];
+  const { novos, antigos } = separarItensMesa(p);
+
   const itensHtml = isMesa ? montarItensDetalhadoMesa(itens) : montarItensSimples(itens);
+  const novosHtml = isMesa ? montarItensDetalhadoMesa(novos) : "";
+  const antigosHtml = isMesa ? montarItensDetalhadoMesa(antigos) : "";
 
   const status = statusEfetivo(p);
   const statusEntrega = statusEntregaBonito(p.status_entrega);
@@ -672,6 +736,11 @@ function montarCardPedido(p, isHistorico){
   const podeImprimirBar = isMesa && pedidoTemSetor(p, "bar");
   const podeImprimirCozinha = isMesa && pedidoTemSetor(p, "cozinha");
   const podeImprimirGeral = isMesa && !podeImprimirBar && !podeImprimirCozinha;
+
+  const temNovos = isMesa && novos.length > 0;
+  const temNovosBar = isMesa && pedidoTemNovosItensSetor(p, "bar");
+  const temNovosCozinha = isMesa && pedidoTemNovosItensSetor(p, "cozinha");
+  const temNovosGeral = isMesa && temNovos && !temNovosBar && !temNovosCozinha;
 
   const origemTexto = isMesa ? "PEDIDO DE MESA" : "PEDIDO VITRINE / DELIVERY";
   const origemClasse = isMesa ? "tag-mesa" : "tag-vitrine";
@@ -693,6 +762,10 @@ function montarCardPedido(p, isHistorico){
         ${!isMesa ? `
           <span class="subtag">Acompanhamento: ${escapeHtml(codigoAcompanhamento)}</span>
         ` : ""}
+
+        ${temNovos ? `
+          <span class="subtag" style="background:#facc15;color:#111827;">NOVO PEDIDO</span>
+        ` : ""}
       </div>
 
       <div class="status ${escapeHtml(status)}">
@@ -707,7 +780,8 @@ function montarCardPedido(p, isHistorico){
       ${isMesa ? `
         <div class="resumo-mesa">
           <strong>Itens:</strong> ${qtdItens}<br>
-          <strong>Total:</strong> ${formatarReal(totalPedido)}
+          <strong>Total:</strong> ${formatarReal(totalPedido)}<br>
+          <strong>Novos itens:</strong> ${novos.length}
         </div>
       ` : ""}
 
@@ -736,8 +810,26 @@ function montarCardPedido(p, isHistorico){
 
       <hr>
 
-      <strong>Itens:</strong><br>
-      ${itensHtml}
+      ${isMesa && temNovos ? `
+        <div class="novos-itens-box">
+          <div class="novos-itens-titulo">🟡 NOVO PEDIDO DA MESA</div>
+          ${novosHtml}
+        </div>
+      ` : ""}
+
+      ${isMesa && antigos.length ? `
+        <div class="itens-antigos-box">
+          <div class="itens-antigos-titulo">📋 JÁ ATENDIDO / PEDIDOS ANTERIORES</div>
+          ${antigosHtml}
+        </div>
+      ` : ""}
+
+      ${!isMesa ? `
+        <strong>Itens:</strong><br>
+        ${itensHtml}
+      ` : `
+        ${!temNovos && !antigos.length ? `<strong>Itens:</strong><br>Sem itens` : ""}
+      `}
 
       <hr>
 
@@ -773,13 +865,19 @@ function montarCardPedido(p, isHistorico){
           ${podeImprimirBar ? `<span class="tag-setor tag-bar">BAR</span>` : ""}
           ${podeImprimirCozinha ? `<span class="tag-setor tag-cozinha">COZINHA</span>` : ""}
           ${podeImprimirGeral ? `<span class="tag-setor">COMANDA</span>` : ""}
+          ${temNovos ? `<br><strong style="color:#fde68a;">Existe novo pedido aguardando atenção</strong>` : ""}
         </div>
       `}
 
       <div class="linha-botoes">
-        ${podeImprimirBar ? `<button class="btn-imprimir-bar" onclick="imprimirComanda('${p.id}','bar')">🖨 Imprimir Bar</button>` : ""}
-        ${podeImprimirCozinha ? `<button class="btn-imprimir-cozinha" onclick="imprimirComanda('${p.id}','cozinha')">🖨 Imprimir Cozinha</button>` : ""}
-        ${podeImprimirGeral ? `<button class="btn-imprimir-geral" onclick="imprimirComanda('${p.id}','geral')">🖨 Imprimir Comanda</button>` : ""}
+        ${temNovosBar ? `<button class="btn-imprimir-novos" onclick="imprimirComanda('${p.id}','bar', true)">🖨 Novos Bar</button>` : ""}
+        ${temNovosCozinha ? `<button class="btn-imprimir-novos" onclick="imprimirComanda('${p.id}','cozinha', true)">🖨 Novos Cozinha</button>` : ""}
+        ${temNovosGeral ? `<button class="btn-imprimir-novos" onclick="imprimirComanda('${p.id}','geral', true)">🖨 Novos Itens</button>` : ""}
+        ${temNovos ? `<button class="btn-marcar-novos" onclick="marcarNovosComoAtendidos('${p.id}')">✔ Marcar novos</button>` : ""}
+
+        ${podeImprimirBar ? `<button class="btn-imprimir-bar" onclick="imprimirComanda('${p.id}','bar', false)">🖨 Imprimir Bar</button>` : ""}
+        ${podeImprimirCozinha ? `<button class="btn-imprimir-cozinha" onclick="imprimirComanda('${p.id}','cozinha', false)">🖨 Imprimir Cozinha</button>` : ""}
+        ${podeImprimirGeral ? `<button class="btn-imprimir-geral" onclick="imprimirComanda('${p.id}','geral', false)">🖨 Imprimir Comanda</button>` : ""}
 
         ${!isHistorico && status === "novo" ? `
           <button class="btn-pago" onclick="marcarPago('${p.id}')">Marcar Pago</button>
@@ -858,7 +956,8 @@ async function carregarPedidos(){
     const { data: itensBanco, error: erroItens } = await supabase
       .from("pedido_itens")
       .select("*")
-      .in("pedido_id", idsPedidos);
+      .in("pedido_id", idsPedidos)
+      .order("created_at", { ascending:true });
 
     if (erroItens) {
       console.error("Erro ao buscar pedido_itens:", erroItens);
@@ -1149,18 +1248,45 @@ window.excluirPedido = async function(id){
   carregarPedidos();
 };
 
-window.imprimirComanda = function(id, setorDesejado){
+window.marcarNovosComoAtendidos = async function(id){
+  const pedido = pedidosCache.find(p => String(p.id) === String(id));
+  if (!pedido) return;
+
+  const { novos } = separarItensMesa(pedido);
+  const idsNovos = novos.map(i => i.id).filter(Boolean);
+
+  if (!idsNovos.length) {
+    alert("Não há novos itens para marcar.");
+    return;
+  }
+
+  const { error } = await supabase
+    .from("pedido_itens")
+    .update({ impresso: true })
+    .in("id", idsNovos);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao marcar novos itens.");
+    return;
+  }
+
+  carregarPedidos();
+};
+
+window.imprimirComanda = async function(id, setorDesejado, somenteNovos = false){
   const pedido = pedidosCache.find(p => String(p.id) === String(id));
   if (!pedido) return alert("Pedido não encontrado.");
 
-  const itens = Array.isArray(pedido.itens_normalizados) ? pedido.itens_normalizados : [];
-  let itensFiltrados = itens;
+  const itensBase = Array.isArray(pedido.itens_normalizados) ? pedido.itens_normalizados : [];
+  const itensNovos = itensBase.filter(i => i.impresso !== true);
+  let itens = somenteNovos ? itensNovos : itensBase;
 
   if (setorDesejado !== "geral") {
-    itensFiltrados = itens.filter(i => setorItem(i) === setorDesejado);
+    itens = itens.filter(i => setorItem(i) === setorDesejado);
   }
 
-  if (!itensFiltrados.length) {
+  if (!itens.length) {
     alert("Esse pedido não possui itens para impressão.");
     return;
   }
@@ -1172,7 +1298,7 @@ window.imprimirComanda = function(id, setorDesejado){
     setorDesejado === "cozinha" ? "COZINHA" :
     "COMANDA";
 
-  const htmlItens = itensFiltrados.map(i => `
+  const htmlItens = itens.map(i => `
     <div style="border-bottom:1px dashed #000;padding:6px 0;">
       <div><strong>${escapeHtml(nomeItem(i))}</strong></div>
       <div>Qtd: ${qtdItem(i)}</div>
@@ -1202,7 +1328,7 @@ window.imprimirComanda = function(id, setorDesejado){
     <body>
       <div class="topo">
         <div class="titulo">COMANDA</div>
-        <div class="setor">${setorTitulo}</div>
+        <div class="setor">${somenteNovos ? "NOVO " : ""}${setorTitulo}</div>
       </div>
 
       <div class="linha"><strong>Cliente:</strong> ${escapeHtml(nomeClientePedido(pedido))}</div>
@@ -1216,7 +1342,7 @@ window.imprimirComanda = function(id, setorDesejado){
       </div>
 
       <div class="bloco">
-        <strong>Total:</strong> ${escapeHtml(formatarReal(calcularTotalPedido(pedido)))}
+        <strong>Total geral da mesa:</strong> ${escapeHtml(formatarReal(calcularTotalPedido(pedido)))}
       </div>
     </body>
     </html>
@@ -1226,10 +1352,27 @@ window.imprimirComanda = function(id, setorDesejado){
   win.document.write(html);
   win.document.close();
 
-  win.onload = function(){
+  win.onload = async function(){
     win.focus();
     win.print();
     setTimeout(() => win.close(), 300);
+
+    if (somenteNovos) {
+      const idsImpressos = itens.map(i => i.id).filter(Boolean);
+      if (idsImpressos.length) {
+        const { error } = await supabase
+          .from("pedido_itens")
+          .update({ impresso: true })
+          .in("id", idsImpressos);
+
+        if (error) {
+          console.error(error);
+          alert("Imprimiu, mas não conseguiu marcar os itens como atendidos.");
+        } else {
+          carregarPedidos();
+        }
+      }
+    }
   };
 };
 
