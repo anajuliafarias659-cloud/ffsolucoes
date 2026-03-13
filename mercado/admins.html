@@ -14,6 +14,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
   display:flex;
   justify-content:space-between;
   align-items:center;
+  gap:10px;
 }
 .container{
   max-width:900px;
@@ -33,11 +34,19 @@ input,select,button{
   border-radius:10px;
   border:none;
 }
+input,select{
+  background:#020617;
+  color:#fff;
+}
 button{
   background:#22c55e;
   color:#000;
   font-weight:bold;
   cursor:pointer;
+}
+button:disabled{
+  opacity:.7;
+  cursor:not-allowed;
 }
 button.danger{
   background:#e53935;
@@ -70,94 +79,225 @@ small{opacity:.7}
   display:flex;
   flex-direction:column;
   gap:6px;
+  min-width:140px;
 }
 a{color:#22c55e;text-decoration:none}
+.info-admin{
+  font-size:13px;
+  opacity:.75;
+}
+@media(max-width:700px){
+  .item{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .actions{
+    width:100%;
+    min-width:unset;
+  }
+}
 </style>
 </head>
 
 <body>
 
 <div class="topo">
-  <h2>🏪 Admin do Mercado</h2>
+  <div>
+    <h2 style="margin:0">🏪 Admin do Mercado</h2>
+    <div class="info-admin" id="infoAdmin">Carregando...</div>
+  </div>
   <button class="danger" onclick="logout()">Sair</button>
 </div>
 
 <div class="container">
 
-<!-- CRIAR USUÁRIO -->
 <div class="card">
   <h3>➕ Criar Usuário do Mercado</h3>
   <input id="nome" placeholder="Nome">
-  <input id="email" placeholder="Email / Usuário">
+  <input id="email" type="email" placeholder="Email / Usuário">
   <input id="senha" type="password" placeholder="Senha">
   <select id="tipo">
     <option value="caixa">Caixa</option>
     <option value="produtos">Produtos / Estoque</option>
     <option value="admin">Admin do Mercado</option>
   </select>
-  <button onclick="criarUsuario()">Criar Usuário</button>
+  <button id="btnCriar" onclick="criarUsuario()">Criar Usuário</button>
 </div>
 
-<!-- LISTA -->
 <div class="card">
   <h3>👥 Usuários do Mercado</h3>
-  <div class="lista" id="listaUsuarios"></div>
+  <div class="lista" id="listaUsuarios">Carregando...</div>
 </div>
 
 </div>
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
 );
 
-/* 🔐 sessão do admin */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || !admin.app_id){
-  window.location.href = "../auth/login.html";
-}
+let APP_ID = null;
+let ADMIN_ID = null;
 
-/* app do mercado */
-const APP_ID = admin.app_id;
-
-/* 🔗 link de ativação (plano B ao QR) */
 const LINK_ATIVACAO =
   "https://anajuliafarias659-cloud.github.io/ffsolucoes/mercado/login-funcionarios.html";
 
-/* criar usuário */
-window.criarUsuario = async ()=>{
-  await supabase.from("usuarios").insert({
-    nome: nome.value,
-    email: email.value,
-    senha: senha.value,
-    tipo: tipo.value,
-    app_id: APP_ID,
-    ativo: true
-  });
+async function validarSessao(){
+  const { data, error } = await supabase.auth.getSession();
 
-  nome.value="";
-  email.value="";
-  senha.value="";
-  carregarUsuarios();
+  if(error || !data.session){
+    window.location.href = "../auth/login.html";
+    return false;
+  }
+
+  const userId = data.session.user.id;
+  ADMIN_ID = userId;
+
+  const { data: usuario, error: erroUsuario } = await supabase
+    .from("usuarios")
+    .select("id, nome, email, tipo, app_id, ativo")
+    .eq("id", userId)
+    .single();
+
+  if(erroUsuario || !usuario){
+    console.error("Erro ao buscar admin:", erroUsuario);
+    alert("Usuário administrador não encontrado.");
+    window.location.href = "../auth/login.html";
+    return false;
+  }
+
+  if(usuario.ativo !== true){
+    alert("Usuário inativo.");
+    await supabase.auth.signOut();
+    window.location.href = "../auth/login.html";
+    return false;
+  }
+
+  APP_ID = usuario.app_id;
+
+  document.getElementById("infoAdmin").innerText =
+    `${usuario.nome || usuario.email} • ID do Negócio: ${APP_ID}`;
+
+  return true;
+}
+
+window.criarUsuario = async () => {
+  const nome = document.getElementById("nome").value.trim();
+  const email = document.getElementById("email").value.trim().toLowerCase();
+  const senha = document.getElementById("senha").value.trim();
+  const tipo = document.getElementById("tipo").value;
+  const btn = document.getElementById("btnCriar");
+
+  if(!nome || !email || !senha || !tipo){
+    alert("Preencha todos os campos.");
+    return;
+  }
+
+  if(!APP_ID){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerText = "Criando...";
+
+  try{
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password: senha
+    });
+
+    if(signUpError){
+      console.error("Erro ao criar no Auth:", signUpError);
+      alert(signUpError.message || "Erro ao criar usuário no Auth.");
+      btn.disabled = false;
+      btn.innerText = "Criar Usuário";
+      return;
+    }
+
+    const authUserId = signUpData?.user?.id;
+
+    if(!authUserId){
+      alert("Usuário não retornou ID no Auth.");
+      btn.disabled = false;
+      btn.innerText = "Criar Usuário";
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from("usuarios")
+      .insert({
+        id: authUserId,
+        nome,
+        email,
+        tipo,
+        app_id: APP_ID,
+        ativo: true
+      });
+
+    if(insertError){
+      console.error("Erro ao salvar na tabela usuarios:", insertError);
+      alert("Usuário criado no Auth, mas falhou ao salvar na tabela usuarios.");
+      btn.disabled = false;
+      btn.innerText = "Criar Usuário";
+      return;
+    }
+
+    document.getElementById("nome").value = "";
+    document.getElementById("email").value = "";
+    document.getElementById("senha").value = "";
+    document.getElementById("tipo").value = "caixa";
+
+    alert("Usuário criado com sucesso.");
+    await carregarUsuarios();
+  }catch(e){
+    console.error(e);
+    alert("Erro inesperado ao criar usuário.");
+  }
+
+  btn.disabled = false;
+  btn.innerText = "Criar Usuário";
 };
 
-/* listar usuários */
 async function carregarUsuarios(){
-  const { data } = await supabase
-    .from("usuarios")
-    .select("*")
-    .eq("app_id", APP_ID);
+  const lista = document.getElementById("listaUsuarios");
+  lista.innerHTML = "Carregando...";
 
-  listaUsuarios.innerHTML="";
-  (data||[]).forEach(u=>{
-    listaUsuarios.innerHTML += `
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("id, nome, email, tipo, ativo")
+    .eq("app_id", APP_ID)
+    .order("nome", { ascending: true });
+
+  if(error){
+    console.error("Erro ao listar usuários:", error);
+    lista.innerHTML = "<p>Erro ao carregar usuários</p>";
+    return;
+  }
+
+  if(!data || data.length === 0){
+    lista.innerHTML = "<p>Nenhum usuário cadastrado</p>";
+    return;
+  }
+
+  lista.innerHTML = "";
+
+  data.forEach(u => {
+    lista.innerHTML += `
       <div class="item">
         <div>
-          <b>${u.nome}</b><br>
-          <small>${u.email} • ${u.tipo}</small>
+          <b>${u.nome || "Sem nome"}</b><br>
+          <small>${u.email || ""} • ${u.tipo || ""} • ${u.ativo ? "Ativo" : "Inativo"}</small>
           <div class="links">
             <small>
               🔗 <a href="${LINK_ATIVACAO}" target="_blank">
@@ -168,36 +308,57 @@ async function carregarUsuarios(){
         </div>
         <div class="actions">
           <button class="sec" onclick="copiarLink()">Copiar link</button>
-          <button class="danger" onclick="desativar('${u.id}')">Desativar</button>
+          ${
+            u.id !== ADMIN_ID
+              ? `<button class="danger" onclick="desativar('${u.id}')">Desativar</button>`
+              : `<button class="danger" disabled>Admin logado</button>`
+          }
         </div>
       </div>
     `;
   });
 }
 
-/* copiar link */
-window.copiarLink = ()=>{
-  navigator.clipboard.writeText(LINK_ATIVACAO);
-  alert("Link de ativação copiado!");
-};
-
-/* desativar */
-window.desativar = async id=>{
-  if(confirm("Desativar usuário?")){
-    await supabase.from("usuarios")
-      .update({ativo:false})
-      .eq("id",id);
-    carregarUsuarios();
+window.copiarLink = async () => {
+  try{
+    await navigator.clipboard.writeText(LINK_ATIVACAO);
+    alert("Link de ativação copiado!");
+  }catch{
+    prompt("Copie o link:", LINK_ATIVACAO);
   }
 };
 
-/* logout */
-window.logout = ()=>{
+window.desativar = async (id) => {
+  if(!id) return;
+
+  if(!confirm("Desativar usuário?")) return;
+
+  const { error } = await supabase
+    .from("usuarios")
+    .update({ ativo: false })
+    .eq("id", id)
+    .eq("app_id", APP_ID);
+
+  if(error){
+    console.error("Erro ao desativar usuário:", error);
+    alert("Erro ao desativar usuário.");
+    return;
+  }
+
+  await carregarUsuarios();
+};
+
+window.logout = async () => {
+  await supabase.auth.signOut();
   localStorage.removeItem("admin_logado");
+  localStorage.removeItem("funcionario_logado");
   window.location.href = "../auth/login.html";
 };
 
-carregarUsuarios();
+const ok = await validarSessao();
+if(ok){
+  await carregarUsuarios();
+}
 </script>
 
 </body>
