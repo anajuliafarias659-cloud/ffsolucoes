@@ -32,6 +32,27 @@ header{
   border-bottom:1px solid var(--border);
   font-size:20px;
   font-weight:600;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
+.btn-voltar{
+  border:none;
+  padding:10px 14px;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:600;
+  background:#1e293b;
+  color:#fff;
+}
+
+.subinfo{
+  font-size:12px;
+  color:var(--muted);
+  width:100%;
 }
 
 .container{
@@ -57,6 +78,7 @@ header{
 .itens div{
   display:flex;
   justify-content:space-between;
+  gap:10px;
   margin-bottom:6px;
 }
 
@@ -69,6 +91,7 @@ header{
   margin-top:12px;
   display:flex;
   gap:8px;
+  flex-wrap:wrap;
 }
 
 button{
@@ -90,12 +113,30 @@ button{
   color:var(--muted);
   margin-top:40px;
 }
+
+.status-badge{
+  display:inline-block;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+  text-transform:uppercase;
+}
+
+.status-novo,.status-aberto{background:rgba(234,179,8,.18);color:#facc15}
+.status-aceito{background:rgba(56,189,248,.18);color:#38bdf8}
+.status-pronto{background:rgba(34,197,94,.18);color:#22c55e}
+.status-cancelado{background:rgba(239,68,68,.18);color:#ef4444}
 </style>
 </head>
 
 <body>
 
-<header>🍳 Cozinha — Pedidos Ativos</header>
+<header>
+  <div>🍳 Cozinha — Pedidos Ativos</div>
+  <button class="btn-voltar" onclick="history.back()">Voltar</button>
+  <div class="subinfo" id="subinfo">Carregando negócio...</div>
+</header>
 
 <div class="container" id="lista"></div>
 
@@ -106,30 +147,45 @@ import { supabase } from "../js/supabase.js";
 
 const lista = document.getElementById("lista");
 const alerta = document.getElementById("alerta");
+const subinfo = document.getElementById("subinfo");
 
 let app_id = null;
+let canalRealtime = null;
 
 /* ===============================
    INICIAR
 ================================= */
 async function iniciar(){
+  const { data, error } = await supabase.auth.getSession();
 
-  const { data:{ session } } = await supabase.auth.getSession();
-
-  if(!session){
-    window.location.href="/auth/login.html";
+  if(error || !data.session){
+    window.location.href = "/auth/login.html";
     return;
   }
 
-  const { data: usuario } = await supabase
+  const { data: usuario, error: erroUsuario } = await supabase
     .from("usuarios")
-    .select("app_id")
-    .eq("id", session.user.id)
+    .select("id, nome, email, app_id")
+    .eq("id", data.session.user.id)
     .single();
+
+  if(erroUsuario || !usuario){
+    console.error("Erro ao buscar usuário:", erroUsuario);
+    alert("Usuário não encontrado.");
+    window.location.href = "/auth/login.html";
+    return;
+  }
 
   app_id = usuario.app_id;
 
-  carregarPedidos();
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  subinfo.innerText = `${usuario.nome || usuario.email} • ID do Negócio: ${app_id}`;
+
+  await carregarPedidos();
   ativarRealtime();
 }
 
@@ -137,7 +193,6 @@ async function iniciar(){
    CARREGAR PEDIDOS
 ================================= */
 async function carregarPedidos(){
-
   const { data, error } = await supabase
     .from("pedidos")
     .select(`
@@ -154,11 +209,12 @@ async function carregarPedidos(){
       )
     `)
     .eq("app_id", app_id)
-    .in("status", ["novo","aberto","aceito"]) /* 🔥 CORREÇÃO AQUI */
-    .order("created_at",{ascending:true});
+    .in("status", ["novo","aberto","aceito"])
+    .order("created_at", { ascending:true });
 
   if(error){
-    console.error(error);
+    console.error("Erro ao carregar pedidos:", error);
+    lista.innerHTML = `<div class="empty">Erro ao carregar pedidos</div>`;
     return;
   }
 
@@ -169,72 +225,69 @@ async function carregarPedidos(){
    RENDER
 ================================= */
 function renderizar(pedidos){
+  lista.innerHTML = "";
+  let encontrou = false;
 
-  lista.innerHTML="";
-  let encontrou=false;
+  pedidos.forEach(p => {
+    const itensCozinha = (p.pedido_itens || []).filter(i => i.destino === "cozinha");
 
-  pedidos.forEach(p=>{
+    if(itensCozinha.length === 0) return;
 
-    const itensCozinha = (p.pedido_itens || [])
-      .filter(i=>i.destino==="cozinha");
+    encontrou = true;
 
-    if(itensCozinha.length===0) return;
-
-    encontrou=true;
-
-    let total=0;
+    let total = 0;
     const numeroMesa = p.mesas?.numero_mesa || "-";
+    const hora = p.created_at
+      ? new Date(p.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+      : "--:--";
 
-    const card=document.createElement("div");
-    card.className="card";
+    const card = document.createElement("div");
+    card.className = "card";
 
-    card.innerHTML=`
+    card.innerHTML = `
       <h3>Mesa ${numeroMesa}</h3>
       <div class="meta">
-        ${new Date(p.created_at).toLocaleTimeString()} · ${p.status}
+        ${hora} · <span class="status-badge status-${p.status}">${p.status}</span>
       </div>
       <div class="itens"></div>
       <div class="total"></div>
       <div class="actions"></div>
     `;
 
-    const divItens=card.querySelector(".itens");
+    const divItens = card.querySelector(".itens");
 
-    itensCozinha.forEach(i=>{
-      total+=Number(i.preco)*Number(i.quantidade);
+    itensCozinha.forEach(i => {
+      const subtotal = Number(i.preco || 0) * Number(i.quantidade || 0);
+      total += subtotal;
 
-      divItens.innerHTML+=`
+      divItens.innerHTML += `
         <div>
           <span>${i.quantidade}x ${i.nome_produto}</span>
-          <span>R$ ${(i.preco*i.quantidade).toFixed(2)}</span>
+          <span>R$ ${subtotal.toFixed(2)}</span>
         </div>
       `;
     });
 
-    card.querySelector(".total").innerText=
-      `Total Cozinha: R$ ${total.toFixed(2)}`;
+    card.querySelector(".total").innerText = `Total Cozinha: R$ ${total.toFixed(2)}`;
 
-    const actions=card.querySelector(".actions");
+    const actions = card.querySelector(".actions");
 
-    if(p.status==="novo" || p.status==="aberto"){
-      actions.innerHTML+=`
-        <button class="preparar"
-          onclick="mudarStatus('${p.id}','aceito')">
+    if(p.status === "novo" || p.status === "aberto"){
+      actions.innerHTML += `
+        <button class="preparar" onclick="mudarStatus('${p.id}','aceito')">
           Preparar
         </button>`;
     }
 
-    if(p.status==="aceito"){
-      actions.innerHTML+=`
-        <button class="entregar"
-          onclick="mudarStatus('${p.id}','pronto')">
+    if(p.status === "aceito"){
+      actions.innerHTML += `
+        <button class="entregar" onclick="mudarStatus('${p.id}','pronto')">
           Pronto
         </button>`;
     }
 
-    actions.innerHTML+=`
-      <button class="cancelar"
-        onclick="mudarStatus('${p.id}','cancelado')">
+    actions.innerHTML += `
+      <button class="cancelar" onclick="mudarStatus('${p.id}','cancelado')">
         Cancelar
       </button>`;
 
@@ -242,42 +295,54 @@ function renderizar(pedidos){
   });
 
   if(!encontrou){
-    lista.innerHTML=`<div class="empty">Nenhum pedido da cozinha</div>`;
+    lista.innerHTML = `<div class="empty">Nenhum pedido da cozinha</div>`;
   }
 }
 
 /* ===============================
    MUDAR STATUS
 ================================= */
-window.mudarStatus=async function(id,status){
-  await supabase
+window.mudarStatus = async function(id, status){
+  const { error } = await supabase
     .from("pedidos")
-    .update({status})
-    .eq("id",id)
-    .eq("app_id",app_id);
+    .update({ status })
+    .eq("id", id)
+    .eq("app_id", app_id);
 
-  carregarPedidos();
+  if(error){
+    console.error("Erro ao mudar status:", error);
+    alert("Erro ao atualizar pedido.");
+    return;
+  }
+
+  await carregarPedidos();
 };
 
 /* ===============================
    REALTIME
 ================================= */
 function ativarRealtime(){
+  if(canalRealtime){
+    supabase.removeChannel(canalRealtime);
+    canalRealtime = null;
+  }
 
-  supabase.channel("pedidos-cozinha")
-    .on("postgres_changes",
-      {event:"INSERT",schema:"public",table:"pedidos"},
-      payload=>{
-        if(payload.new.app_id===app_id){
-          alerta.play();
+  canalRealtime = supabase.channel("pedidos-cozinha-" + app_id)
+    .on(
+      "postgres_changes",
+      { event:"INSERT", schema:"public", table:"pedidos" },
+      payload => {
+        if(payload.new.app_id === app_id){
+          alerta.play().catch(() => {});
           carregarPedidos();
         }
       }
     )
-    .on("postgres_changes",
-      {event:"UPDATE",schema:"public",table:"pedidos"},
-      payload=>{
-        if(payload.new.app_id===app_id){
+    .on(
+      "postgres_changes",
+      { event:"UPDATE", schema:"public", table:"pedidos" },
+      payload => {
+        if(payload.new.app_id === app_id){
           carregarPedidos();
         }
       }
