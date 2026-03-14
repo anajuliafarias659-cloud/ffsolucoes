@@ -11,7 +11,7 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
 .container{max-width:900px;margin:auto;padding:20px}
-input,select{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px;box-sizing:border-box}
+input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px;box-sizing:border-box}
 .produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
@@ -103,9 +103,6 @@ small{opacity:.75;display:block}
 .card-sessao h3{
   margin-top:0;
 }
-#boxCliente{
-  display:none;
-}
 .badge{
   display:inline-block;
   background:#1e293b;
@@ -132,7 +129,6 @@ small{opacity:.75;display:block}
 .linha-historico:last-child{
   border-bottom:none;
 }
-.oculto{display:none}
 </style>
 </head>
 
@@ -143,24 +139,11 @@ small{opacity:.75;display:block}
 <div class="container">
 
   <div class="card-sessao" id="cardSessao">
-    <h3>Identificação do atendimento</h3>
-
-    <select id="tipoAtendimento">
-      <option value="garcom">👨‍🍳 Garçom</option>
-      <option value="cliente">📱 Cliente</option>
-    </select>
-
-    <div id="boxGarcomInfo">
-      <small>Os itens serão lançados no nome do garçom logado.</small>
-    </div>
-
-    <div id="boxCliente">
-      <input id="clienteNome" placeholder="Nome do cliente">
-      <input id="clienteTelefone" placeholder="Celular do cliente">
-    </div>
-
+    <h3>Identificação do cliente</h3>
+    <input id="clienteNome" placeholder="Nome do cliente">
+    <input id="clienteTelefone" placeholder="Celular do cliente">
     <button id="btnIniciarSessao" style="background:#22c55e;color:#000;padding:12px 16px;width:100%">✅ Iniciar atendimento</button>
-    <small id="sessaoAtualInfo" style="margin-top:10px"></small>
+    <small id="sessaoAtualInfo" style="margin-top:10px;display:block"></small>
   </div>
 
   <input id="busca" placeholder="🔍 Buscar produto">
@@ -203,12 +186,13 @@ const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 
 let APP_ID = null;
-let USUARIO_LOGADO = null;
 let pedidoAtual = null;
 let produtosCache = [];
 let categoriasCache = [];
 let categoriaSelecionada = null;
 let canalPedido = null;
+
+let FUNCIONARIO_LOGADO = null;
 
 const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
 let sessaoLocal = null;
@@ -355,20 +339,32 @@ function salvarSessaoLocal(sessao) {
   atualizarSessaoNaTela();
 }
 
+function carregarFuncionarioLogado() {
+  try {
+    FUNCIONARIO_LOGADO = JSON.parse(localStorage.getItem("funcionario_logado") || "null");
+  } catch {
+    FUNCIONARIO_LOGADO = null;
+  }
+}
+
 function atualizarSessaoNaTela() {
   const info = document.getElementById("sessaoAtualInfo");
 
   if (!sessaoLocal) {
-    info.innerHTML = "Nenhuma sessão ativa nesta mesa.";
+    info.innerHTML = FUNCIONARIO_LOGADO?.nome
+      ? `Garçom logado: <strong>${FUNCIONARIO_LOGADO.nome}</strong><br>Nenhuma sessão ativa nesta mesa.`
+      : "Nenhuma sessão ativa nesta mesa.";
     return;
   }
 
-  const origem = sessaoLocal.tipo_atendimento === "garcom" ? "Garçom" : "Cliente";
-  const nome = sessaoLocal.responsavel_nome || "-";
-  const fone = sessaoLocal.cliente_telefone ? ` | ${sessaoLocal.cliente_telefone}` : "";
+  const cliente = sessaoLocal.cliente_nome || "-";
+  const fone = sessaoLocal.cliente_telefone || "-";
+  const garcom = sessaoLocal.garcom_nome || null;
+
   info.innerHTML = `
-    <span class="badge">${origem}</span>
-    <span class="badge">${nome}${fone}</span>
+    <span class="badge">Cliente: ${cliente}</span>
+    <span class="badge">${fone}</span>
+    ${garcom ? `<span class="badge">Garçom: ${garcom}</span>` : ""}
   `;
 }
 
@@ -390,7 +386,7 @@ async function validarSessao() {
 
   const { data: usuario, error: erroUsuario } = await supabase
     .from("usuarios")
-    .select("id, app_id, nome")
+    .select("id, app_id")
     .eq("id", userId)
     .single();
 
@@ -401,12 +397,12 @@ async function validarSessao() {
   }
 
   APP_ID = usuario.app_id;
-  USUARIO_LOGADO = usuario;
   return true;
 }
 
 async function iniciarSistema() {
   carregarSessaoLocal();
+  carregarFuncionarioLogado();
   atualizarSessaoNaTela();
 
   const ok = await validarSessao();
@@ -450,12 +446,16 @@ async function verificarPedidoExistente() {
     if (pedidoAtual.sessao_token) {
       salvarSessaoLocal({
         sessao_token: pedidoAtual.sessao_token,
-        tipo_atendimento: pedidoAtual.tipo_atendimento,
-        responsavel_nome: pedidoAtual.responsavel_nome,
         cliente_nome: pedidoAtual.cliente_nome,
         cliente_telefone: pedidoAtual.cliente_telefone,
+        responsavel_nome: pedidoAtual.responsavel_nome,
+        garcom_nome: pedidoAtual.garcom_nome,
+        funcionario_id: pedidoAtual.funcionario_id,
         sessao_expira_em: pedidoAtual.sessao_expira_em
       });
+
+      document.getElementById("clienteNome").value = pedidoAtual.cliente_nome || "";
+      document.getElementById("clienteTelefone").value = pedidoAtual.cliente_telefone || "";
     }
 
     atualizarBotaoLiberar();
@@ -468,32 +468,21 @@ async function verificarPedidoExistente() {
 }
 
 async function iniciarAtendimentoManual() {
-  const tipo = document.getElementById("tipoAtendimento").value;
+  const clienteNome = document.getElementById("clienteNome").value.trim();
+  const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
 
-  let responsavelNome = "";
-  let clienteNome = null;
-  let clienteTelefone = null;
-
-  if (tipo === "garcom") {
-    responsavelNome = USUARIO_LOGADO?.nome || "Garçom";
-  } else {
-    clienteNome = document.getElementById("clienteNome").value.trim();
-    clienteTelefone = document.getElementById("clienteTelefone").value.trim();
-
-    if (!clienteNome || !clienteTelefone) {
-      alert("Preencha nome e celular do cliente.");
-      return;
-    }
-
-    responsavelNome = clienteNome;
+  if (!clienteNome || !clienteTelefone) {
+    alert("Preencha nome e celular do cliente.");
+    return;
   }
 
   const sessao = {
     sessao_token: gerarToken(),
-    tipo_atendimento: tipo,
-    responsavel_nome: responsavelNome,
     cliente_nome: clienteNome,
     cliente_telefone: clienteTelefone,
+    responsavel_nome: clienteNome,
+    garcom_nome: FUNCIONARIO_LOGADO?.nome || null,
+    funcionario_id: FUNCIONARIO_LOGADO?.id || null,
     sessao_expira_em: adicionarMinutosISO(60)
   };
 
@@ -504,10 +493,11 @@ async function iniciarAtendimentoManual() {
       .from("pedidos")
       .update({
         sessao_token: sessao.sessao_token,
-        tipo_atendimento: sessao.tipo_atendimento,
-        responsavel_nome: sessao.responsavel_nome,
         cliente_nome: sessao.cliente_nome,
         cliente_telefone: sessao.cliente_telefone,
+        responsavel_nome: sessao.responsavel_nome,
+        garcom_nome: sessao.garcom_nome,
+        funcionario_id: sessao.funcionario_id,
         sessao_expira_em: sessao.sessao_expira_em,
         sessao_status: "ativa"
       })
@@ -603,7 +593,8 @@ async function criarPedidoSeNecessario() {
       cliente_nome: sessaoLocal.cliente_nome,
       cliente_telefone: sessaoLocal.cliente_telefone,
       responsavel_nome: sessaoLocal.responsavel_nome,
-      tipo_atendimento: sessaoLocal.tipo_atendimento
+      garcom_nome: sessaoLocal.garcom_nome,
+      funcionario_id: sessaoLocal.funcionario_id
     })
     .select()
     .single();
@@ -749,10 +740,11 @@ async function addProduto(produtoId) {
       preco: Number(produto.preco || 0),
       quantidade: 1,
       status: "novo",
-      responsavel_nome: sessaoLocal.responsavel_nome,
+      responsavel_nome: sessaoLocal.cliente_nome,
       cliente_nome: sessaoLocal.cliente_nome,
       cliente_telefone: sessaoLocal.cliente_telefone,
-      tipo_origem: sessaoLocal.tipo_atendimento,
+      garcom_nome: sessaoLocal.garcom_nome,
+      funcionario_id: sessaoLocal.funcionario_id,
       sessao_token: sessaoLocal.sessao_token
     });
 
@@ -864,9 +856,9 @@ function renderizarHistoricoPorResponsavel(itens) {
   const grupos = {};
 
   itens.forEach(i => {
-    const tipo = i.tipo_origem === "garcom" ? "Garçom" : "Cliente";
-    const nome = i.responsavel_nome || i.cliente_nome || "Sem nome";
-    const chave = `${tipo} - ${nome}`;
+    const cliente = i.cliente_nome || i.responsavel_nome || "Sem nome";
+    const garcom = i.garcom_nome ? ` | Garçom: ${i.garcom_nome}` : "";
+    const chave = `Cliente: ${cliente}${garcom}`;
 
     if (!grupos[chave]) grupos[chave] = [];
     grupos[chave].push(i);
@@ -932,8 +924,8 @@ async function carregarPedido() {
     const bloqueado = pedidoBloqueadoParaEdicao();
     const produtoRel = produtosCache.find(p => String(p.id) === String(i.produto_id)) || null;
     const imgItem = produtoRel ? obterImagemProduto(produtoRel) : "https://via.placeholder.com/80x80?text=Produto";
-    const origemTexto = i.tipo_origem === "garcom" ? "Garçom" : "Cliente";
-    const nomeResponsavel = i.responsavel_nome || i.cliente_nome || "-";
+    const nomeCliente = i.cliente_nome || i.responsavel_nome || "-";
+    const nomeGarcom = i.garcom_nome || pedidoAtual?.garcom_nome || null;
 
     const item = document.createElement("div");
     item.className = "item";
@@ -944,7 +936,8 @@ async function carregarPedido() {
           <strong>${i.nome_produto}</strong>
           <small>Valor unitário: ${formatarMoeda(i.preco)}</small>
           <small>Subtotal: ${formatarMoeda(Number(i.preco || 0) * Number(i.quantidade || 0))}</small>
-          <small>${origemTexto}: ${nomeResponsavel}</small>
+          <small>Cliente: ${nomeCliente}</small>
+          ${nomeGarcom ? `<small>Garçom: ${nomeGarcom}</small>` : ""}
         </div>
       </div>
 
@@ -1103,11 +1096,6 @@ function ativarRealtimeNotificacao() {
     )
     .subscribe();
 }
-
-document.getElementById("tipoAtendimento").onchange = e => {
-  const tipo = e.target.value;
-  document.getElementById("boxCliente").style.display = tipo === "cliente" ? "block" : "none";
-};
 
 document.getElementById("btnIniciarSessao").onclick = iniciarAtendimentoManual;
 document.getElementById("busca").oninput = aplicarFiltros;
