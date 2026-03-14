@@ -5,7 +5,6 @@
   <title>Mesa</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <script type="module" src="../js/auth.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
@@ -819,40 +818,12 @@
       if (subTopo) subTopo.innerText = `Status atual: ${nomeStatus(pedidoAtual.status)}`;
     }
 
-    async function validarSessaoAuth() {
-      const { data, error } = await supabase.auth.getSession();
-
-      if (error || !data.session) {
-        alert("Sessão inválida");
-        location.href = "/auth/login.html";
-        return false;
-      }
-
-      const userId = data.session.user.id;
-
-      const { data: usuario, error: erroUsuario } = await supabase
-        .from("usuarios")
-        .select("id, app_id")
-        .eq("id", userId)
-        .single();
-
-      if (erroUsuario || !usuario) {
-        alert("Usuário não encontrado.");
-        location.href = "/auth/login.html";
-        return false;
-      }
-
-      APP_ID = usuario.app_id;
-      return true;
-    }
-
-    async function validarSessaoMesa() {
+    async function validarSessaoMesaPublica() {
       const { data, error } = await supabase
         .from("sessoes_mesa")
         .select("*")
         .eq("mesa_id", mesaId)
         .eq("token", tokenSessao)
-        .eq("app_id", APP_ID)
         .eq("ativa", true)
         .maybeSingle();
 
@@ -863,11 +834,21 @@
       }
 
       sessaoMesaBanco = data;
+      APP_ID = data.app_id;
+
+      if (!APP_ID) {
+        alert("Sessão da mesa sem vínculo com o bar.");
+        location.href = "mesas.html";
+        return false;
+      }
 
       if (sessaoExpiradaBanco()) {
         await supabase
           .from("sessoes_mesa")
-          .update({ ativa: false, encerrada_em: agoraISO() })
+          .update({
+            ativa: false,
+            encerrada_em: agoraISO()
+          })
           .eq("id", data.id);
 
         alert("Sessão da mesa expirou. Escaneie novamente o QR.");
@@ -879,34 +860,7 @@
       return true;
     }
 
-    async function iniciarSistema() {
-      carregarFuncionarioLogado();
-      atualizarSessaoNaTela();
-
-      const ok = await validarSessaoAuth();
-      if (!ok) return;
-
-      const sessaoOk = await validarSessaoMesa();
-      if (!sessaoOk) return;
-
-      const mesaOk = await carregarMesa();
-      if (!mesaOk) return;
-
-      await carregarProdutos();
-      await sincronizarSessaoComPedidos();
-      ativarRealtimeMesa();
-
-      heartbeat = setInterval(async () => {
-        const tocou = await tocarSessaoMesa();
-        if (!tocou || sessaoExpiradaBanco()) {
-          clearInterval(heartbeat);
-          alert("Sessão da mesa expirou. Escaneie novamente o QR.");
-          location.href = "mesas.html";
-        }
-      }, 60000);
-    }
-
-    async function carregarMesa() {
+    async function carregarMesaPublica() {
       const { data, error } = await supabase
         .from("mesas")
         .select("id, numero_mesa, app_id")
@@ -928,6 +882,30 @@
       mesaAtual = data;
       document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
       return true;
+    }
+
+    async function iniciarSistema() {
+      carregarFuncionarioLogado();
+      atualizarSessaoNaTela();
+
+      const sessaoOk = await validarSessaoMesaPublica();
+      if (!sessaoOk) return;
+
+      const mesaOk = await carregarMesaPublica();
+      if (!mesaOk) return;
+
+      await carregarProdutos();
+      await sincronizarSessaoComPedidos();
+      ativarRealtimeMesa();
+
+      heartbeat = setInterval(async () => {
+        const tocou = await tocarSessaoMesa();
+        if (!tocou || sessaoExpiradaBanco()) {
+          clearInterval(heartbeat);
+          alert("Sessão da mesa expirou. Escaneie novamente o QR.");
+          location.href = "mesas.html";
+        }
+      }, 60000);
     }
 
     async function sincronizarSessaoComPedidos() {
