@@ -239,9 +239,28 @@ function podeLiberarMesa(status) {
   return status === "pago" || status === "finalizado" || status === "cancelado";
 }
 
+/* AGORA SÓ PODE EDITAR SE O PEDIDO ESTIVER EM ABERTO */
+function pedidoPodeSerEditado() {
+  if (!pedidoAtual) return true;
+  return pedidoAtual.status === "aberto";
+}
+
 function pedidoBloqueadoParaEdicao() {
-  if (!pedidoAtual) return false;
-  return ["pago", "finalizado", "cancelado"].includes(pedidoAtual.status);
+  return !pedidoPodeSerEditado();
+}
+
+function mensagemPedidoTravado() {
+  if (!pedidoAtual) return "Pedido não encontrado.";
+  const status = pedidoAtual.status;
+
+  if (status === "novo") return "O pedido já foi enviado ao bar e não pode mais ser alterado.";
+  if (status === "aceito") return "O bar já aceitou o pedido. Não é mais possível alterar.";
+  if (status === "pronto") return "O pedido já está pronto. Não é mais possível alterar.";
+  if (status === "conta_solicitada") return "A conta já foi solicitada. Não é mais possível alterar.";
+  if (status === "pago") return "O pedido já foi pago.";
+  if (status === "finalizado") return "O pedido já foi finalizado.";
+  if (status === "cancelado") return "O pedido foi cancelado.";
+  return "Não é possível alterar este pedido.";
 }
 
 function limparTelaPedido() {
@@ -281,10 +300,14 @@ function atualizarInfoStatus() {
     ? `<br><small>Sessão expira em: ${new Date(pedidoAtual.sessao_expira_em).toLocaleString("pt-BR")}</small>`
     : "";
 
+  let avisoEdicao = pedidoPodeSerEditado()
+    ? `<br><small>Você ainda pode alterar os itens deste pedido antes de enviar.</small>`
+    : `<br><small>Itens travados. Este pedido não pode mais ser alterado pela mesa.</small>`;
+
   if (podeLiberarMesa(pedidoAtual.status)) {
-    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa já pode ser liberada.</small>${expiraInfo}`;
+    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa já pode ser liberada.</small>${avisoEdicao}${expiraInfo}`;
   } else {
-    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa só pode ser liberada após pagamento, cancelamento ou finalização.</small>${expiraInfo}`;
+    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa só pode ser liberada após pagamento, cancelamento ou finalização.</small>${avisoEdicao}${expiraInfo}`;
   }
 }
 
@@ -574,7 +597,13 @@ async function criarPedidoSeNecessario() {
   const sessaoOk = await validarSessaoPedido();
   if (!sessaoOk) return false;
 
-  if (pedidoAtual && !podeLiberarMesa(pedidoAtual.status)) return true;
+  if (pedidoAtual && !podeLiberarMesa(pedidoAtual.status)) {
+    if (!pedidoPodeSerEditado()) {
+      alert(mensagemPedidoTravado());
+      return false;
+    }
+    return true;
+  }
 
   if (pedidoAtual && podeLiberarMesa(pedidoAtual.status)) {
     pedidoAtual = null;
@@ -696,6 +725,7 @@ function aplicarFiltros() {
 
   lista.forEach(p => {
     const imgPrincipal = obterImagemProduto(p);
+    const podeAdicionar = !pedidoAtual || pedidoPodeSerEditado() || podeLiberarMesa(pedidoAtual.status);
 
     const card = document.createElement("div");
     card.className = "produto";
@@ -708,7 +738,7 @@ function aplicarFiltros() {
           <small>${p.categoria_exibicao}</small>
         </div>
       </div>
-      <button data-id="${p.id}">➕</button>
+      <button data-id="${p.id}" ${!podeAdicionar ? "disabled" : ""}>➕</button>
     `;
     card.querySelector("button").onclick = () => addProduto(p.id);
     div.appendChild(card);
@@ -721,6 +751,11 @@ async function addProduto(produtoId) {
 
   const sessaoOk = await validarSessaoPedido();
   if (!sessaoOk) return;
+
+  if (!pedidoPodeSerEditado()) {
+    alert(mensagemPedidoTravado());
+    return;
+  }
 
   const produto = produtosCache.find(p => String(p.id) === String(produtoId));
   if (!produto) return;
@@ -760,7 +795,7 @@ async function addProduto(produtoId) {
 
 async function aumentarItem(item) {
   if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
-    alert("Não é possível alterar este pedido.");
+    alert(mensagemPedidoTravado());
     return;
   }
 
@@ -787,7 +822,7 @@ async function aumentarItem(item) {
 
 async function diminuirItem(item) {
   if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
-    alert("Não é possível alterar este pedido.");
+    alert(mensagemPedidoTravado());
     return;
   }
 
@@ -821,7 +856,7 @@ async function diminuirItem(item) {
 
 async function removerItem(itemId) {
   if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
-    alert("Não é possível remover item deste pedido.");
+    alert(mensagemPedidoTravado());
     return;
   }
 
@@ -890,11 +925,13 @@ function renderizarHistoricoPorResponsavel(itens) {
 async function carregarPedido() {
   if (!pedidoAtual) {
     limparTelaPedido();
+    aplicarFiltros();
     return;
   }
 
   if (podeLiberarMesa(pedidoAtual.status)) {
     encerrarPedidoNaTela();
+    aplicarFiltros();
     return;
   }
 
@@ -959,6 +996,8 @@ async function carregarPedido() {
 
   renderizarHistoricoPorResponsavel(itens);
   document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(total)}`;
+  atualizarInfoStatus();
+  aplicarFiltros();
 }
 
 document.getElementById("btnEnviar").onclick = async () => {
@@ -972,11 +1011,34 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
+  if (!pedidoPodeSerEditado()) {
+    alert(mensagemPedidoTravado());
+    return;
+  }
+
+  const { data: itens, error: erroItens } = await supabase
+    .from("pedido_itens")
+    .select("id")
+    .eq("pedido_id", pedidoAtual.id)
+    .limit(1);
+
+  if (erroItens) {
+    console.error(erroItens);
+    alert("Erro ao validar itens do pedido.");
+    return;
+  }
+
+  if (!itens || itens.length === 0) {
+    alert("Adicione pelo menos um item antes de enviar.");
+    return;
+  }
+
   const { error } = await supabase
     .from("pedidos")
     .update({ status: "novo" })
     .eq("id", pedidoAtual.id)
-    .eq("app_id", APP_ID);
+    .eq("app_id", APP_ID)
+    .eq("status", "aberto");
 
   if (error) {
     console.error(error);
@@ -987,6 +1049,8 @@ document.getElementById("btnEnviar").onclick = async () => {
   pedidoAtual.status = "novo";
   atualizarBotaoLiberar();
   atualizarInfoStatus();
+  aplicarFiltros();
+  await carregarPedido();
   alert("Pedido enviado!");
 };
 
@@ -998,6 +1062,11 @@ document.getElementById("btnConta").onclick = async () => {
 
   if (podeLiberarMesa(pedidoAtual.status)) {
     alert("Esse pedido já foi encerrado.");
+    return;
+  }
+
+  if (pedidoAtual.status === "aberto") {
+    alert("Envie o pedido antes de solicitar a conta.");
     return;
   }
 
@@ -1016,6 +1085,8 @@ document.getElementById("btnConta").onclick = async () => {
   pedidoAtual.status = "conta_solicitada";
   atualizarBotaoLiberar();
   atualizarInfoStatus();
+  aplicarFiltros();
+  await carregarPedido();
   alert("Conta solicitada!");
 };
 
@@ -1077,15 +1148,18 @@ function ativarRealtimeNotificacao() {
         if (status === "cancelado") {
           alert("❌ Pedido cancelado!");
           encerrarPedidoNaTela();
+          aplicarFiltros();
           return;
         }
         if (status === "pago") {
           alert("💰 Pedido pago! Sessão encerrada e mesa livre.");
           encerrarPedidoNaTela();
+          aplicarFiltros();
           return;
         }
         if (status === "finalizado") {
           encerrarPedidoNaTela();
+          aplicarFiltros();
           return;
         }
 
