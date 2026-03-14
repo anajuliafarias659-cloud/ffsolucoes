@@ -18,14 +18,14 @@ body{
   justify-content:center;
   align-items:center;
   min-height:100vh;
+  padding:20px;
 }
 .card{
   background:#0f172a;
   padding:30px;
   border-radius:18px;
   text-align:center;
-  width:min(92vw,420px);
-  box-shadow:0 10px 30px rgba(0,0,0,.35);
+  width:min(95vw,520px);
 }
 #qrcode{
   margin:20px auto;
@@ -43,25 +43,35 @@ button{
   color:#fff;
   cursor:pointer;
   font-weight:bold;
+  margin:6px;
 }
 .info{
   font-size:13px;
   color:#cbd5e1;
-  margin-top:12px;
+  margin-top:14px;
   line-height:1.5;
+  text-align:left;
+  background:#020617;
+  border-radius:12px;
+  padding:14px;
   word-break:break-word;
 }
+.ok{color:#22c55e}
 .erro{
+  color:#fca5a5;
   background:#7f1d1d;
-  color:#fff;
-  padding:10px 12px;
   border-radius:10px;
-  margin-top:12px;
-  font-size:14px;
+  padding:10px 12px;
+  margin-top:10px;
 }
-.loading{
-  color:#94a3b8;
-  font-size:14px;
+.loading{color:#94a3b8}
+.url-box{
+  margin-top:12px;
+  padding:10px;
+  border-radius:10px;
+  background:#111827;
+  font-size:12px;
+  word-break:break-all;
 }
 </style>
 </head>
@@ -69,10 +79,16 @@ button{
 <body>
 
 <div class="card">
-  <h2 id="titulo">Mesa</h2>
-  <div id="qrcode"><div class="loading">Gerando QR...</div></div>
-  <button onclick="window.print()">🖨️ Imprimir</button>
-  <div class="info" id="infoQr"></div>
+  <h2 id="titulo">Gerando QR...</h2>
+  <div id="qrcode"><div class="loading">Aguarde...</div></div>
+
+  <div>
+    <button onclick="window.print()">🖨️ Imprimir</button>
+    <button id="btnAbrir" style="display:none">🔗 Abrir link</button>
+  </div>
+
+  <div class="url-box" id="urlFinalBox" style="display:none"></div>
+  <div class="info" id="logBox"></div>
   <div id="erroBox"></div>
 </div>
 
@@ -82,20 +98,18 @@ const supabase = window.supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= CONTEXTO ================= */
 const params = new URLSearchParams(location.search);
 const mesaId = (params.get("mesa") || "").trim();
-
 const admin = JSON.parse(localStorage.getItem("admin_logado") || "null");
 
-if (!mesaId || !admin?.app_id) {
-  mostrarErro("Dados inválidos para gerar QR da mesa.");
-  throw new Error("Mesa ou app_id ausente");
+let URL_FINAL = "";
+
+function log(msg, ok = true){
+  const box = document.getElementById("logBox");
+  box.innerHTML += `<div class="${ok ? 'ok' : ''}">${msg}</div>`;
 }
 
-document.getElementById("titulo").innerText = "Gerando QR da mesa...";
-
-function mostrarErro(msg){
+function erro(msg){
   document.getElementById("erroBox").innerHTML = `<div class="erro">${msg}</div>`;
 }
 
@@ -114,7 +128,19 @@ function gerarTokenSeguro(){
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+function gerarQRCode(url){
+  const box = document.getElementById("qrcode");
+  box.innerHTML = "";
+  new QRCode(box, {
+    text: url,
+    width: 220,
+    height: 220,
+    correctLevel: QRCode.CorrectLevel.H
+  });
+}
+
 async function carregarMesa(){
+  log("1. Validando mesa...");
   const { data, error } = await supabase
     .from("mesas")
     .select("id, numero_mesa, app_id")
@@ -123,14 +149,16 @@ async function carregarMesa(){
     .maybeSingle();
 
   if (error || !data) {
-    console.error(error);
+    console.error("Erro mesa:", error);
     throw new Error("Mesa não encontrada para este bar.");
   }
 
+  log(`Mesa encontrada: ${data.numero_mesa}`);
   return data;
 }
 
-async function buscarSessaoAtivaDaMesa(){
+async function buscarSessaoAtiva(){
+  log("2. Buscando sessão ativa...");
   const { data, error } = await supabase
     .from("sessoes_mesa")
     .select("*")
@@ -141,14 +169,21 @@ async function buscarSessaoAtivaDaMesa(){
     .limit(1);
 
   if (error) {
-    console.error(error);
+    console.error("Erro buscar sessão:", error);
     throw new Error("Erro ao buscar sessão ativa da mesa.");
   }
 
-  return data?.[0] || null;
+  if (data?.length) {
+    log("Sessão ativa encontrada.");
+    return data[0];
+  }
+
+  log("Nenhuma sessão ativa encontrada.");
+  return null;
 }
 
-async function encerrarSessaoAntiga(sessaoId){
+async function encerrarSessao(sessaoId){
+  log("3. Encerrando sessão antiga...");
   await supabase
     .from("sessoes_mesa")
     .update({
@@ -164,6 +199,7 @@ async function encerrarSessaoAntiga(sessaoId){
 }
 
 async function criarNovaSessao(){
+  log("4. Criando nova sessão...");
   const token = gerarTokenSeguro();
 
   const payload = {
@@ -175,6 +211,8 @@ async function criarNovaSessao(){
     expira_em: adicionarMinutosISO(30)
   };
 
+  console.log("Payload sessão:", payload);
+
   const { data, error } = await supabase
     .from("sessoes_mesa")
     .insert(payload)
@@ -182,62 +220,66 @@ async function criarNovaSessao(){
     .single();
 
   if (error || !data) {
-    console.error(error);
-    throw new Error("Erro ao criar sessão da mesa.");
+    console.error("Erro criar sessão:", error);
+    throw new Error("Erro ao criar sessão da mesa. Veja o console.");
   }
 
+  log(`Sessão criada com token: ${data.token}`);
   return data;
 }
 
 async function obterSessaoValida(){
-  const sessaoAtiva = await buscarSessaoAtivaDaMesa();
+  const sessao = await buscarSessaoAtiva();
 
-  if (!sessaoAtiva) {
+  if (!sessao) {
     return await criarNovaSessao();
   }
 
-  const expirou = !sessaoAtiva.expira_em || new Date(sessaoAtiva.expira_em).getTime() < Date.now();
+  const expirou = !sessao.expira_em || new Date(sessao.expira_em).getTime() < Date.now();
 
   if (expirou) {
-    await encerrarSessaoAntiga(sessaoAtiva.id);
+    log("Sessão ativa estava expirada.");
+    await encerrarSessao(sessao.id);
     return await criarNovaSessao();
   }
 
-  return sessaoAtiva;
-}
-
-function gerarQRCode(url){
-  const box = document.getElementById("qrcode");
-  box.innerHTML = "";
-
-  new QRCode(box, {
-    text: url,
-    width: 220,
-    height: 220,
-    correctLevel: QRCode.CorrectLevel.H
-  });
+  log("Sessão ativa reaproveitada.");
+  return sessao;
 }
 
 async function iniciar(){
   try {
+    if (!mesaId) throw new Error("Parâmetro mesa ausente na URL.");
+    if (!admin?.app_id) throw new Error("admin_logado ou app_id ausente no localStorage.");
+
+    log(`Mesa recebida na URL: ${mesaId}`);
+    log(`App do admin: ${admin.app_id}`);
+
     const mesa = await carregarMesa();
     const sessao = await obterSessaoValida();
 
     document.getElementById("titulo").innerText = `Mesa ${mesa.numero_mesa}`;
 
-    const url = `https://www.ffsolucoes.com.br/bar/mesa.html?mesa=${mesa.id}&token=${sessao.token}`;
+    URL_FINAL = `https://www.ffsolucoes.com.br/bar/mesa.html?mesa=${mesa.id}&token=${sessao.token}`;
 
-    gerarQRCode(url);
+    log("5. URL final do QR montada com sucesso.");
+    log(`Token final: ${sessao.token}`);
 
-    document.getElementById("infoQr").innerHTML = `
-      Sessão ativa da mesa criada com sucesso.<br>
-      Token: ${sessao.token}
-    `;
-  } catch (err) {
-    console.error(err);
+    document.getElementById("urlFinalBox").style.display = "block";
+    document.getElementById("urlFinalBox").innerText = URL_FINAL;
+
+    gerarQRCode(URL_FINAL);
+
+    const btnAbrir = document.getElementById("btnAbrir");
+    btnAbrir.style.display = "inline-block";
+    btnAbrir.onclick = () => window.open(URL_FINAL, "_blank");
+
+  } catch (e) {
+    console.error(e);
     document.getElementById("titulo").innerText = "Erro ao gerar QR";
-    document.getElementById("qrcode").innerHTML = `<div class="loading">Falha ao gerar QR</div>`;
-    mostrarErro(err.message || "Erro inesperado.");
+    document.getElementById("qrcode").innerHTML = `<div class="loading">Falha</div>`;
+    erro(e.message || "Erro inesperado.");
+    log("Falhou ao gerar QR.", false);
   }
 }
 
