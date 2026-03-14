@@ -5,7 +5,6 @@
 <title>Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script type="module" src="../js/auth.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
@@ -565,9 +564,9 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
   {
     auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
     }
   }
 );
@@ -589,11 +588,6 @@ let sessaoMesaBanco = null;
 let sessaoLocal = null;
 let heartbeat = null;
 
-if (!mesaId || !tokenSessao) {
-  alert("Sessão da mesa inválida. Escaneie novamente o QR.");
-  location.href = "mesas.html";
-}
-
 window.rolarParaPedido = () => {
   document.getElementById("areaPedidoAtual")?.scrollIntoView({ behavior:"smooth", block:"start" });
 };
@@ -601,6 +595,20 @@ window.rolarParaPedido = () => {
 window.rolarParaProdutos = () => {
   document.getElementById("areaProdutos")?.scrollIntoView({ behavior:"smooth", block:"start" });
 };
+
+function voltarOuFechar() {
+  if (window.history.length > 1) {
+    history.back();
+  } else {
+    location.href = "/";
+  }
+}
+
+if (!mesaId || !tokenSessao) {
+  alert("Sessão da mesa inválida. Escaneie novamente o QR.");
+  voltarOuFechar();
+  throw new Error("Parâmetros mesa/token ausentes");
+}
 
 function formatarMoeda(valor) {
   return Number(valor || 0).toLocaleString("pt-BR", {
@@ -690,7 +698,7 @@ function obterImagemProduto(produto) {
   } catch {
     imgs = [];
   }
-  return imgs[0] || "https://via.placeholder.com/80x80?text=Produto";
+  return imgs[0] || produto.imagem || produto.foto || "https://via.placeholder.com/80x80?text=Produto";
 }
 
 function obterCategoriaProduto(produto) {
@@ -815,38 +823,55 @@ function atualizarInfoStatus() {
   if (subTopo) subTopo.innerText = `Status atual: ${nomeStatus(pedidoAtual.status)}`;
 }
 
-async function validarSessaoAuth() {
-  while(!window.APP_ID){
-    await new Promise(r => setTimeout(r, 100));
-  }
+async function validarSessaoClienteMesa() {
+  const { data, error } = await supabase
+    .from("sessoes_mesa")
+    .select("id, app_id, mesa_id, token, ativa, expira_em, ultimo_acesso_em")
+    .eq("mesa_id", mesaId)
+    .eq("token", tokenSessao)
+    .eq("ativa", true)
+    .maybeSingle();
 
-  const { data, error } = await supabase.auth.getSession();
-
-  if (error || !data.session) {
-    alert("Sessão inválida");
-    location.href = "/auth/login.html";
+  if (error || !data) {
+    alert("Sessão da mesa inválida. Escaneie novamente o QR.");
+    voltarOuFechar();
     return false;
   }
 
-  const userId = data.session.user.id;
-
-  const { data: usuario, error: erroUsuario } = await supabase
-    .from("usuarios")
-    .select("id, app_id")
-    .eq("id", userId)
-    .single();
-
-  if (erroUsuario || !usuario) {
-    alert("Usuário não encontrado.");
-    location.href = "/auth/login.html";
+  if (!data.app_id) {
+    alert("Sessão da mesa sem vínculo com o bar.");
+    voltarOuFechar();
     return false;
   }
 
-  APP_ID = usuario.app_id;
+  APP_ID = data.app_id;
+  sessaoMesaBanco = data;
+
+  if (sessaoExpiradaBanco()) {
+    await supabase
+      .from("sessoes_mesa")
+      .update({
+        ativa: false,
+        encerrada_em: agoraISO()
+      })
+      .eq("id", data.id);
+
+    alert("Sessão da mesa expirou. Escaneie novamente o QR.");
+    voltarOuFechar();
+    return false;
+  }
+
+  await tocarSessaoMesa();
   return true;
 }
 
 async function validarSessaoMesa() {
+  if (!APP_ID) {
+    alert("Bar não identificado para esta mesa.");
+    voltarOuFechar();
+    return false;
+  }
+
   const { data, error } = await supabase
     .from("sessoes_mesa")
     .select("*")
@@ -858,7 +883,7 @@ async function validarSessaoMesa() {
 
   if (error || !data) {
     alert("Sessão da mesa inválida. Escaneie novamente o QR.");
-    location.href = "mesas.html";
+    voltarOuFechar();
     return false;
   }
 
@@ -874,7 +899,7 @@ async function validarSessaoMesa() {
       .eq("id", data.id);
 
     alert("Sessão da mesa expirou. Escaneie novamente o QR.");
-    location.href = "mesas.html";
+    voltarOuFechar();
     return false;
   }
 
@@ -886,8 +911,8 @@ async function iniciarSistema() {
   carregarFuncionarioLogado();
   atualizarSessaoNaTela();
 
-  const ok = await validarSessaoAuth();
-  if (!ok) return;
+  const clienteOk = await validarSessaoClienteMesa();
+  if (!clienteOk) return;
 
   const sessaoOk = await validarSessaoMesa();
   if (!sessaoOk) return;
@@ -904,7 +929,7 @@ async function iniciarSistema() {
     if (!tocou || sessaoExpiradaBanco()) {
       clearInterval(heartbeat);
       alert("Sessão da mesa expirou. Escaneie novamente o QR.");
-      location.href = "mesas.html";
+      voltarOuFechar();
     }
   }, 60000);
 }
@@ -918,13 +943,13 @@ async function carregarMesa() {
 
   if (error || !data) {
     alert("Mesa não encontrada.");
-    location.href = "mesas.html";
+    voltarOuFechar();
     return false;
   }
 
   if (String(data.app_id) !== String(APP_ID)) {
     alert("Essa mesa não pertence a este bar.");
-    location.href = "mesas.html";
+    voltarOuFechar();
     return false;
   }
 
@@ -990,7 +1015,7 @@ async function iniciarAtendimentoManual() {
 
   if (!sessaoMesaBanco || sessaoExpiradaBanco()) {
     alert("Sessão da mesa expirou. Escaneie novamente o QR.");
-    location.href = "mesas.html";
+    voltarOuFechar();
     return;
   }
 
@@ -1019,7 +1044,7 @@ async function validarSessaoPedido() {
 
   if (!sessaoMesaBanco || sessaoExpiradaBanco()) {
     alert("Sessão da mesa expirou. Escaneie novamente o QR.");
-    location.href = "mesas.html";
+    voltarOuFechar();
     return false;
   }
 
@@ -1589,7 +1614,7 @@ document.getElementById("btnLiberar").onclick = async () => {
   if (!pedidosPendentes || pedidosPendentes.length === 0) {
     await encerrarSessaoMesa();
     removerSessaoLocal();
-    location.href = "mesas.html";
+    voltarOuFechar();
     return;
   }
 
@@ -1616,7 +1641,7 @@ document.getElementById("btnLiberar").onclick = async () => {
   await encerrarSessaoMesa();
   removerSessaoLocal();
   mostrarToast("Mesa liberada");
-  location.href = "mesas.html";
+  setTimeout(() => voltarOuFechar(), 700);
 };
 
 async function encerrarSessaoMesa() {
@@ -1692,6 +1717,8 @@ function ativarRealtimeMesa() {
 
 window.addEventListener("beforeunload", () => {
   if (heartbeat) clearInterval(heartbeat);
+  removerCanalPedidoAtual();
+  if (canalMesa) supabase.removeChannel(canalMesa);
 });
 
 document.getElementById("btnIniciarSessao").onclick = iniciarAtendimentoManual;
