@@ -21,6 +21,10 @@ body{
   color:#fff;
 }
 
+.oculto{
+  display:none !important;
+}
+
 .topo{
   background:#0f172a;
   padding:14px 16px;
@@ -41,12 +45,29 @@ body{
 .topo-info{
   display:flex;
   flex-direction:column;
-  gap:4px;
+  gap:6px;
+  min-width:0;
 }
 
 .topo-sub{
   font-size:12px;
   color:#94a3b8;
+  font-weight:normal;
+}
+
+.topo-cliente{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.badge-topo{
+  display:inline-block;
+  background:#1e293b;
+  color:#fff;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
   font-weight:normal;
 }
 
@@ -69,7 +90,7 @@ body{
 .container{
   max-width:900px;
   margin:auto;
-  padding:14px 14px 205px;
+  padding:14px 14px 190px;
 }
 
 input{
@@ -193,7 +214,6 @@ small{
   flex-shrink:0;
 }
 
-/* ITEM DO PEDIDO AJUSTADO PRA CELULAR */
 .item{
   display:flex;
   gap:10px;
@@ -363,7 +383,6 @@ small{
   margin:14px 0;
 }
 
-/* BARRA FIXA */
 .barra-fixa{
   position:fixed;
   left:0;
@@ -437,11 +456,10 @@ small{
   color:#fff;
 }
 
-/* BOTÃO FLUTUANTE */
 .btn-flutuante{
   position:fixed;
   right:16px;
-  bottom:170px;
+  bottom:160px;
   z-index:85;
   width:58px;
   height:58px;
@@ -483,7 +501,7 @@ small{
   position:fixed;
   left:50%;
   transform:translateX(-50%);
-  bottom:155px;
+  bottom:145px;
   z-index:90;
   background:#111827;
   color:#fff;
@@ -498,11 +516,11 @@ small{
 
 @media(min-width:768px){
   .container{
-    padding:20px 20px 195px;
+    padding:20px 20px 190px;
   }
 
   .barra-totais{
-    grid-template-columns:1fr 1fr;
+    grid-template-columns:1fr;
   }
 
   .acoes-fixas{
@@ -510,7 +528,7 @@ small{
   }
 
   .btn-flutuante{
-    bottom:150px;
+    bottom:145px;
   }
 }
 </style>
@@ -522,6 +540,7 @@ small{
   <div class="topo-info">
     <div id="tituloMesa">🍽️ Mesa</div>
     <div class="topo-sub" id="subTopoMesa">Pedido, conta e liberação da mesa</div>
+    <div class="topo-cliente" id="topoClienteInfo"></div>
   </div>
 
   <div class="topo-acoes">
@@ -568,10 +587,6 @@ small{
   <div class="barra-fixa-conteudo">
     <div class="barra-totais">
       <div class="total-fixo">
-        <span>Lote atual</span>
-        <strong id="totalPedidoBarra">R$ 0,00</strong>
-      </div>
-      <div class="total-fixo">
         <span>Total da mesa</span>
         <strong id="totalMesaBarra">R$ 0,00</strong>
       </div>
@@ -611,6 +626,7 @@ let categoriaSelecionada = null;
 let canalMesa = null;
 let canalPedidoAtual = null;
 let FUNCIONARIO_LOGADO = null;
+let mesaAtual = null;
 
 const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
 let sessaoLocal = null;
@@ -703,14 +719,7 @@ function atualizarBotaoFlutuante(qtd) {
 
 function limparTelaPedidoAtual() {
   document.getElementById("pedido").innerHTML = `<div class="msg-vazio">Nenhum item em aberto no momento</div>`;
-  atualizarTotaisLote(0);
   atualizarBotaoFlutuante(0);
-}
-
-function atualizarTotaisLote(total) {
-  const valor = formatarMoeda(total || 0);
-  const el = document.getElementById("totalPedidoBarra");
-  if (el) el.innerText = valor;
 }
 
 function atualizarTotaisMesa(total) {
@@ -771,11 +780,19 @@ function carregarFuncionarioLogado() {
 
 function atualizarSessaoNaTela() {
   const info = document.getElementById("sessaoAtualInfo");
+  const topo = document.getElementById("topoClienteInfo");
+  const cardSessao = document.getElementById("cardSessao");
 
   if (!sessaoLocal) {
     info.innerHTML = FUNCIONARIO_LOGADO?.nome
       ? `Garçom logado: <strong>${FUNCIONARIO_LOGADO.nome}</strong><br>Nenhuma sessão ativa nesta mesa.`
       : "Nenhuma sessão ativa nesta mesa.";
+
+    topo.innerHTML = FUNCIONARIO_LOGADO?.nome
+      ? `<span class="badge-topo">Garçom: ${FUNCIONARIO_LOGADO.nome}</span>`
+      : "";
+
+    cardSessao.classList.remove("oculto");
     return;
   }
 
@@ -788,6 +805,14 @@ function atualizarSessaoNaTela() {
     <span class="badge">${fone}</span>
     ${garcom ? `<span class="badge">Garçom: ${garcom}</span>` : ""}
   `;
+
+  topo.innerHTML = `
+    <span class="badge-topo">Cliente: ${cliente}</span>
+    <span class="badge-topo">${fone}</span>
+    ${garcom ? `<span class="badge-topo">Garçom: ${garcom}</span>` : ""}
+  `;
+
+  cardSessao.classList.add("oculto");
 }
 
 function sessaoExpiradaLocal() {
@@ -871,22 +896,42 @@ async function iniciarSistema() {
   const ok = await validarSessao();
   if (!ok) return;
 
-  await carregarMesa();
+  if (!FUNCIONARIO_LOGADO) {
+    alert("Funcionário não identificado. Faça login novamente.");
+    location.href = "mesas.html";
+    return;
+  }
+
+  const mesaOk = await carregarMesa();
+  if (!mesaOk) return;
+
   await carregarProdutos();
   await sincronizarSessaoComPedidos();
   ativarRealtimeMesa();
 }
 
 async function carregarMesa() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("mesas")
-    .select("numero_mesa")
+    .select("id, numero_mesa, app_id")
     .eq("id", mesaId)
     .maybeSingle();
 
-  if (data) {
-    document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
+  if (error || !data) {
+    alert("Mesa não encontrada.");
+    location.href = "mesas.html";
+    return false;
   }
+
+  if (String(data.app_id) !== String(APP_ID)) {
+    alert("Essa mesa não pertence a este bar.");
+    location.href = "mesas.html";
+    return false;
+  }
+
+  mesaAtual = data;
+  document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
+  return true;
 }
 
 async function sincronizarSessaoComPedidos() {
@@ -945,6 +990,11 @@ async function iniciarAtendimentoManual() {
     return;
   }
 
+  if (!mesaAtual || String(mesaAtual.app_id) !== String(APP_ID)) {
+    alert("Mesa inválida para este bar.");
+    return;
+  }
+
   const sessao = {
     sessao_token: gerarToken(),
     cliente_nome: clienteNome,
@@ -962,6 +1012,16 @@ async function iniciarAtendimentoManual() {
 async function validarSessaoPedido() {
   if (!sessaoLocal) {
     alert("Inicie o atendimento antes de lançar itens.");
+    return false;
+  }
+
+  if (!FUNCIONARIO_LOGADO) {
+    alert("Funcionário não identificado.");
+    return false;
+  }
+
+  if (!mesaAtual || String(mesaAtual.app_id) !== String(APP_ID)) {
+    alert("Mesa inválida para este bar.");
     return false;
   }
 
@@ -1233,7 +1293,6 @@ async function removerItem(itemId) {
 }
 
 async function carregarPedidoAtual() {
-
   if (!pedidoAtual) {
     limparTelaPedidoAtual();
     atualizarInfoStatus();
@@ -1256,16 +1315,11 @@ async function carregarPedidoAtual() {
   const div = document.getElementById("pedido");
   div.innerHTML = "";
 
-  let total = 0;
-
   if (itens.length === 0) {
     div.innerHTML = `<div class="msg-vazio">Nenhum item neste pedido em aberto</div>`;
   }
 
   itens.forEach(i => {
-
-    total += Number(i.preco || 0) * Number(i.quantidade || 0);
-
     const bloqueado = pedidoBloqueadoParaEdicao();
 
     const produtoRel = produtosCache.find(
@@ -1284,14 +1338,12 @@ async function carregarPedidoAtual() {
 
     item.innerHTML = `
       <div class="item-topo">
-
         <img class="thumb-item"
              src="${imgItem}"
              alt="${i.nome_produto}"
              onerror="this.onerror=null;this.src='https://via.placeholder.com/80x80?text=Produto'">
 
         <div class="item-info">
-
           <strong>${i.nome_produto}</strong>
 
           <div class="item-acoes-wrap">
@@ -1308,23 +1360,18 @@ async function carregarPedidoAtual() {
 
           <small>Cliente: ${nomeCliente}</small>
           ${nomeGarcom ? `<small>Garçom: ${nomeGarcom}</small>` : ""}
-
         </div>
-
       </div>
     `;
 
     const botoes = item.querySelectorAll("button");
-
     botoes[0].onclick = () => diminuirItem(i);
     botoes[1].onclick = () => aumentarItem(i);
     botoes[2].onclick = () => removerItem(i.id);
 
     div.appendChild(item);
-
   });
 
-  atualizarTotaisLote(total);
   atualizarBotaoFlutuante(
     itens.reduce((acc, item) => acc + Number(item.quantidade || 0), 0)
   );
