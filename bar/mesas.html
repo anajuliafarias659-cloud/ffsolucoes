@@ -15,7 +15,7 @@
 
 <style>
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.topo{background:#0f172a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 .container{padding:32px;max-width:1200px;margin:auto}
 .btn{border:none;padding:10px 16px;border-radius:10px;font-weight:bold;cursor:pointer}
 .btn-add{background:#22c55e}
@@ -33,6 +33,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .status.conta{background:#fde047;color:#000}
 .qr{background:#020617;border-radius:14px;padding:10px;margin:12px 0;display:flex;justify-content:center}
 .btn-remover{margin-top:8px;width:100%;background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
+.url-mini{margin-top:8px;font-size:11px;color:#94a3b8;word-break:break-all}
 </style>
 </head>
 
@@ -62,10 +63,17 @@ const SEGREDO_REMOVER_MESA = "4321";
 let criandoMesa = false;
 
 function esperarSessao(){
-  const funcionario = JSON.parse(localStorage.getItem("funcionario_logado"));
+  const funcionario = JSON.parse(localStorage.getItem("funcionario_logado") || "null");
+  const admin = JSON.parse(localStorage.getItem("admin_logado") || "null");
 
   if(funcionario && funcionario.app_id){
     app_id = funcionario.app_id;
+    iniciarSistema();
+    return;
+  }
+
+  if(admin && admin.app_id){
+    app_id = admin.app_id;
     iniciarSistema();
     return;
   }
@@ -90,9 +98,111 @@ function iniciarSistema(){
   setInterval(carregarMesas,4000);
 }
 
+function agoraISO(){
+  return new Date().toISOString();
+}
+
+function adicionarMinutosISO(minutos){
+  return new Date(Date.now() + minutos * 60000).toISOString();
+}
+
+function gerarTokenSeguro(){
+  if (window.crypto?.randomUUID) {
+    return crypto.randomUUID().replaceAll("-", "") + Date.now();
+  }
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+async function buscarSessaoAtivaMesa(mesaId){
+  const { data, error } = await sb
+    .from("sessoes_mesa")
+    .select("*")
+    .eq("mesa_id", mesaId)
+    .eq("app_id", app_id)
+    .eq("ativa", true)
+    .order("created_at", { ascending:false })
+    .limit(1);
+
+  if (error) {
+    console.error("Erro ao buscar sessão da mesa:", mesaId, error);
+    return null;
+  }
+
+  return data?.[0] || null;
+}
+
+async function encerrarSessaoMesa(sessaoId){
+  const { error: e1 } = await sb
+    .from("sessoes_mesa")
+    .update({
+      ativa: false,
+      encerrada_em: agoraISO()
+    })
+    .eq("id", sessaoId);
+
+  if (e1) {
+    console.error("Erro ao encerrar sessão:", e1);
+  }
+
+  const { error: e2 } = await sb
+    .from("sessoes_mesa_dispositivos")
+    .delete()
+    .eq("sessao_mesa_id", sessaoId);
+
+  if (e2) {
+    console.error("Erro ao limpar dispositivos da sessão:", e2);
+  }
+}
+
+async function criarSessaoMesa(mesaId){
+  const token = gerarTokenSeguro();
+
+  const payload = {
+    mesa_id: mesaId,
+    app_id: app_id,
+    token: token,
+    ativa: true,
+    ultimo_acesso_em: agoraISO(),
+    expira_em: adicionarMinutosISO(60)
+  };
+
+  const { data, error } = await sb
+    .from("sessoes_mesa")
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error || !data) {
+    console.error("Erro ao criar sessão da mesa:", mesaId, error);
+    return null;
+  }
+
+  return data;
+}
+
+async function obterSessaoValidaMesa(mesaId){
+  const sessao = await buscarSessaoAtivaMesa(mesaId);
+
+  if (!sessao) {
+    return await criarSessaoMesa(mesaId);
+  }
+
+  const expirou = !sessao.expira_em || new Date(sessao.expira_em).getTime() < Date.now();
+
+  if (expirou) {
+    await encerrarSessaoMesa(sessao.id);
+    return await criarSessaoMesa(mesaId);
+  }
+
+  return sessao;
+}
+
+function montarUrlMesa(mesaId, token){
+  return `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(mesaId)}&token=${encodeURIComponent(token)}`;
+}
+
 /* ===== CARREGAR MESAS ===== */
 async function carregarMesas(){
-
   const { data: mesas } = await sb
     .from("mesas")
     .select("id,numero_mesa,ocupada")
@@ -105,7 +215,7 @@ async function carregarMesas(){
     .select("mesa_id,status,created_at")
     .eq("app_id", app_id)
     .not("mesa_id","is",null)
-    .not("status","in",'("pago","finalizado")')
+    .not("status","in",'("pago","finalizado","cancelado","encerrado")')
     .order("created_at",{ ascending:false });
 
   const pedidosPorMesa = {};
@@ -119,13 +229,15 @@ async function carregarMesas(){
   grid.innerHTML="";
 
   for (const m of (mesas || [])) {
-
     const pedido = pedidosPorMesa[m.id];
     let classe = "livre";
     let texto  = "LIVRE";
 
     if(pedido){
-      if(pedido.status === "conta_solicitada"){
+      if(
+        pedido.status === "conta_solicitada" ||
+        pedido.status === "pedir_conta"
+      ){
         classe="conta";
         texto="PEDIU A CONTA";
       }else{
@@ -136,12 +248,14 @@ async function carregarMesas(){
       if(!m.ocupada){
         await sb.from("mesas").update({ ocupada:true }).eq("id",m.id);
       }
-
     } else {
       if(m.ocupada){
         await sb.from("mesas").update({ ocupada:false }).eq("id",m.id);
       }
     }
+
+    const sessao = await obterSessaoValidaMesa(m.id);
+    const urlMesa = sessao ? montarUrlMesa(m.id, sessao.token) : `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(m.id)}`;
 
     const div = document.createElement("div");
     div.className=`card ${classe}`;
@@ -151,20 +265,20 @@ async function carregarMesas(){
       <div class="qr">
         <canvas id="qr-${m.id}"></canvas>
       </div>
+      <div class="url-mini">${urlMesa}</div>
       ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ``}
     `;
 
     div.onclick=()=>{
-      location.href=`mesa.html?mesa=${m.id}`;
+      location.href = urlMesa;
     };
 
     grid.appendChild(div);
 
-    QRCode.toCanvas(
-      document.getElementById(`qr-${m.id}`),
-      location.origin + `/bar/mesa.html?mesa=${m.id}`,
-      { width:120 }
-    );
+    const canvas = document.getElementById(`qr-${m.id}`);
+    if (canvas && sessao) {
+      await QRCode.toCanvas(canvas, urlMesa, { width:120 });
+    }
 
     const btn=div.querySelector(".btn-remover");
     if(btn){
@@ -172,6 +286,12 @@ async function carregarMesas(){
         e.stopPropagation();
         const senha=prompt("Código para remover a mesa:");
         if(senha!==SEGREDO_REMOVER_MESA) return;
+
+        const sessaoAtual = await buscarSessaoAtivaMesa(m.id);
+        if (sessaoAtual?.id) {
+          await encerrarSessaoMesa(sessaoAtual.id);
+        }
+
         await sb.from("mesas").update({ativa:false,ocupada:false}).eq("id",m.id);
         carregarMesas();
       };
@@ -194,12 +314,27 @@ async function adicionarMesa(){
 
   const prox=(data?.numero_mesa||0)+1;
 
-  await sb.from("mesas").insert({
-    app_id,
-    numero_mesa:prox,
-    ativa:true,
-    ocupada:false
-  });
+  const { data: novaMesa, error } = await sb
+    .from("mesas")
+    .insert({
+      app_id,
+      numero_mesa:prox,
+      ativa:true,
+      ocupada:false
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error(error);
+    criandoMesa=false;
+    alert("Erro ao adicionar mesa.");
+    return;
+  }
+
+  if (novaMesa?.id) {
+    await criarSessaoMesa(novaMesa.id);
+  }
 
   criandoMesa=false;
   carregarMesas();
@@ -211,6 +346,7 @@ function vendaAvulsa(){
 
 function logout(){
   localStorage.removeItem("funcionario_logado");
+  localStorage.removeItem("admin_logado");
   location.href="/auth/login.html";
 }
 
