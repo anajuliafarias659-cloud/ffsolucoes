@@ -102,13 +102,11 @@ th{
 .alerta.piscar{
   animation:piscar 1s infinite
 }
-
 .itens-consumo{
   display:flex;
   flex-direction:column;
   gap:6px;
 }
-
 .item-linha{
   background:#111827;
   border:1px solid #1f2937;
@@ -116,7 +114,6 @@ th{
   padding:8px 10px;
   line-height:1.4;
 }
-
 .item-topo{
   display:flex;
   justify-content:space-between;
@@ -124,35 +121,29 @@ th{
   gap:10px;
   flex-wrap:wrap;
 }
-
 .item-nome{
   font-weight:bold;
   color:#fff;
 }
-
 .item-qtd{
   color:#cbd5e1;
   font-size:13px;
 }
-
 .item-subtotal{
   color:#22c55e;
   font-weight:bold;
   font-size:13px;
 }
-
 .item-obs{
   color:#fbbf24;
   font-size:12px;
   margin-top:4px;
 }
-
 .total-mesa{
   font-size:15px;
   font-weight:bold;
   color:#22c55e;
 }
-
 .mesa-tag{
   display:inline-block;
   background:#1e293b;
@@ -160,13 +151,29 @@ th{
   border-radius:999px;
   font-weight:bold;
 }
-
 .vazio{
   color:#94a3b8;
   text-align:center;
   padding:14px 0;
 }
-
+.status-box{
+  margin-top:12px;
+  color:#94a3b8;
+  font-size:13px;
+}
+.toast{
+  position:fixed;
+  right:16px;
+  bottom:16px;
+  background:#f59e0b;
+  color:#111827;
+  padding:14px 16px;
+  border-radius:12px;
+  font-weight:bold;
+  box-shadow:0 8px 30px rgba(0,0,0,.35);
+  z-index:9999;
+  display:none;
+}
 @media(max-width: 768px){
   .topo{
     padding:14px;
@@ -237,6 +244,8 @@ th{
       </div>
     </div>
 
+    <div class="status-box" id="statusRealtime">Status: iniciando...</div>
+
     <br>
     <button onclick="gerarFechamento()">🔄 Atualizar</button>
     <button onclick="fecharCaixa()">📄 Fechar Caixa Hoje (PDF)</button>
@@ -259,73 +268,143 @@ th{
 
 </div>
 
+<div class="toast" id="toastConta">🔔 Nova solicitação de conta</div>
+
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
 let resumoPagamentosGlobal = "";
 let canalRealtime = null;
+let intervaloBackup = null;
+let ultimoSomConta = 0;
 
 async function aguardarSessao(){
   while(!window.APP_ID){
-    await new Promise(r=>setTimeout(r,100));
+    await new Promise(r => setTimeout(r, 100));
   }
 
   const { data: { session } } = await supabase.auth.getSession();
-  if(session){
+
+  if(session?.access_token){
     await supabase.realtime.setAuth(session.access_token);
   }
 
   await verificarContas();
   await gerarFechamento();
   ativarRealtime();
+  iniciarBackupAtualizacao();
 }
+
 aguardarSessao();
 
 window.irPara = p => location.href = p;
-window.scrollContas = () => document.getElementById("boxContas").scrollIntoView({behavior:"smooth"});
+window.scrollContas = () => document.getElementById("boxContas").scrollIntoView({ behavior:"smooth" });
 window.irPagamento = id => location.href = `pagamento.html?pedido=${id}`;
 
 /* =========================
-   REALTIME
+   REALTIME + BACKUP
 ========================= */
+function atualizarStatusRealtime(txt){
+  const el = document.getElementById("statusRealtime");
+  if(el) el.innerText = "Status: " + txt;
+}
+
 function ativarRealtime(){
   if(canalRealtime){
     supabase.removeChannel(canalRealtime);
+    canalRealtime = null;
   }
 
+  atualizarStatusRealtime("conectando realtime...");
+
   canalRealtime = supabase
-    .channel("caixa-realtime")
-    .on("postgres_changes",
+    .channel(`caixa-realtime-${window.APP_ID}`)
+
+    .on(
+      "postgres_changes",
       {
         event: "*",
         schema: "public",
         table: "pedidos"
       },
       async (payload) => {
-        if(payload?.new?.status === "conta_solicitada"){
-          tocarSom();
+        console.log("Realtime pedidos:", payload);
+
+        const novo = payload?.new || {};
+        const antigo = payload?.old || {};
+
+        if(novo.app_id !== window.APP_ID && antigo.app_id !== window.APP_ID){
+          return;
         }
+
+        if(novo.status === "conta_solicitada" && antigo.status !== "conta_solicitada"){
+          tocarSom();
+          mostrarToast("🔔 Nova solicitação de conta");
+        }
+
         await verificarContas();
         await gerarFechamento();
       }
     )
-    .on("postgres_changes",
+
+    .on(
+      "postgres_changes",
       {
         event: "*",
         schema: "public",
         table: "pedido_itens"
       },
       async () => {
+        console.log("Realtime pedido_itens");
         await verificarContas();
         await gerarFechamento();
       }
     )
-    .subscribe();
+
+    .subscribe((status) => {
+      console.log("Status canal caixa:", status);
+
+      if(status === "SUBSCRIBED"){
+        atualizarStatusRealtime("realtime conectado");
+      }else if(status === "CHANNEL_ERROR"){
+        atualizarStatusRealtime("erro no realtime, backup de 5s ativo");
+      }else if(status === "TIMED_OUT"){
+        atualizarStatusRealtime("realtime expirou, backup de 5s ativo");
+      }else if(status === "CLOSED"){
+        atualizarStatusRealtime("realtime fechado, backup de 5s ativo");
+      }else{
+        atualizarStatusRealtime(status);
+      }
+    });
+}
+
+function iniciarBackupAtualizacao(){
+  if(intervaloBackup) clearInterval(intervaloBackup);
+
+  intervaloBackup = setInterval(async () => {
+    await verificarContas();
+    await gerarFechamento();
+  }, 5000);
 }
 
 function tocarSom(){
+  const agora = Date.now();
+  if(agora - ultimoSomConta < 1500) return;
+  ultimoSomConta = agora;
+
   const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
-  audio.play().catch(()=>{});
+  audio.play().catch(() => {});
+}
+
+function mostrarToast(msg){
+  const el = document.getElementById("toastConta");
+  el.innerText = msg;
+  el.style.display = "block";
+
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => {
+    el.style.display = "none";
+  }, 4000);
 }
 
 /* =========================
@@ -381,7 +460,16 @@ async function verificarContas(){
     .eq("app_id", window.APP_ID)
     .eq("status", "conta_solicitada");
 
-  if(erroPedidos || !pedidos || pedidos.length === 0){
+  if(erroPedidos){
+    console.error("Erro ao buscar pedidos:", erroPedidos);
+    btn.style.display = "none";
+    btn.classList.remove("piscar");
+    box.style.display = "none";
+    qtd.innerText = "0";
+    return;
+  }
+
+  if(!pedidos || pedidos.length === 0){
     btn.style.display = "none";
     btn.classList.remove("piscar");
     box.style.display = "none";
@@ -409,6 +497,7 @@ async function verificarContas(){
   if(erroItens){
     console.error("Erro ao buscar itens:", erroItens);
   }
+
   if(erroMesas){
     console.error("Erro ao buscar mesas:", erroMesas);
   }
@@ -462,9 +551,10 @@ async function verificarContas(){
     }
   }
 
-  const mesasFormatadas = Object.values(mapaMesas).sort((a,b)=>{
+  const mesasFormatadas = Object.values(mapaMesas).sort((a,b) => {
     const na = Number(a.numero_mesa);
     const nb = Number(b.numero_mesa);
+
     if(!isNaN(na) && !isNaN(nb)) return na - nb;
     return String(a.numero_mesa).localeCompare(String(b.numero_mesa), "pt-BR");
   });
@@ -535,15 +625,20 @@ async function verificarContas(){
 window.gerarFechamento = async function(){
   const inicio = new Date();
   inicio.setHours(0,0,0,0);
+
   const amanha = new Date(inicio.getTime() + 86400000);
 
-  const { data: pedidos } = await supabase
+  const { data: pedidos, error } = await supabase
     .from("pedidos")
     .select("id, forma_pagamento, created_at")
     .eq("app_id", window.APP_ID)
     .eq("status", "finalizado")
     .gte("created_at", inicio.toISOString())
     .lt("created_at", amanha.toISOString());
+
+  if(error){
+    console.error("Erro ao gerar fechamento:", error);
+  }
 
   if(!pedidos || pedidos.length === 0){
     document.getElementById("totalRecebido").innerText = "R$ 0.00";
@@ -555,13 +650,17 @@ window.gerarFechamento = async function(){
 
   const ids = pedidos.map(p => p.id);
 
-  const { data: itens } = await supabase
+  const { data: itens, error: erroItens } = await supabase
     .from("pedido_itens")
     .select("pedido_id, preco, quantidade")
     .in("pedido_id", ids);
 
+  if(erroItens){
+    console.error("Erro ao buscar itens do fechamento:", erroItens);
+  }
+
   let total = 0;
-  let pagamentos = {};
+  const pagamentos = {};
 
   pedidos.forEach(p => {
     let totalPedido = 0;
@@ -569,7 +668,7 @@ window.gerarFechamento = async function(){
     (itens || [])
       .filter(i => i.pedido_id === p.id)
       .forEach(i => {
-        totalPedido += Number(i.preco) * Number(i.quantidade);
+        totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
       });
 
     total += totalPedido;
@@ -617,6 +716,15 @@ window.fecharCaixa = function(){
 
   doc.save(`fechamento-caixa-${data.replaceAll("/","-")}.pdf`);
 };
+
+window.addEventListener("beforeunload", () => {
+  if(canalRealtime){
+    supabase.removeChannel(canalRealtime);
+  }
+  if(intervaloBackup){
+    clearInterval(intervaloBackup);
+  }
+});
 </script>
 
 </body>
