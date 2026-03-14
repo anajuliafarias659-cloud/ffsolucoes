@@ -740,7 +740,7 @@ button {
     let todosProdutos = [];
     let modoVenda = "whatsapp";
     let numeroWhatsapp = "";
-    let corSelecionada = null;
+    let variacaoSelecionada = null;
     let produtoAtual = null;
     let valorFrete = 0;
     let subtotalCarrinhoAtual = 0;
@@ -752,6 +752,40 @@ button {
         currency: "BRL"
       });
     }
+
+    function obterVariacoesProduto(produto) {
+  try {
+    const variacoes = JSON.parse(produto.variacoes || "[]");
+    return Array.isArray(variacoes) ? variacoes : [];
+  } catch {
+    return [];
+  }
+}
+
+function obterTextoVariacao(v) {
+  const tipo = String(v?.tipo || "").trim();
+  const valor = String(v?.valor || "").trim();
+
+  if (tipo && valor) return `${tipo}: ${valor}`;
+  if (valor) return valor;
+  if (tipo) return tipo;
+
+  return "Variação";
+}
+
+function obterRotuloVariacoes(variacoes) {
+  if (!variacoes.length) return "variação";
+
+  const tipos = [...new Set(
+    variacoes.map(v => String(v?.tipo || "").trim()).filter(Boolean)
+  )];
+
+  if (tipos.length === 1) {
+    return tipos[0].toLowerCase();
+  }
+
+  return "variação";
+}
 function gerarCodigoAcompanhamento() {
   const letras = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let codigo = "PED-";
@@ -1153,37 +1187,38 @@ return;
     }
 
     function adicionarSugestaoDireto(produto) {
-      let variacoes = [];
-      try {
-        variacoes = JSON.parse(produto.variacoes || "[]");
-      } catch {}
+  const variacoes = obterVariacoesProduto(produto);
 
-      let corFinal = "Sem cor";
+  let variacaoFinal = "Padrão";
 
-      if (variacoes.length > 0) {
-        const corDisponivel = variacoes.find((v) => Number(v.estoque) > 0);
+  if (variacoes.length > 0) {
+    const disponivel = variacoes.find((v) => Number(v.estoque) > 0);
 
-        if (!corDisponivel) {
-          alert("Esse produto complementar está sem estoque.");
-          return;
-        }
-
-        corFinal = corDisponivel.cor || "Sem cor";
-      }
-
-      const existente = carrinho.find(
-        (i) => String(i.id) === String(produto.id) && i.cor === corFinal
-      );
-
-      if (existente) {
-        existente.qtd++;
-      } else {
-        carrinho.push({ ...produto, qtd: 1, cor: corFinal });
-      }
-
-      salvarCarrinhoLocal();
-      abrirCarrinho();
+    if (!disponivel) {
+      alert("Esse produto complementar está sem estoque.");
+      return;
     }
+
+    variacaoFinal = String(disponivel.valor || "Padrão");
+  }
+
+  const existente = carrinho.find(
+    (i) => String(i.id) === String(produto.id) && i.variacao === variacaoFinal
+  );
+
+  if (existente) {
+    existente.qtd++;
+  } else {
+    carrinho.push({
+      ...produto,
+      qtd: 1,
+      variacao: variacaoFinal
+    });
+  }
+
+  salvarCarrinhoLocal();
+  abrirCarrinho();
+}
 
     window.adicionarSugestaoDiretoPorId = function (id) {
       const produto = todosProdutos.find((p) => String(p.id) === String(id));
@@ -1440,127 +1475,122 @@ return;
     }
 
     function abrirModal(produto, imgs) {
-      produtoAtual = produto;
-      corSelecionada = null;
+  produtoAtual = produto;
+  variacaoSelecionada = null;
 
-      modalProduto.style.display = "flex";
-      modalNome.innerText = produto.nome;
-      modalPreco.innerText = formatarReal(produto.preco);
-      modalDescricao.innerHTML = produto.descricao || "";
+  modalProduto.style.display = "flex";
+  modalNome.innerText = produto.nome;
+  modalPreco.innerText = formatarReal(produto.preco);
+  modalDescricao.innerHTML = produto.descricao || "";
 
-      let index = 0;
-      modalImg.src = imgs[index] || "";
+  let index = 0;
+  modalImg.src = imgs[index] || "";
 
-      modalDots.innerHTML = imgs
-        .map(
-          (_, i) => `
-            <span
-              style="
-                height:10px;
-                width:10px;
-                margin:4px;
-                background:${i === 0 ? "#0071e3" : "#ccc"};
-                border-radius:50%;
-                display:inline-block;
-                cursor:pointer
-              "
-              onclick="trocarImg(${i})"
-            ></span>
-          `
-        )
-        .join("");
+  modalDots.innerHTML = imgs
+    .map(
+      (_, i) => `
+        <span
+          style="
+            height:10px;
+            width:10px;
+            margin:4px;
+            background:${i === 0 ? "#0071e3" : "#ccc"};
+            border-radius:50%;
+            display:inline-block;
+            cursor:pointer
+          "
+          onclick="trocarImg(${i})"
+        ></span>
+      `
+    )
+    .join("");
 
-      window.trocarImg = function (i) {
-        index = i;
-        modalImg.src = imgs[i];
+  window.trocarImg = function (i) {
+    index = i;
+    modalImg.src = imgs[i];
 
-        document.querySelectorAll("#modalDots span").forEach((d, di) => {
-          d.style.background = di === i ? "#0071e3" : "#ccc";
-        });
-      };
+    document.querySelectorAll("#modalDots span").forEach((d, di) => {
+      d.style.background = di === i ? "#0071e3" : "#ccc";
+    });
+  };
 
-      let variacoes = [];
-      try {
-        variacoes = JSON.parse(produto.variacoes || "[]");
-      } catch {}
+  const variacoes = obterVariacoesProduto(produto);
 
-      if (variacoes.length) {
-        modalDescricao.innerHTML += `
-          <br><strong>Selecione a cor:</strong><br>
-          <div id="coresArea" style="margin-top:10px;"></div>
-        `;
+  if (variacoes.length) {
+    const rotulo = obterRotuloVariacoes(variacoes);
 
-        const coresArea = document.getElementById("coresArea");
+    modalDescricao.innerHTML += `
+      <br><strong>Selecione ${rotulo}:</strong><br>
+      <div id="variacoesArea" style="margin-top:10px;"></div>
+    `;
 
-        variacoes.forEach((v) => {
-          const btn = document.createElement("button");
-          btn.innerText = `${v.cor} (${v.estoque})`;
-          btn.style.margin = "5px";
-          btn.style.padding = "6px 12px";
-          btn.style.borderRadius = "6px";
-          btn.style.border = "1px solid #ccc";
-          btn.style.cursor = "pointer";
+    const variacoesArea = document.getElementById("variacoesArea");
 
-          if (Number(v.estoque) <= 0) {
-            btn.disabled = true;
-            btn.style.opacity = "0.5";
-          }
+    variacoes.forEach((v) => {
+      const btn = document.createElement("button");
+      btn.innerText = `${obterTextoVariacao(v)} (${Number(v.estoque || 0)})`;
+      btn.style.margin = "5px";
+      btn.style.padding = "6px 12px";
+      btn.style.borderRadius = "6px";
+      btn.style.border = "1px solid #ccc";
+      btn.style.cursor = "pointer";
 
-          btn.onclick = () => {
-            corSelecionada = v.cor;
-
-            document.querySelectorAll("#coresArea button").forEach((b) => {
-              b.style.background = "#fff";
-              b.style.color = "#000";
-            });
-
-            btn.style.background = "#0071e3";
-            btn.style.color = "#fff";
-          };
-
-          coresArea.appendChild(btn);
-        });
+      if (Number(v.estoque) <= 0) {
+        btn.disabled = true;
+        btn.style.opacity = "0.5";
       }
 
-      modalAdd.onclick = adicionarCarrinho;
-    }
+      btn.onclick = () => {
+        variacaoSelecionada = String(v.valor || "Padrão");
+
+        document.querySelectorAll("#variacoesArea button").forEach((b) => {
+          b.style.background = "#fff";
+          b.style.color = "#000";
+        });
+
+        btn.style.background = "#0071e3";
+        btn.style.color = "#fff";
+      };
+
+      variacoesArea.appendChild(btn);
+    });
+  }
+
+  modalAdd.onclick = adicionarCarrinho;
+}
 
     window.fecharModal = function () {
       modalProduto.style.display = "none";
     };
 
     function adicionarCarrinho() {
-      let variacoes = [];
-      try {
-        variacoes = JSON.parse(produtoAtual.variacoes || "[]");
-      } catch {}
+  const variacoes = obterVariacoesProduto(produtoAtual);
+  const precisaVariacao = variacoes.length > 0;
 
-      const precisaCor = variacoes.length > 0;
+  if (precisaVariacao && !variacaoSelecionada) {
+    alert("Selecione uma variação.");
+    return;
+  }
 
-      if (precisaCor && !corSelecionada) {
-        alert("Selecione uma cor.");
-        return;
-      }
+  const variacaoFinal = variacaoSelecionada || "Padrão";
 
-      const corFinal = corSelecionada || "Sem cor";
+  const existente = carrinho.find(
+    (i) => i.id === produtoAtual.id && i.variacao === variacaoFinal
+  );
 
-      const existente = carrinho.find(
-        (i) => i.id === produtoAtual.id && i.cor === corFinal
-      );
+  if (existente) {
+    existente.qtd++;
+  } else {
+    carrinho.push({
+      ...produtoAtual,
+      qtd: 1,
+      variacao: variacaoFinal
+    });
+  }
 
-      if (existente) {
-        existente.qtd++;
-      } else {
-        carrinho.push({
-          ...produtoAtual,
-          qtd: 1,
-          cor: corFinal
-        });
-      }
-
-      salvarCarrinhoLocal();
-      fecharModal();
-    }
+  salvarCarrinhoLocal();
+  fecharModal();
+}
 
     function atualizarResumoCarrinho() {
       let subtotal = 0;
@@ -1607,7 +1637,7 @@ return;
 
           return `
             <div style="margin-bottom:12px;border-bottom:1px solid #eee;padding-bottom:8px;">
-              <strong>${i.nome}</strong> (${i.cor})
+              <strong>${i.nome}</strong> (${i.variacao || "Padrão"})
               <br>
               <small>
                 ${
@@ -1735,7 +1765,7 @@ return;
         pedidoId,
         items: itens
           .map((i) => ({
-            title: String(`${i.nome || "Produto"} (${i.cor || "Sem cor"})`).slice(0, 120),
+            title: String(`${i.nome || "Produto"} (${i.variacao || "Padrão"})`).slice(0, 120),
             quantity: Number(i.qtd || 1),
             unit_price: Number(i.preco || 0)
           }))
@@ -1802,13 +1832,15 @@ for (const item of carrinho) {
     variacoes = [];
   }
 
-  const corItem = item.cor || "Sem cor";
-  const idx = variacoes.findIndex((v) => v.cor === corItem);
+  const variacaoItem = item.variacao || "Padrão";
+const idx = variacoes.findIndex((v) => String(v.valor || "Padrão") === variacaoItem);
 
+if (variacoes.length > 0) {
   if (idx === -1 || Number(variacoes[idx].estoque || 0) < Number(item.qtd || 1)) {
-    alert(`Estoque insuficiente para ${item.nome} (${corItem})`);
+    alert(`Estoque insuficiente para ${item.nome} (${variacaoItem})`);
     return;
   }
+}
 
   subtotal += Number(item.preco || 0) * Number(item.qtd || 1);
 }
