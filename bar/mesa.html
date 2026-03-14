@@ -55,7 +55,13 @@ button{
 .total{
   font-size:18px;
   font-weight:bold;
-  margin:16px 0;
+  margin:14px 0 0;
+}
+
+#totalMesa{
+  color:#22c55e;
+  font-size:20px;
+  margin-top:8px;
 }
 
 .filtros{
@@ -86,7 +92,7 @@ button{
   display:grid;
   grid-template-columns:1fr;
   gap:10px;
-  margin-top:12px;
+  margin-top:14px;
 }
 
 .acoes button{
@@ -368,7 +374,8 @@ small{
 
   <div class="historico-bloco" id="historicoPedidosEnviados" style="display:none;"></div>
 
-  <div class="total" id="totalPedido">Total em aberto: R$ 0,00</div>
+  <div class="total" id="totalPedido">Lote atual: R$ 0,00</div>
+  <div class="total" id="totalMesa">Total da mesa: R$ 0,00</div>
 
   <div class="acoes">
     <button id="btnEnviar">📨 Enviar pedido atual</button>
@@ -460,7 +467,7 @@ function pedidoBloqueadoParaEdicao() {
 
 function limparTelaPedidoAtual() {
   document.getElementById("pedido").innerHTML = `<div class="msg-vazio">Nenhum item em aberto no momento</div>`;
-  document.getElementById("totalPedido").innerText = `Total em aberto: ${formatarMoeda(0)}`;
+  document.getElementById("totalPedido").innerText = `Lote atual: ${formatarMoeda(0)}`;
 }
 
 function obterImagemProduto(produto) {
@@ -557,7 +564,7 @@ function atualizarInfoStatus() {
 
   if (!pedidoAtual) {
     div.style.display = "block";
-    div.innerHTML = `Sem pedido em aberto no momento.<br><small>Você pode adicionar novos itens para abrir um novo pedido.</small>`;
+    div.innerHTML = `Sem pedido em aberto no momento.<br><small>Ao tocar em um produto, um novo lote será criado.</small>`;
     return;
   }
 
@@ -642,7 +649,6 @@ async function sincronizarSessaoComPedidos() {
   }
 
   const pedidos = data || [];
-
   const pedidoAberto = pedidos.find(p => p.status === "aberto") || null;
   const pedidoMaisRecente = pedidos[0] || null;
 
@@ -671,6 +677,7 @@ async function sincronizarSessaoComPedidos() {
 
   await carregarPedidoAtual();
   await carregarHistoricoPedidosEnviados();
+  await calcularTotalGeralMesa();
   aplicarFiltros();
 }
 
@@ -889,6 +896,7 @@ async function addProduto(produtoId) {
 
   await carregarPedidoAtual();
   await carregarHistoricoPedidosEnviados();
+  await calcularTotalGeralMesa();
 }
 
 async function aumentarItem(item) {
@@ -912,6 +920,7 @@ async function aumentarItem(item) {
   }
 
   await carregarPedidoAtual();
+  await calcularTotalGeralMesa();
 }
 
 async function diminuirItem(item) {
@@ -942,6 +951,7 @@ async function diminuirItem(item) {
   }
 
   await carregarPedidoAtual();
+  await calcularTotalGeralMesa();
 }
 
 async function removerItem(itemId) {
@@ -963,12 +973,14 @@ async function removerItem(itemId) {
   }
 
   await carregarPedidoAtual();
+  await calcularTotalGeralMesa();
 }
 
 async function carregarPedidoAtual() {
   if (!pedidoAtual) {
     limparTelaPedidoAtual();
     atualizarInfoStatus();
+    await calcularTotalGeralMesa();
     return;
   }
 
@@ -1035,8 +1047,9 @@ async function carregarPedidoAtual() {
     div.appendChild(item);
   });
 
-  document.getElementById("totalPedido").innerText = `Total em aberto: ${formatarMoeda(total)}`;
+  document.getElementById("totalPedido").innerText = `Lote atual: ${formatarMoeda(total)}`;
   atualizarInfoStatus();
+  await calcularTotalGeralMesa();
 }
 
 async function carregarHistoricoPedidosEnviados() {
@@ -1094,6 +1107,47 @@ async function carregarHistoricoPedidosEnviados() {
   box.style.display = "block";
 }
 
+async function calcularTotalGeralMesa() {
+  const { data: pedidos, error: erroPedidos } = await supabase
+    .from("pedidos")
+    .select("id,status")
+    .eq("mesa_id", mesaId)
+    .eq("app_id", APP_ID)
+    .not("status", "in", '("cancelado","finalizado")');
+
+  if (erroPedidos) {
+    console.error(erroPedidos);
+    document.getElementById("totalMesa").innerText = "Total da mesa: R$ 0,00";
+    return 0;
+  }
+
+  if (!pedidos || pedidos.length === 0) {
+    document.getElementById("totalMesa").innerText = "Total da mesa: R$ 0,00";
+    return 0;
+  }
+
+  const ids = pedidos.map(p => p.id);
+
+  const { data: itens, error: erroItens } = await supabase
+    .from("pedido_itens")
+    .select("pedido_id, preco, quantidade")
+    .in("pedido_id", ids);
+
+  if (erroItens) {
+    console.error(erroItens);
+    document.getElementById("totalMesa").innerText = "Total da mesa: R$ 0,00";
+    return 0;
+  }
+
+  let total = 0;
+  (itens || []).forEach(i => {
+    total += Number(i.preco || 0) * Number(i.quantidade || 0);
+  });
+
+  document.getElementById("totalMesa").innerText = `Total da mesa: ${formatarMoeda(total)}`;
+  return total;
+}
+
 document.getElementById("btnEnviar").onclick = async () => {
   if (!pedidoAtual) {
     alert("Nenhum pedido em aberto.");
@@ -1135,11 +1189,18 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
-  alert("Pedido enviado! Agora esse lote ficou travado. Se quiser pedir mais, é só adicionar novos itens.");
+  alert("Pedido enviado! Esse lote ficou travado. Se quiser pedir mais, é só adicionar novos itens.");
   await sincronizarSessaoComPedidos();
 };
 
 document.getElementById("btnConta").onclick = async () => {
+  const totalMesa = await calcularTotalGeralMesa();
+
+  if (totalMesa <= 0) {
+    alert("Não há valores pendentes para pagamento nesta mesa.");
+    return;
+  }
+
   const { data: pedidosAtivos, error } = await supabase
     .from("pedidos")
     .select("id,status")
@@ -1183,6 +1244,28 @@ document.getElementById("btnConta").onclick = async () => {
 };
 
 document.getElementById("btnLiberar").onclick = async () => {
+  const totalMesa = await calcularTotalGeralMesa();
+
+  if (totalMesa > 0) {
+    const { data: pedidosPendentes, errorBusca } = await supabase
+      .from("pedidos")
+      .select("id,status")
+      .eq("mesa_id", mesaId)
+      .eq("app_id", APP_ID)
+      .not("status", "in", '("finalizado","cancelado")');
+
+    if (errorBusca) {
+      console.error(errorBusca);
+      alert("Erro ao verificar a mesa.");
+      return;
+    }
+
+    if (pedidosPendentes && pedidosPendentes.some(p => !podeLiberarMesa(p.status))) {
+      alert("Não é possível liberar a mesa. Ainda existem pedidos pendentes.");
+      return;
+    }
+  }
+
   const { data: pedidosPendentes, errorBusca } = await supabase
     .from("pedidos")
     .select("id,status")
