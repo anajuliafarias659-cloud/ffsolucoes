@@ -582,11 +582,15 @@ let categoriasCache = [];
 let categoriaSelecionada = null;
 let canalMesa = null;
 let canalPedidoAtual = null;
+let canalSessaoMesa = null;
 let FUNCIONARIO_LOGADO = null;
 let mesaAtual = null;
 let sessaoMesaBanco = null;
 let sessaoLocal = null;
 let heartbeat = null;
+
+const LIMITE_DISPOSITIVOS_SESSAO = 5;
+const DEVICE_STORAGE_KEY = "mesa_device_key";
 
 window.rolarParaPedido = () => {
   document.getElementById("areaPedidoAtual")?.scrollIntoView({ behavior:"smooth", block:"start" });
@@ -728,13 +732,22 @@ function carregarFuncionarioLogado() {
   }
 }
 
+function obterDeviceKey() {
+  let key = localStorage.getItem(DEVICE_STORAGE_KEY);
+  if (!key) {
+    key = crypto.randomUUID();
+    localStorage.setItem(DEVICE_STORAGE_KEY, key);
+  }
+  return key;
+}
+
 function atualizarSessaoNaTela() {
   const info = document.getElementById("sessaoAtualInfo");
   const topo = document.getElementById("topoClienteInfo");
   const cardSessao = document.getElementById("cardSessao");
 
   if (!sessaoLocal) {
-    info.innerHTML = "Nenhuma identificação ativa nesta mesa.";
+    info.innerHTML = "Nenhuma identificação ativa neste celular.";
     topo.innerHTML = "";
     cardSessao.classList.remove("oculto");
     return;
@@ -764,6 +777,158 @@ function sessaoExpiradaBanco() {
   return new Date(sessaoMesaBanco.expira_em).getTime() < Date.now();
 }
 
+async function carregarDispositivosSessao() {
+  if (!sessaoMesaBanco?.id) return [];
+
+  const { data, error } = await supabase
+    .from("sessoes_mesa_dispositivos")
+    .select("*")
+    .eq("sessao_mesa_id", sessaoMesaBanco.id)
+    .order("criado_em", { ascending: true });
+
+  if (error) {
+    console.error(error);
+    return [];
+  }
+
+  return data || [];
+}
+
+async function atualizarResumoTopoDispositivos() {
+  const topo = document.getElementById("topoClienteInfo");
+  if (!topo || !sessaoMesaBanco?.id) return;
+
+  const dispositivos = await carregarDispositivosSessao();
+  const nomes = dispositivos
+    .map(d => (d.cliente_nome || "").trim())
+    .filter(Boolean)
+    .slice(0, 5);
+
+  if (topo.innerHTML.trim()) {
+    topo.innerHTML += `<span class="badge-topo">Celulares: ${dispositivos.length}/5</span>`;
+    if (nomes.length > 0) {
+      topo.innerHTML += `<span class="badge-topo">Mesa: ${nomes.join(", ")}</span>`;
+    }
+  } else {
+    topo.innerHTML = `<span class="badge-topo">Celulares: ${dispositivos.length}/5</span>`;
+    if (nomes.length > 0) {
+      topo.innerHTML += `<span class="badge-topo">Mesa: ${nomes.join(", ")}</span>`;
+    }
+  }
+}
+
+async function registrarOuValidarDispositivoSessao() {
+  if (!sessaoMesaBanco?.id) return false;
+
+  const deviceKey = obterDeviceKey();
+
+  const { data: existente, error: erroExistente } = await supabase
+    .from("sessoes_mesa_dispositivos")
+    .select("*")
+    .eq("sessao_mesa_id", sessaoMesaBanco.id)
+    .eq("device_key", deviceKey)
+    .maybeSingle();
+
+  if (erroExistente) {
+    console.error(erroExistente);
+    alert("Erro ao validar aparelho desta mesa.");
+    voltarOuFechar();
+    return false;
+  }
+
+  if (existente) {
+    const { error: erroUpdate } = await supabase
+      .from("sessoes_mesa_dispositivos")
+      .update({
+        ultimo_acesso_em: agoraISO()
+      })
+      .eq("id", existente.id);
+
+    if (erroUpdate) {
+      console.error(erroUpdate);
+      alert("Erro ao atualizar aparelho desta sessão.");
+      voltarOuFechar();
+      return false;
+    }
+
+    return true;
+  }
+
+  const { count, error: erroCount } = await supabase
+    .from("sessoes_mesa_dispositivos")
+    .select("*", { count: "exact", head: true })
+    .eq("sessao_mesa_id", sessaoMesaBanco.id);
+
+  if (erroCount) {
+    console.error(erroCount);
+    alert("Erro ao contar aparelhos da sessão.");
+    voltarOuFechar();
+    return false;
+  }
+
+  if (Number(count || 0) >= LIMITE_DISPOSITIVOS_SESSAO) {
+    alert("Essa mesa já atingiu o limite de 5 celulares conectados nesta sessão.");
+    voltarOuFechar();
+    return false;
+  }
+
+  const { error: erroInsert } = await supabase
+    .from("sessoes_mesa_dispositivos")
+    .insert({
+      sessao_mesa_id: sessaoMesaBanco.id,
+      device_key: deviceKey,
+      cliente_nome: "",
+      cliente_telefone: "",
+      ultimo_acesso_em: agoraISO()
+    });
+
+  if (erroInsert) {
+    console.error(erroInsert);
+    alert("Erro ao registrar este aparelho na sessão da mesa.");
+    voltarOuFechar();
+    return false;
+  }
+
+  return true;
+}
+
+async function atualizarDispositivoComCliente() {
+  if (!sessaoMesaBanco?.id || !sessaoLocal) return;
+
+  const deviceKey = obterDeviceKey();
+
+  await supabase
+    .from("sessoes_mesa_dispositivos")
+    .update({
+      cliente_nome: sessaoLocal.cliente_nome || "",
+      cliente_telefone: sessaoLocal.cliente_telefone || "",
+      ultimo_acesso_em: agoraISO()
+    })
+    .eq("sessao_mesa_id", sessaoMesaBanco.id)
+    .eq("device_key", deviceKey);
+}
+
+async function tocarDispositivoSessao() {
+  if (!sessaoMesaBanco?.id) return false;
+
+  const deviceKey = obterDeviceKey();
+
+  const { error } = await supabase
+    .from("sessoes_mesa_dispositivos")
+    .update({
+      ultimo_acesso_em: agoraISO()
+    })
+    .eq("sessao_mesa_id", sessaoMesaBanco.id)
+    .eq("device_key", deviceKey);
+
+  if (error) {
+    console.error(error);
+    return false;
+  }
+
+  return true;
+}
+
 async function tocarSessaoMesa() {
   if (!sessaoMesaBanco?.id) return false;
 
@@ -781,6 +946,7 @@ async function tocarSessaoMesa() {
   if (error || !data) return false;
 
   sessaoMesaBanco = data;
+  await tocarDispositivoSessao();
   return true;
 }
 
@@ -856,10 +1022,18 @@ async function validarSessaoClienteMesa() {
       })
       .eq("id", data.id);
 
+    await supabase
+      .from("sessoes_mesa_dispositivos")
+      .delete()
+      .eq("sessao_mesa_id", data.id);
+
     alert("Sessão da mesa expirou. Escaneie novamente o QR.");
     voltarOuFechar();
     return false;
   }
+
+  const dispositivoOk = await registrarOuValidarDispositivoSessao();
+  if (!dispositivoOk) return false;
 
   await tocarSessaoMesa();
   return true;
@@ -898,6 +1072,11 @@ async function validarSessaoMesa() {
       })
       .eq("id", data.id);
 
+    await supabase
+      .from("sessoes_mesa_dispositivos")
+      .delete()
+      .eq("sessao_mesa_id", data.id);
+
     alert("Sessão da mesa expirou. Escaneie novamente o QR.");
     voltarOuFechar();
     return false;
@@ -923,6 +1102,7 @@ async function iniciarSistema() {
   await carregarProdutos();
   await sincronizarSessaoComPedidos();
   ativarRealtimeMesa();
+  ativarRealtimeSessaoMesa();
 
   heartbeat = setInterval(async () => {
     const tocou = await tocarSessaoMesa();
@@ -978,16 +1158,25 @@ async function sincronizarSessaoComPedidos() {
 
   pedidoAtual = pedidoAberto;
 
-  if (pedidoMaisRecente?.cliente_nome || pedidoMaisRecente?.cliente_telefone) {
+  const deviceKey = obterDeviceKey();
+
+  const { data: meuDispositivo } = await supabase
+    .from("sessoes_mesa_dispositivos")
+    .select("*")
+    .eq("sessao_mesa_id", sessaoMesaBanco.id)
+    .eq("device_key", deviceKey)
+    .maybeSingle();
+
+  if (meuDispositivo?.cliente_nome || meuDispositivo?.cliente_telefone) {
     salvarSessaoLocal({
-      cliente_nome: pedidoMaisRecente.cliente_nome || "",
-      cliente_telefone: pedidoMaisRecente.cliente_telefone || "",
-      garcom_nome: pedidoMaisRecente.garcom_nome || null,
-      funcionario_id: pedidoMaisRecente.funcionario_id || null
+      cliente_nome: meuDispositivo.cliente_nome || "",
+      cliente_telefone: meuDispositivo.cliente_telefone || "",
+      garcom_nome: pedidoMaisRecente?.garcom_nome || null,
+      funcionario_id: pedidoMaisRecente?.funcionario_id || null
     });
 
-    document.getElementById("clienteNome").value = pedidoMaisRecente.cliente_nome || "";
-    document.getElementById("clienteTelefone").value = pedidoMaisRecente.cliente_telefone || "";
+    document.getElementById("clienteNome").value = meuDispositivo.cliente_nome || "";
+    document.getElementById("clienteTelefone").value = meuDispositivo.cliente_telefone || "";
   } else {
     removerSessaoLocal();
   }
@@ -1002,6 +1191,7 @@ async function sincronizarSessaoComPedidos() {
   await carregarHistoricoPedidosEnviados();
   await calcularTotalGeralMesa();
   aplicarFiltros();
+  await atualizarResumoTopoDispositivos();
 }
 
 async function iniciarAtendimentoManual() {
@@ -1027,7 +1217,9 @@ async function iniciarAtendimentoManual() {
   };
 
   salvarSessaoLocal(sessao);
+  await atualizarDispositivoComCliente();
   await tocarSessaoMesa();
+  await atualizarResumoTopoDispositivos();
   mostrarToast("Atendimento iniciado");
 }
 
@@ -1654,12 +1846,24 @@ async function encerrarSessaoMesa() {
       encerrada_em: agoraISO()
     })
     .eq("id", sessaoMesaBanco.id);
+
+  await supabase
+    .from("sessoes_mesa_dispositivos")
+    .delete()
+    .eq("sessao_mesa_id", sessaoMesaBanco.id);
 }
 
 function removerCanalPedidoAtual() {
   if (canalPedidoAtual) {
     supabase.removeChannel(canalPedidoAtual);
     canalPedidoAtual = null;
+  }
+}
+
+function removerCanalSessaoMesa() {
+  if (canalSessaoMesa) {
+    supabase.removeChannel(canalSessaoMesa);
+    canalSessaoMesa = null;
   }
 }
 
@@ -1680,6 +1884,34 @@ function ativarRealtimePedidoAtual() {
       },
       async () => {
         await carregarPedidoAtual();
+      }
+    )
+    .subscribe();
+}
+
+function ativarRealtimeSessaoMesa() {
+  removerCanalSessaoMesa();
+
+  if (!sessaoMesaBanco?.id) return;
+
+  canalSessaoMesa = supabase
+    .channel("sessao-mesa-" + sessaoMesaBanco.id)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "sessoes_mesa",
+        filter: `id=eq.${sessaoMesaBanco.id}`
+      },
+      async payload => {
+        const novaSessao = payload.new;
+
+        if (!novaSessao || novaSessao.ativa === false) {
+          alert("Esta sessão da mesa foi encerrada. Escaneie novamente o QR.");
+          voltarOuFechar();
+          return;
+        }
       }
     )
     .subscribe();
@@ -1718,6 +1950,7 @@ function ativarRealtimeMesa() {
 window.addEventListener("beforeunload", () => {
   if (heartbeat) clearInterval(heartbeat);
   removerCanalPedidoAtual();
+  removerCanalSessaoMesa();
   if (canalMesa) supabase.removeChannel(canalMesa);
 });
 
