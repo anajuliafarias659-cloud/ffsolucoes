@@ -11,7 +11,7 @@
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;font-size:20px;font-weight:bold}
 .container{max-width:900px;margin:auto;padding:20px}
-input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px}
+input,select{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:10px;box-sizing:border-box}
 .produto,.item{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px}
 button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 .total{font-size:18px;font-weight:bold;margin:16px 0}
@@ -24,7 +24,7 @@ button{padding:6px 12px;border:none;border-radius:8px;cursor:pointer}
 #btnConta{background:#f59e0b;color:#000}
 #btnLiberar{background:#2563eb;color:#fff}
 .msg-vazio{opacity:.7;background:#0f172a;border-radius:14px;padding:14px}
-small{opacity:.75}
+small{opacity:.75;display:block}
 .info-status{
   margin:10px 0 16px;
   padding:12px 14px;
@@ -93,6 +93,46 @@ small{opacity:.75}
   padding:8px 10px;
   border-radius:8px;
 }
+.card-sessao{
+  background:#0f172a;
+  border-radius:14px;
+  padding:16px;
+  margin-bottom:16px;
+  border:1px solid rgba(255,255,255,.08);
+}
+.card-sessao h3{
+  margin-top:0;
+}
+#boxCliente{
+  display:none;
+}
+.badge{
+  display:inline-block;
+  background:#1e293b;
+  color:#fff;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  margin-right:6px;
+  margin-top:6px;
+}
+.historico-bloco{
+  background:#0f172a;
+  border-radius:14px;
+  padding:14px;
+  margin-top:14px;
+}
+.historico-bloco h4{
+  margin:0 0 10px 0;
+}
+.linha-historico{
+  padding:8px 0;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
+.linha-historico:last-child{
+  border-bottom:none;
+}
+.oculto{display:none}
 </style>
 </head>
 
@@ -101,6 +141,28 @@ small{opacity:.75}
 <div class="topo" id="tituloMesa">🍽️ Mesa</div>
 
 <div class="container">
+
+  <div class="card-sessao" id="cardSessao">
+    <h3>Identificação do atendimento</h3>
+
+    <select id="tipoAtendimento">
+      <option value="garcom">👨‍🍳 Garçom</option>
+      <option value="cliente">📱 Cliente</option>
+    </select>
+
+    <div id="boxGarcomInfo">
+      <small>Os itens serão lançados no nome do garçom logado.</small>
+    </div>
+
+    <div id="boxCliente">
+      <input id="clienteNome" placeholder="Nome do cliente">
+      <input id="clienteTelefone" placeholder="Celular do cliente">
+    </div>
+
+    <button id="btnIniciarSessao" style="background:#22c55e;color:#000;padding:12px 16px;width:100%">✅ Iniciar atendimento</button>
+    <small id="sessaoAtualInfo" style="margin-top:10px"></small>
+  </div>
+
   <input id="busca" placeholder="🔍 Buscar produto">
   <div class="filtros" id="filtrosCategorias"></div>
 
@@ -110,6 +172,8 @@ small{opacity:.75}
   <h3>Pedido da mesa</h3>
   <div id="statusPedido" class="info-status" style="display:none;"></div>
   <div id="pedido"></div>
+
+  <div class="historico-bloco" id="historicoPorResponsavel" style="display:none;"></div>
 
   <div class="total" id="totalPedido">Total: R$ 0,00</div>
 
@@ -139,11 +203,15 @@ const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 
 let APP_ID = null;
+let USUARIO_LOGADO = null;
 let pedidoAtual = null;
 let produtosCache = [];
 let categoriasCache = [];
 let categoriaSelecionada = null;
 let canalPedido = null;
+
+const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
+let sessaoLocal = null;
 
 if (!mesaId) {
   alert("Mesa não informada.");
@@ -155,6 +223,18 @@ function formatarMoeda(valor) {
     style: "currency",
     currency: "BRL"
   });
+}
+
+function gerarToken() {
+  return "tok_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function agoraISO() {
+  return new Date().toISOString();
+}
+
+function adicionarMinutosISO(minutos) {
+  return new Date(Date.now() + minutos * 60000).toISOString();
 }
 
 function nomeStatus(status) {
@@ -183,6 +263,8 @@ function pedidoBloqueadoParaEdicao() {
 function limparTelaPedido() {
   document.getElementById("pedido").innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
   document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(0)}`;
+  document.getElementById("historicoPorResponsavel").style.display = "none";
+  document.getElementById("historicoPorResponsavel").innerHTML = "";
 }
 
 function atualizarBotaoLiberar() {
@@ -211,15 +293,22 @@ function atualizarInfoStatus() {
 
   div.style.display = "block";
 
+  const expiraInfo = pedidoAtual.sessao_expira_em
+    ? `<br><small>Sessão expira em: ${new Date(pedidoAtual.sessao_expira_em).toLocaleString("pt-BR")}</small>`
+    : "";
+
   if (podeLiberarMesa(pedidoAtual.status)) {
-    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa já pode ser liberada.</small>`;
+    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa já pode ser liberada.</small>${expiraInfo}`;
   } else {
-    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa só pode ser liberada após pagamento, cancelamento ou finalização.</small>`;
+    div.innerHTML = `Status do pedido: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>A mesa só pode ser liberada após pagamento, cancelamento ou finalização.</small>${expiraInfo}`;
   }
 }
 
 function encerrarPedidoNaTela() {
   pedidoAtual = null;
+  sessaoLocal = null;
+  localStorage.removeItem(CHAVE_SESSAO);
+  atualizarSessaoNaTela();
   atualizarBotaoLiberar();
   atualizarInfoStatus();
   limparTelaPedido();
@@ -252,6 +341,42 @@ function obterCategoriaProduto(produto) {
   );
 }
 
+function carregarSessaoLocal() {
+  try {
+    sessaoLocal = JSON.parse(localStorage.getItem(CHAVE_SESSAO) || "null");
+  } catch {
+    sessaoLocal = null;
+  }
+}
+
+function salvarSessaoLocal(sessao) {
+  sessaoLocal = sessao;
+  localStorage.setItem(CHAVE_SESSAO, JSON.stringify(sessao));
+  atualizarSessaoNaTela();
+}
+
+function atualizarSessaoNaTela() {
+  const info = document.getElementById("sessaoAtualInfo");
+
+  if (!sessaoLocal) {
+    info.innerHTML = "Nenhuma sessão ativa nesta mesa.";
+    return;
+  }
+
+  const origem = sessaoLocal.tipo_atendimento === "garcom" ? "Garçom" : "Cliente";
+  const nome = sessaoLocal.responsavel_nome || "-";
+  const fone = sessaoLocal.cliente_telefone ? ` | ${sessaoLocal.cliente_telefone}` : "";
+  info.innerHTML = `
+    <span class="badge">${origem}</span>
+    <span class="badge">${nome}${fone}</span>
+  `;
+}
+
+function sessaoExpiradaLocal() {
+  if (!sessaoLocal?.sessao_expira_em) return false;
+  return new Date(sessaoLocal.sessao_expira_em).getTime() < Date.now();
+}
+
 async function validarSessao() {
   const { data, error } = await supabase.auth.getSession();
 
@@ -265,7 +390,7 @@ async function validarSessao() {
 
   const { data: usuario, error: erroUsuario } = await supabase
     .from("usuarios")
-    .select("id, app_id")
+    .select("id, app_id, nome")
     .eq("id", userId)
     .single();
 
@@ -276,10 +401,14 @@ async function validarSessao() {
   }
 
   APP_ID = usuario.app_id;
+  USUARIO_LOGADO = usuario;
   return true;
 }
 
 async function iniciarSistema() {
+  carregarSessaoLocal();
+  atualizarSessaoNaTela();
+
   const ok = await validarSessao();
   if (!ok) return;
 
@@ -317,6 +446,18 @@ async function verificarPedidoExistente() {
 
   if (data) {
     pedidoAtual = data;
+
+    if (pedidoAtual.sessao_token) {
+      salvarSessaoLocal({
+        sessao_token: pedidoAtual.sessao_token,
+        tipo_atendimento: pedidoAtual.tipo_atendimento,
+        responsavel_nome: pedidoAtual.responsavel_nome,
+        cliente_nome: pedidoAtual.cliente_nome,
+        cliente_telefone: pedidoAtual.cliente_telefone,
+        sessao_expira_em: pedidoAtual.sessao_expira_em
+      });
+    }
+
     atualizarBotaoLiberar();
     atualizarInfoStatus();
     ativarRealtimeNotificacao();
@@ -326,7 +467,123 @@ async function verificarPedidoExistente() {
   }
 }
 
+async function iniciarAtendimentoManual() {
+  const tipo = document.getElementById("tipoAtendimento").value;
+
+  let responsavelNome = "";
+  let clienteNome = null;
+  let clienteTelefone = null;
+
+  if (tipo === "garcom") {
+    responsavelNome = USUARIO_LOGADO?.nome || "Garçom";
+  } else {
+    clienteNome = document.getElementById("clienteNome").value.trim();
+    clienteTelefone = document.getElementById("clienteTelefone").value.trim();
+
+    if (!clienteNome || !clienteTelefone) {
+      alert("Preencha nome e celular do cliente.");
+      return;
+    }
+
+    responsavelNome = clienteNome;
+  }
+
+  const sessao = {
+    sessao_token: gerarToken(),
+    tipo_atendimento: tipo,
+    responsavel_nome: responsavelNome,
+    cliente_nome: clienteNome,
+    cliente_telefone: clienteTelefone,
+    sessao_expira_em: adicionarMinutosISO(60)
+  };
+
+  salvarSessaoLocal(sessao);
+
+  if (pedidoAtual && !podeLiberarMesa(pedidoAtual.status)) {
+    const { error } = await supabase
+      .from("pedidos")
+      .update({
+        sessao_token: sessao.sessao_token,
+        tipo_atendimento: sessao.tipo_atendimento,
+        responsavel_nome: sessao.responsavel_nome,
+        cliente_nome: sessao.cliente_nome,
+        cliente_telefone: sessao.cliente_telefone,
+        sessao_expira_em: sessao.sessao_expira_em,
+        sessao_status: "ativa"
+      })
+      .eq("id", pedidoAtual.id)
+      .eq("app_id", APP_ID);
+
+    if (error) {
+      console.error(error);
+      alert("Erro ao atualizar atendimento.");
+      return;
+    }
+
+    pedidoAtual = {
+      ...pedidoAtual,
+      ...sessao,
+      sessao_status: "ativa"
+    };
+
+    atualizarInfoStatus();
+  }
+
+  alert("Atendimento iniciado com sucesso!");
+}
+
+async function validarSessaoPedido() {
+  if (!sessaoLocal) {
+    alert("Inicie o atendimento antes de lançar itens.");
+    return false;
+  }
+
+  if (sessaoExpiradaLocal()) {
+    alert("A sessão expirou. Inicie um novo atendimento.");
+    localStorage.removeItem(CHAVE_SESSAO);
+    sessaoLocal = null;
+    atualizarSessaoNaTela();
+    return false;
+  }
+
+  if (pedidoAtual?.sessao_expira_em && new Date(pedidoAtual.sessao_expira_em).getTime() < Date.now()) {
+    alert("A sessão deste pedido expirou. Inicie um novo atendimento.");
+    return false;
+  }
+
+  return true;
+}
+
+async function renovarExpiracaoSessao() {
+  if (!sessaoLocal || !pedidoAtual) return;
+
+  const novaExpiracao = adicionarMinutosISO(60);
+
+  sessaoLocal.sessao_expira_em = novaExpiracao;
+  salvarSessaoLocal(sessaoLocal);
+
+  const { error } = await supabase
+    .from("pedidos")
+    .update({
+      sessao_expira_em: novaExpiracao,
+      sessao_status: "ativa"
+    })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", APP_ID);
+
+  if (error) {
+    console.error(error);
+  } else {
+    pedidoAtual.sessao_expira_em = novaExpiracao;
+    pedidoAtual.sessao_status = "ativa";
+    atualizarInfoStatus();
+  }
+}
+
 async function criarPedidoSeNecessario() {
+  const sessaoOk = await validarSessaoPedido();
+  if (!sessaoOk) return false;
+
   if (pedidoAtual && !podeLiberarMesa(pedidoAtual.status)) return true;
 
   if (pedidoAtual && podeLiberarMesa(pedidoAtual.status)) {
@@ -339,7 +596,14 @@ async function criarPedidoSeNecessario() {
       app_id: APP_ID,
       mesa_id: mesaId,
       status: "aberto",
-      origem: "mesa"
+      origem: "mesa",
+      sessao_token: sessaoLocal.sessao_token,
+      sessao_status: "ativa",
+      sessao_expira_em: sessaoLocal.sessao_expira_em,
+      cliente_nome: sessaoLocal.cliente_nome,
+      cliente_telefone: sessaoLocal.cliente_telefone,
+      responsavel_nome: sessaoLocal.responsavel_nome,
+      tipo_atendimento: sessaoLocal.tipo_atendimento
     })
     .select()
     .single();
@@ -464,6 +728,9 @@ async function addProduto(produtoId) {
   const ok = await criarPedidoSeNecessario();
   if (!ok) return;
 
+  const sessaoOk = await validarSessaoPedido();
+  if (!sessaoOk) return;
+
   const produto = produtosCache.find(p => String(p.id) === String(produtoId));
   if (!produto) return;
 
@@ -472,67 +739,30 @@ async function addProduto(produtoId) {
     return;
   }
 
-  const { data: itensExistentes, error: erroBusca } = await supabase
+  const { error: erroInsert } = await supabase
     .from("pedido_itens")
-    .select("id, quantidade")
-    .eq("pedido_id", pedidoAtual.id)
-    .eq("produto_id", produto.id)
-    .order("created_at", { ascending: true });
+    .insert({
+      app_id: APP_ID,
+      pedido_id: pedidoAtual.id,
+      produto_id: produto.id,
+      nome_produto: produto.nome,
+      preco: Number(produto.preco || 0),
+      quantidade: 1,
+      status: "novo",
+      responsavel_nome: sessaoLocal.responsavel_nome,
+      cliente_nome: sessaoLocal.cliente_nome,
+      cliente_telefone: sessaoLocal.cliente_telefone,
+      tipo_origem: sessaoLocal.tipo_atendimento,
+      sessao_token: sessaoLocal.sessao_token
+    });
 
-  if (erroBusca) {
-    console.error(erroBusca);
-    alert("Erro ao verificar item existente.");
+  if (erroInsert) {
+    console.error(erroInsert);
+    alert("Erro ao adicionar produto.");
     return;
   }
 
-  if (itensExistentes && itensExistentes.length > 0) {
-    const itemPrincipal = itensExistentes[0];
-    const idsDuplicados = itensExistentes.slice(1).map(i => i.id);
-    const somaDuplicados = itensExistentes.slice(1).reduce((acc, i) => acc + Number(i.quantidade || 0), 0);
-    const novaQtd = Number(itemPrincipal.quantidade || 0) + somaDuplicados + 1;
-
-    const { error: erroUpdate } = await supabase
-      .from("pedido_itens")
-      .update({ quantidade: novaQtd })
-      .eq("id", itemPrincipal.id)
-      .eq("pedido_id", pedidoAtual.id);
-
-    if (erroUpdate) {
-      console.error(erroUpdate);
-      alert("Erro ao atualizar quantidade.");
-      return;
-    }
-
-    if (idsDuplicados.length > 0) {
-      const { error: erroDeleteDuplicados } = await supabase
-        .from("pedido_itens")
-        .delete()
-        .in("id", idsDuplicados);
-
-      if (erroDeleteDuplicados) {
-        console.error(erroDeleteDuplicados);
-      }
-    }
-  } else {
-    const { error: erroInsert } = await supabase
-      .from("pedido_itens")
-      .insert({
-        app_id: APP_ID,
-        pedido_id: pedidoAtual.id,
-        produto_id: produto.id,
-        nome_produto: produto.nome,
-        preco: Number(produto.preco || 0),
-        quantidade: 1,
-        status: "novo"
-      });
-
-    if (erroInsert) {
-      console.error(erroInsert);
-      alert("Erro ao adicionar produto.");
-      return;
-    }
-  }
-
+  await renovarExpiracaoSessao();
   await carregarPedido();
 }
 
@@ -541,6 +771,9 @@ async function aumentarItem(item) {
     alert("Não é possível alterar este pedido.");
     return;
   }
+
+  const sessaoOk = await validarSessaoPedido();
+  if (!sessaoOk) return;
 
   const novaQtd = Number(item.quantidade || 0) + 1;
 
@@ -556,6 +789,7 @@ async function aumentarItem(item) {
     return;
   }
 
+  await renovarExpiracaoSessao();
   await carregarPedido();
 }
 
@@ -564,6 +798,9 @@ async function diminuirItem(item) {
     alert("Não é possível alterar este pedido.");
     return;
   }
+
+  const sessaoOk = await validarSessaoPedido();
+  if (!sessaoOk) return;
 
   const qtd = Number(item.quantidade || 0);
 
@@ -586,6 +823,7 @@ async function diminuirItem(item) {
     return;
   }
 
+  await renovarExpiracaoSessao();
   await carregarPedido();
 }
 
@@ -594,6 +832,9 @@ async function removerItem(itemId) {
     alert("Não é possível remover item deste pedido.");
     return;
   }
+
+  const sessaoOk = await validarSessaoPedido();
+  if (!sessaoOk) return;
 
   const { error } = await supabase
     .from("pedido_itens")
@@ -607,7 +848,51 @@ async function removerItem(itemId) {
     return;
   }
 
+  await renovarExpiracaoSessao();
   await carregarPedido();
+}
+
+function renderizarHistoricoPorResponsavel(itens) {
+  const box = document.getElementById("historicoPorResponsavel");
+
+  if (!itens || itens.length === 0) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  const grupos = {};
+
+  itens.forEach(i => {
+    const tipo = i.tipo_origem === "garcom" ? "Garçom" : "Cliente";
+    const nome = i.responsavel_nome || i.cliente_nome || "Sem nome";
+    const chave = `${tipo} - ${nome}`;
+
+    if (!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(i);
+  });
+
+  let html = `<h4>Histórico por responsável</h4>`;
+
+  Object.keys(grupos).forEach(chave => {
+    let subtotalGrupo = 0;
+    html += `<div style="margin-bottom:12px"><strong>${chave}</strong>`;
+
+    grupos[chave].forEach(i => {
+      const subtotal = Number(i.preco || 0) * Number(i.quantidade || 0);
+      subtotalGrupo += subtotal;
+      html += `
+        <div class="linha-historico">
+          ${i.quantidade}x ${i.nome_produto} — ${formatarMoeda(subtotal)}
+        </div>
+      `;
+    });
+
+    html += `<small>Total de ${chave}: ${formatarMoeda(subtotalGrupo)}</small></div>`;
+  });
+
+  box.innerHTML = html;
+  box.style.display = "block";
 }
 
 async function carregarPedido() {
@@ -632,50 +917,12 @@ async function carregarPedido() {
     return;
   }
 
-  const mapa = new Map();
-
-  (data || []).forEach(i => {
-    const chave = String(i.produto_id || i.id);
-
-    if (!mapa.has(chave)) {
-      mapa.set(chave, {
-        ...i,
-        quantidade: Number(i.quantidade || 0)
-      });
-    } else {
-      const atual = mapa.get(chave);
-      atual.quantidade += Number(i.quantidade || 0);
-    }
-  });
-
-  const itens = Array.from(mapa.values());
-
-  for (const item of itens) {
-    const duplicados = (data || []).filter(d => String(d.produto_id) === String(item.produto_id));
-    if (duplicados.length > 1) {
-      const principal = duplicados[0];
-      const idsExcluir = duplicados.slice(1).map(d => d.id);
-      const qtdTotal = duplicados.reduce((acc, d) => acc + Number(d.quantidade || 0), 0);
-
-      const { error: erroUpdate } = await supabase
-        .from("pedido_itens")
-        .update({ quantidade: qtdTotal })
-        .eq("id", principal.id);
-
-      if (!erroUpdate && idsExcluir.length > 0) {
-        await supabase
-          .from("pedido_itens")
-          .delete()
-          .in("id", idsExcluir);
-      }
-    }
-  }
-
+  const itens = data || [];
   const div = document.getElementById("pedido");
   div.innerHTML = "";
   let total = 0;
 
-  if (!itens || itens.length === 0) {
+  if (itens.length === 0) {
     div.innerHTML = `<div class="msg-vazio">Nenhum item no pedido ainda</div>`;
   }
 
@@ -685,6 +932,8 @@ async function carregarPedido() {
     const bloqueado = pedidoBloqueadoParaEdicao();
     const produtoRel = produtosCache.find(p => String(p.id) === String(i.produto_id)) || null;
     const imgItem = produtoRel ? obterImagemProduto(produtoRel) : "https://via.placeholder.com/80x80?text=Produto";
+    const origemTexto = i.tipo_origem === "garcom" ? "Garçom" : "Cliente";
+    const nomeResponsavel = i.responsavel_nome || i.cliente_nome || "-";
 
     const item = document.createElement("div");
     item.className = "item";
@@ -695,6 +944,7 @@ async function carregarPedido() {
           <strong>${i.nome_produto}</strong>
           <small>Valor unitário: ${formatarMoeda(i.preco)}</small>
           <small>Subtotal: ${formatarMoeda(Number(i.preco || 0) * Number(i.quantidade || 0))}</small>
+          <small>${origemTexto}: ${nomeResponsavel}</small>
         </div>
       </div>
 
@@ -714,6 +964,7 @@ async function carregarPedido() {
     div.appendChild(item);
   });
 
+  renderizarHistoricoPorResponsavel(itens);
   document.getElementById("totalPedido").innerText = `Total: ${formatarMoeda(total)}`;
 }
 
@@ -782,13 +1033,17 @@ document.getElementById("btnLiberar").onclick = async () => {
   }
 
   if (!podeLiberarMesa(pedidoAtual.status)) {
-    alert("Não é possível liberar a mesa. Ainda existe pedido pendente. A mesa só pode ser liberada quando o pedido estiver pago, cancelado ou finalizado.");
+    alert("Não é possível liberar a mesa. Ainda existe pedido pendente.");
     return;
   }
 
   const { error } = await supabase
     .from("pedidos")
-    .update({ status: "finalizado" })
+    .update({
+      status: "finalizado",
+      sessao_status: "encerrada",
+      sessao_expira_em: agoraISO()
+    })
     .eq("id", pedidoAtual.id)
     .eq("app_id", APP_ID);
 
@@ -832,7 +1087,7 @@ function ativarRealtimeNotificacao() {
           return;
         }
         if (status === "pago") {
-          alert("💰 Pedido pago! A mesa ficou livre.");
+          alert("💰 Pedido pago! Sessão encerrada e mesa livre.");
           encerrarPedidoNaTela();
           return;
         }
@@ -849,6 +1104,12 @@ function ativarRealtimeNotificacao() {
     .subscribe();
 }
 
+document.getElementById("tipoAtendimento").onchange = e => {
+  const tipo = e.target.value;
+  document.getElementById("boxCliente").style.display = tipo === "cliente" ? "block" : "none";
+};
+
+document.getElementById("btnIniciarSessao").onclick = iniciarAtendimentoManual;
 document.getElementById("busca").oninput = aplicarFiltros;
 document.addEventListener("DOMContentLoaded", iniciarSistema);
 </script>
