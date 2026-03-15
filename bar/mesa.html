@@ -90,11 +90,6 @@ body{
   grid-template-columns:1fr 1fr;
   gap:12px;
 }
-.grid-4{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:12px;
-}
 input, textarea, button{
   font-family:inherit;
 }
@@ -435,14 +430,8 @@ function setSessaoVisual(valida){
   document.getElementById("statusSessao").textContent = valida ? "Sessão válida" : "Sessão inválida";
 }
 function atualizarStatusMesa(){
-  document.getElementById("statusCliente").textContent =
-    mesaAtual?.cliente_nome || "Não identificado";
-
-  if (mesaAtual?.pedir_conta) {
-    document.getElementById("statusConta").textContent = "Conta solicitada";
-  } else {
-    document.getElementById("statusConta").textContent = "Conta em aberto";
-  }
+  document.getElementById("statusCliente").textContent = mesaAtual?.cliente_nome || "Não identificado";
+  document.getElementById("statusConta").textContent = mesaAtual?.pedir_conta ? "Conta solicitada" : "Conta em aberto";
 }
 function obterImagemProduto(p){
   return p.imagem_url || p.imagem || p.foto_url || p.foto || "";
@@ -602,7 +591,8 @@ function adicionarAoLote(produtoId){
   } else {
     loteAtual.push({
       produto_id: produto.id,
-      nome_produto: produto.nome || "Produto",
+      nome_produto: (produto.nome || "Produto").trim(),
+      preco: Number(produto.preco || 0),
       preco_unitario: Number(produto.preco || 0),
       quantidade: qtd,
       observacao: null
@@ -635,26 +625,30 @@ function renderizarLoteAtual(){
   if (!loteAtual.length) {
     box.innerHTML = `<div class="vazio">Nenhum item no lote.</div>`;
   } else {
-    box.innerHTML = loteAtual.map(item => `
-      <div class="lote-item">
-        <div>
-          <div class="lote-nome">${escapeHtml(item.nome_produto)}</div>
-          <div class="lote-sub">Qtd: ${Number(item.quantidade || 0)} × ${moeda(item.preco_unitario)}</div>
-        </div>
+    box.innerHTML = loteAtual.map(item => {
+      const precoUnit = Number(item.preco_unitario || item.preco || 0);
+      const qtd = Number(item.quantidade || 0);
+      return `
+        <div class="lote-item">
+          <div>
+            <div class="lote-nome">${escapeHtml(item.nome_produto)}</div>
+            <div class="lote-sub">Qtd: ${qtd} × ${moeda(precoUnit)}</div>
+          </div>
 
-        <div>
-          <div class="lote-valor">${moeda(Number(item.quantidade || 0) * Number(item.preco_unitario || 0))}</div>
-          <div class="lote-controles">
-            <button class="btn-cinza" onclick="alterarQtdLote('${item.produto_id}', -1)">-</button>
-            <button class="btn-verde" onclick="alterarQtdLote('${item.produto_id}', 1)">+</button>
+          <div>
+            <div class="lote-valor">${moeda(qtd * precoUnit)}</div>
+            <div class="lote-controles">
+              <button class="btn-cinza" onclick="alterarQtdLote('${item.produto_id}', -1)">-</button>
+              <button class="btn-verde" onclick="alterarQtdLote('${item.produto_id}', 1)">+</button>
+            </div>
           </div>
         </div>
-      </div>
-    `).join("");
+      `;
+    }).join("");
   }
 
   const totalItens = loteAtual.reduce((s, i) => s + Number(i.quantidade || 0), 0);
-  const totalLote = loteAtual.reduce((s, i) => s + (Number(i.preco_unitario || 0) * Number(i.quantidade || 0)), 0);
+  const totalLote = loteAtual.reduce((s, i) => s + (Number(i.preco_unitario || i.preco || 0) * Number(i.quantidade || 0)), 0);
 
   document.getElementById("itensLote").textContent = totalItens;
   document.getElementById("totalLote").textContent = moeda(totalLote);
@@ -676,27 +670,41 @@ async function enviarPedido() {
     const clienteCelular = (document.getElementById("clienteCelular")?.value || "").trim() || null;
     const observacaoPedido = (document.getElementById("observacaoPedido")?.value || "").trim() || null;
 
-    const totalLote = loteAtual.reduce((soma, item) => {
-      return soma + (Number(item.preco_unitario || 0) * Number(item.quantidade || 1));
-    }, 0);
+    const itensPedido = loteAtual.map(item => {
+      const preco = Number(item.preco_unitario || item.preco || 0);
+      const quantidade = Number(item.quantidade || 1);
+      const subtotal = preco * quantidade;
 
-    const itensPedido = loteAtual.map(item => ({
-      app_id: app_id,
-      mesa_id: mesaId,
-      produto_id: item.produto_id || null,
-      nome_produto: (item.nome_produto || "").trim() || "Produto",
-      quantidade: Number(item.quantidade || 1),
-      preco_unitario: Number(item.preco_unitario || 0),
-      subtotal: Number(item.preco_unitario || 0) * Number(item.quantidade || 1),
-      observacao: item.observacao || null,
-      status: "pendente"
-    }));
+      return {
+        app_id: app_id,
+        mesa_id: mesaId,
+        produto_id: item.produto_id || null,
+        nome_produto: (item.nome_produto || "").trim() || "Produto",
+        quantidade: quantidade,
+        preco: preco,
+        preco_unitario: preco,
+        subtotal: subtotal,
+        total: subtotal,
+        observacao: item.observacao || null,
+        status: "pendente"
+      };
+    });
 
-    const itemInvalido = itensPedido.find(item => !item.nome_produto);
+    const itemInvalido = itensPedido.find(item =>
+      !item.nome_produto ||
+      item.preco === null ||
+      Number.isNaN(item.preco) ||
+      Number.isNaN(item.quantidade)
+    );
+
     if (itemInvalido) {
-      alert("Existe item sem nome no lote.");
+      console.error("Item inválido:", itemInvalido);
+      alert("Existe item inválido no lote.");
       return;
     }
+
+    const totalLote = itensPedido.reduce((soma, item) => soma + Number(item.total || 0), 0);
+    const quantidadeTotal = itensPedido.reduce((soma, item) => soma + Number(item.quantidade || 0), 0);
 
     const payloadPedido = [{
       app_id: app_id,
@@ -704,9 +712,10 @@ async function enviarPedido() {
       cliente_nome: clienteNome,
       cliente_celular: clienteCelular,
       observacao: observacaoPedido,
-      quantidade: itensPedido.reduce((soma, item) => soma + item.quantidade, 0),
+      quantidade: quantidadeTotal,
       subtotal: totalLote,
       total: totalLote,
+      preco: totalLote,
       preco_unitario: totalLote,
       status: "pendente",
       origem: "mesa"
@@ -737,8 +746,10 @@ async function enviarPedido() {
       produto_id: item.produto_id,
       nome_produto: item.nome_produto,
       quantidade: item.quantidade,
+      preco: item.preco,
       preco_unitario: item.preco_unitario,
       subtotal: item.subtotal,
+      total: item.total,
       observacao: item.observacao,
       status: item.status
     }));
@@ -843,7 +854,7 @@ async function carregarPedidosMesa() {
     const itens = data || [];
 
     const totalMesa = itens.reduce((soma, item) => {
-      return soma + Number(item.subtotal || 0);
+      return soma + Number(item.subtotal || item.total || 0);
     }, 0);
 
     document.getElementById("totalMesa").textContent = moeda(totalMesa);
@@ -853,14 +864,19 @@ async function carregarPedidosMesa() {
     if (!itens.length) {
       listaPedidos.innerHTML = `<div class="vazio">Nenhum pedido ainda.</div>`;
     } else {
-      listaPedidos.innerHTML = itens.map(item => `
-        <div class="item">
-          <strong>${escapeHtml(item.nome_produto || item.produto_nome || "Produto")}</strong><br>
-          Qtd: ${Number(item.quantidade || 0)} × ${moeda(item.preco_unitario || 0)}<br>
-          Subtotal: ${moeda(item.subtotal || 0)}
-          ${item.observacao ? `<br><small>Obs: ${escapeHtml(item.observacao)}</small>` : ""}
-        </div>
-      `).join("");
+      listaPedidos.innerHTML = itens.map(item => {
+        const precoUnit = Number(item.preco_unitario || item.preco || 0);
+        const subtotal = Number(item.subtotal || item.total || (precoUnit * Number(item.quantidade || 0)));
+
+        return `
+          <div class="item">
+            <strong>${escapeHtml(item.nome_produto || item.produto_nome || "Produto")}</strong><br>
+            Qtd: ${Number(item.quantidade || 0)} × ${moeda(precoUnit)}<br>
+            Subtotal: ${moeda(subtotal)}
+            ${item.observacao ? `<br><small>Obs: ${escapeHtml(item.observacao)}</small>` : ""}
+          </div>
+        `;
+      }).join("");
     }
   } catch (err) {
     console.error("Erro geral ao carregar pedidos da mesa:", err);
