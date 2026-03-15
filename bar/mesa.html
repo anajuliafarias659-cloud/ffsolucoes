@@ -396,6 +396,9 @@ let produtos = [];
 let loteAtual = [];
 const qtdTempPorProduto = {};
 
+const STATUS_FECHADOS = ["pago", "finalizado", "cancelado", "encerrado"];
+const STATUS_ABERTOS = ["pendente", "em_preparo", "pronto", "entregue", "conta_solicitada", "aguardando_pagamento", "ocupada"];
+
 const alertaErro = document.getElementById("alertaErro");
 const alertaOk = document.getElementById("alertaOk");
 const badgeMesa = document.getElementById("badgeMesa");
@@ -431,10 +434,24 @@ function setSessaoVisual(valida){
 }
 function atualizarStatusMesa(){
   document.getElementById("statusCliente").textContent = mesaAtual?.cliente_nome || "Não identificado";
-  document.getElementById("statusConta").textContent = mesaAtual?.pedir_conta ? "Conta solicitada" : "Conta em aberto";
+
+  let contaTxt = "Conta em aberto";
+  if (mesaAtual?.status === "livre" || mesaAtual?.ocupada === false) {
+    contaTxt = "Mesa livre";
+  } else if (mesaAtual?.pedir_conta) {
+    contaTxt = "Conta solicitada";
+  }
+
+  document.getElementById("statusConta").textContent = contaTxt;
 }
 function obterImagemProduto(p){
   return p.imagem_url || p.imagem || p.foto_url || p.foto || "";
+}
+function statusFechado(status){
+  return STATUS_FECHADOS.includes(String(status || "").toLowerCase().trim());
+}
+function statusAberto(status){
+  return !statusFechado(status);
 }
 
 async function validarSessaoMesa(){
@@ -509,7 +526,8 @@ async function iniciarAtendimento(){
         cliente_celular: clienteCelular || null,
         ocupada: true,
         status: "ocupada",
-        aberta_em: new Date().toISOString()
+        aberta_em: new Date().toISOString(),
+        pedir_conta: false
       })
       .eq("id", mesaId);
 
@@ -706,7 +724,6 @@ async function enviarPedido() {
     const totalLote = itensPedido.reduce((soma, item) => soma + Number(item.total || 0), 0);
     const quantidadeTotal = itensPedido.reduce((soma, item) => soma + Number(item.quantidade || 0), 0);
 
-    // PEDIDOS NÃO RECEBE CAMPO "preco"
     const payloadPedido = [{
       app_id: app_id,
       mesa_id: mesaId,
@@ -720,8 +737,6 @@ async function enviarPedido() {
       status: "pendente",
       origem: "mesa"
     }];
-
-    console.log("payloadPedido", payloadPedido);
 
     const { data: novoPedido, error: erroPedido } = await sb
       .from("pedidos")
@@ -755,8 +770,6 @@ async function enviarPedido() {
       observacao: item.observacao,
       status: item.status
     }));
-
-    console.log("payloadItens", payloadItens);
 
     const { error: erroItens } = await sb
       .from("pedido_itens")
@@ -802,11 +815,15 @@ async function enviarPedido() {
 
 async function pedirConta() {
   try {
+    const agora = new Date().toISOString();
+
     const { error: erroMesa } = await sb
       .from("mesas")
       .update({
         pedir_conta: true,
-        ocupada: true
+        ocupada: true,
+        status: "conta_solicitada",
+        updated_at: agora
       })
       .eq("id", mesaId);
 
@@ -828,6 +845,19 @@ async function pedirConta() {
       console.error("Erro ao marcar pedidos:", erroPedidos);
     }
 
+    const { error: erroItens } = await sb
+      .from("pedido_itens")
+      .update({
+        status: "conta_solicitada"
+      })
+      .eq("mesa_id", mesaId)
+      .eq("app_id", app_id)
+      .not("status", "in", '("pago","finalizado","cancelado","encerrado")');
+
+    if (erroItens) {
+      console.error("Erro ao marcar itens da conta:", erroItens);
+    }
+
     await carregarMesa();
     await carregarPedidosMesa();
 
@@ -838,14 +868,108 @@ async function pedirConta() {
   }
 }
 
+async function liberarMesaSeNecessario() {
+  try {
+    const { data: pedidosMesa, error } = await sb
+      .from("pedidos")
+      .select("id,status")
+      .eq("mesa_id", mesaId)
+      .eq("app_id", app_id);
+
+    if (error) {
+      console.error("Erro ao verificar liberação da mesa:", error);
+      return;
+    }
+
+    const pedidos = pedidosMesa || [];
+    const pedidosAbertos = pedidos.filter(p => statusAberto(p.status));
+
+    if (pedidosAbertos.length > 0) {
+      return;
+    }
+
+    if (!mesaAtual) {
+      await carregarMesa();
+    }
+
+    if (mesaAtual && (mesaAtual.ocupada || mesaAtual.pedir_conta || mesaAtual.cliente_nome || mesaAtual.status !== "livre")) {
+      const { error: erroLiberar } = await sb
+        .from("mesas")
+        .update({
+          ocupada: false,
+          status: "livre",
+          pedir_conta: false,
+          cliente_nome: null,
+          cliente_celular: null,
+          aberta_em: null
+        })
+        .eq("id", mesaId);
+
+      if (erroLiberar) {
+        console.error("Erro ao liberar mesa:", erroLiberar);
+        return;
+      }
+
+      mesaAtual = {
+        ...mesaAtual,
+        ocupada: false,
+        status: "livre",
+        pedir_conta: false,
+        cliente_nome: null,
+        cliente_celular: null,
+        aberta_em: null
+      };
+
+      atualizarStatusMesa();
+      mostrarOk("Mesa liberada automaticamente.");
+    }
+  } catch (err) {
+    console.error("Erro geral ao liberar mesa:", err);
+  }
+}
+
+async function sincronizarItensComPedidos() {
+  try {
+    const { data: pedidosFechados, error } = await sb
+      .from("pedidos")
+      .select("id,status")
+      .eq("mesa_id", mesaId)
+      .eq("app_id", app_id)
+      .in("status", ["pago", "finalizado", "encerrado"]);
+
+    if (error) {
+      console.error("Erro ao sincronizar pedidos pagos:", error);
+      return;
+    }
+
+    const idsFechados = (pedidosFechados || []).map(p => p.id).filter(Boolean);
+
+    if (!idsFechados.length) return;
+
+    const { error: erroItens } = await sb
+      .from("pedido_itens")
+      .update({ status: "pago" })
+      .in("pedido_id", idsFechados)
+      .not("status", "in", '("pago","finalizado","cancelado","encerrado")');
+
+    if (erroItens) {
+      console.error("Erro ao sincronizar itens pagos:", erroItens);
+    }
+  } catch (err) {
+    console.error("Erro geral sincronizando itens:", err);
+  }
+}
+
 async function carregarPedidosMesa() {
   try {
+    await sincronizarItensComPedidos();
+
     const { data, error } = await sb
       .from("pedido_itens")
       .select("*")
       .eq("mesa_id", mesaId)
       .eq("app_id", app_id)
-      .not("status", "in", '("pago","finalizado","cancelado","encerrado")')
+      .not("status", "in", '("cancelado","encerrado")')
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -854,8 +978,9 @@ async function carregarPedidosMesa() {
     }
 
     const itens = data || [];
+    const itensAbertos = itens.filter(item => !statusFechado(item.status));
 
-    const totalMesa = itens.reduce((soma, item) => {
+    const totalMesa = itensAbertos.reduce((soma, item) => {
       return soma + Number(item.subtotal || item.total || 0);
     }, 0);
 
@@ -863,10 +988,10 @@ async function carregarPedidosMesa() {
 
     const listaPedidos = document.getElementById("listaPedidos");
 
-    if (!itens.length) {
-      listaPedidos.innerHTML = `<div class="vazio">Nenhum pedido ainda.</div>`;
+    if (!itensAbertos.length) {
+      listaPedidos.innerHTML = `<div class="vazio">Nenhum pedido em aberto.</div>`;
     } else {
-      listaPedidos.innerHTML = itens.map(item => {
+      listaPedidos.innerHTML = itensAbertos.map(item => {
         const precoUnit = Number(item.preco_unitario || item.preco || 0);
         const subtotal = Number(item.subtotal || item.total || (precoUnit * Number(item.quantidade || 0)));
 
@@ -874,12 +999,15 @@ async function carregarPedidosMesa() {
           <div class="item">
             <strong>${escapeHtml(item.nome_produto || item.produto_nome || "Produto")}</strong><br>
             Qtd: ${Number(item.quantidade || 0)} × ${moeda(precoUnit)}<br>
-            Subtotal: ${moeda(subtotal)}
+            Subtotal: ${moeda(subtotal)}<br>
+            <small>Status: ${escapeHtml(item.status || "-")}</small>
             ${item.observacao ? `<br><small>Obs: ${escapeHtml(item.observacao)}</small>` : ""}
           </div>
         `;
       }).join("");
     }
+
+    await liberarMesaSeNecessario();
   } catch (err) {
     console.error("Erro geral ao carregar pedidos da mesa:", err);
   }
@@ -898,6 +1026,48 @@ function filtrarProdutos(){
   );
 
   renderizarProdutos(filtrados);
+}
+
+function iniciarRealtimeMesa() {
+  sb.channel(`mesa-${mesaId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "mesas",
+        filter: `id=eq.${mesaId}`
+      },
+      async () => {
+        await carregarMesa();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pedidos",
+        filter: `mesa_id=eq.${mesaId}`
+      },
+      async () => {
+        await carregarPedidosMesa();
+        await carregarMesa();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pedido_itens",
+        filter: `mesa_id=eq.${mesaId}`
+      },
+      async () => {
+        await carregarPedidosMesa();
+      }
+    )
+    .subscribe();
 }
 
 async function iniciarPagina(){
@@ -919,6 +1089,8 @@ async function iniciarPagina(){
       renderizarLoteAtual();
     });
     document.getElementById("buscaProduto").addEventListener("input", filtrarProdutos);
+
+    iniciarRealtimeMesa();
 
     setInterval(async () => {
       try{
