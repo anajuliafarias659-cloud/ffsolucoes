@@ -34,6 +34,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .qr{background:#020617;border-radius:14px;padding:10px;margin:12px 0;display:flex;justify-content:center}
 .btn-remover{margin-top:8px;width:100%;background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
 .url-mini{margin-top:8px;font-size:11px;color:#94a3b8;word-break:break-all}
+.cliente-mini{font-size:12px;color:#94a3b8;margin-bottom:8px;min-height:16px}
 </style>
 </head>
 
@@ -62,6 +63,7 @@ let app_id = null;
 const SEGREDO_REMOVER_MESA = "4321";
 let criandoMesa = false;
 let carregandoMesas = false;
+let canalRealtime = null;
 
 function esperarSessao(){
   const funcionario = JSON.parse(localStorage.getItem("funcionario_logado") || "null");
@@ -96,6 +98,7 @@ function iniciarSistema(){
   }
 
   carregarMesas();
+  iniciarRealtime();
   setInterval(carregarMesas, 4000);
 }
 
@@ -201,6 +204,16 @@ async function obterSessaoValidaMesa(mesaId){
   return sessao;
 }
 
+function statusFechado(status){
+  const s = String(status || "").toLowerCase().trim();
+  return ["pago","finalizado","cancelado","encerrado"].includes(s);
+}
+
+function statusConta(status){
+  const s = String(status || "").toLowerCase().trim();
+  return s === "conta_solicitada" || s === "pedir_conta";
+}
+
 /* ===== CARREGAR MESAS ===== */
 async function carregarMesas(){
   if (carregandoMesas) return;
@@ -209,33 +222,32 @@ async function carregarMesas(){
   try {
     const { data: mesas, error: erroMesas } = await sb
       .from("mesas")
-      .select("id,numero_mesa,ocupada")
+      .select("id,numero_mesa,ocupada,status,pedir_conta,cliente_nome,ativa")
       .eq("app_id", app_id)
       .eq("ativa", true)
       .order("numero_mesa");
 
     if (erroMesas) {
       console.error("Erro ao carregar mesas:", erroMesas);
-      carregandoMesas = false;
       return;
     }
 
     const { data: pedidos, error: erroPedidos } = await sb
       .from("pedidos")
-      .select("mesa_id,status,created_at")
+      .select("id,mesa_id,status,created_at")
       .eq("app_id", app_id)
       .not("mesa_id","is",null)
-      .not("status","in",'("pago","finalizado","cancelado","encerrado")')
       .order("created_at",{ ascending:false });
 
     if (erroPedidos) {
       console.error("Erro ao carregar pedidos:", erroPedidos);
     }
 
-    const pedidosPorMesa = {};
+    const pedidosAbertosPorMesa = {};
     (pedidos || []).forEach(p => {
-      if (!pedidosPorMesa[p.mesa_id]) {
-        pedidosPorMesa[p.mesa_id] = p;
+      if (statusFechado(p.status)) return;
+      if (!pedidosAbertosPorMesa[p.mesa_id]) {
+        pedidosAbertosPorMesa[p.mesa_id] = p;
       }
     });
 
@@ -243,26 +255,43 @@ async function carregarMesas(){
     grid.innerHTML = "";
 
     for (const m of (mesas || [])) {
-      const pedido = pedidosPorMesa[m.id];
+      const pedidoAberto = pedidosAbertosPorMesa[m.id];
+
+      const mesaPediuConta =
+        m.pedir_conta === true ||
+        statusConta(m.status) ||
+        statusConta(pedidoAberto?.status);
+
       let classe = "livre";
       let texto = "LIVRE";
 
-      if (pedido) {
-        if (pedido.status === "conta_solicitada" || pedido.status === "pedir_conta") {
-          classe = "conta";
-          texto = "PEDIU A CONTA";
-        } else {
-          classe = "preparando";
-          texto = "OCUPADA";
-        }
+      if (mesaPediuConta) {
+        classe = "conta";
+        texto = "PEDIU A CONTA";
+      } else if (pedidoAberto || m.ocupada) {
+        classe = "preparando";
+        texto = "OCUPADA";
+      }
 
-        if (!m.ocupada) {
-          await sb.from("mesas").update({ ocupada:true }).eq("id", m.id);
-        }
-      } else {
-        if (m.ocupada) {
-          await sb.from("mesas").update({ ocupada:false }).eq("id", m.id);
-        }
+      const deveEstarOcupada = mesaPediuConta || !!pedidoAberto;
+
+      if (deveEstarOcupada && !m.ocupada) {
+        await sb
+          .from("mesas")
+          .update({ ocupada: true })
+          .eq("id", m.id);
+      }
+
+      if (!deveEstarOcupada && m.ocupada) {
+        await sb
+          .from("mesas")
+          .update({
+            ocupada: false,
+            pedir_conta: false,
+            status: "livre",
+            cliente_nome: null
+          })
+          .eq("id", m.id);
       }
 
       const sessao = await obterSessaoValidaMesa(m.id);
@@ -275,11 +304,12 @@ async function carregarMesas(){
       div.innerHTML = `
         <h3>Mesa ${m.numero_mesa}</h3>
         <span class="status ${classe}">${texto}</span>
+        <div class="cliente-mini">${m.cliente_nome ? m.cliente_nome : ""}</div>
         <div class="qr">
           <canvas id="qr-${m.id}"></canvas>
         </div>
         <div class="url-mini">${urlMesa}</div>
-        ${!pedido ? `<button class="btn-remover">Remover mesa</button>` : ``}
+        ${!pedidoAberto && !mesaPediuConta ? `<button class="btn-remover">Remover mesa</button>` : ``}
       `;
 
       div.onclick = () => {
@@ -307,7 +337,13 @@ async function carregarMesas(){
 
           await sb
             .from("mesas")
-            .update({ ativa:false, ocupada:false })
+            .update({
+              ativa:false,
+              ocupada:false,
+              pedir_conta:false,
+              status:"livre",
+              cliente_nome:null
+            })
             .eq("id", m.id);
 
           carregarMesas();
@@ -317,6 +353,40 @@ async function carregarMesas(){
   } finally {
     carregandoMesas = false;
   }
+}
+
+/* ===== REALTIME ===== */
+function iniciarRealtime(){
+  if (canalRealtime) return;
+
+  canalRealtime = sb.channel(`painel-mesas-${app_id}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "mesas",
+        filter: `app_id=eq.${app_id}`
+      },
+      () => {
+        carregarMesas();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pedidos",
+        filter: `app_id=eq.${app_id}`
+      },
+      () => {
+        carregarMesas();
+      }
+    )
+    .subscribe((status) => {
+      console.log("Realtime mesas:", status);
+    });
 }
 
 /* ===== ADICIONAR MESA ===== */
@@ -348,7 +418,9 @@ async function adicionarMesa(){
         app_id,
         numero_mesa: prox,
         ativa: true,
-        ocupada: false
+        ocupada: false,
+        pedir_conta: false,
+        status: "livre"
       })
       .select()
       .single();
