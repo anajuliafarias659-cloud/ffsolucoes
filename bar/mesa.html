@@ -472,44 +472,7 @@ small{
 }
 
 .tela-expirada{
-  position:fixed;
-  inset:0;
-  background:rgba(2,6,23,.96);
-  display:none;
-  align-items:center;
-  justify-content:center;
-  z-index:999;
-  padding:20px;
-}
-
-.tela-expirada.show{
-  display:flex;
-}
-
-.tela-expirada-card{
-  width:min(92vw,420px);
-  background:#0f172a;
-  border:1px solid var(--line);
-  border-radius:18px;
-  padding:24px;
-  text-align:center;
-  box-shadow:0 16px 40px rgba(0,0,0,.45);
-}
-
-.tela-expirada-card h2{
-  margin:0 0 10px 0;
-}
-
-.tela-expirada-card p{
-  margin:0 0 16px 0;
-  color:#cbd5e1;
-}
-
-.tela-expirada-card button{
-  width:100%;
-  background:var(--blue);
-  color:#fff;
-  min-height:44px;
+  display:none !important;
 }
 
 @media (min-width:700px){
@@ -726,10 +689,6 @@ function gerarToken() {
   return "tok_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function agoraISO() {
-  return new Date().toISOString();
-}
-
 function adicionarMinutosISO(minutos) {
   return new Date(Date.now() + minutos * 60000).toISOString();
 }
@@ -831,23 +790,27 @@ function sessaoExpiradaLocal() {
   return new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
 }
 
-function travarTelaPorNovoQRCode(titulo, texto) {
-  telaTravada = true;
-  document.getElementById("tituloExpirada").textContent = titulo || "Sessão encerrada";
-  document.getElementById("textoExpirada").textContent = texto || "Escaneie novamente o QR da mesa para continuar.";
-  document.getElementById("telaExpirada").classList.add("show");
-
-  document.getElementById("containerPrincipal")?.classList.add("bloqueado-ui");
-  document.getElementById("cardSessao")?.classList.add("bloqueado-ui");
-  document.getElementById("cardLote")?.classList.add("bloqueado-ui");
+function travarTelaPorNovoQRCode() {
+  telaTravada = false;
 }
 
 function liberarBloqueioTela() {
   telaTravada = false;
-  document.getElementById("telaExpirada").classList.remove("show");
-  document.getElementById("containerPrincipal")?.classList.remove("bloqueado-ui");
-  document.getElementById("cardSessao")?.classList.remove("bloqueado-ui");
-  document.getElementById("cardLote")?.classList.remove("bloqueado-ui");
+}
+
+function resetarInterfaceParaNovaSessao() {
+  removerSessaoLocal();
+  pedidoAtual = null;
+  removerCanalPedidoAtual();
+  limparTelaPedidoAtual();
+  atualizarTotaisMesa(0);
+  atualizarInfoStatus();
+  liberarBloqueioTela();
+
+  document.getElementById("clienteNome").value = "";
+  document.getElementById("clienteTelefone").value = "";
+  document.getElementById("formSessao")?.classList.remove("oculto");
+  document.getElementById("btnToggleSessao").textContent = "Fechar";
 }
 
 function iniciarMonitorSessao() {
@@ -855,19 +818,14 @@ function iniciarMonitorSessao() {
 
   if (!sessaoLocal?.sessao_expira_em) return;
 
-  const verificar = () => {
+  const verificar = async () => {
     if (sessaoExpiradaLocal()) {
-      removerSessaoLocal();
-      pedidoAtual = null;
-      limparTelaPedidoAtual();
-      atualizarTotaisMesa(0);
-      travarTelaPorNovoQRCode(
-        "Sessão expirada",
-        "Sua sessão expirou após 15 minutos. Escaneie novamente o QR da mesa para continuar."
-      );
-    } else {
-      atualizarSessaoNaTela();
+      resetarInterfaceParaNovaSessao();
+      alert("Sessão expirada. Inicie uma nova sessão para continuar.");
+      return;
     }
+
+    atualizarSessaoNaTela();
   };
 
   verificar();
@@ -944,7 +902,6 @@ function configurarToggleSessao() {
   if (!btn || !form) return;
 
   btn.onclick = () => {
-    if (telaTravada) return;
     form.classList.toggle("oculto");
     btn.textContent = form.classList.contains("oculto") ? "Abrir" : "Fechar";
   };
@@ -957,7 +914,6 @@ function configurarTogglePedido() {
   if (!btn || !conteudo) return;
 
   btn.onclick = () => {
-    if (telaTravada) return;
     conteudo.classList.toggle("oculto");
     btn.textContent = conteudo.classList.contains("oculto") ? "Abrir" : "Recolher";
   };
@@ -971,9 +927,7 @@ async function validarSessao() {
     return !!APP_ID;
   }
 
-  if (error) {
-    console.error(error);
-  }
+  if (error) console.error(error);
 
   const userId = data.session.user.id;
 
@@ -1032,7 +986,6 @@ async function sincronizarSessaoComPedidos() {
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .not("status", "in", '("cancelado")')
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -1041,39 +994,47 @@ async function sincronizarSessaoComPedidos() {
   }
 
   const pedidos = data || [];
-  const pedidoAberto = pedidos.find(p => p.status === "aberto") || null;
-  const pedidoMaisRecente = pedidos[0] || null;
 
-  const todosPagosOuFinalizados = pedidos.length > 0 && pedidos.every(p => ["pago", "finalizado"].includes(p.status));
+  const pedidosAtivos = pedidos.filter(p =>
+    ["aberto", "novo", "aceito", "pronto", "conta_solicitada"].includes(p.status)
+  );
 
-  if (todosPagosOuFinalizados) {
-    removerSessaoLocal();
-    pedidoAtual = null;
-    limparTelaPedidoAtual();
-    atualizarTotaisMesa(0);
-    removerCanalPedidoAtual();
-    travarTelaPorNovoQRCode(
-      "Mesa encerrada",
-      "A conta foi paga e a mesa foi liberada. Para pedir novamente, escaneie o QR da mesa de novo."
-    );
+  const pedidoAberto = pedidosAtivos.find(p => p.status === "aberto") || null;
+  const pedidoMaisRecenteAtivo = pedidosAtivos[0] || null;
+
+  if (pedidosAtivos.length === 0) {
+    resetarInterfaceParaNovaSessao();
+    await carregarHistoricoPedidosEnviados();
+    aplicarFiltros();
     return;
+  }
+
+  if (pedidoMaisRecenteAtivo?.sessao_expira_em) {
+    const expiradaBanco = new Date(pedidoMaisRecenteAtivo.sessao_expira_em).getTime() <= Date.now();
+
+    if (expiradaBanco) {
+      resetarInterfaceParaNovaSessao();
+      await carregarHistoricoPedidosEnviados();
+      aplicarFiltros();
+      return;
+    }
   }
 
   pedidoAtual = pedidoAberto;
 
-  if (pedidoMaisRecente?.sessao_token && !sessaoExpiradaLocal()) {
+  if (pedidoMaisRecenteAtivo?.sessao_token) {
     salvarSessaoLocal({
-      sessao_token: pedidoMaisRecente.sessao_token,
-      cliente_nome: pedidoMaisRecente.cliente_nome,
-      cliente_telefone: pedidoMaisRecente.cliente_telefone,
-      responsavel_nome: pedidoMaisRecente.responsavel_nome,
-      garcom_nome: pedidoMaisRecente.garcom_nome,
-      funcionario_id: pedidoMaisRecente.funcionario_id,
-      sessao_expira_em: pedidoMaisRecente.sessao_expira_em
+      sessao_token: pedidoMaisRecenteAtivo.sessao_token,
+      cliente_nome: pedidoMaisRecenteAtivo.cliente_nome,
+      cliente_telefone: pedidoMaisRecenteAtivo.cliente_telefone,
+      responsavel_nome: pedidoMaisRecenteAtivo.responsavel_nome,
+      garcom_nome: pedidoMaisRecenteAtivo.garcom_nome,
+      funcionario_id: pedidoMaisRecenteAtivo.funcionario_id,
+      sessao_expira_em: pedidoMaisRecenteAtivo.sessao_expira_em
     });
 
-    document.getElementById("clienteNome").value = pedidoMaisRecente.cliente_nome || "";
-    document.getElementById("clienteTelefone").value = pedidoMaisRecente.cliente_telefone || "";
+    document.getElementById("clienteNome").value = pedidoMaisRecenteAtivo.cliente_nome || "";
+    document.getElementById("clienteTelefone").value = pedidoMaisRecenteAtivo.cliente_telefone || "";
   }
 
   atualizarInfoStatus();
@@ -1088,11 +1049,6 @@ async function sincronizarSessaoComPedidos() {
 }
 
 async function iniciarAtendimentoManual() {
-  if (telaTravada) {
-    alert("Escaneie novamente o QR da mesa para continuar.");
-    return;
-  }
-
   const clienteNome = document.getElementById("clienteNome").value.trim();
   const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
 
@@ -1112,27 +1068,18 @@ async function iniciarAtendimentoManual() {
   };
 
   salvarSessaoLocal(sessao);
-  liberarBloqueioTela();
   alert("Atendimento iniciado com sucesso! A sessão vale por 15 minutos.");
 }
 
 async function validarSessaoPedido() {
-  if (telaTravada) {
-    alert("Escaneie novamente o QR da mesa para continuar.");
-    return false;
-  }
-
   if (!sessaoLocal) {
     alert("Inicie o atendimento antes de lançar itens.");
     return false;
   }
 
   if (sessaoExpiradaLocal()) {
-    removerSessaoLocal();
-    travarTelaPorNovoQRCode(
-      "Sessão expirada",
-      "Sua sessão expirou após 15 minutos. Escaneie novamente o QR da mesa para continuar."
-    );
+    resetarInterfaceParaNovaSessao();
+    alert("Sua sessão expirou. Inicie uma nova sessão para continuar.");
     return false;
   }
 
@@ -1233,7 +1180,6 @@ function renderizarBotoesCategorias() {
     btn.textContent = cat.nome;
     if (categoriaSelecionada === cat.id) btn.classList.add("ativo");
     btn.onclick = () => {
-      if (telaTravada) return;
       categoriaSelecionada = cat.id;
       renderizarBotoesCategorias();
       aplicarFiltros();
@@ -1533,7 +1479,7 @@ async function calcularTotalGeralMesa() {
     .select("id,status")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .not("status", "in", '("cancelado","finalizado")');
+    .in("status", ["aberto","novo","aceito","pronto","conta_solicitada","pago"]);
 
   if (erroPedidos) {
     console.error(erroPedidos);
@@ -1569,11 +1515,6 @@ async function calcularTotalGeralMesa() {
 }
 
 document.getElementById("btnEnviar").onclick = async () => {
-  if (telaTravada) {
-    alert("Escaneie novamente o QR da mesa para continuar.");
-    return;
-  }
-
   if (!pedidoAtual) {
     alert("Nenhum pedido em aberto.");
     return;
@@ -1619,11 +1560,6 @@ document.getElementById("btnEnviar").onclick = async () => {
 };
 
 document.getElementById("btnConta").onclick = async () => {
-  if (telaTravada) {
-    alert("Escaneie novamente o QR da mesa para continuar.");
-    return;
-  }
-
   const totalMesa = await calcularTotalGeralMesa();
 
   if (totalMesa <= 0) {
@@ -1636,7 +1572,7 @@ document.getElementById("btnConta").onclick = async () => {
     .select("id,status")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .not("status", "in", '("finalizado","cancelado","pago")');
+    .in("status", ["aberto","novo","aceito","pronto","conta_solicitada"]);
 
   if (error) {
     console.error(error);
@@ -1718,15 +1654,11 @@ function ativarRealtimeMesa() {
         table: "pedidos",
         filter: `mesa_id=eq.${mesaId}`
       },
-      async payload => {
+      async (payload) => {
         const novoStatus = payload.new?.status;
 
         if (novoStatus === "aceito") alert("👨‍🍳 Um pedido da mesa foi aceito!");
         if (novoStatus === "pronto") alert("✅ Um pedido da mesa ficou pronto!");
-        if (novoStatus === "pago") {
-          await sincronizarSessaoComPedidos();
-          return;
-        }
         if (novoStatus === "cancelado") alert("❌ Um pedido da mesa foi cancelado!");
 
         await sincronizarSessaoComPedidos();
@@ -1737,8 +1669,10 @@ function ativarRealtimeMesa() {
 
 document.getElementById("btnIniciarSessao").onclick = iniciarAtendimentoManual;
 document.getElementById("busca").oninput = aplicarFiltros;
-document.getElementById("btnRecarregar").onclick = () => {
-  location.href = "mesas.html";
+
+document.getElementById("btnRecarregar").onclick = async () => {
+  resetarInterfaceParaNovaSessao();
+  await sincronizarSessaoComPedidos();
 };
 
 document.addEventListener("DOMContentLoaded", iniciarSistema);
