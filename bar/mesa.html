@@ -666,9 +666,12 @@ let categoriasCache = [];
 let categoriaSelecionada = null;
 let canalMesa = null;
 let canalPedidoAtual = null;
+let canalMesaStatus = null;
 let FUNCIONARIO_LOGADO = null;
 let sessaoExpiradaTimer = null;
 let telaTravada = false;
+let mesaInfo = null;
+let atualizandoMesaStatus = false;
 
 const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
 let sessaoLocal = null;
@@ -821,6 +824,14 @@ function iniciarMonitorSessao() {
   const verificar = async () => {
     if (sessaoExpiradaLocal()) {
       resetarInterfaceParaNovaSessao();
+      await atualizarMesaStatus({
+        ocupada: false,
+        pedir_conta: false,
+        status: "livre",
+        cliente_nome: null,
+        cliente_celular: null,
+        total_aberto: 0
+      });
       alert("Sessão expirada. Inicie uma nova sessão para continuar.");
       return;
     }
@@ -947,6 +958,46 @@ async function validarSessao() {
   return !!APP_ID;
 }
 
+async function atualizarMesaStatus({
+  ocupada = null,
+  pedir_conta = null,
+  status = null,
+  cliente_nome = undefined,
+  cliente_celular = undefined,
+  total_aberto = undefined
+} = {}) {
+  if (!mesaId || atualizandoMesaStatus) return;
+
+  const payload = {};
+  if (ocupada !== null) payload.ocupada = ocupada;
+  if (pedir_conta !== null) payload.pedir_conta = pedir_conta;
+  if (status !== null) payload.status = status;
+  if (cliente_nome !== undefined) payload.cliente_nome = cliente_nome;
+  if (cliente_celular !== undefined) payload.cliente_celular = cliente_celular;
+  if (total_aberto !== undefined) payload.total_aberto = Number(total_aberto || 0);
+
+  if (Object.keys(payload).length === 0) return;
+
+  atualizandoMesaStatus = true;
+  try {
+    const { data, error } = await supabase
+      .from("mesas")
+      .update(payload)
+      .eq("id", mesaId)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erro ao atualizar mesa:", error);
+      return;
+    }
+
+    if (data) mesaInfo = data;
+  } finally {
+    atualizandoMesaStatus = false;
+  }
+}
+
 async function iniciarSistema() {
   configurarToggleSessao();
   configurarTogglePedido();
@@ -964,6 +1015,7 @@ async function iniciarSistema() {
   await carregarProdutos();
   await sincronizarSessaoComPedidos();
   ativarRealtimeMesa();
+  ativarRealtimeMesaStatus();
 
   if (sessaoLocal) iniciarMonitorSessao();
 }
@@ -971,11 +1023,12 @@ async function iniciarSistema() {
 async function carregarMesa() {
   const { data } = await supabase
     .from("mesas")
-    .select("numero_mesa")
+    .select("*")
     .eq("id", mesaId)
     .maybeSingle();
 
   if (data) {
+    mesaInfo = data;
     document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
   }
 }
@@ -1004,7 +1057,18 @@ async function sincronizarSessaoComPedidos() {
 
   if (pedidosAtivos.length === 0) {
     resetarInterfaceParaNovaSessao();
+
+    await atualizarMesaStatus({
+      ocupada: false,
+      pedir_conta: false,
+      status: "livre",
+      cliente_nome: null,
+      cliente_celular: null,
+      total_aberto: 0
+    });
+
     await carregarHistoricoPedidosEnviados();
+    await calcularTotalGeralMesa();
     aplicarFiltros();
     return;
   }
@@ -1014,7 +1078,18 @@ async function sincronizarSessaoComPedidos() {
 
     if (expiradaBanco) {
       resetarInterfaceParaNovaSessao();
+
+      await atualizarMesaStatus({
+        ocupada: false,
+        pedir_conta: false,
+        status: "livre",
+        cliente_nome: null,
+        cliente_celular: null,
+        total_aberto: 0
+      });
+
       await carregarHistoricoPedidosEnviados();
+      await calcularTotalGeralMesa();
       aplicarFiltros();
       return;
     }
@@ -1037,6 +1112,19 @@ async function sincronizarSessaoComPedidos() {
     document.getElementById("clienteTelefone").value = pedidoMaisRecenteAtivo.cliente_telefone || "";
   }
 
+  const totalMesa = await calcularTotalGeralMesa();
+  const statusMesa = pedidosAtivos.some(p => p.status === "conta_solicitada") ? "pediu_conta" : "ocupada";
+  const pediuConta = pedidosAtivos.some(p => p.status === "conta_solicitada");
+
+  await atualizarMesaStatus({
+    ocupada: true,
+    pedir_conta: pediuConta,
+    status: statusMesa,
+    cliente_nome: pedidoMaisRecenteAtivo?.cliente_nome || sessaoLocal?.cliente_nome || null,
+    cliente_celular: pedidoMaisRecenteAtivo?.cliente_telefone || sessaoLocal?.cliente_telefone || null,
+    total_aberto: totalMesa
+  });
+
   atualizarInfoStatus();
 
   if (pedidoAtual) ativarRealtimePedidoAtual();
@@ -1044,7 +1132,6 @@ async function sincronizarSessaoComPedidos() {
 
   await carregarPedidoAtual();
   await carregarHistoricoPedidosEnviados();
-  await calcularTotalGeralMesa();
   aplicarFiltros();
 }
 
@@ -1068,6 +1155,15 @@ async function iniciarAtendimentoManual() {
   };
 
   salvarSessaoLocal(sessao);
+
+  await atualizarMesaStatus({
+    ocupada: true,
+    pedir_conta: false,
+    status: "ocupada",
+    cliente_nome: clienteNome,
+    cliente_celular: clienteTelefone
+  });
+
   alert("Atendimento iniciado com sucesso! A sessão vale por 15 minutos.");
 }
 
@@ -1079,6 +1175,16 @@ async function validarSessaoPedido() {
 
   if (sessaoExpiradaLocal()) {
     resetarInterfaceParaNovaSessao();
+
+    await atualizarMesaStatus({
+      ocupada: false,
+      pedir_conta: false,
+      status: "livre",
+      cliente_nome: null,
+      cliente_celular: null,
+      total_aberto: 0
+    });
+
     alert("Sua sessão expirou. Inicie uma nova sessão para continuar.");
     return false;
   }
@@ -1120,6 +1226,15 @@ async function criarPedidoSeNecessario() {
   pedidoAtual = data;
   atualizarInfoStatus();
   ativarRealtimePedidoAtual();
+
+  await atualizarMesaStatus({
+    ocupada: true,
+    pedir_conta: false,
+    status: "ocupada",
+    cliente_nome: sessaoLocal.cliente_nome,
+    cliente_celular: sessaoLocal.cliente_telefone
+  });
+
   return true;
 }
 
@@ -1489,6 +1604,7 @@ async function calcularTotalGeralMesa() {
 
   if (!pedidos || pedidos.length === 0) {
     atualizarTotaisMesa(0);
+    await atualizarMesaStatus({ total_aberto: 0 });
     return 0;
   }
 
@@ -1511,6 +1627,7 @@ async function calcularTotalGeralMesa() {
   });
 
   atualizarTotaisMesa(total);
+  await atualizarMesaStatus({ total_aberto: total });
   return total;
 }
 
@@ -1554,6 +1671,12 @@ document.getElementById("btnEnviar").onclick = async () => {
     alert("Erro ao enviar pedido.");
     return;
   }
+
+  await atualizarMesaStatus({
+    ocupada: true,
+    pedir_conta: false,
+    status: "ocupada"
+  });
 
   alert("Pedido enviado! Esse lote ficou travado. Se quiser pedir mais dentro da sessão, adicione novos itens.");
   await sincronizarSessaoComPedidos();
@@ -1604,6 +1727,12 @@ document.getElementById("btnConta").onclick = async () => {
     alert("Erro ao solicitar conta.");
     return;
   }
+
+  await atualizarMesaStatus({
+    ocupada: true,
+    pedir_conta: true,
+    status: "pediu_conta"
+  });
 
   alert("Conta solicitada!");
   await sincronizarSessaoComPedidos();
@@ -1662,6 +1791,35 @@ function ativarRealtimeMesa() {
         if (novoStatus === "cancelado") alert("❌ Um pedido da mesa foi cancelado!");
 
         await sincronizarSessaoComPedidos();
+      }
+    )
+    .subscribe();
+}
+
+function ativarRealtimeMesaStatus() {
+  if (canalMesaStatus) {
+    supabase.removeChannel(canalMesaStatus);
+    canalMesaStatus = null;
+  }
+
+  canalMesaStatus = supabase
+    .channel("mesa-status-" + mesaId)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "mesas",
+        filter: `id=eq.${mesaId}`
+      },
+      async (payload) => {
+        mesaInfo = payload.new || mesaInfo;
+
+        const livre = payload.new?.status === "livre" || payload.new?.ocupada === false;
+        if (livre) {
+          resetarInterfaceParaNovaSessao();
+          await sincronizarSessaoComPedidos();
+        }
       }
     )
     .subscribe();
