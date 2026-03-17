@@ -10,7 +10,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
 <script type="module" src="../js/auth.js"></script>
 
 <style>
@@ -23,20 +22,20 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .btn-voltar{background:#1e293b;color:#fff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px}
 .card{background:#0f172a;padding:16px;border-radius:18px;text-align:center;border:2px solid transparent;cursor:pointer;transition:.15s}
-.card:hover{transform:scale(1.03)}
+.card:hover{transform:scale(1.02)}
 .card.livre{border-color:#22c55e}
 .card.preparando{border-color:#eab308}
 .card.conta{border-color:#fde047;box-shadow:0 0 14px rgba(253,224,71,.25)}
-.status{margin:6px 0 10px;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:13px}
+.status{margin:6px 0 10px;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:13px;display:inline-block}
 .status.livre{background:#22c55e;color:#022c22}
 .status.preparando{background:#eab308;color:#000}
 .status.conta{background:#fde047;color:#000}
-.qr{background:#020617;border-radius:14px;padding:10px;margin:12px 0;display:flex;justify-content:center}
+.qr{background:#020617;border-radius:14px;padding:10px;margin:12px 0;display:flex;justify-content:center;min-height:140px;align-items:center}
 .btn-remover{margin-top:8px;width:100%;background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
 .url-mini{margin-top:8px;font-size:11px;color:#94a3b8;word-break:break-all}
 .cliente-mini{font-size:12px;color:#94a3b8;margin-bottom:8px;min-height:16px}
 .sessao-mini{font-size:11px;color:#cbd5e1;margin-top:6px;min-height:15px}
-.atualizacao{font-size:12px;color:#94a3b8;margin-top:10px}
+.atualizacao{font-size:12px;color:#94a3b8;margin-top:10px;margin-bottom:14px}
 </style>
 </head>
 
@@ -67,8 +66,8 @@ const SEGREDO_REMOVER_MESA = "4321";
 let criandoMesa = false;
 let carregandoMesas = false;
 let intervalMesas = null;
-
-const DURACAO_SESSAO_MINUTOS = 1440; // 24h
+const DURACAO_SESSAO_MINUTOS = 1440;
+const cardsRenderizados = new Map();
 
 function esperarSessao(){
   const funcionario = JSON.parse(localStorage.getItem("funcionario_logado") || "null");
@@ -105,9 +104,7 @@ function iniciarSistema(){
   carregarMesas();
 
   if (intervalMesas) clearInterval(intervalMesas);
-  intervalMesas = setInterval(() => {
-    carregarMesas();
-  }, 5000);
+  intervalMesas = setInterval(carregarMesas, 5000);
 }
 
 function agoraISO(){
@@ -129,13 +126,31 @@ function montarUrlMesa(mesaId, token){
   return `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(mesaId)}&token=${encodeURIComponent(token)}`;
 }
 
+function normalizarStatus(status){
+  return String(status || "")
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 function statusFechado(status){
-  const s = String(status || "").toLowerCase().trim();
-  return ["pago","finalizado","cancelado","encerrado"].includes(s);
+  const s = normalizarStatus(status);
+  return [
+    "pago",
+    "finalizado",
+    "cancelado",
+    "encerrado",
+    "concluido",
+    "fechado",
+    "quitado",
+    "recebido",
+    "entregue"
+  ].includes(s);
 }
 
 function statusConta(status){
-  const s = String(status || "").toLowerCase().trim();
+  const s = normalizarStatus(status);
   return s === "conta_solicitada" || s === "pedir_conta";
 }
 
@@ -159,8 +174,7 @@ function expirouSessao(sessao){
 function atualizarInfoAtualizacao(){
   const el = document.getElementById("infoAtualizacao");
   if (!el) return;
-  const agora = new Date();
-  el.textContent = `Última atualização: ${agora.toLocaleTimeString("pt-BR")} • Atualiza sozinha a cada 5 segundos`;
+  el.textContent = `Última atualização: ${new Date().toLocaleTimeString("pt-BR")} • Atualiza a cada 5 segundos`;
 }
 
 async function buscarSessaoAtivaMesa(mesaId){
@@ -184,7 +198,7 @@ async function buscarSessaoAtivaMesa(mesaId){
 async function encerrarSessaoMesa(sessaoId){
   if (!sessaoId) return;
 
-  const { error: e1 } = await sb
+  await sb
     .from("sessoes_mesa")
     .update({
       ativa: false,
@@ -192,35 +206,25 @@ async function encerrarSessaoMesa(sessaoId){
     })
     .eq("id", sessaoId);
 
-  if (e1) {
-    console.error("Erro ao encerrar sessão:", e1);
-  }
-
-  const { error: e2 } = await sb
+  await sb
     .from("sessoes_mesa_dispositivos")
     .delete()
     .eq("sessao_mesa_id", sessaoId);
-
-  if (e2) {
-    console.error("Erro ao limpar dispositivos da sessão:", e2);
-  }
 }
 
 async function criarSessaoMesa(mesaId){
   const token = gerarTokenSeguro();
 
-  const payload = {
-    mesa_id: mesaId,
-    app_id: app_id,
-    token: token,
-    ativa: true,
-    ultimo_acesso_em: agoraISO(),
-    expira_em: adicionarMinutosISO(DURACAO_SESSAO_MINUTOS)
-  };
-
   const { data, error } = await sb
     .from("sessoes_mesa")
-    .insert(payload)
+    .insert({
+      mesa_id: mesaId,
+      app_id: app_id,
+      token,
+      ativa: true,
+      ultimo_acesso_em: agoraISO(),
+      expira_em: adicionarMinutosISO(DURACAO_SESSAO_MINUTOS)
+    })
     .select()
     .single();
 
@@ -232,7 +236,7 @@ async function criarSessaoMesa(mesaId){
   return data;
 }
 
-async function garantirSessaoValidaMesa(mesaId){
+async function obterSessaoSomenteLeitura(mesaId){
   let sessao = await buscarSessaoAtivaMesa(mesaId);
 
   if (sessao && expirouSessao(sessao)) {
@@ -240,14 +244,120 @@ async function garantirSessaoValidaMesa(mesaId){
     sessao = null;
   }
 
-  if (!sessao) {
-    sessao = await criarSessaoMesa(mesaId);
-  }
-
   return sessao;
 }
 
-/* ===== CARREGAR MESAS ===== */
+function criarCardMesaBase(mesaId){
+  const div = document.createElement("div");
+  div.dataset.mesaId = mesaId;
+  div.className = "card livre";
+  div.innerHTML = `
+    <h3 class="titulo-mesa"></h3>
+    <span class="status livre"></span>
+    <div class="cliente-mini"></div>
+    <div class="qr"><canvas></canvas></div>
+    <div class="sessao-mini"></div>
+    <div class="url-mini"></div>
+    <button class="btn-remover" style="display:none">Remover mesa</button>
+  `;
+  return div;
+}
+
+async function desenharQrSeMudou(card, urlMesa){
+  const qrWrap = card.querySelector(".qr");
+  const canvas = qrWrap.querySelector("canvas");
+  if (!canvas) return;
+
+  if (card.dataset.urlAtual === urlMesa) return;
+
+  canvas.width = 120;
+  canvas.height = 120;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  await QRCode.toCanvas(canvas, urlMesa, { width: 120 });
+  card.dataset.urlAtual = urlMesa;
+}
+
+async function atualizarOuCriarCardMesa(mesa){
+  const grid = document.getElementById("listaMesas");
+  let card = cardsRenderizados.get(mesa.id);
+
+  if (!card) {
+    card = criarCardMesaBase(mesa.id);
+    cardsRenderizados.set(mesa.id, card);
+    grid.appendChild(card);
+  }
+
+  const pedidoAberto = mesa.pedidoAberto;
+  const mesaPediuConta = mesa.mesaPediuConta;
+  const mesaSemPendencias = mesa.mesaSemPendencias;
+  const sessao = mesa.sessao;
+
+  let classe = "livre";
+  let texto = "LIVRE";
+
+  if (mesaPediuConta) {
+    classe = "conta";
+    texto = "PEDIU A CONTA";
+  } else if (pedidoAberto || mesa.ocupada) {
+    classe = "preparando";
+    texto = "OCUPADA";
+  }
+
+  const urlMesa = sessao
+    ? montarUrlMesa(mesa.id, sessao.token)
+    : `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(mesa.id)}`;
+
+  const expiraTxt = sessao?.expira_em ? `Sessão até ${formatarHoraBR(sessao.expira_em)}` : "";
+  const clienteTexto = mesa.cliente_nome ? mesa.cliente_nome : (mesaSemPendencias ? "Disponível para novo acesso" : "");
+
+  card.className = `card ${classe}`;
+  card.querySelector(".titulo-mesa").textContent = `Mesa ${mesa.numero_mesa}`;
+
+  const statusEl = card.querySelector(".status");
+  statusEl.className = `status ${classe}`;
+  statusEl.textContent = texto;
+
+  card.querySelector(".cliente-mini").textContent = clienteTexto;
+  card.querySelector(".sessao-mini").textContent = expiraTxt;
+  card.querySelector(".url-mini").textContent = urlMesa;
+
+  await desenharQrSeMudou(card, urlMesa);
+
+  card.onclick = () => {
+    location.href = urlMesa;
+  };
+
+  const btn = card.querySelector(".btn-remover");
+  const podeRemover = !pedidoAberto && !mesaPediuConta;
+
+  btn.style.display = podeRemover ? "block" : "none";
+  btn.onclick = async (e) => {
+    e.stopPropagation();
+    const senha = prompt("Código para remover a mesa:");
+    if (senha !== SEGREDO_REMOVER_MESA) return;
+
+    const sessaoAtual = await buscarSessaoAtivaMesa(mesa.id);
+    if (sessaoAtual?.id) await encerrarSessaoMesa(sessaoAtual.id);
+
+    await sb
+      .from("mesas")
+      .update({
+        ativa:false,
+        ocupada:false,
+        pedir_conta:false,
+        status:"livre",
+        cliente_nome:null
+      })
+      .eq("id", mesa.id);
+
+    card.remove();
+    cardsRenderizados.delete(mesa.id);
+    carregarMesas();
+  };
+}
+
 async function carregarMesas(){
   if (carregandoMesas) return;
   carregandoMesas = true;
@@ -269,59 +379,45 @@ async function carregarMesas(){
       .from("pedidos")
       .select("id,mesa_id,status,created_at")
       .eq("app_id", app_id)
-      .not("mesa_id", "is", null)
-      .order("created_at", { ascending:false });
+      .not("mesa_id","is",null)
+      .order("created_at",{ ascending:false });
 
     if (erroPedidos) {
       console.error("Erro ao carregar pedidos:", erroPedidos);
+      return;
     }
 
-    const pedidosAbertosPorMesa = {};
     const todosPedidosPorMesa = {};
-
     (pedidos || []).forEach(p => {
       if (!todosPedidosPorMesa[p.mesa_id]) todosPedidosPorMesa[p.mesa_id] = [];
       todosPedidosPorMesa[p.mesa_id].push(p);
-
-      if (statusFechado(p.status)) return;
-      if (!pedidosAbertosPorMesa[p.mesa_id]) {
-        pedidosAbertosPorMesa[p.mesa_id] = p;
-      }
     });
 
-    const grid = document.getElementById("listaMesas");
-    grid.innerHTML = "";
+    const idsAtuais = new Set();
 
     for (const m of (mesas || [])) {
+      idsAtuais.add(m.id);
+
       const pedidosMesa = todosPedidosPorMesa[m.id] || [];
-      const pedidoAberto = pedidosAbertosPorMesa[m.id] || null;
+      const pedidoAberto = pedidosMesa.find(p => !statusFechado(p.status)) || null;
 
       const mesaPediuConta =
         m.pedir_conta === true ||
         statusConta(m.status) ||
         statusConta(pedidoAberto?.status);
 
-      const mesaSemPendencias =
-        pedidosMesa.length === 0 || pedidosMesa.every(p => statusFechado(p.status));
-
-      let classe = "livre";
-      let texto = "LIVRE";
-
-      if (mesaPediuConta) {
-        classe = "conta";
-        texto = "PEDIU A CONTA";
-      } else if (pedidoAberto || m.ocupada) {
-        classe = "preparando";
-        texto = "OCUPADA";
-      }
-
+      const mesaSemPendencias = !pedidoAberto;
       const deveEstarOcupada = mesaPediuConta || !!pedidoAberto;
 
       if (deveEstarOcupada && !m.ocupada) {
         await sb
           .from("mesas")
-          .update({ ocupada: true })
+          .update({
+            ocupada: true,
+            status: mesaPediuConta ? "conta_solicitada" : "ocupada"
+          })
           .eq("id", m.id);
+        m.ocupada = true;
       }
 
       if (!deveEstarOcupada && (m.ocupada || m.pedir_conta || m.status !== "livre" || m.cliente_nome)) {
@@ -334,69 +430,28 @@ async function carregarMesas(){
             cliente_nome: null
           })
           .eq("id", m.id);
+
+        m.ocupada = false;
+        m.pedir_conta = false;
+        m.status = "livre";
+        m.cliente_nome = null;
       }
 
-      // Garante uma sessão válida, mas sem recriar toda hora
-      const sessao = await garantirSessaoValidaMesa(m.id);
+      const sessao = await obterSessaoSomenteLeitura(m.id);
 
-      const urlMesa = sessao
-        ? montarUrlMesa(m.id, sessao.token)
-        : `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(m.id)}`;
+      await atualizarOuCriarCardMesa({
+        ...m,
+        pedidoAberto,
+        mesaPediuConta,
+        mesaSemPendencias,
+        sessao
+      });
+    }
 
-      const expiraTxt = sessao?.expira_em
-        ? `Sessão até ${formatarHoraBR(sessao.expira_em)}`
-        : "";
-
-      const div = document.createElement("div");
-      div.className = `card ${classe}`;
-      div.innerHTML = `
-        <h3>Mesa ${m.numero_mesa}</h3>
-        <span class="status ${classe}">${texto}</span>
-        <div class="cliente-mini">${m.cliente_nome ? m.cliente_nome : (mesaSemPendencias ? "Disponível para novo acesso" : "")}</div>
-        <div class="qr">
-          <canvas id="qr-${m.id}"></canvas>
-        </div>
-        <div class="sessao-mini">${expiraTxt}</div>
-        <div class="url-mini">${urlMesa}</div>
-        ${!pedidoAberto && !mesaPediuConta ? `<button class="btn-remover">Remover mesa</button>` : ``}
-      `;
-
-      div.onclick = () => {
-        location.href = urlMesa;
-      };
-
-      grid.appendChild(div);
-
-      const canvas = document.getElementById(`qr-${m.id}`);
-      if (canvas && sessao) {
-        await QRCode.toCanvas(canvas, urlMesa, { width:120 });
-      }
-
-      const btn = div.querySelector(".btn-remover");
-      if (btn) {
-        btn.onclick = async (e) => {
-          e.stopPropagation();
-          const senha = prompt("Código para remover a mesa:");
-          if (senha !== SEGREDO_REMOVER_MESA) return;
-
-          const sessaoAtual = await buscarSessaoAtivaMesa(m.id);
-          if (sessaoAtual?.id) {
-            await encerrarSessaoMesa(sessaoAtual.id);
-          }
-
-          await sb
-            .from("mesas")
-            .update({
-              ativa: false,
-              ocupada: false,
-              pedir_conta: false,
-              status: "livre",
-              cliente_nome: null
-            })
-            .eq("id", m.id);
-
-          carregarMesas();
-        };
+    for (const [mesaId, card] of cardsRenderizados.entries()) {
+      if (!idsAtuais.has(mesaId)) {
+        card.remove();
+        cardsRenderizados.delete(mesaId);
       }
     }
 
@@ -408,7 +463,6 @@ async function carregarMesas(){
   }
 }
 
-/* ===== ADICIONAR MESA ===== */
 async function adicionarMesa(){
   if (criandoMesa) return;
   criandoMesa = true;
@@ -468,10 +522,9 @@ function logout(){
 
 esperarSessao();
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js");
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
 }
 </script>
-
 </body>
 </html>
