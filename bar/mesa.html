@@ -659,7 +659,7 @@ const supabase = createClient(
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
 
-let APP_ID = null;
+let APP_ID = params.get("app_id") || null;
 let pedidoAtual = null;
 let produtosCache = [];
 let categoriasCache = [];
@@ -669,7 +669,6 @@ let canalPedidoAtual = null;
 let canalMesaStatus = null;
 let FUNCIONARIO_LOGADO = null;
 let sessaoExpiradaTimer = null;
-let telaTravada = false;
 let mesaInfo = null;
 let atualizandoMesaStatus = false;
 
@@ -725,15 +724,11 @@ function limparTelaPedidoAtual() {
 }
 
 function atualizarTotaisLote(total) {
-  const valor = formatarMoeda(total || 0);
-  const el = document.getElementById("totalPedidoBarra");
-  if (el) el.innerText = valor;
+  document.getElementById("totalPedidoBarra").innerText = formatarMoeda(total || 0);
 }
 
 function atualizarTotaisMesa(total) {
-  const valor = formatarMoeda(total || 0);
-  const el = document.getElementById("totalMesaBarra");
-  if (el) el.innerText = valor;
+  document.getElementById("totalMesaBarra").innerText = formatarMoeda(total || 0);
 }
 
 function obterImagemProduto(produto) {
@@ -793,14 +788,6 @@ function sessaoExpiradaLocal() {
   return new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
 }
 
-function travarTelaPorNovoQRCode() {
-  telaTravada = false;
-}
-
-function liberarBloqueioTela() {
-  telaTravada = false;
-}
-
 function resetarInterfaceParaNovaSessao() {
   removerSessaoLocal();
   pedidoAtual = null;
@@ -808,8 +795,6 @@ function resetarInterfaceParaNovaSessao() {
   limparTelaPedidoAtual();
   atualizarTotaisMesa(0);
   atualizarInfoStatus();
-  liberarBloqueioTela();
-
   document.getElementById("clienteNome").value = "";
   document.getElementById("clienteTelefone").value = "";
   document.getElementById("formSessao")?.classList.remove("oculto");
@@ -860,7 +845,7 @@ function atualizarSessaoNaTela() {
       ? `Funcionário logado: <strong>${FUNCIONARIO_LOGADO.nome}</strong><br>Nenhuma sessão ativa nesta mesa.`
       : "Nenhuma sessão ativa nesta mesa.";
 
-    if (btn) btn.textContent = form.classList.contains("oculto") ? "Abrir" : "Fechar";
+    btn.textContent = form.classList.contains("oculto") ? "Abrir" : "Fechar";
     return;
   }
 
@@ -878,10 +863,8 @@ function atualizarSessaoNaTela() {
     <span class="badge">Expira: ${expiraEm}</span>
   `;
 
-  if (form && btn) {
-    form.classList.add("oculto");
-    btn.textContent = "Abrir";
-  }
+  form.classList.add("oculto");
+  btn.textContent = "Abrir";
 }
 
 function atualizarInfoStatus() {
@@ -910,8 +893,6 @@ function configurarToggleSessao() {
   const btn = document.getElementById("btnToggleSessao");
   const form = document.getElementById("formSessao");
 
-  if (!btn || !form) return;
-
   btn.onclick = () => {
     form.classList.toggle("oculto");
     btn.textContent = form.classList.contains("oculto") ? "Abrir" : "Fechar";
@@ -922,36 +903,74 @@ function configurarTogglePedido() {
   const btn = document.getElementById("btnTogglePedido");
   const conteudo = document.getElementById("pedidoConteudo");
 
-  if (!btn || !conteudo) return;
-
   btn.onclick = () => {
     conteudo.classList.toggle("oculto");
     btn.textContent = conteudo.classList.contains("oculto") ? "Abrir" : "Recolher";
   };
 }
 
-async function validarSessao() {
-  const { data, error } = await supabase.auth.getSession();
-
-  if (!data?.session) {
-    APP_ID = localStorage.getItem("app_id") || null;
-    return !!APP_ID;
-  }
-
-  if (error) console.error(error);
-
-  const userId = data.session.user.id;
-
-  const { data: usuario, error: erroUsuario } = await supabase
-    .from("usuarios")
-    .select("id, app_id")
-    .eq("id", userId)
+async function carregarMesa() {
+  const { data, error } = await supabase
+    .from("mesas")
+    .select("*")
+    .eq("id", mesaId)
     .maybeSingle();
 
-  if (!erroUsuario && usuario?.app_id) {
-    APP_ID = usuario.app_id;
+  if (error) {
+    console.error(error);
+    alert("Erro ao carregar mesa.");
+    return false;
+  }
+
+  if (!data) {
+    alert("Mesa não encontrada.");
+    return false;
+  }
+
+  mesaInfo = data;
+  if (data.app_id) {
+    APP_ID = data.app_id;
+    localStorage.setItem("app_id", APP_ID);
+  }
+
+  document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
+  return true;
+}
+
+async function validarSessao() {
+  if (APP_ID) {
     localStorage.setItem("app_id", APP_ID);
     return true;
+  }
+
+  if (!mesaInfo) {
+    const okMesa = await carregarMesa();
+    if (!okMesa) return false;
+  }
+
+  if (mesaInfo?.app_id) {
+    APP_ID = mesaInfo.app_id;
+    localStorage.setItem("app_id", APP_ID);
+    return true;
+  }
+
+  const { data, error } = await supabase.auth.getSession();
+  if (error) console.error(error);
+
+  if (data?.session?.user?.id) {
+    const userId = data.session.user.id;
+
+    const { data: usuario, error: erroUsuario } = await supabase
+      .from("usuarios")
+      .select("id, app_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!erroUsuario && usuario?.app_id) {
+      APP_ID = usuario.app_id;
+      localStorage.setItem("app_id", APP_ID);
+      return true;
+    }
   }
 
   APP_ID = localStorage.getItem("app_id") || null;
@@ -1005,32 +1024,21 @@ async function iniciarSistema() {
   carregarFuncionarioLogado();
   atualizarSessaoNaTela();
 
+  const mesaOk = await carregarMesa();
+  if (!mesaOk) return;
+
   const ok = await validarSessao();
   if (!ok) {
     alert("App do bar não identificado.");
     return;
   }
 
-  await carregarMesa();
   await carregarProdutos();
   await sincronizarSessaoComPedidos();
   ativarRealtimeMesa();
   ativarRealtimeMesaStatus();
 
   if (sessaoLocal) iniciarMonitorSessao();
-}
-
-async function carregarMesa() {
-  const { data } = await supabase
-    .from("mesas")
-    .select("*")
-    .eq("id", mesaId)
-    .maybeSingle();
-
-  if (data) {
-    mesaInfo = data;
-    document.getElementById("tituloMesa").innerText = `🍽️ Mesa ${data.numero_mesa}`;
-  }
 }
 
 async function sincronizarSessaoComPedidos() {
@@ -1047,7 +1055,6 @@ async function sincronizarSessaoComPedidos() {
   }
 
   const pedidos = data || [];
-
   const pedidosAtivos = pedidos.filter(p =>
     ["aberto", "novo", "aceito", "pronto", "conta_solicitada"].includes(p.status)
   );
@@ -1113,13 +1120,12 @@ async function sincronizarSessaoComPedidos() {
   }
 
   const totalMesa = await calcularTotalGeralMesa();
-  const statusMesa = pedidosAtivos.some(p => p.status === "conta_solicitada") ? "pediu_conta" : "ocupada";
   const pediuConta = pedidosAtivos.some(p => p.status === "conta_solicitada");
 
   await atualizarMesaStatus({
     ocupada: true,
     pedir_conta: pediuConta,
-    status: statusMesa,
+    status: pediuConta ? "pediu_conta" : "ocupada",
     cliente_nome: pedidoMaisRecenteAtivo?.cliente_nome || sessaoLocal?.cliente_nome || null,
     cliente_celular: pedidoMaisRecenteAtivo?.cliente_telefone || sessaoLocal?.cliente_telefone || null,
     total_aberto: totalMesa
@@ -1267,9 +1273,7 @@ function montarCategoriasPelosProdutos() {
 
   produtosCache.forEach(p => {
     const chave = obterCategoriaProduto(p);
-    if (!mapa.has(chave)) {
-      mapa.set(chave, { id: chave, nome: chave });
-    }
+    if (!mapa.has(chave)) mapa.set(chave, { id: chave, nome: chave });
   });
 
   categoriasCache = Array.from(mapa.values());
@@ -1352,7 +1356,7 @@ async function addProduto(produtoId) {
   const produto = produtosCache.find(p => String(p.id) === String(produtoId));
   if (!produto) return;
 
-  const { error: erroInsert } = await supabase
+  const { error } = await supabase
     .from("pedido_itens")
     .insert({
       app_id: APP_ID,
@@ -1370,8 +1374,8 @@ async function addProduto(produtoId) {
       sessao_token: sessaoLocal.sessao_token
     });
 
-  if (erroInsert) {
-    console.error(erroInsert);
+  if (error) {
+    console.error(error);
     alert("Erro ao adicionar produto.");
     return;
   }
