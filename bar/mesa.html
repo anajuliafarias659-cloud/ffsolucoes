@@ -30,6 +30,7 @@ body{
 }
 
 .oculto{display:none !important}
+.bloqueado-ui{opacity:.45;pointer-events:none;filter:grayscale(.2)}
 
 .topo{
   background:#0b1220;
@@ -73,11 +74,6 @@ button:disabled{
   cursor:not-allowed;
 }
 
-.bloqueado{
-  opacity:.4;
-  pointer-events:none;
-}
-
 .msg-vazio{
   opacity:.75;
   background:var(--card);
@@ -100,7 +96,6 @@ small{
   font-size:14px;
 }
 
-/* LOGIN / SESSÃO FLUTUANTE */
 .card-sessao{
   position:fixed;
   top:72px;
@@ -151,7 +146,6 @@ small{
   margin-top:6px;
 }
 
-/* FILTROS */
 .area-filtros{
   margin-top:6px;
 }
@@ -180,7 +174,6 @@ small{
   font-size:18px;
 }
 
-/* PRODUTOS */
 #listaProdutos{
   display:grid;
   grid-template-columns:repeat(3,minmax(0,1fr));
@@ -245,7 +238,6 @@ small{
   border-radius:9px;
 }
 
-/* PEDIDO FLUTUANTE */
 .card-lote{
   position:fixed;
   right:12px;
@@ -418,7 +410,6 @@ small{
   margin:14px 0;
 }
 
-/* BARRA DE AÇÕES DENTRO DO PEDIDO */
 .barra-fixa{
   margin-top:8px;
 }
@@ -453,7 +444,7 @@ small{
 
 .acoes-fixas{
   display:grid;
-  grid-template-columns:1fr 1fr 1fr;
+  grid-template-columns:1fr 1fr;
   gap:8px;
 }
 
@@ -475,14 +466,50 @@ small{
   color:#000;
 }
 
-#btnLiberar{
-  background:var(--blue);
-  color:#fff;
-}
-
 .area-produtos{
   padding-top:170px;
   padding-right:0;
+}
+
+.tela-expirada{
+  position:fixed;
+  inset:0;
+  background:rgba(2,6,23,.96);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:999;
+  padding:20px;
+}
+
+.tela-expirada.show{
+  display:flex;
+}
+
+.tela-expirada-card{
+  width:min(92vw,420px);
+  background:#0f172a;
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:24px;
+  text-align:center;
+  box-shadow:0 16px 40px rgba(0,0,0,.45);
+}
+
+.tela-expirada-card h2{
+  margin:0 0 10px 0;
+}
+
+.tela-expirada-card p{
+  margin:0 0 16px 0;
+  color:#cbd5e1;
+}
+
+.tela-expirada-card button{
+  width:100%;
+  background:var(--blue);
+  color:#fff;
+  min-height:44px;
 }
 
 @media (min-width:700px){
@@ -599,7 +626,7 @@ small{
   <small id="sessaoAtualInfo" style="margin-top:10px;display:block"></small>
 </div>
 
-<div class="container">
+<div class="container" id="containerPrincipal">
   <div class="area-produtos">
     <div class="area-filtros">
       <input id="busca" placeholder="🔍 Buscar produto">
@@ -638,9 +665,16 @@ small{
       <div class="acoes-fixas">
         <button id="btnEnviar">📨 Enviar</button>
         <button id="btnConta">🧾 Conta</button>
-        <button id="btnLiberar">🔓 Liberar</button>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="telaExpirada" class="tela-expirada">
+  <div class="tela-expirada-card">
+    <h2 id="tituloExpirada">Sessão encerrada</h2>
+    <p id="textoExpirada">Escaneie novamente o QR da mesa para continuar.</p>
+    <button id="btnRecarregar">Entendi</button>
   </div>
 </div>
 
@@ -670,6 +704,8 @@ let categoriaSelecionada = null;
 let canalMesa = null;
 let canalPedidoAtual = null;
 let FUNCIONARIO_LOGADO = null;
+let sessaoExpiradaTimer = null;
+let telaTravada = false;
 
 const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
 let sessaoLocal = null;
@@ -710,10 +746,6 @@ function nomeStatus(status) {
     cancelado: "Cancelado"
   };
   return mapa[status] || status || "-";
-}
-
-function podeLiberarMesa(status) {
-  return ["pago", "finalizado", "cancelado"].includes(status);
 }
 
 function pedidoPodeSerEditado() {
@@ -776,12 +808,14 @@ function salvarSessaoLocal(sessao) {
   sessaoLocal = sessao;
   localStorage.setItem(CHAVE_SESSAO, JSON.stringify(sessao));
   atualizarSessaoNaTela();
+  iniciarMonitorSessao();
 }
 
 function removerSessaoLocal() {
   sessaoLocal = null;
   localStorage.removeItem(CHAVE_SESSAO);
   atualizarSessaoNaTela();
+  pararMonitorSessao();
 }
 
 function carregarFuncionarioLogado() {
@@ -789,6 +823,61 @@ function carregarFuncionarioLogado() {
     FUNCIONARIO_LOGADO = JSON.parse(localStorage.getItem("funcionario_logado") || "null");
   } catch {
     FUNCIONARIO_LOGADO = null;
+  }
+}
+
+function sessaoExpiradaLocal() {
+  if (!sessaoLocal?.sessao_expira_em) return false;
+  return new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
+}
+
+function travarTelaPorNovoQRCode(titulo, texto) {
+  telaTravada = true;
+  document.getElementById("tituloExpirada").textContent = titulo || "Sessão encerrada";
+  document.getElementById("textoExpirada").textContent = texto || "Escaneie novamente o QR da mesa para continuar.";
+  document.getElementById("telaExpirada").classList.add("show");
+
+  document.getElementById("containerPrincipal")?.classList.add("bloqueado-ui");
+  document.getElementById("cardSessao")?.classList.add("bloqueado-ui");
+  document.getElementById("cardLote")?.classList.add("bloqueado-ui");
+}
+
+function liberarBloqueioTela() {
+  telaTravada = false;
+  document.getElementById("telaExpirada").classList.remove("show");
+  document.getElementById("containerPrincipal")?.classList.remove("bloqueado-ui");
+  document.getElementById("cardSessao")?.classList.remove("bloqueado-ui");
+  document.getElementById("cardLote")?.classList.remove("bloqueado-ui");
+}
+
+function iniciarMonitorSessao() {
+  pararMonitorSessao();
+
+  if (!sessaoLocal?.sessao_expira_em) return;
+
+  const verificar = () => {
+    if (sessaoExpiradaLocal()) {
+      removerSessaoLocal();
+      pedidoAtual = null;
+      limparTelaPedidoAtual();
+      atualizarTotaisMesa(0);
+      travarTelaPorNovoQRCode(
+        "Sessão expirada",
+        "Sua sessão expirou após 15 minutos. Escaneie novamente o QR da mesa para continuar."
+      );
+    } else {
+      atualizarSessaoNaTela();
+    }
+  };
+
+  verificar();
+  sessaoExpiradaTimer = setInterval(verificar, 1000);
+}
+
+function pararMonitorSessao() {
+  if (sessaoExpiradaTimer) {
+    clearInterval(sessaoExpiradaTimer);
+    sessaoExpiradaTimer = null;
   }
 }
 
@@ -809,39 +898,21 @@ function atualizarSessaoNaTela() {
   const cliente = sessaoLocal.cliente_nome || "-";
   const fone = sessaoLocal.cliente_telefone || "-";
   const garcom = sessaoLocal.garcom_nome || null;
+  const expiraEm = sessaoLocal.sessao_expira_em
+    ? new Date(sessaoLocal.sessao_expira_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    : "-";
 
   info.innerHTML = `
     <span class="badge">Cliente: ${cliente}</span>
     <span class="badge">${fone}</span>
     ${garcom ? `<span class="badge">Responsável: ${garcom}</span>` : ""}
+    <span class="badge">Expira: ${expiraEm}</span>
   `;
 
   if (form && btn) {
     form.classList.add("oculto");
     btn.textContent = "Abrir";
   }
-}
-
-function sessaoExpiradaLocal() {
-  if (!sessaoLocal?.sessao_expira_em) return false;
-  return new Date(sessaoLocal.sessao_expira_em).getTime() < Date.now();
-}
-
-function atualizarBotaoLiberarPorPedidos(pedidosAtivos) {
-  const btn = document.getElementById("btnLiberar");
-
-  if (!btn) return;
-
-  if (!pedidosAtivos || pedidosAtivos.length === 0) {
-    btn.disabled = false;
-    btn.classList.remove("bloqueado");
-    return;
-  }
-
-  const existePendente = pedidosAtivos.some(p => !podeLiberarMesa(p.status));
-  btn.disabled = existePendente;
-  if (existePendente) btn.classList.add("bloqueado");
-  else btn.classList.remove("bloqueado");
 }
 
 function atualizarInfoStatus() {
@@ -873,6 +944,7 @@ function configurarToggleSessao() {
   if (!btn || !form) return;
 
   btn.onclick = () => {
+    if (telaTravada) return;
     form.classList.toggle("oculto");
     btn.textContent = form.classList.contains("oculto") ? "Abrir" : "Fechar";
   };
@@ -885,6 +957,7 @@ function configurarTogglePedido() {
   if (!btn || !conteudo) return;
 
   btn.onclick = () => {
+    if (telaTravada) return;
     conteudo.classList.toggle("oculto");
     btn.textContent = conteudo.classList.contains("oculto") ? "Abrir" : "Recolher";
   };
@@ -937,6 +1010,8 @@ async function iniciarSistema() {
   await carregarProdutos();
   await sincronizarSessaoComPedidos();
   ativarRealtimeMesa();
+
+  if (sessaoLocal) iniciarMonitorSessao();
 }
 
 async function carregarMesa() {
@@ -957,7 +1032,7 @@ async function sincronizarSessaoComPedidos() {
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .not("status", "in", '("finalizado","cancelado")')
+    .not("status", "in", '("cancelado")')
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -969,9 +1044,24 @@ async function sincronizarSessaoComPedidos() {
   const pedidoAberto = pedidos.find(p => p.status === "aberto") || null;
   const pedidoMaisRecente = pedidos[0] || null;
 
+  const todosPagosOuFinalizados = pedidos.length > 0 && pedidos.every(p => ["pago", "finalizado"].includes(p.status));
+
+  if (todosPagosOuFinalizados) {
+    removerSessaoLocal();
+    pedidoAtual = null;
+    limparTelaPedidoAtual();
+    atualizarTotaisMesa(0);
+    removerCanalPedidoAtual();
+    travarTelaPorNovoQRCode(
+      "Mesa encerrada",
+      "A conta foi paga e a mesa foi liberada. Para pedir novamente, escaneie o QR da mesa de novo."
+    );
+    return;
+  }
+
   pedidoAtual = pedidoAberto;
 
-  if (pedidoMaisRecente?.sessao_token) {
+  if (pedidoMaisRecente?.sessao_token && !sessaoExpiradaLocal()) {
     salvarSessaoLocal({
       sessao_token: pedidoMaisRecente.sessao_token,
       cliente_nome: pedidoMaisRecente.cliente_nome,
@@ -986,7 +1076,6 @@ async function sincronizarSessaoComPedidos() {
     document.getElementById("clienteTelefone").value = pedidoMaisRecente.cliente_telefone || "";
   }
 
-  atualizarBotaoLiberarPorPedidos(pedidos);
   atualizarInfoStatus();
 
   if (pedidoAtual) ativarRealtimePedidoAtual();
@@ -999,6 +1088,11 @@ async function sincronizarSessaoComPedidos() {
 }
 
 async function iniciarAtendimentoManual() {
+  if (telaTravada) {
+    alert("Escaneie novamente o QR da mesa para continuar.");
+    return;
+  }
+
   const clienteNome = document.getElementById("clienteNome").value.trim();
   const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
 
@@ -1014,22 +1108,31 @@ async function iniciarAtendimentoManual() {
     responsavel_nome: clienteNome,
     garcom_nome: FUNCIONARIO_LOGADO?.nome || null,
     funcionario_id: FUNCIONARIO_LOGADO?.id || null,
-    sessao_expira_em: adicionarMinutosISO(60)
+    sessao_expira_em: adicionarMinutosISO(15)
   };
 
   salvarSessaoLocal(sessao);
-  alert("Atendimento iniciado com sucesso!");
+  liberarBloqueioTela();
+  alert("Atendimento iniciado com sucesso! A sessão vale por 15 minutos.");
 }
 
 async function validarSessaoPedido() {
+  if (telaTravada) {
+    alert("Escaneie novamente o QR da mesa para continuar.");
+    return false;
+  }
+
   if (!sessaoLocal) {
     alert("Inicie o atendimento antes de lançar itens.");
     return false;
   }
 
   if (sessaoExpiradaLocal()) {
-    alert("A sessão expirou. Inicie um novo atendimento.");
     removerSessaoLocal();
+    travarTelaPorNovoQRCode(
+      "Sessão expirada",
+      "Sua sessão expirou após 15 minutos. Escaneie novamente o QR da mesa para continuar."
+    );
     return false;
   }
 
@@ -1130,6 +1233,7 @@ function renderizarBotoesCategorias() {
     btn.textContent = cat.nome;
     if (categoriaSelecionada === cat.id) btn.classList.add("ativo");
     btn.onclick = () => {
+      if (telaTravada) return;
       categoriaSelecionada = cat.id;
       renderizarBotoesCategorias();
       aplicarFiltros();
@@ -1222,6 +1326,8 @@ async function aumentarItem(item) {
     return;
   }
 
+  if (!(await validarSessaoPedido())) return;
+
   const novaQtd = Number(item.quantidade || 0) + 1;
 
   const { error } = await supabase
@@ -1245,6 +1351,8 @@ async function diminuirItem(item) {
     alert("Não é possível alterar este lote.");
     return;
   }
+
+  if (!(await validarSessaoPedido())) return;
 
   const qtd = Number(item.quantidade || 0);
 
@@ -1276,6 +1384,8 @@ async function removerItem(itemId) {
     alert("Não é possível remover item deste lote.");
     return;
   }
+
+  if (!(await validarSessaoPedido())) return;
 
   const { error } = await supabase
     .from("pedido_itens")
@@ -1459,6 +1569,11 @@ async function calcularTotalGeralMesa() {
 }
 
 document.getElementById("btnEnviar").onclick = async () => {
+  if (telaTravada) {
+    alert("Escaneie novamente o QR da mesa para continuar.");
+    return;
+  }
+
   if (!pedidoAtual) {
     alert("Nenhum pedido em aberto.");
     return;
@@ -1499,11 +1614,16 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
-  alert("Pedido enviado! Esse lote ficou travado. Se quiser pedir mais, é só adicionar novos itens.");
+  alert("Pedido enviado! Esse lote ficou travado. Se quiser pedir mais dentro da sessão, adicione novos itens.");
   await sincronizarSessaoComPedidos();
 };
 
 document.getElementById("btnConta").onclick = async () => {
+  if (telaTravada) {
+    alert("Escaneie novamente o QR da mesa para continuar.");
+    return;
+  }
+
   const totalMesa = await calcularTotalGeralMesa();
 
   if (totalMesa <= 0) {
@@ -1551,76 +1671,6 @@ document.getElementById("btnConta").onclick = async () => {
 
   alert("Conta solicitada!");
   await sincronizarSessaoComPedidos();
-};
-
-document.getElementById("btnLiberar").onclick = async () => {
-  const totalMesa = await calcularTotalGeralMesa();
-
-  if (totalMesa > 0) {
-    const { data: pedidosPendentes, errorBusca } = await supabase
-      .from("pedidos")
-      .select("id,status")
-      .eq("mesa_id", mesaId)
-      .eq("app_id", APP_ID)
-      .not("status", "in", '("finalizado","cancelado")');
-
-    if (errorBusca) {
-      console.error(errorBusca);
-      alert("Erro ao verificar a mesa.");
-      return;
-    }
-
-    if (pedidosPendentes && pedidosPendentes.some(p => !podeLiberarMesa(p.status))) {
-      alert("Não é possível liberar a mesa. Ainda existem pedidos pendentes.");
-      return;
-    }
-  }
-
-  const { data: pedidosPendentes, errorBusca } = await supabase
-    .from("pedidos")
-    .select("id,status")
-    .eq("mesa_id", mesaId)
-    .eq("app_id", APP_ID)
-    .not("status", "in", '("finalizado","cancelado")');
-
-  if (errorBusca) {
-    console.error(errorBusca);
-    alert("Erro ao verificar a mesa.");
-    return;
-  }
-
-  if (!pedidosPendentes || pedidosPendentes.length === 0) {
-    removerSessaoLocal();
-    location.href = "mesas.html";
-    return;
-  }
-
-  const bloqueando = pedidosPendentes.some(p => !podeLiberarMesa(p.status));
-  if (bloqueando) {
-    alert("Não é possível liberar a mesa. Ainda existem pedidos pendentes.");
-    return;
-  }
-
-  const ids = pedidosPendentes.map(p => p.id);
-
-  const { error } = await supabase
-    .from("pedidos")
-    .update({
-      status: "finalizado",
-      sessao_status: "encerrada",
-      sessao_expira_em: agoraISO()
-    })
-    .in("id", ids)
-    .eq("app_id", APP_ID);
-
-  if (error) {
-    console.error(error);
-    alert("Erro ao liberar mesa.");
-    return;
-  }
-
-  removerSessaoLocal();
-  location.href = "mesas.html";
 };
 
 function removerCanalPedidoAtual() {
@@ -1673,7 +1723,10 @@ function ativarRealtimeMesa() {
 
         if (novoStatus === "aceito") alert("👨‍🍳 Um pedido da mesa foi aceito!");
         if (novoStatus === "pronto") alert("✅ Um pedido da mesa ficou pronto!");
-        if (novoStatus === "pago") alert("💰 Um pedido da mesa foi pago!");
+        if (novoStatus === "pago") {
+          await sincronizarSessaoComPedidos();
+          return;
+        }
         if (novoStatus === "cancelado") alert("❌ Um pedido da mesa foi cancelado!");
 
         await sincronizarSessaoComPedidos();
@@ -1684,6 +1737,10 @@ function ativarRealtimeMesa() {
 
 document.getElementById("btnIniciarSessao").onclick = iniciarAtendimentoManual;
 document.getElementById("busca").oninput = aplicarFiltros;
+document.getElementById("btnRecarregar").onclick = () => {
+  location.href = "mesas.html";
+};
+
 document.addEventListener("DOMContentLoaded", iniciarSistema);
 </script>
 
