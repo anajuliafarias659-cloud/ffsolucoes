@@ -26,7 +26,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .card:hover{transform:scale(1.03)}
 .card.livre{border-color:#22c55e}
 .card.preparando{border-color:#eab308}
-.card.conta{border-color:#fde047;box-shadow:0 0 14px rgba(253,224,71,.8)}
+.card.conta{border-color:#fde047;box-shadow:0 0 14px rgba(253,224,71,.25)}
 .status{margin:6px 0 10px;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:13px}
 .status.livre{background:#22c55e;color:#022c22}
 .status.preparando{background:#eab308;color:#000}
@@ -36,6 +36,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .url-mini{margin-top:8px;font-size:11px;color:#94a3b8;word-break:break-all}
 .cliente-mini{font-size:12px;color:#94a3b8;margin-bottom:8px;min-height:16px}
 .sessao-mini{font-size:11px;color:#cbd5e1;margin-top:6px;min-height:15px}
+.atualizacao{font-size:12px;color:#94a3b8;margin-top:10px}
 </style>
 </head>
 
@@ -51,6 +52,7 @@ body{margin:0;font-family:Arial;background:#020617;color:#fff}
 </div>
 
 <div class="container">
+  <div class="atualizacao" id="infoAtualizacao">Atualizando...</div>
   <div class="grid" id="listaMesas"></div>
 </div>
 
@@ -64,10 +66,9 @@ let app_id = null;
 const SEGREDO_REMOVER_MESA = "4321";
 let criandoMesa = false;
 let carregandoMesas = false;
-let canalRealtime = null;
 let intervalMesas = null;
 
-const DURACAO_SESSAO_MINUTOS = 15;
+const DURACAO_SESSAO_MINUTOS = 1440; // 24h
 
 function esperarSessao(){
   const funcionario = JSON.parse(localStorage.getItem("funcionario_logado") || "null");
@@ -91,21 +92,22 @@ function esperarSessao(){
     return;
   }
 
-  setTimeout(esperarSessao,100);
+  setTimeout(esperarSessao, 100);
 }
 
 function iniciarSistema(){
   if(!app_id){
     alert("Sessão inválida");
-    location.href="/auth/login.html";
+    location.href = "/auth/login.html";
     return;
   }
 
   carregarMesas();
-  iniciarRealtime();
 
   if (intervalMesas) clearInterval(intervalMesas);
-  intervalMesas = setInterval(carregarMesas, 4000);
+  intervalMesas = setInterval(() => {
+    carregarMesas();
+  }, 5000);
 }
 
 function agoraISO(){
@@ -137,15 +139,13 @@ function statusConta(status){
   return s === "conta_solicitada" || s === "pedir_conta";
 }
 
-function statusPedidoAtivo(status){
-  const s = String(status || "").toLowerCase().trim();
-  return ["aberto","novo","aceito","preparando","pronto","conta_solicitada","pedir_conta"].includes(s);
-}
-
 function formatarHoraBR(dataIso){
   if (!dataIso) return "";
   try{
-    return new Date(dataIso).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+    return new Date(dataIso).toLocaleTimeString("pt-BR", {
+      hour:"2-digit",
+      minute:"2-digit"
+    });
   }catch{
     return "";
   }
@@ -154,6 +154,13 @@ function formatarHoraBR(dataIso){
 function expirouSessao(sessao){
   if (!sessao?.expira_em) return true;
   return new Date(sessao.expira_em).getTime() <= Date.now();
+}
+
+function atualizarInfoAtualizacao(){
+  const el = document.getElementById("infoAtualizacao");
+  if (!el) return;
+  const agora = new Date();
+  el.textContent = `Última atualização: ${agora.toLocaleTimeString("pt-BR")} • Atualiza sozinha a cada 5 segundos`;
 }
 
 async function buscarSessaoAtivaMesa(mesaId){
@@ -225,59 +232,19 @@ async function criarSessaoMesa(mesaId){
   return data;
 }
 
-async function obterSessaoValidaMesa(mesaId){
-  const sessao = await buscarSessaoAtivaMesa(mesaId);
+async function garantirSessaoValidaMesa(mesaId){
+  let sessao = await buscarSessaoAtivaMesa(mesaId);
 
-  if (!sessao) {
-    return await criarSessaoMesa(mesaId);
+  if (sessao && expirouSessao(sessao)) {
+    await encerrarSessaoMesa(sessao.id);
+    sessao = null;
   }
 
-  if (expirouSessao(sessao)) {
-    await encerrarSessaoMesa(sessao.id);
-    return await criarSessaoMesa(mesaId);
+  if (!sessao) {
+    sessao = await criarSessaoMesa(mesaId);
   }
 
   return sessao;
-}
-
-async function renovarSessaoMesaSeNecessario(mesaId, motivo = ""){
-  const sessaoAtual = await buscarSessaoAtivaMesa(mesaId);
-
-  if (sessaoAtual?.id) {
-    await encerrarSessaoMesa(sessaoAtual.id);
-  }
-
-  const novaSessao = await criarSessaoMesa(mesaId);
-
-  if (!novaSessao) {
-    console.error("Falha ao renovar sessão da mesa", mesaId, motivo);
-  }
-
-  return novaSessao;
-}
-
-async function processarSessaoConformePedidos(mesa, pedidoAberto){
-  let sessao = await buscarSessaoAtivaMesa(mesa.id);
-
-  if (pedidoAberto) {
-    if (!sessao) {
-      sessao = await criarSessaoMesa(mesa.id);
-    } else if (expirouSessao(sessao)) {
-      await encerrarSessaoMesa(sessao.id);
-      sessao = await criarSessaoMesa(mesa.id);
-    }
-    return sessao;
-  }
-
-  if (sessao) {
-    if (expirouSessao(sessao)) {
-      await encerrarSessaoMesa(sessao.id);
-      return await criarSessaoMesa(mesa.id);
-    }
-    return sessao;
-  }
-
-  return await criarSessaoMesa(mesa.id);
 }
 
 /* ===== CARREGAR MESAS ===== */
@@ -302,8 +269,8 @@ async function carregarMesas(){
       .from("pedidos")
       .select("id,mesa_id,status,created_at")
       .eq("app_id", app_id)
-      .not("mesa_id","is",null)
-      .order("created_at",{ ascending:false });
+      .not("mesa_id", "is", null)
+      .order("created_at", { ascending:false });
 
     if (erroPedidos) {
       console.error("Erro ao carregar pedidos:", erroPedidos);
@@ -334,17 +301,8 @@ async function carregarMesas(){
         statusConta(m.status) ||
         statusConta(pedidoAberto?.status);
 
-      const mesaSemPendencias = pedidosMesa.length === 0 || pedidosMesa.every(p => statusFechado(p.status));
-
-      if (mesaSemPendencias) {
-        const sessaoAtual = await buscarSessaoAtivaMesa(m.id);
-
-        if (sessaoAtual) {
-          await renovarSessaoMesaSeNecessario(m.id, "mesa paga/finalizada");
-        } else {
-          await criarSessaoMesa(m.id);
-        }
-      }
+      const mesaSemPendencias =
+        pedidosMesa.length === 0 || pedidosMesa.every(p => statusFechado(p.status));
 
       let classe = "livre";
       let texto = "LIVRE";
@@ -366,7 +324,7 @@ async function carregarMesas(){
           .eq("id", m.id);
       }
 
-      if (!deveEstarOcupada && m.ocupada) {
+      if (!deveEstarOcupada && (m.ocupada || m.pedir_conta || m.status !== "livre" || m.cliente_nome)) {
         await sb
           .from("mesas")
           .update({
@@ -378,7 +336,9 @@ async function carregarMesas(){
           .eq("id", m.id);
       }
 
-      const sessao = await processarSessaoConformePedidos(m, pedidoAberto);
+      // Garante uma sessão válida, mas sem recriar toda hora
+      const sessao = await garantirSessaoValidaMesa(m.id);
+
       const urlMesa = sessao
         ? montarUrlMesa(m.id, sessao.token)
         : `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(m.id)}`;
@@ -392,7 +352,7 @@ async function carregarMesas(){
       div.innerHTML = `
         <h3>Mesa ${m.numero_mesa}</h3>
         <span class="status ${classe}">${texto}</span>
-        <div class="cliente-mini">${m.cliente_nome ? m.cliente_nome : ""}</div>
+        <div class="cliente-mini">${m.cliente_nome ? m.cliente_nome : (mesaSemPendencias ? "Disponível para novo acesso" : "")}</div>
         <div class="qr">
           <canvas id="qr-${m.id}"></canvas>
         </div>
@@ -427,11 +387,11 @@ async function carregarMesas(){
           await sb
             .from("mesas")
             .update({
-              ativa:false,
-              ocupada:false,
-              pedir_conta:false,
-              status:"livre",
-              cliente_nome:null
+              ativa: false,
+              ocupada: false,
+              pedir_conta: false,
+              status: "livre",
+              cliente_nome: null
             })
             .eq("id", m.id);
 
@@ -439,55 +399,13 @@ async function carregarMesas(){
         };
       }
     }
+
+    atualizarInfoAtualizacao();
+  } catch (erro) {
+    console.error("Erro geral ao carregar mesas:", erro);
   } finally {
     carregandoMesas = false;
   }
-}
-
-/* ===== REALTIME ===== */
-function iniciarRealtime(){
-  if (canalRealtime) return;
-
-  canalRealtime = sb.channel(`painel-mesas-${app_id}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "mesas",
-        filter: `app_id=eq.${app_id}`
-      },
-      () => {
-        carregarMesas();
-      }
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "pedidos",
-        filter: `app_id=eq.${app_id}`
-      },
-      () => {
-        carregarMesas();
-      }
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "sessoes_mesa",
-        filter: `app_id=eq.${app_id}`
-      },
-      () => {
-        carregarMesas();
-      }
-    )
-    .subscribe((status) => {
-      console.log("Realtime mesas:", status);
-    });
 }
 
 /* ===== ADICIONAR MESA ===== */
@@ -507,7 +425,6 @@ async function adicionarMesa(){
     if (erroUltima) {
       console.error("Erro ao buscar última mesa:", erroUltima);
       alert("Erro ao buscar última mesa.");
-      criandoMesa = false;
       return;
     }
 
@@ -529,7 +446,6 @@ async function adicionarMesa(){
     if (error || !novaMesa) {
       console.error("Erro ao adicionar mesa:", error);
       alert("Erro ao adicionar mesa.");
-      criandoMesa = false;
       return;
     }
 
@@ -541,7 +457,7 @@ async function adicionarMesa(){
 }
 
 function vendaAvulsa(){
-  location.href = `venda-avulsa.html`;
+  location.href = "venda-avulsa.html";
 }
 
 function logout(){
@@ -552,8 +468,8 @@ function logout(){
 
 esperarSessao();
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
 }
 </script>
 
