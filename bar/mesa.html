@@ -68,6 +68,11 @@ button{
   font-weight:bold;
 }
 
+button:disabled{
+  opacity:.6;
+  cursor:not-allowed;
+}
+
 .bloqueado{
   opacity:.4;
   pointer-events:none;
@@ -95,7 +100,7 @@ small{
   font-size:14px;
 }
 
-/* BLOCO FLUTUANTE LOGIN */
+/* LOGIN / SESSÃO FLUTUANTE */
 .card-sessao{
   position:fixed;
   top:72px;
@@ -146,7 +151,7 @@ small{
   margin-top:6px;
 }
 
-/* BUSCA E CATEGORIAS */
+/* FILTROS */
 .area-filtros{
   margin-top:6px;
 }
@@ -170,12 +175,12 @@ small{
   background:var(--blue);
 }
 
-/* PRODUTOS */
 .titulo-secao{
   margin:12px 0 12px;
   font-size:18px;
 }
 
+/* PRODUTOS */
 #listaProdutos{
   display:grid;
   grid-template-columns:repeat(3,minmax(0,1fr));
@@ -413,7 +418,7 @@ small{
   margin:14px 0;
 }
 
-/* AÇÕES DO PEDIDO */
+/* BARRA DE AÇÕES DENTRO DO PEDIDO */
 .barra-fixa{
   margin-top:8px;
 }
@@ -475,20 +480,13 @@ small{
   color:#fff;
 }
 
-/* EMPURRA CONTEÚDO PARA NÃO FICAR ATRÁS DOS PAINÉIS */
 .area-produtos{
   padding-top:170px;
   padding-right:0;
 }
 
-@media (min-width: 700px){
-  .container{
-    padding-left:16px;
-    padding-right:16px;
-  }
-
+@media (min-width:700px){
   .area-produtos{
-    padding-left:0;
     padding-right:390px;
   }
 
@@ -496,17 +494,9 @@ small{
     grid-template-columns:repeat(3,minmax(0,1fr));
     gap:10px;
   }
-
-  .produto-info strong{
-    font-size:14px;
-  }
-
-  .produto-info small{
-    font-size:12px;
-  }
 }
 
-@media (min-width: 1100px){
+@media (min-width:1100px){
   .area-produtos{
     padding-right:400px;
   }
@@ -516,7 +506,7 @@ small{
   }
 }
 
-@media (max-width: 699px){
+@media (max-width:699px){
   .topo{
     font-size:18px;
     padding:12px 14px;
@@ -539,7 +529,7 @@ small{
   }
 }
 
-@media (max-width: 520px){
+@media (max-width:520px){
   #listaProdutos{
     grid-template-columns:repeat(3,minmax(0,1fr));
     gap:7px;
@@ -578,7 +568,7 @@ small{
   }
 }
 
-@media (max-width: 420px){
+@media (max-width:420px){
   .card-sessao{
     width:min(255px,calc(100vw - 24px));
   }
@@ -648,7 +638,7 @@ small{
       <div class="acoes-fixas">
         <button id="btnEnviar">📨 Enviar</button>
         <button id="btnConta">🧾 Conta</button>
-        <button id="btnLiberar" class="bloqueado">🔓 Liberar</button>
+        <button id="btnLiberar">🔓 Liberar</button>
       </div>
     </div>
   </div>
@@ -809,7 +799,7 @@ function atualizarSessaoNaTela() {
 
   if (!sessaoLocal) {
     info.innerHTML = FUNCIONARIO_LOGADO?.nome
-      ? `Garçom logado: <strong>${FUNCIONARIO_LOGADO.nome}</strong><br>Nenhuma sessão ativa nesta mesa.`
+      ? `Funcionário logado: <strong>${FUNCIONARIO_LOGADO.nome}</strong><br>Nenhuma sessão ativa nesta mesa.`
       : "Nenhuma sessão ativa nesta mesa.";
 
     if (btn) btn.textContent = form.classList.contains("oculto") ? "Abrir" : "Fechar";
@@ -823,7 +813,7 @@ function atualizarSessaoNaTela() {
   info.innerHTML = `
     <span class="badge">Cliente: ${cliente}</span>
     <span class="badge">${fone}</span>
-    ${garcom ? `<span class="badge">Garçom: ${garcom}</span>` : ""}
+    ${garcom ? `<span class="badge">Responsável: ${garcom}</span>` : ""}
   `;
 
   if (form && btn) {
@@ -840,12 +830,16 @@ function sessaoExpiradaLocal() {
 function atualizarBotaoLiberarPorPedidos(pedidosAtivos) {
   const btn = document.getElementById("btnLiberar");
 
+  if (!btn) return;
+
   if (!pedidosAtivos || pedidosAtivos.length === 0) {
+    btn.disabled = false;
     btn.classList.remove("bloqueado");
     return;
   }
 
   const existePendente = pedidosAtivos.some(p => !podeLiberarMesa(p.status));
+  btn.disabled = existePendente;
   if (existePendente) btn.classList.add("bloqueado");
   else btn.classList.remove("bloqueado");
 }
@@ -899,10 +893,13 @@ function configurarTogglePedido() {
 async function validarSessao() {
   const { data, error } = await supabase.auth.getSession();
 
-  if (error || !data.session) {
-    alert("Sessão inválida");
-    location.href = "/auth/login.html";
-    return false;
+  if (!data?.session) {
+    APP_ID = localStorage.getItem("app_id") || null;
+    return !!APP_ID;
+  }
+
+  if (error) {
+    console.error(error);
   }
 
   const userId = data.session.user.id;
@@ -911,16 +908,16 @@ async function validarSessao() {
     .from("usuarios")
     .select("id, app_id")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
-  if (erroUsuario || !usuario) {
-    alert("Usuário não encontrado.");
-    location.href = "/auth/login.html";
-    return false;
+  if (!erroUsuario && usuario?.app_id) {
+    APP_ID = usuario.app_id;
+    localStorage.setItem("app_id", APP_ID);
+    return true;
   }
 
-  APP_ID = usuario.app_id;
-  return true;
+  APP_ID = localStorage.getItem("app_id") || null;
+  return !!APP_ID;
 }
 
 async function iniciarSistema() {
@@ -931,7 +928,10 @@ async function iniciarSistema() {
   atualizarSessaoNaTela();
 
   const ok = await validarSessao();
-  if (!ok) return;
+  if (!ok) {
+    alert("App do bar não identificado.");
+    return;
+  }
 
   await carregarMesa();
   await carregarProdutos();
@@ -1321,7 +1321,7 @@ async function carregarPedidoAtual() {
     div.innerHTML = `<div class="msg-vazio">Nenhum item neste pedido em aberto</div>`;
   }
 
-  itens.forEach(i => {
+  itens.forEach((i, index) => {
     total += Number(i.preco || 0) * Number(i.quantidade || 0);
 
     const bloqueado = pedidoBloqueadoParaEdicao();
@@ -1334,7 +1334,7 @@ async function carregarPedidoAtual() {
       <div class="item-topo">
         <img class="thumb-item" src="${imgItem}" alt="${i.nome_produto}" onerror="this.onerror=null;this.src='https://via.placeholder.com/300x300?text=Produto'">
         <div class="item-info">
-          <strong>${i.nome_produto}</strong>
+          <strong>${index + 1}. ${i.nome_produto}</strong>
           <div class="linha-preco">${formatarMoeda(Number(i.preco || 0) * Number(i.quantidade || 0))}</div>
         </div>
       </div>
@@ -1400,12 +1400,12 @@ async function carregarHistoricoPedidosEnviados() {
     html += `<div class="divisor"></div>`;
     html += `<div class="lote-tag">Lote ${idx + 1} — ${nomeStatus(p.status)}</div>`;
 
-    (itens || []).forEach(i => {
+    (itens || []).forEach((i, itemIndex) => {
       const sub = Number(i.preco || 0) * Number(i.quantidade || 0);
       subtotal += sub;
       html += `
         <div class="linha-historico">
-          ${i.quantidade}x ${i.nome_produto} — ${formatarMoeda(sub)}
+          ${itemIndex + 1}. ${i.quantidade}x ${i.nome_produto} — ${formatarMoeda(sub)}
         </div>
       `;
     });
