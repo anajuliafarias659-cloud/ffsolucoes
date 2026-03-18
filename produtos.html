@@ -117,8 +117,17 @@ small{opacity:.7}
   grid-template-columns:repeat(3,1fr);
   gap:10px;
 }
+.linha-4{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+}
+@media(max-width:900px){
+  .linha-4{grid-template-columns:1fr 1fr}
+}
 @media(max-width:700px){
   .linha-3{grid-template-columns:1fr}
+  .linha-4{grid-template-columns:1fr}
 }
 .dica{
   background:#111827;
@@ -145,7 +154,7 @@ small{opacity:.7}
     <h2>➕ Cadastrar / Editar produtos</h2>
 
     <input id="nome" placeholder="Ex: iPhone 14, Arroz 5kg, Cerveja Heineken, Camisa Nike">
-    <input id="preco" type="text" placeholder="Preço">
+    <input id="preco" type="text" placeholder="Preço padrão do produto">
     <input id="estoque" type="number" placeholder="Estoque geral (se não usar variações)">
     <input id="peso" type="number" step="0.01" placeholder="Peso (kg) - opcional">
     <textarea id="descricao" placeholder="Descrição do produto"></textarea>
@@ -160,13 +169,16 @@ small{opacity:.7}
       Roupa → <b>Tamanho</b>: M<br>
       Arroz → <b>Peso</b>: 5kg<br>
       Cerveja → <b>Embalagem</b>: Long Neck<br>
-      Refrigerante → <b>Volume</b>: 2L
+      Refrigerante → <b>Volume</b>: 2L<br><br>
+      <b>💰 Se cada variação tiver preço próprio, informe no campo "Preço da variação".</b><br>
+      Se deixar vazio, a vitrine pode usar o <b>preço padrão do produto</b>.
     </div>
 
-    <div class="linha-3">
+    <div class="linha-4">
       <input id="tipoVariacaoInput" placeholder="Tipo da variação (ex: Cor, Tamanho, Volume, Embalagem)">
       <input id="valorVariacaoInput" placeholder="Valor da variação (ex: Preto, M, 2L, Long Neck)">
       <input id="estoqueVariacaoInput" type="number" placeholder="Estoque dessa variação">
+      <input id="precoVariacaoInput" type="text" placeholder="Preço dessa variação">
     </div>
 
     <button type="button" onclick="adicionarVariacao()">Adicionar variação</button>
@@ -221,6 +233,7 @@ const listaVariacoes = document.getElementById("listaVariacoes");
 const tipoVariacaoInput = document.getElementById("tipoVariacaoInput");
 const valorVariacaoInput = document.getElementById("valorVariacaoInput");
 const estoqueVariacaoInput = document.getElementById("estoqueVariacaoInput");
+const precoVariacaoInput = document.getElementById("precoVariacaoInput");
 
 /* ===== FORMATAR REAL ===== */
 function formatarReal(valor){
@@ -230,23 +243,38 @@ function formatarReal(valor){
   });
 }
 
+function moedaParaNumero(valor){
+  return Number(
+    String(valor || "")
+      .replace(/\s/g,"")
+      .replace("R$","")
+      .replace(/\./g,"")
+      .replace(",",".")
+  ) || 0;
+}
+
 /* ===== MÁSCARA DE MOEDA ===== */
 document.addEventListener("DOMContentLoaded", function(){
-  preco.addEventListener("input", function(e){
-    let valor = e.target.value.replace(/\D/g, "");
+  function aplicarMascaraMoeda(input){
+    input.addEventListener("input", function(e){
+      let valor = e.target.value.replace(/\D/g, "");
 
-    if(valor === ""){
-      e.target.value = "";
-      return;
-    }
+      if(valor === ""){
+        e.target.value = "";
+        return;
+      }
 
-    valor = (Number(valor) / 100).toFixed(2);
+      valor = (Number(valor) / 100).toFixed(2);
 
-    e.target.value = Number(valor).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL"
+      e.target.value = Number(valor).toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL"
+      });
     });
-  });
+  }
+
+  aplicarMascaraMoeda(preco);
+  aplicarMascaraMoeda(precoVariacaoInput);
 });
 
 /* ===== SESSÃO ===== */
@@ -389,6 +417,8 @@ function adicionarVariacao(){
   const tipo = tipoVariacaoInput.value.trim();
   const valor = valorVariacaoInput.value.trim();
   const estoqueVar = estoqueVariacaoInput.value;
+  const precoVarTexto = precoVariacaoInput.value.trim();
+  const precoVar = precoVarTexto ? moedaParaNumero(precoVarTexto) : null;
 
   if(!tipo || !valor || estoqueVar === "" || Number(estoqueVar) < 0){
     alert("Informe tipo, valor e estoque da variação");
@@ -398,19 +428,25 @@ function adicionarVariacao(){
   variacoes.push({
     tipo,
     valor,
-    estoque: Number(estoqueVar)
+    estoque: Number(estoqueVar),
+    preco: precoVar
   });
 
   tipoVariacaoInput.value = "";
   valorVariacaoInput.value = "";
   estoqueVariacaoInput.value = "";
+  precoVariacaoInput.value = "";
   atualizarVariacoes();
 }
 
 function atualizarVariacoes(){
   listaVariacoes.innerHTML = variacoes.map((v,i)=>`
     <div class="variacao-box">
-      <span><b>${v.tipo}:</b> ${v.valor} - ${v.estoque} unidades</span>
+      <span>
+        <b>${v.tipo}:</b> ${v.valor}
+        - ${v.estoque} unidades
+        - ${v.preco !== null && v.preco !== undefined ? formatarReal(v.preco) : "usa preço padrão"}
+      </span>
       <button type="button" onclick="removerVariacao(${i})">x</button>
     </div>
   `).join("");
@@ -450,20 +486,21 @@ async function salvar(){
 
   const idsComplementares = lerComplementaresSelecionados();
 
+  const variacoesTratadas = (variacoes || []).map(v => ({
+    tipo: String(v.tipo || "").trim(),
+    valor: String(v.valor || "").trim(),
+    estoque: Number(v.estoque || 0),
+    preco: v.preco === null || v.preco === undefined || v.preco === "" ? null : Number(v.preco || 0)
+  }));
+
   const payload = {
     nome: nome.value.trim(),
-    preco: Number(
-      preco.value
-        .replace(/\s/g,"")
-        .replace("R$","")
-        .replace(/\./g,"")
-        .replace(",",".")
-    ) || 0,
+    preco: moedaParaNumero(preco.value),
     estoque: Number(estoque.value || 0),
     peso: Number(peso.value || 0),
     descricao: descricao.value.trim(),
     categoria: categoria.value || "",
-    variacoes: JSON.stringify(variacoes),
+    variacoes: JSON.stringify(variacoesTratadas),
     imagens: JSON.stringify(imagens),
     produtos_complementares: JSON.stringify(idsComplementares)
   };
@@ -512,7 +549,12 @@ function editar(p){
 
   try {
     const parsed = JSON.parse(p.variacoes || "[]");
-    variacoes = Array.isArray(parsed) ? parsed : [];
+    variacoes = Array.isArray(parsed) ? parsed.map(v => ({
+      tipo: v.tipo || "",
+      valor: v.valor || "",
+      estoque: Number(v.estoque || 0),
+      preco: v.preco === null || v.preco === undefined || v.preco === "" ? null : Number(v.preco || 0)
+    })) : [];
   } catch {
     variacoes = [];
   }
@@ -553,13 +595,13 @@ async function carregar(){
     try { vars = JSON.parse(p.variacoes || "[]"); } catch {}
 
     const resumoVariacoes = Array.isArray(vars) && vars.length
-      ? vars.slice(0,2).map(v => `${v.tipo}: ${v.valor}`).join(" | ")
+      ? vars.slice(0,2).map(v => {
+          const precoVar = v.preco !== null && v.preco !== undefined && v.preco !== ""
+            ? ` - ${formatarReal(v.preco)}`
+            : "";
+          return `${v.tipo}: ${v.valor}${precoVar}`;
+        }).join(" | ")
       : "Sem variações";
-
-    const produtoString = JSON.stringify(p)
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '&quot;');
 
     return `
       <div class="produto">
@@ -609,6 +651,7 @@ function limpar(){
   tipoVariacaoInput.value = "";
   valorVariacaoInput.value = "";
   estoqueVariacaoInput.value = "";
+  precoVariacaoInput.value = "";
   preview.innerHTML = "";
   listaVariacoes.innerHTML = "";
   btnSalvar.innerText = "Cadastrar Produto";
