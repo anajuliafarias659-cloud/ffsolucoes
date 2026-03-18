@@ -869,6 +869,13 @@
       return "variação";
     }
 
+    function obterPrecoVariacao(produto, variacao) {
+      if (variacao?.preco !== null && variacao?.preco !== undefined && variacao?.preco !== "") {
+        return Number(variacao.preco || 0);
+      }
+      return Number(produto?.preco || 0);
+    }
+
     function gerarCodigoAcompanhamento() {
       const letras = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
       let codigo = "PED-";
@@ -898,7 +905,8 @@
         peso: item.peso,
         frete_gratis: item.frete_gratis,
         produtos_complementares: item.produtos_complementares,
-        variacoes: item.variacoes
+        variacoes: item.variacoes,
+        estoque: item.estoque ?? 0
       }));
 
       localStorage.setItem(ULTIMO_PEDIDO_KEY, JSON.stringify(itens));
@@ -1169,21 +1177,8 @@
     async function criarPagamentoPixMP(pedidoId, total, cliente = {}) {
       const valorFinal = Number(Number(total || 0).toFixed(2));
 
-      console.log("DEBUG PIX =>", {
-        APP_ID,
-        pedidoId,
-        total,
-        valorFinal
-      });
-
-      if (!APP_ID) {
-        throw new Error("APP_ID ausente");
-      }
-
-      if (!pedidoId) {
-        throw new Error("pedidoId ausente");
-      }
-
+      if (!APP_ID) throw new Error("APP_ID ausente");
+      if (!pedidoId) throw new Error("pedidoId ausente");
       if (!Number.isFinite(valorFinal) || valorFinal <= 0) {
         throw new Error("transaction_amount inválido antes de enviar");
       }
@@ -1196,8 +1191,6 @@
         payerEmail: cliente.email || "cliente@cliente.com"
       };
 
-      console.log("PAYLOAD PIX =>", payload);
-
       const res = await fetch(URL_PAGAMENTO_PIX, {
         method: "POST",
         headers: {
@@ -1208,8 +1201,6 @@
       });
 
       const json = await res.json().catch(() => ({}));
-
-      console.log("RESPOSTA PIX =>", json);
 
       if (!res.ok) {
         throw new Error(
@@ -1307,6 +1298,11 @@
           imgs = JSON.parse(p.imagens || "[]");
         } catch {}
 
+        const variacoes = obterVariacoesProduto(p);
+        const precoInicial = variacoes.length
+          ? obterPrecoVariacao(p, variacoes[0])
+          : Number(p.preco || 0);
+
         const card = document.createElement("div");
         card.className = "card";
 
@@ -1322,7 +1318,7 @@
           </div>
 
           <h4>${p.nome}</h4>
-          <div class="preco">${formatarReal(p.preco)}</div>
+          <div class="preco">${formatarReal(precoInicial)}</div>
           <button class="btn-add">Adicionar</button>
         `;
 
@@ -1358,9 +1354,10 @@
       const variacoes = obterVariacoesProduto(produto);
 
       let variacaoFinal = "Padrão";
+      let precoFinal = Number(produto.preco || 0);
 
       if (variacoes.length > 0) {
-        const disponivel = variacoes.find((v) => Number(v.estoque) > 0);
+        const disponivel = variacoes.find((v) => Number(v.estoque || 0) > 0);
 
         if (!disponivel) {
           alert("Esse produto complementar está sem estoque.");
@@ -1368,10 +1365,20 @@
         }
 
         variacaoFinal = String(disponivel.valor || "Padrão");
+        precoFinal = obterPrecoVariacao(produto, disponivel);
+      } else {
+        const estoqueGeral = Number(produto.estoque || 0);
+        if (estoqueGeral <= 0) {
+          alert("Esse produto complementar está sem estoque.");
+          return;
+        }
       }
 
       const existente = carrinho.find(
-        (i) => String(i.id) === String(produto.id) && i.variacao === variacaoFinal
+        (i) =>
+          String(i.id) === String(produto.id) &&
+          i.variacao === variacaoFinal &&
+          Number(i.preco || 0) === Number(precoFinal || 0)
       );
 
       if (existente) {
@@ -1380,7 +1387,8 @@
         carrinho.push({
           ...produto,
           qtd: 1,
-          variacao: variacaoFinal
+          variacao: variacaoFinal,
+          preco: precoFinal
         });
       }
 
@@ -1437,7 +1445,7 @@
               <div class="sugestao-item">
                 ${obterImagemProduto(p) ? `<img src="${obterImagemProduto(p)}" alt="${p.nome}">` : ""}
                 <div class="nome">${p.nome}</div>
-                <div class="preco">${formatarReal(p.preco)}</div>
+                <div class="preco">${formatarReal(Number(p.preco || 0))}</div>
                 <button onclick="adicionarSugestaoDiretoPorId('${p.id}')">Adicionar</button>
               </div>
             `).join("")}
@@ -1648,8 +1656,14 @@
 
       modalProduto.style.display = "flex";
       modalNome.innerText = produto.nome;
-      modalPreco.innerText = formatarReal(produto.preco);
       modalDescricao.innerHTML = produto.descricao || "";
+
+      const variacoes = obterVariacoesProduto(produto);
+      const precoInicial = variacoes.length
+        ? obterPrecoVariacao(produto, variacoes[0])
+        : Number(produto.preco || 0);
+
+      modalPreco.innerText = formatarReal(precoInicial);
 
       let index = 0;
       modalImg.src = imgs[index] || "";
@@ -1682,8 +1696,6 @@
         });
       };
 
-      const variacoes = obterVariacoesProduto(produto);
-
       if (variacoes.length) {
         const rotulo = obterRotuloVariacoes(variacoes);
 
@@ -1694,22 +1706,29 @@
 
         const variacoesArea = document.getElementById("variacoesArea");
 
-        variacoes.forEach((v) => {
+        variacoes.forEach((v, idx) => {
           const btn = document.createElement("button");
-          btn.innerText = `${obterTextoVariacao(v)} (${Number(v.estoque || 0)})`;
+          const precoVar = obterPrecoVariacao(produto, v);
+
+          btn.innerText = `${obterTextoVariacao(v)} - ${formatarReal(precoVar)} (${Number(v.estoque || 0)})`;
           btn.style.margin = "5px";
           btn.style.padding = "6px 12px";
           btn.style.borderRadius = "6px";
           btn.style.border = "1px solid #ccc";
           btn.style.cursor = "pointer";
 
-          if (Number(v.estoque) <= 0) {
+          if (Number(v.estoque || 0) <= 0) {
             btn.disabled = true;
             btn.style.opacity = "0.5";
           }
 
           btn.onclick = () => {
-            variacaoSelecionada = String(v.valor || "Padrão");
+            variacaoSelecionada = {
+              valor: String(v.valor || "Padrão"),
+              preco: precoVar
+            };
+
+            modalPreco.innerText = formatarReal(precoVar);
 
             document.querySelectorAll("#variacoesArea button").forEach((b) => {
               b.style.background = "#fff";
@@ -1719,6 +1738,16 @@
             btn.style.background = "#0071e3";
             btn.style.color = "#fff";
           };
+
+          if (idx === 0 && Number(v.estoque || 0) > 0) {
+            variacaoSelecionada = {
+              valor: String(v.valor || "Padrão"),
+              preco: precoVar
+            };
+            btn.style.background = "#0071e3";
+            btn.style.color = "#fff";
+            modalPreco.innerText = formatarReal(precoVar);
+          }
 
           variacoesArea.appendChild(btn);
         });
@@ -1740,10 +1769,14 @@
         return;
       }
 
-      const variacaoFinal = variacaoSelecionada || "Padrão";
+      const nomeVariacao = variacaoSelecionada?.valor || "Padrão";
+      const precoFinal = Number(variacaoSelecionada?.preco ?? produtoAtual.preco ?? 0);
 
       const existente = carrinho.find(
-        (i) => i.id === produtoAtual.id && i.variacao === variacaoFinal
+        (i) =>
+          i.id === produtoAtual.id &&
+          i.variacao === nomeVariacao &&
+          Number(i.preco || 0) === precoFinal
       );
 
       if (existente) {
@@ -1752,7 +1785,8 @@
         carrinho.push({
           ...produtoAtual,
           qtd: 1,
-          variacao: variacaoFinal
+          variacao: nomeVariacao,
+          preco: precoFinal
         });
       }
 
@@ -1987,7 +2021,7 @@
       for (const item of carrinho) {
         const { data: produtoBanco, error: prodErr } = await supabase
           .from("produtos")
-          .select("variacoes")
+          .select("estoque, variacoes")
           .eq("id", item.id)
           .single();
 
@@ -2004,11 +2038,17 @@
         }
 
         const variacaoItem = item.variacao || "Padrão";
-        const idx = variacoes.findIndex((v) => String(v.valor || "Padrão") === variacaoItem);
 
         if (variacoes.length > 0) {
+          const idx = variacoes.findIndex((v) => String(v.valor || "Padrão") === variacaoItem);
+
           if (idx === -1 || Number(variacoes[idx].estoque || 0) < Number(item.qtd || 1)) {
             alert(`Estoque insuficiente para ${item.nome} (${variacaoItem})`);
+            return null;
+          }
+        } else {
+          if (Number(produtoBanco.estoque || 0) < Number(item.qtd || 1)) {
+            alert(`Estoque insuficiente para ${item.nome}`);
             return null;
           }
         }
@@ -2017,6 +2057,76 @@
       }
 
       return subtotal;
+    }
+
+    async function baixarEstoqueCarrinho() {
+      for (const item of carrinho) {
+        const { data: produtoBanco, error: prodErr } = await supabase
+          .from("produtos")
+          .select("id, estoque, variacoes")
+          .eq("id", item.id)
+          .single();
+
+        if (prodErr || !produtoBanco) {
+          throw new Error(`Erro ao consultar estoque do produto: ${item.nome}`);
+        }
+
+        let variacoes = [];
+        try {
+          variacoes = JSON.parse(produtoBanco.variacoes || "[]");
+        } catch {
+          variacoes = [];
+        }
+
+        if (variacoes.length > 0) {
+          const variacaoItem = item.variacao || "Padrão";
+          const idx = variacoes.findIndex(
+            (v) => String(v.valor || "Padrão") === String(variacaoItem)
+          );
+
+          if (idx === -1) {
+            throw new Error(`Variação não encontrada para ${item.nome} (${variacaoItem})`);
+          }
+
+          const estoqueAtual = Number(variacoes[idx].estoque || 0);
+          const qtdPedido = Number(item.qtd || 1);
+
+          if (estoqueAtual < qtdPedido) {
+            throw new Error(`Estoque insuficiente para ${item.nome} (${variacaoItem})`);
+          }
+
+          variacoes[idx].estoque = estoqueAtual - qtdPedido;
+
+          const { error: updateErr } = await supabase
+            .from("produtos")
+            .update({
+              variacoes: JSON.stringify(variacoes)
+            })
+            .eq("id", item.id);
+
+          if (updateErr) {
+            throw new Error(`Erro ao baixar estoque de ${item.nome}`);
+          }
+        } else {
+          const estoqueAtual = Number(produtoBanco.estoque || 0);
+          const qtdPedido = Number(item.qtd || 1);
+
+          if (estoqueAtual < qtdPedido) {
+            throw new Error(`Estoque insuficiente para ${item.nome}`);
+          }
+
+          const { error: updateErr } = await supabase
+            .from("produtos")
+            .update({
+              estoque: estoqueAtual - qtdPedido
+            })
+            .eq("id", item.id);
+
+          if (updateErr) {
+            throw new Error(`Erro ao baixar estoque de ${item.nome}`);
+          }
+        }
+      }
     }
 
     function montarMensagemWhatsApp({ nome, telefone, codigoAcompanhamento, subtotal, frete, total }) {
@@ -2137,6 +2247,51 @@ Enviado pela vitrine online.`;
       const total = Number((subtotalFinal + freteFinal).toFixed(2));
       const codigoAcompanhamento = gerarCodigoAcompanhamento();
 
+      const { data: pedidoCriado, error: erroPedidoWhats } = await supabase
+        .from("pedidos")
+        .insert([
+          {
+            app_id: APP_ID,
+            cliente_nome: nome,
+            cliente_telefone: telefone,
+            cliente_rua: document.getElementById("clienteRua").value,
+            cliente_numero: document.getElementById("clienteNumero").value,
+            cliente_bairro: document.getElementById("clienteBairro").value,
+            cliente_cidade: document.getElementById("clienteCidade").value,
+            cliente_estado: document.getElementById("clienteEstado").value,
+            cliente_cep: document.getElementById("clienteCep").value,
+            cliente_localizacao: document.getElementById("clienteLocalizacao").value,
+            itens: carrinho,
+            total: total,
+            subtotal: subtotalFinal,
+            frete_valor: freteFinal,
+            frete_uf: ufFrete,
+            frete_regiao: resultadoFrete.regiao,
+            frete_peso_total: Number(pesoTotalPedido || 0),
+            status: "pedido_whatsapp",
+            pagamento_modo: "whatsapp",
+            pagamento_tipo: formaPagamentoWhats || "whatsapp",
+            pagamento_status: "pendente",
+            codigo_acompanhamento: codigoAcompanhamento,
+            status_entrega: "Pedido recebido"
+          }
+        ])
+        .select("id")
+        .single();
+
+      if (erroPedidoWhats || !pedidoCriado?.id) {
+        alert("Erro ao salvar pedido do WhatsApp.");
+        return;
+      }
+
+      try {
+        await baixarEstoqueCarrinho();
+      } catch (erroEstoque) {
+        await supabase.from("pedidos").delete().eq("id", pedidoCriado.id);
+        alert(erroEstoque.message || "Erro ao baixar estoque.");
+        return;
+      }
+
       const mensagem = montarMensagemWhatsApp({
         nome,
         telefone,
@@ -2230,15 +2385,6 @@ Enviado pela vitrine online.`;
       const pagamentoTipoInicial =
         modoEscolhido === "pix_mp" ? "pix" : "checkout_online";
 
-      console.log("TOTAL FINAL =>", {
-        APP_ID,
-        subtotal,
-        subtotalFinal,
-        valorFrete,
-        freteFinal,
-        total
-      });
-
       const { data: pedidoCriado, error } = await supabase
         .from("pedidos")
         .insert([
@@ -2271,8 +2417,6 @@ Enviado pela vitrine online.`;
         .select("id")
         .single();
 
-      console.log("PEDIDO CRIADO =>", pedidoCriado, error);
-
       if (error || !pedidoCriado?.id) {
         console.error("ERRO AO CRIAR PEDIDO =>", error, pedidoCriado);
         alert("Erro ao salvar pedido.");
@@ -2280,7 +2424,6 @@ Enviado pela vitrine online.`;
       }
 
       const pedidoId = String(pedidoCriado.id);
-      console.log("pedidoId final =>", pedidoId);
       const linkAcompanhamento = `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(codigoAcompanhamento)}`;
 
       if (modoEscolhido === "pix_mp") {
@@ -2360,7 +2503,7 @@ Enviado pela vitrine online.`;
           `;
 
           iniciarVerificacaoPix(pedidoId, codigoAcompanhamento);
-          alert("✅ PIX gerado com sucesso. Agora é só pagar que a tela vai atualizar automaticamente.");
+          alert("✅ PIX gerado com sucesso.");
           return;
         } catch (e) {
           console.error(e);
