@@ -22,9 +22,9 @@ body{margin:0;font-family:Inter,Arial;background:#020617;color:#e5e7eb;font-size
 }
 .mobile-pos{padding:12px;padding-bottom:260px}
 .card{background:#0f172a;border-radius:14px;padding:12px;margin-bottom:10px}
-.card input,.card textarea,.card button{
+.card input,.card textarea,.card button,.card select{
 width:100%;padding:10px;font-size:14px;border-radius:10px;border:none;margin-bottom:6px}
-.card input,.card textarea{background:#020617;color:#fff}
+.card input,.card textarea,.card select{background:#020617;color:#fff}
 .card button{cursor:pointer;background:#0ea5e9;color:#fff}
 .lista-item{padding:8px;border-radius:8px;background:#020617;margin-bottom:4px;cursor:pointer}
 .lista-item:hover{background:#1e293b}
@@ -49,6 +49,13 @@ font-size:18px;font-weight:900}
   display:inline-block;
   font-size:12px;
   cursor:pointer;
+}
+.variacao-info{
+  margin:6px 0;
+  padding:8px;
+  border-radius:10px;
+  background:#111827;
+  font-size:13px;
 }
 </style>
 </head>
@@ -77,6 +84,14 @@ font-size:18px;font-weight:900}
 <div class="card hidden" id="previewProduto">
 <b id="prevNome"></b>
 <p>R$ <span id="prevPreco"></span> | Estoque: <span id="prevEstoque"></span></p>
+
+<div id="areaVariacoes" class="hidden">
+  <select id="selectVariacao" onchange="selecionarVariacaoAtual()">
+    <option value="">Selecione uma variação</option>
+  </select>
+  <div class="variacao-info" id="infoVariacao"></div>
+</div>
+
 <button onclick="confirmarAdicionar()">Adicionar ao carrinho</button>
 </div>
 
@@ -119,12 +134,54 @@ let app_id = null;
 let nomeEmpresa = "Minha Empresa";
 let carrinho = [];
 let produtoAtual = null;
+let variacaoAtual = null;
 let total = 0;
 let timerBusca = null;
 
 /* ================= UTIL ================= */
 
 function round2(v){ return Math.round((Number(v) || 0) * 100) / 100; }
+
+function parseVariacoes(produto){
+  try{
+    const arr = JSON.parse(produto?.variacoes || "[]");
+    return Array.isArray(arr) ? arr : [];
+  }catch{
+    return [];
+  }
+}
+
+function produtoTemVariacoes(produto){
+  return parseVariacoes(produto).length > 0;
+}
+
+function obterPrecoProduto(produto){
+  return Number(produto?.preco || 0);
+}
+
+function obterPrecoVariacao(produto, variacao){
+  if(variacao && variacao.preco !== null && variacao.preco !== undefined && variacao.preco !== ""){
+    return Number(variacao.preco || 0);
+  }
+  return obterPrecoProduto(produto);
+}
+
+function obterEstoqueVariacao(variacao){
+  return Number(variacao?.estoque || 0);
+}
+
+function obterTextoVariacao(v){
+  const tipo = String(v?.tipo || "").trim();
+  const valor = String(v?.valor || "").trim();
+  if(tipo && valor) return `${tipo}: ${valor}`;
+  if(valor) return valor;
+  if(tipo) return tipo;
+  return "Variação";
+}
+
+function formatarReal(v){
+  return Number(v || 0).toFixed(2);
+}
 
 const codigo = document.getElementById("codigo");
 const quantidade = document.getElementById("quantidade");
@@ -139,6 +196,9 @@ const valorPago = document.getElementById("valorPago");
 const infoPagamento = document.getElementById("infoPagamento");
 const formFiado = document.getElementById("formFiado");
 const empresaInfo = document.getElementById("empresaInfo");
+const areaVariacoes = document.getElementById("areaVariacoes");
+const selectVariacao = document.getElementById("selectVariacao");
+const infoVariacao = document.getElementById("infoVariacao");
 
 /* ================= VALIDAR SESSÃO ================= */
 
@@ -241,7 +301,7 @@ async function buscarGeral(v){
       .select("*")
       .eq("app_id", app_id)
       .ilike("nome", `%${v}%`)
-      .limit(5);
+      .limit(8);
   }
 
   const { data, error } = res;
@@ -258,10 +318,15 @@ async function buscarGeral(v){
   }
 
   data.forEach(p => {
+    const variacoes = parseVariacoes(p);
+    const precoMostrar = variacoes.length
+      ? obterPrecoVariacao(p, variacoes[0])
+      : obterPrecoProduto(p);
+
     const produtoSeguro = encodeURIComponent(JSON.stringify(p));
     listaBusca.innerHTML += `
       <div class="lista-item" onclick="selecionarProdutoDecode('${produtoSeguro}')">
-        ${p.nome} — R$ ${Number(p.preco || 0).toFixed(2)}
+        ${p.nome} — R$ ${formatarReal(precoMostrar)}
       </div>
     `;
   });
@@ -274,12 +339,56 @@ window.selecionarProdutoDecode = function(p){
 
 function selecionarProduto(p){
   produtoAtual = p;
+  variacaoAtual = null;
+
   prevNome.innerText = p.nome || "";
-  prevPreco.innerText = Number(p.preco || 0).toFixed(2);
-  prevEstoque.innerText = Number(p.estoque || 0);
+
+  const variacoes = parseVariacoes(p);
+
+  if(variacoes.length > 0){
+    areaVariacoes.classList.remove("hidden");
+
+    selectVariacao.innerHTML = `<option value="">Selecione uma variação</option>` +
+      variacoes.map((v, i) => {
+        const preco = obterPrecoVariacao(p, v);
+        const estoque = obterEstoqueVariacao(v);
+        return `<option value="${i}">${obterTextoVariacao(v)} - R$ ${formatarReal(preco)} - estoque ${estoque}</option>`;
+      }).join("");
+
+    prevPreco.innerText = formatarReal(obterPrecoProduto(p));
+    prevEstoque.innerText = "-";
+    infoVariacao.innerText = "Selecione uma variação para ver preço e estoque.";
+  }else{
+    areaVariacoes.classList.add("hidden");
+    selectVariacao.innerHTML = `<option value="">Selecione uma variação</option>`;
+    infoVariacao.innerText = "";
+    prevPreco.innerText = formatarReal(obterPrecoProduto(p));
+    prevEstoque.innerText = Number(p.estoque || 0);
+  }
+
   previewProduto.classList.remove("hidden");
   listaBusca.innerHTML = "";
 }
+
+window.selecionarVariacaoAtual = function(){
+  if(!produtoAtual) return;
+
+  const variacoes = parseVariacoes(produtoAtual);
+  const idx = Number(selectVariacao.value);
+
+  if(Number.isNaN(idx) || !variacoes[idx]){
+    variacaoAtual = null;
+    prevPreco.innerText = formatarReal(obterPrecoProduto(produtoAtual));
+    prevEstoque.innerText = "-";
+    infoVariacao.innerText = "Selecione uma variação para ver preço e estoque.";
+    return;
+  }
+
+  variacaoAtual = variacoes[idx];
+  prevPreco.innerText = formatarReal(obterPrecoVariacao(produtoAtual, variacaoAtual));
+  prevEstoque.innerText = obterEstoqueVariacao(variacaoAtual);
+  infoVariacao.innerText = `${obterTextoVariacao(variacaoAtual)}`;
+};
 
 /* ================= CARRINHO ================= */
 
@@ -296,32 +405,86 @@ function confirmarAdicionar(){
     return;
   }
 
-  if(qtd > Number(produtoAtual.estoque || 0)){
-    alert("Estoque insuficiente");
-    return;
-  }
+  const usaVariacoes = produtoTemVariacoes(produtoAtual);
 
-  const existente = carrinho.find(i => i.id === produtoAtual.id);
+  if(usaVariacoes){
+    if(!variacaoAtual){
+      alert("Selecione uma variação");
+      return;
+    }
 
-  if(existente){
-    const novaQtd = existente.qtd + qtd;
+    const estoqueVar = obterEstoqueVariacao(variacaoAtual);
+    if(qtd > estoqueVar){
+      alert("Estoque insuficiente na variação");
+      return;
+    }
 
-    if(novaQtd > Number(produtoAtual.estoque || 0)){
+    const nomeVariacao = String(variacaoAtual.valor || "Padrão");
+    const tipoVariacao = String(variacaoAtual.tipo || "");
+    const precoFinal = obterPrecoVariacao(produtoAtual, variacaoAtual);
+
+    const existente = carrinho.find(i =>
+      i.id === produtoAtual.id &&
+      i.variacao === nomeVariacao &&
+      i.tipo_variacao === tipoVariacao
+    );
+
+    if(existente){
+      const novaQtd = existente.qtd + qtd;
+
+      if(novaQtd > estoqueVar){
+        alert("Estoque insuficiente na variação");
+        return;
+      }
+
+      existente.qtd = novaQtd;
+      existente.subtotal = round2(existente.qtd * existente.preco);
+    }else{
+      carrinho.push({
+        id: produtoAtual.id,
+        nome: produtoAtual.nome,
+        qtd,
+        preco: precoFinal,
+        estoque: estoqueVar,
+        subtotal: round2(qtd * precoFinal),
+        variacao: nomeVariacao,
+        tipo_variacao: tipoVariacao,
+        usa_variacao: true
+      });
+    }
+  }else{
+    const estoqueGeral = Number(produtoAtual.estoque || 0);
+
+    if(qtd > estoqueGeral){
       alert("Estoque insuficiente");
       return;
     }
 
-    existente.qtd = novaQtd;
-    existente.subtotal = round2(existente.qtd * existente.preco);
-  }else{
-    carrinho.push({
-      id: produtoAtual.id,
-      nome: produtoAtual.nome,
-      qtd,
-      preco: Number(produtoAtual.preco || 0),
-      estoque: Number(produtoAtual.estoque || 0),
-      subtotal: round2(qtd * Number(produtoAtual.preco || 0))
-    });
+    const existente = carrinho.find(i => i.id === produtoAtual.id && !i.usa_variacao);
+
+    if(existente){
+      const novaQtd = existente.qtd + qtd;
+
+      if(novaQtd > estoqueGeral){
+        alert("Estoque insuficiente");
+        return;
+      }
+
+      existente.qtd = novaQtd;
+      existente.subtotal = round2(existente.qtd * existente.preco);
+    }else{
+      carrinho.push({
+        id: produtoAtual.id,
+        nome: produtoAtual.nome,
+        qtd,
+        preco: Number(produtoAtual.preco || 0),
+        estoque: estoqueGeral,
+        subtotal: round2(qtd * Number(produtoAtual.preco || 0)),
+        variacao: null,
+        tipo_variacao: null,
+        usa_variacao: false
+      });
+    }
   }
 
   atualizarCarrinho();
@@ -329,6 +492,10 @@ function confirmarAdicionar(){
   codigo.value = "";
   quantidade.value = 1;
   produtoAtual = null;
+  variacaoAtual = null;
+  areaVariacoes.classList.add("hidden");
+  selectVariacao.innerHTML = `<option value="">Selecione uma variação</option>`;
+  infoVariacao.innerText = "";
 }
 
 function removerItem(index){
@@ -346,9 +513,14 @@ function atualizarCarrinho(){
 
   carrinho.forEach((i, index) => {
     total += i.subtotal;
+
+    const textoVariacao = i.usa_variacao
+      ? `<br><small>${i.tipo_variacao ? i.tipo_variacao + ": " : ""}${i.variacao || ""}</small>`
+      : "";
+
     carrinhoDiv.innerHTML += `
       <div>
-        ${i.qtd} x ${i.nome} = R$ ${i.subtotal.toFixed(2)}<br>
+        ${i.qtd} x ${i.nome}${textoVariacao} = R$ ${i.subtotal.toFixed(2)}<br>
         <span class="remover-item" onclick="removerItem(${index})">Remover</span>
       </div>
     `;
@@ -371,6 +543,65 @@ function calcularPagamento(){
   if(pago < total) infoPagamento.innerText = `Falta: R$ ${(total - pago).toFixed(2)}`;
   else if(pago > total) infoPagamento.innerText = `Troco: R$ ${(pago - total).toFixed(2)}`;
   else infoPagamento.innerText = "Pagamento exato";
+}
+
+/* ================= ESTOQUE ================= */
+
+async function baixarEstoqueItem(item){
+  const { data: produtoBanco, error } = await supabaseClient
+    .from("produtos")
+    .select("id, app_id, estoque, variacoes")
+    .eq("id", item.id)
+    .eq("app_id", app_id)
+    .single();
+
+  if(error || !produtoBanco){
+    throw new Error(`Erro ao consultar estoque de ${item.nome}`);
+  }
+
+  if(item.usa_variacao){
+    const variacoes = parseVariacoes(produtoBanco);
+    const idx = variacoes.findIndex(v =>
+      String(v.valor || "Padrão") === String(item.variacao || "Padrão") &&
+      String(v.tipo || "") === String(item.tipo_variacao || "")
+    );
+
+    if(idx === -1){
+      throw new Error(`Variação não encontrada em ${item.nome}`);
+    }
+
+    const estoqueAtual = Number(variacoes[idx].estoque || 0);
+    if(estoqueAtual < Number(item.qtd || 1)){
+      throw new Error(`Estoque insuficiente em ${item.nome} (${item.variacao})`);
+    }
+
+    variacoes[idx].estoque = estoqueAtual - Number(item.qtd || 1);
+
+    const { error: erroUpdate } = await supabaseClient
+      .from("produtos")
+      .update({ variacoes: JSON.stringify(variacoes) })
+      .eq("id", item.id)
+      .eq("app_id", app_id);
+
+    if(erroUpdate){
+      throw new Error(`Erro ao atualizar estoque da variação em ${item.nome}`);
+    }
+  }else{
+    const estoqueAtual = Number(produtoBanco.estoque || 0);
+    if(estoqueAtual < Number(item.qtd || 1)){
+      throw new Error(`Estoque insuficiente em ${item.nome}`);
+    }
+
+    const { error: erroUpdate } = await supabaseClient
+      .from("produtos")
+      .update({ estoque: estoqueAtual - Number(item.qtd || 1) })
+      .eq("id", item.id)
+      .eq("app_id", app_id);
+
+    if(erroUpdate){
+      throw new Error(`Erro ao atualizar estoque de ${item.nome}`);
+    }
+  }
 }
 
 /* ================= FIADO ================= */
@@ -401,6 +632,11 @@ async function confirmarFiado(){
   const valorDevido = total;
 
   for(const i of carrinho){
+    const observacaoFinal = [
+      obs || null,
+      i.usa_variacao ? `Variação: ${i.tipo_variacao ? i.tipo_variacao + " - " : ""}${i.variacao}` : null
+    ].filter(Boolean).join(" | ") || null;
+
     const { error: erroVenda } = await supabaseClient.from("vendas").insert({
       app_id: app_id,
       produto_id: i.id,
@@ -411,7 +647,7 @@ async function confirmarFiado(){
       forma_pagamento: "FIADO",
       cliente_nome: nome,
       cliente_cpf: cpf || null,
-      observacao: obs || null
+      observacao: observacaoFinal
     });
 
     if(erroVenda){
@@ -420,15 +656,11 @@ async function confirmarFiado(){
       return;
     }
 
-    const { error: erroEstoque } = await supabaseClient
-      .from("produtos")
-      .update({ estoque: i.estoque - i.qtd })
-      .eq("id", i.id)
-      .eq("app_id", app_id);
-
-    if(erroEstoque){
-      console.error("Erro ao atualizar estoque:", erroEstoque);
-      alert("Erro ao atualizar estoque.");
+    try{
+      await baixarEstoqueItem(i);
+    }catch(err){
+      console.error(err);
+      alert(err.message || "Erro ao atualizar estoque.");
       return;
     }
   }
@@ -445,13 +677,19 @@ async function confirmarFiado(){
 /* ================= RECIBO ================= */
 
 function gerarRecibo(tipo, pago, devido = 0, cliente = null){
-  const data = new Date().toLocaleString("pt-BR");
+  const data = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
 
   let itensHTML = "";
   carrinho.forEach(i => {
+    const nomeItem = i.usa_variacao
+      ? `${i.nome} (${i.tipo_variacao ? i.tipo_variacao + ": " : ""}${i.variacao || ""})`
+      : i.nome;
+
     itensHTML += `
       <tr>
-        <td>${i.nome}</td>
+        <td>${nomeItem}</td>
         <td>${i.qtd}</td>
         <td>R$ ${i.preco.toFixed(2)}</td>
         <td>R$ ${i.subtotal.toFixed(2)}</td>
@@ -533,6 +771,10 @@ async function finalizarVenda(tipo){
   }
 
   for(const i of carrinho){
+    const observacaoFinal = i.usa_variacao
+      ? `Variação: ${i.tipo_variacao ? i.tipo_variacao + " - " : ""}${i.variacao}`
+      : null;
+
     const { error: erroVenda } = await supabaseClient.from("vendas").insert({
       app_id: app_id,
       produto_id: i.id,
@@ -540,7 +782,8 @@ async function finalizarVenda(tipo){
       valor_total: i.subtotal,
       valor_pago: pago,
       valor_devido: 0,
-      forma_pagamento: tipo
+      forma_pagamento: tipo,
+      observacao: observacaoFinal
     });
 
     if(erroVenda){
@@ -549,15 +792,11 @@ async function finalizarVenda(tipo){
       return;
     }
 
-    const { error: erroEstoque } = await supabaseClient
-      .from("produtos")
-      .update({ estoque: i.estoque - i.qtd })
-      .eq("id", i.id)
-      .eq("app_id", app_id);
-
-    if(erroEstoque){
-      console.error("Erro ao atualizar estoque:", erroEstoque);
-      alert("Erro ao atualizar estoque.");
+    try{
+      await baixarEstoqueItem(i);
+    }catch(err){
+      console.error(err);
+      alert(err.message || "Erro ao atualizar estoque.");
       return;
     }
   }
@@ -575,6 +814,11 @@ function limparVenda(){
   codigo.value = "";
   quantidade.value = 1;
   produtoAtual = null;
+  variacaoAtual = null;
+  previewProduto.classList.add("hidden");
+  areaVariacoes.classList.add("hidden");
+  selectVariacao.innerHTML = `<option value="">Selecione uma variação</option>`;
+  infoVariacao.innerText = "";
   atualizarCarrinho();
 }
 
