@@ -854,13 +854,47 @@ function pedidoTemNovosItensSetor(p, setor){
   return novos.some(i => setorItem(i) === setor);
 }
 
+function parseDataBrasil(dataIso){
+  if (!dataIso) return null;
+
+  const texto = String(dataIso).trim();
+
+  const temTimezone = /[zZ]$|[+\-]\d{2}:\d{2}$/.test(texto);
+
+  const isoCorrigida = temTimezone
+    ? texto
+    : texto.replace(" ", "T") + "Z";
+
+  const d = new Date(isoCorrigida);
+
+  if (isNaN(d.getTime())) return null;
+  return d;
+}
+
 function formatarDataHoraPedido(dataIso){
-  if(!dataIso) return { data:"--/--/----", hora:"--:--" };
-  const d = new Date(dataIso);
+  const d = parseDataBrasil(dataIso);
+
+  if(!d) return { data:"--/--/----", hora:"--:--" };
+
   return {
-    data: d.toLocaleDateString("pt-BR"),
-    hora: d.toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" })
+    data: d.toLocaleDateString("pt-BR", {
+      timeZone: "America/Fortaleza"
+    }),
+    hora: d.toLocaleTimeString("pt-BR", {
+      timeZone: "America/Fortaleza",
+      hour:"2-digit",
+      minute:"2-digit"
+    })
   };
+}
+
+function formatarDataHoraCompleta(dataIso){
+  const d = parseDataBrasil(dataIso);
+  if (!d) return "-";
+
+  return d.toLocaleString("pt-BR", {
+    timeZone: "America/Fortaleza"
+  });
 }
 
 function numeroExibicaoPedido(p){
@@ -869,8 +903,8 @@ function numeroExibicaoPedido(p){
 
 function ordenarPedidos(lista){
   return [...lista].sort((a,b) => {
-    const da = new Date(a.created_at || 0).getTime();
-    const db = new Date(b.created_at || 0).getTime();
+    const da = parseDataBrasil(a.created_at)?.getTime() || 0;
+    const db = parseDataBrasil(b.created_at)?.getTime() || 0;
     return db - da;
   });
 }
@@ -987,7 +1021,7 @@ function montarCardPedidoDetalhado(p, isHistorico){
   const mesaNumero = numeroMesaPedido(p);
   const totalPedido = calcularTotalPedido(p);
   const qtdItens = quantidadeItensPedido(p);
-  const dataHoraBonita = p.created_at ? new Date(p.created_at).toLocaleString("pt-BR") : "-";
+  const dataHoraBonita = formatarDataHoraCompleta(p.created_at);
 
   return `
     <div class="pedido-detalhado ${isMesa ? "mesa" : ""}">
@@ -1567,7 +1601,7 @@ window.imprimirComanda = async function(id, setorDesejado, somenteNovos = false)
     return;
   }
 
-  const dataHora = new Date().toLocaleString("pt-BR");
+  const dataHora = formatarDataHoraCompleta(new Date().toISOString());
   const mesaNumero = numeroMesaPedido(pedido);
   const setorTitulo =
     setorDesejado === "bar" ? "BAR" :
