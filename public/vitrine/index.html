@@ -797,6 +797,8 @@
     let totalCarrinhoAtual = 0;
     let formaPagamentoWhats = "";
     let nomeLojaAtual = "";
+    let lojaFechadaAgora = false;
+    let mensagemLojaFechada = "Estamos fechados no momento. Tente novamente mais tarde.";
 
     function formatarReal(valor) {
       return Number(valor || 0).toLocaleString("pt-BR", {
@@ -817,6 +819,49 @@
       }
 
       return "whatsapp";
+    }
+
+    function mostrarTelaLojaFechada() {
+      document.body.innerHTML = `
+        <div style="
+          min-height:100vh;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          background:#020617;
+          color:#fff;
+          padding:20px;
+          text-align:center;
+          font-family:Arial,sans-serif;
+        ">
+          <div style="
+            background:#0f172a;
+            padding:30px;
+            border-radius:18px;
+            max-width:500px;
+            width:100%;
+            box-shadow:0 10px 30px rgba(0,0,0,.35);
+          ">
+            <h1 style="margin-top:0;">🚫 Loja fechada</h1>
+            <p style="font-size:16px;line-height:1.5;">
+              ${mensagemLojaFechada}
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    async function verificarLojaFechadaServidor() {
+      const { data } = await supabase
+        .from("config_site")
+        .select("loja_fechada, mensagem_fechado")
+        .eq("app_id", APP_ID)
+        .maybeSingle();
+
+      return {
+        fechada: data?.loja_fechada === true,
+        mensagem: data?.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde."
+      };
     }
 
     function atualizarModoVendaUI() {
@@ -963,6 +1008,14 @@
           tituloFinalizarPedido.innerText = nomeLojaAtual
             ? `Finalizar pedido - ${nomeLojaAtual}`
             : "Finalizar Pedido";
+        }
+
+        lojaFechadaAgora = config.loja_fechada === true;
+        mensagemLojaFechada = config.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde.";
+
+        if (lojaFechadaAgora) {
+          mostrarTelaLojaFechada();
+          return;
         }
 
         const rua = config.loja_rua || "";
@@ -2059,77 +2112,7 @@
       return subtotal;
     }
 
-    async function baixarEstoqueCarrinho() {
-      for (const item of carrinho) {
-        const { data: produtoBanco, error: prodErr } = await supabase
-          .from("produtos")
-          .select("id, estoque, variacoes")
-          .eq("id", item.id)
-          .single();
-
-        if (prodErr || !produtoBanco) {
-          throw new Error(`Erro ao consultar estoque do produto: ${item.nome}`);
-        }
-
-        let variacoes = [];
-        try {
-          variacoes = JSON.parse(produtoBanco.variacoes || "[]");
-        } catch {
-          variacoes = [];
-        }
-
-        if (variacoes.length > 0) {
-          const variacaoItem = item.variacao || "Padrão";
-          const idx = variacoes.findIndex(
-            (v) => String(v.valor || "Padrão") === String(variacaoItem)
-          );
-
-          if (idx === -1) {
-            throw new Error(`Variação não encontrada para ${item.nome} (${variacaoItem})`);
-          }
-
-          const estoqueAtual = Number(variacoes[idx].estoque || 0);
-          const qtdPedido = Number(item.qtd || 1);
-
-          if (estoqueAtual < qtdPedido) {
-            throw new Error(`Estoque insuficiente para ${item.nome} (${variacaoItem})`);
-          }
-
-          variacoes[idx].estoque = estoqueAtual - qtdPedido;
-
-          const { error: updateErr } = await supabase
-            .from("produtos")
-            .update({
-              variacoes: JSON.stringify(variacoes)
-            })
-            .eq("id", item.id);
-
-          if (updateErr) {
-            throw new Error(`Erro ao baixar estoque de ${item.nome}`);
-          }
-        } else {
-          const estoqueAtual = Number(produtoBanco.estoque || 0);
-          const qtdPedido = Number(item.qtd || 1);
-
-          if (estoqueAtual < qtdPedido) {
-            throw new Error(`Estoque insuficiente para ${item.nome}`);
-          }
-
-          const { error: updateErr } = await supabase
-            .from("produtos")
-            .update({
-              estoque: estoqueAtual - qtdPedido
-            })
-            .eq("id", item.id);
-
-          if (updateErr) {
-            throw new Error(`Erro ao baixar estoque de ${item.nome}`);
-          }
-        }
-      }
-    }
-
-    function montarMensagemWhatsApp({ nome, telefone, codigoAcompanhamento, subtotal, frete, total }) {
+    async function montarMensagemWhatsApp({ nome, telefone, codigoAcompanhamento, subtotal, frete, total }) {
       const rua = document.getElementById("clienteRua").value.trim();
       const numero = document.getElementById("clienteNumero").value.trim();
       const bairro = document.getElementById("clienteBairro").value.trim();
@@ -2170,8 +2153,7 @@ ${cep ? "CEP: " + cep : ""}`.trim();
         pagamentoTexto = "PIX";
       }
 
-      const mensagem =
-`*Novo pedido da vitrine*
+      return `*Novo pedido da vitrine*
 *Loja:* ${nomeLojaAtual || "Loja não identificada"}
 *Código:* ${codigoAcompanhamento}
 
@@ -2192,12 +2174,16 @@ ${enderecoTexto}
 ${localizacao ? `*Localização:* ${localizacao}` : ""}
 
 Enviado pela vitrine online.`;
-
-      return mensagem;
     }
 
     window.finalizarPedidoWhatsApp = async function () {
       if (!carrinho.length) return;
+
+      const statusLoja = await verificarLojaFechadaServidor();
+      if (statusLoja.fechada) {
+        alert(statusLoja.mensagem);
+        return;
+      }
 
       const nome = document.getElementById("clienteNome").value.trim();
       const telefone = document.getElementById("clienteTelefone").value.trim();
@@ -2247,52 +2233,7 @@ Enviado pela vitrine online.`;
       const total = Number((subtotalFinal + freteFinal).toFixed(2));
       const codigoAcompanhamento = gerarCodigoAcompanhamento();
 
-      const { data: pedidoCriado, error: erroPedidoWhats } = await supabase
-        .from("pedidos")
-        .insert([
-          {
-            app_id: APP_ID,
-            cliente_nome: nome,
-            cliente_telefone: telefone,
-            cliente_rua: document.getElementById("clienteRua").value,
-            cliente_numero: document.getElementById("clienteNumero").value,
-            cliente_bairro: document.getElementById("clienteBairro").value,
-            cliente_cidade: document.getElementById("clienteCidade").value,
-            cliente_estado: document.getElementById("clienteEstado").value,
-            cliente_cep: document.getElementById("clienteCep").value,
-            cliente_localizacao: document.getElementById("clienteLocalizacao").value,
-            itens: carrinho,
-            total: total,
-            subtotal: subtotalFinal,
-            frete_valor: freteFinal,
-            frete_uf: ufFrete,
-            frete_regiao: resultadoFrete.regiao,
-            frete_peso_total: Number(pesoTotalPedido || 0),
-            status: "pedido_whatsapp",
-            pagamento_modo: "whatsapp",
-            pagamento_tipo: formaPagamentoWhats || "whatsapp",
-            pagamento_status: "pendente",
-            codigo_acompanhamento: codigoAcompanhamento,
-            status_entrega: "Pedido recebido"
-          }
-        ])
-        .select("id")
-        .single();
-
-      if (erroPedidoWhats || !pedidoCriado?.id) {
-        alert("Erro ao salvar pedido do WhatsApp.");
-        return;
-      }
-
-      try {
-        await baixarEstoqueCarrinho();
-      } catch (erroEstoque) {
-        await supabase.from("pedidos").delete().eq("id", pedidoCriado.id);
-        alert(erroEstoque.message || "Erro ao baixar estoque.");
-        return;
-      }
-
-      const mensagem = montarMensagemWhatsApp({
+      const mensagem = await montarMensagemWhatsApp({
         nome,
         telefone,
         codigoAcompanhamento,
@@ -2330,6 +2271,12 @@ Enviado pela vitrine online.`;
 
     window.finalizarPedido = async function (modoEscolhido) {
       if (!carrinho.length) return;
+
+      const statusLoja = await verificarLojaFechadaServidor();
+      if (statusLoja.fechada) {
+        alert(statusLoja.mensagem);
+        return;
+      }
 
       if (modoVenda === "whatsapp") {
         await window.finalizarPedidoWhatsApp();
@@ -2418,7 +2365,6 @@ Enviado pela vitrine online.`;
         .single();
 
       if (error || !pedidoCriado?.id) {
-        console.error("ERRO AO CRIAR PEDIDO =>", error, pedidoCriado);
         alert("Erro ao salvar pedido.");
         return;
       }
@@ -2506,7 +2452,6 @@ Enviado pela vitrine online.`;
           alert("✅ PIX gerado com sucesso.");
           return;
         } catch (e) {
-          console.error(e);
           alert("Erro ao gerar PIX: " + e.message);
           return;
         }
@@ -2537,7 +2482,6 @@ Enviado pela vitrine online.`;
           window.location.href = linkPagamento;
           return;
         } catch (e) {
-          console.error(e);
           alert("Erro ao gerar pagamento: " + e.message);
           return;
         }
