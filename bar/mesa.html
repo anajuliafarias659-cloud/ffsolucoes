@@ -17,13 +17,11 @@
   --muted:#6b7280;
   --line:#e5e7eb;
   --primary:#e91e63;
-  --primary-dark:#c2185b;
   --green:#16a34a;
   --orange:#f59e0b;
   --red:#ef4444;
   --dark:#111827;
   --shadow:0 8px 24px rgba(0,0,0,.08);
-  --radius:18px;
 }
 
 html,body{
@@ -524,6 +522,67 @@ small{
   margin:14px 0;
 }
 
+.modal-fundo{
+  position:fixed;
+  inset:0;
+  background:rgba(15,23,42,.65);
+  backdrop-filter:blur(4px);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  z-index:300;
+}
+
+.modal-fundo.mostrar{
+  display:flex;
+}
+
+.modal{
+  width:min(460px,100%);
+  background:#fff;
+  border-radius:22px;
+  padding:20px;
+  box-shadow:0 20px 50px rgba(0,0,0,.25);
+}
+
+.modal h3{
+  margin:0 0 10px;
+  color:#111827;
+}
+
+.modal p{
+  margin:0 0 14px;
+  color:#4b5563;
+  line-height:1.45;
+}
+
+.modal .acoes{
+  display:grid;
+  gap:10px;
+}
+
+.modal .acoes button{
+  width:100%;
+  padding:13px 14px;
+  border-radius:14px;
+}
+
+.btn-principal{
+  background:var(--primary);
+  color:#fff;
+}
+
+.btn-secundario{
+  background:#111827;
+  color:#fff;
+}
+
+.btn-neutro{
+  background:#f3f4f6;
+  color:#111827;
+}
+
 .tela-expirada{
   position:fixed;
   inset:0;
@@ -694,6 +753,18 @@ small{
   </div>
 </div>
 
+<div id="modalDebito" class="modal-fundo">
+  <div class="modal">
+    <h3>Débito encontrado em outra mesa</h3>
+    <p id="textoModalDebito">Existe débito em outra mesa.</p>
+    <div class="acoes">
+      <button id="btnIrMesaAntiga" class="btn-secundario">Ir para mesa antiga</button>
+      <button id="btnTrazerDebito" class="btn-principal">Trazer débito para esta mesa</button>
+      <button id="btnCancelarDebito" class="btn-neutro">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
@@ -727,6 +798,8 @@ let mesaInfo = null;
 let atualizandoMesaStatus = false;
 let acessoMesaLiberado = false;
 let sessaoMesaRegistro = null;
+let modoSomenteConta = false;
+let debitoPendenteTransferencia = null;
 
 const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
 let sessaoLocal = null;
@@ -779,9 +852,20 @@ function normalizarStatus(status){
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function limparTelefone(fone) {
+  return String(fone || "").replace(/\D/g, "");
+}
+
+function gerarClienteId(nome, telefone) {
+  const fone = limparTelefone(telefone);
+  if (fone) return "cli_" + fone;
+  const base = (nome || "").trim().toLowerCase();
+  return "cli_" + btoa(unescape(encodeURIComponent(base || "cliente"))).replace(/=/g, "");
+}
+
 function pedidoPodeSerEditado() {
   if (!pedidoAtual) return true;
-  return pedidoAtual.status === "aberto";
+  return normalizarStatus(pedidoAtual.status) === "aberto";
 }
 
 function pedidoBloqueadoParaEdicao() {
@@ -872,6 +956,15 @@ function esconderTelaExpirada() {
   document.getElementById("cardLote").classList.remove("bloqueado-ui");
 }
 
+function abrirModalDebito(texto) {
+  document.getElementById("textoModalDebito").textContent = texto;
+  document.getElementById("modalDebito").classList.add("mostrar");
+}
+
+function fecharModalDebito() {
+  document.getElementById("modalDebito").classList.remove("mostrar");
+}
+
 function resetarInterfaceParaNovaSessao() {
   removerSessaoLocal();
   pedidoAtual = null;
@@ -885,9 +978,58 @@ function resetarInterfaceParaNovaSessao() {
   document.getElementById("btnToggleSessao").textContent = "Fechar";
 }
 
-async function exigirNovoScanQR(motivo = "Sessão expirada. Escaneie novamente o QR da mesa.") {
-  resetarInterfaceParaNovaSessao();
-  bloquearTelaExpirada("Sessão encerrada", motivo);
+function ativarModoSomenteConta(motivo = "Sessão expirada. Escaneie novamente o QR para fazer novos pedidos. Você ainda pode conferir e pagar a conta.") {
+  modoSomenteConta = true;
+
+  const formSessao = document.getElementById("formSessao");
+  if (formSessao) formSessao.classList.add("oculto");
+
+  const btnEnviar = document.getElementById("btnEnviar");
+  const btnConta = document.getElementById("btnConta");
+
+  if (btnEnviar) {
+    btnEnviar.disabled = true;
+    btnEnviar.textContent = "Sessão expirada";
+  }
+
+  if (btnConta) {
+    btnConta.disabled = false;
+    btnConta.textContent = "Pedir conta";
+  }
+
+  document.getElementById("sessaoAtualInfo").innerHTML = motivo;
+  atualizarInfoStatus();
+  aplicarFiltros();
+}
+
+function desativarModoSomenteConta() {
+  modoSomenteConta = false;
+
+  const btnEnviar = document.getElementById("btnEnviar");
+  const btnConta = document.getElementById("btnConta");
+
+  if (btnEnviar) {
+    btnEnviar.disabled = false;
+    btnEnviar.textContent = "Enviar pedido";
+  }
+
+  if (btnConta) {
+    btnConta.disabled = false;
+    btnConta.textContent = "Pedir conta";
+  }
+
+  atualizarInfoStatus();
+  aplicarFiltros();
+}
+
+async function exigirNovoScanQR(motivo = "Sessão expirada. Escaneie novamente o QR da mesa para novos pedidos.") {
+  removerSessaoLocal();
+  pedidoAtual = null;
+  removerCanalPedidoAtual();
+  atualizarTotaisLote(0);
+  ativarModoSomenteConta(motivo);
+  await carregarHistoricoPedidosEnviados();
+  await calcularTotalGeralMesa();
 }
 
 function iniciarMonitorSessao() {
@@ -905,7 +1047,7 @@ function iniciarMonitorSessao() {
 
     if (sessaoExpiradaLocal()) {
       await encerrarSessaoMesaSeExistir();
-      await exigirNovoScanQR("Sua sessão expirou neste aparelho. Escaneie novamente o QR da mesa para continuar.");
+      await exigirNovoScanQR("Sua sessão expirou neste aparelho. Escaneie novamente o QR para novos pedidos. A conta continua disponível.");
       return;
     }
 
@@ -931,6 +1073,13 @@ function atualizarSessaoNaTela() {
   const badges = document.getElementById("badgesSessao");
 
   badges.innerHTML = "";
+
+  if (modoSomenteConta) {
+    info.innerHTML = "Sessão expirada para novos pedidos. A conta ainda pode ser consultada e solicitada.";
+    form.classList.add("oculto");
+    btn.textContent = "Abrir";
+    return;
+  }
 
   if (!sessaoLocal) {
     info.innerHTML = "Nenhuma sessão ativa nesta mesa.";
@@ -966,6 +1115,12 @@ function atualizarSessaoNaTela() {
 function atualizarInfoStatus() {
   const div = document.getElementById("statusPedido");
 
+  if (modoSomenteConta) {
+    div.style.display = "block";
+    div.innerHTML = `Sessão expirada para novos pedidos.<br><small>Escaneie novamente o QR para pedir mais itens. Você ainda pode consultar e pagar a conta.</small>`;
+    return;
+  }
+
   if (!pedidoAtual) {
     div.style.display = "block";
     div.innerHTML = `Nenhum pedido em aberto no momento.<br><small>Toque em um produto para começar um novo lote.</small>`;
@@ -978,7 +1133,7 @@ function atualizarInfoStatus() {
     ? `<br><small>Sessão válida até: ${new Date(pedidoAtual.sessao_expira_em).toLocaleString("pt-BR")}</small>`
     : "";
 
-  if (pedidoAtual.status === "aberto") {
+  if (normalizarStatus(pedidoAtual.status) === "aberto") {
     div.innerHTML = `Status do lote: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>Você ainda pode alterar este lote antes de enviar.</small>${expiraInfo}`;
   } else {
     div.innerHTML = `Status do lote: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>Esse lote já foi enviado e está travado.</small>${expiraInfo}`;
@@ -1208,6 +1363,135 @@ async function atualizarMesaStatus({
   }
 }
 
+async function buscarMesaPorId(idMesa) {
+  const { data, error } = await supabase
+    .from("mesas")
+    .select("id, numero_mesa")
+    .eq("id", idMesa)
+    .maybeSingle();
+
+  if (error) {
+    console.error(error);
+    return null;
+  }
+
+  return data || null;
+}
+
+async function buscarDebitosClienteEmOutrasMesas(clienteId, mesaAtualId) {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id, mesa_id, status, cliente_id, cliente_nome, cliente_telefone, created_at")
+    .eq("app_id", APP_ID)
+    .eq("cliente_id", clienteId)
+    .neq("mesa_id", mesaAtualId)
+    .in("status", ["aberto", "novo", "aceito", "pronto", "conta_solicitada", "pedir_conta"])
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Erro ao buscar débitos do cliente:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+async function transferirDebitosParaNovaMesa(clienteId, mesaOrigemId, mesaNovaId) {
+  const { data: pedidos, error } = await supabase
+    .from("pedidos")
+    .select("id")
+    .eq("app_id", APP_ID)
+    .eq("cliente_id", clienteId)
+    .eq("mesa_id", mesaOrigemId)
+    .in("status", ["aberto", "novo", "aceito", "pronto", "conta_solicitada", "pedir_conta"]);
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao localizar débitos para transferência.");
+    return false;
+  }
+
+  if (!pedidos || pedidos.length === 0) return true;
+
+  const ids = pedidos.map(p => p.id);
+
+  const { error: errorUpdate } = await supabase
+    .from("pedidos")
+    .update({
+      mesa_id: mesaNovaId,
+      mesa_origem_id: mesaOrigemId
+    })
+    .in("id", ids);
+
+  if (errorUpdate) {
+    console.error(errorUpdate);
+    alert("Erro ao transferir débitos.");
+    return false;
+  }
+
+  await supabase
+    .from("mesas")
+    .update({
+      ocupada: false,
+      pedir_conta: false,
+      status: "livre",
+      cliente_nome: null,
+      cliente_celular: null,
+      total_aberto: 0
+    })
+    .eq("id", mesaOrigemId);
+
+  return true;
+}
+
+async function irParaMesaComDebito(mesaAntigaId) {
+  const { data: sessaoAntiga, error } = await supabase
+    .from("sessoes_mesa")
+    .select("*")
+    .eq("mesa_id", mesaAntigaId)
+    .eq("app_id", APP_ID)
+    .eq("ativa", true)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error(error);
+    alert("Não foi possível abrir a mesa antiga.");
+    return;
+  }
+
+  const sessao = sessaoAntiga?.[0];
+  if (!sessao?.token) {
+    alert("A mesa antiga não possui sessão ativa no momento.");
+    return;
+  }
+
+  location.href = `${location.pathname}?mesa=${encodeURIComponent(mesaAntigaId)}&token=${encodeURIComponent(sessao.token)}`;
+}
+
+async function tratarDebitoClienteAntesDeAbrir(clienteId, clienteNome, clienteTelefone) {
+  const debitos = await buscarDebitosClienteEmOutrasMesas(clienteId, mesaId);
+
+  if (!debitos.length) return { ok: true };
+
+  const mesaDebitoId = debitos[0].mesa_id;
+  const mesaDebitoInfo = await buscarMesaPorId(mesaDebitoId);
+  const numeroMesa = mesaDebitoInfo?.numero_mesa || mesaDebitoId;
+
+  return new Promise((resolve) => {
+    debitoPendenteTransferencia = {
+      clienteId,
+      clienteNome,
+      clienteTelefone,
+      mesaOrigemId: mesaDebitoId,
+      mesaOrigemNumero: numeroMesa,
+      resolve
+    };
+
+    abrirModalDebito(`Existe débito seu na mesa ${numeroMesa}. Acerte a mesa antiga ou traga o débito para esta mesa.`);
+  });
+}
+
 async function iniciarSistema() {
   configurarToggleSessao();
   configurarTogglePedido();
@@ -1228,8 +1512,8 @@ async function iniciarSistema() {
   if (!sessaoMesaOk) return;
 
   if (sessaoLocal && sessaoLocal.token !== TOKEN_URL) {
-    await exigirNovoScanQR("Essa sessão local não pertence a este QR. Escaneie novamente a mesa.");
-    return;
+    removerSessaoLocal();
+    ativarModoSomenteConta("Escaneie novamente o QR desta mesa para liberar novos pedidos.");
   }
 
   await tocarSessaoMesa();
@@ -1237,6 +1521,7 @@ async function iniciarSistema() {
   await sincronizarSessaoComPedidos();
   ativarRealtimeMesa();
   ativarRealtimeMesaStatus();
+  configurarModalDebito();
 
   if (sessaoLocal) iniciarMonitorSessao();
 }
@@ -1299,6 +1584,7 @@ async function sincronizarSessaoComPedidos() {
   if (pedidoMaisRecenteAtivo?.sessao_token) {
     salvarSessaoLocal({
       sessao_token: pedidoMaisRecenteAtivo.sessao_token,
+      cliente_id: pedidoMaisRecenteAtivo.cliente_id,
       cliente_nome: pedidoMaisRecenteAtivo.cliente_nome,
       cliente_telefone: pedidoMaisRecenteAtivo.cliente_telefone,
       responsavel_nome: pedidoMaisRecenteAtivo.responsavel_nome,
@@ -1351,8 +1637,25 @@ async function iniciarAtendimentoManual() {
     return;
   }
 
+  const clienteId = gerarClienteId(clienteNome, clienteTelefone);
+
+  if (
+    sessaoLocal &&
+    sessaoLocal.cliente_id === clienteId &&
+    sessaoLocal.token === TOKEN_URL &&
+    !sessaoExpiradaLocal()
+  ) {
+    desativarModoSomenteConta();
+    alert("Cliente reconhecido. Sessão retomada com sucesso.");
+    return;
+  }
+
+  const validacaoDebito = await tratarDebitoClienteAntesDeAbrir(clienteId, clienteNome, clienteTelefone);
+  if (!validacaoDebito.ok) return;
+
   const sessao = {
     sessao_token: gerarToken(),
+    cliente_id: clienteId,
     cliente_nome: clienteNome,
     cliente_telefone: clienteTelefone,
     responsavel_nome: clienteNome,
@@ -1363,6 +1666,7 @@ async function iniciarAtendimentoManual() {
   };
 
   salvarSessaoLocal(sessao);
+  desativarModoSomenteConta();
   await tocarSessaoMesa();
 
   await atualizarMesaStatus({
@@ -1373,12 +1677,13 @@ async function iniciarAtendimentoManual() {
     cliente_celular: clienteTelefone
   });
 
-  alert("Sessão iniciada com sucesso. Ela vale por 15 minutos neste aparelho.");
+  alert("Sessão iniciada com sucesso.");
+  await sincronizarSessaoComPedidos();
 }
 
 async function validarSessaoPedido() {
   if (!acessoMesaLiberado) {
-    bloquearTelaExpirada("QR obrigatório", "Escaneie novamente o QR da mesa.");
+    alert("Escaneie novamente o QR da mesa para fazer novos pedidos.");
     return false;
   }
 
@@ -1386,22 +1691,24 @@ async function validarSessaoPedido() {
   if (!acessoMesaLiberado) return false;
 
   if (!sessaoLocal) {
-    alert("Inicie o atendimento antes de lançar itens.");
+    ativarModoSomenteConta("Escaneie novamente o QR da mesa para liberar novos pedidos.");
+    alert("Sessão expirada. Escaneie novamente o QR para fazer novos pedidos.");
     return false;
   }
 
   if (sessaoLocal.token !== TOKEN_URL) {
-    await exigirNovoScanQR("A sessão desta mesa não é válida neste aparelho. Escaneie novamente o QR.");
+    await exigirNovoScanQR("A sessão desta mesa não é válida neste aparelho. Escaneie novamente o QR para novos pedidos.");
     return false;
   }
 
   if (sessaoExpiradaLocal()) {
     await encerrarSessaoMesaSeExistir();
-    await exigirNovoScanQR("Sua sessão expirou. Escaneie novamente o QR da mesa para continuar.");
+    await exigirNovoScanQR("Sua sessão expirou. Escaneie novamente o QR para fazer novos pedidos. A conta continua disponível.");
     return false;
   }
 
   await tocarSessaoMesa();
+  desativarModoSomenteConta();
   return true;
 }
 
@@ -1409,7 +1716,7 @@ async function criarPedidoSeNecessario() {
   const sessaoOk = await validarSessaoPedido();
   if (!sessaoOk) return false;
 
-  if (pedidoAtual && pedidoAtual.status === "aberto") return true;
+  if (pedidoAtual && normalizarStatus(pedidoAtual.status) === "aberto") return true;
 
   const { data, error } = await supabase
     .from("pedidos")
@@ -1421,6 +1728,7 @@ async function criarPedidoSeNecessario() {
       sessao_token: sessaoLocal.sessao_token,
       sessao_status: "ativa",
       sessao_expira_em: sessaoLocal.sessao_expira_em,
+      cliente_id: sessaoLocal.cliente_id,
       cliente_nome: sessaoLocal.cliente_nome,
       cliente_telefone: sessaoLocal.cliente_telefone,
       responsavel_nome: sessaoLocal.responsavel_nome,
@@ -1544,7 +1852,7 @@ function aplicarFiltros() {
           <small>${p.categoria_exibicao}</small>
         </div>
         <div class="produto-preco">${formatarMoeda(p.preco)}</div>
-        <button data-id="${p.id}">Adicionar</button>
+        <button data-id="${p.id}" ${modoSomenteConta ? "disabled" : ""}>${modoSomenteConta ? "Escaneie o QR" : "Adicionar"}</button>
       </div>
     `;
 
@@ -1554,6 +1862,11 @@ function aplicarFiltros() {
 }
 
 async function addProduto(produtoId) {
+  if (modoSomenteConta) {
+    alert("Sua sessão expirou. Escaneie novamente o QR da mesa para pedir novos itens.");
+    return;
+  }
+
   const ok = await criarPedidoSeNecessario();
   if (!ok) return;
 
@@ -1593,7 +1906,7 @@ async function addProduto(produtoId) {
 }
 
 async function aumentarItem(item) {
-  if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
+  if (!pedidoAtual || pedidoBloqueadoParaEdicao() || modoSomenteConta) {
     alert("Não é possível alterar este lote.");
     return;
   }
@@ -1619,7 +1932,7 @@ async function aumentarItem(item) {
 }
 
 async function diminuirItem(item) {
-  if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
+  if (!pedidoAtual || pedidoBloqueadoParaEdicao() || modoSomenteConta) {
     alert("Não é possível alterar este lote.");
     return;
   }
@@ -1652,7 +1965,7 @@ async function diminuirItem(item) {
 }
 
 async function removerItem(itemId) {
-  if (!pedidoAtual || pedidoBloqueadoParaEdicao()) {
+  if (!pedidoAtual || pedidoBloqueadoParaEdicao() || modoSomenteConta) {
     alert("Não é possível remover item deste lote.");
     return;
   }
@@ -1706,7 +2019,7 @@ async function carregarPedidoAtual() {
   itens.forEach((i) => {
     total += Number(i.preco || 0) * Number(i.quantidade || 0);
 
-    const bloqueado = pedidoBloqueadoParaEdicao();
+    const bloqueado = pedidoBloqueadoParaEdicao() || modoSomenteConta;
     const produtoRel = produtosCache.find(p => String(p.id) === String(i.produto_id)) || null;
     const imgItem = produtoRel ? obterImagemProduto(produtoRel) : "https://via.placeholder.com/600x600?text=Produto";
 
@@ -1839,7 +2152,58 @@ async function calcularTotalGeralMesa() {
   return total;
 }
 
+function configurarModalDebito() {
+  document.getElementById("btnCancelarDebito").onclick = () => {
+    fecharModalDebito();
+    if (debitoPendenteTransferencia?.resolve) {
+      debitoPendenteTransferencia.resolve({ ok: false });
+    }
+    debitoPendenteTransferencia = null;
+  };
+
+  document.getElementById("btnIrMesaAntiga").onclick = async () => {
+    const pend = debitoPendenteTransferencia;
+    fecharModalDebito();
+
+    if (pend?.resolve) pend.resolve({ ok: false });
+
+    if (pend?.mesaOrigemId) {
+      await irParaMesaComDebito(pend.mesaOrigemId);
+    }
+
+    debitoPendenteTransferencia = null;
+  };
+
+  document.getElementById("btnTrazerDebito").onclick = async () => {
+    const pend = debitoPendenteTransferencia;
+    if (!pend) return;
+
+    const ok = await transferirDebitosParaNovaMesa(
+      pend.clienteId,
+      pend.mesaOrigemId,
+      mesaId
+    );
+
+    fecharModalDebito();
+
+    if (pend.resolve) {
+      pend.resolve({ ok });
+    }
+
+    if (ok) {
+      alert(`Débito da mesa ${pend.mesaOrigemNumero} trazido para esta mesa com sucesso.`);
+    }
+
+    debitoPendenteTransferencia = null;
+  };
+}
+
 document.getElementById("btnEnviar").onclick = async () => {
+  if (modoSomenteConta) {
+    alert("Sessão expirada. Escaneie novamente o QR para enviar novos pedidos.");
+    return;
+  }
+
   if (!pedidoAtual) {
     alert("Nenhum pedido em aberto.");
     return;
