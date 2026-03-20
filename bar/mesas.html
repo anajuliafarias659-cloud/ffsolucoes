@@ -210,7 +210,6 @@ const SEGREDO_REMOVER_MESA = "4321";
 let criandoMesa = false;
 let carregandoMesas = false;
 let intervalMesas = null;
-const DURACAO_SESSAO_MINUTOS = 15;
 const cardsRenderizados = new Map();
 
 function esperarSessao(){
@@ -255,19 +254,8 @@ function agoraISO(){
   return new Date().toISOString();
 }
 
-function adicionarMinutosISO(minutos){
-  return new Date(Date.now() + minutos * 60000).toISOString();
-}
-
-function gerarTokenSeguro(){
-  if (window.crypto?.randomUUID) {
-    return crypto.randomUUID().replaceAll("-", "") + Date.now();
-  }
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
-function montarUrlMesa(mesaId, token){
-  return `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(mesaId)}&token=${encodeURIComponent(token)}`;
+function montarUrlMesa(mesaId){
+  return `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(mesaId)}`;
 }
 
 function normalizarStatus(status){
@@ -356,66 +344,12 @@ async function encerrarSessaoMesa(sessaoId){
     .eq("sessao_mesa_id", sessaoId);
 }
 
-async function criarSessaoMesa(mesaId){
-  const token = gerarTokenSeguro();
-
-  const { data, error } = await sb
-    .from("sessoes_mesa")
-    .insert({
-      mesa_id: mesaId,
-      app_id: app_id,
-      token,
-      ativa: true,
-      ultimo_acesso_em: agoraISO(),
-      expira_em: adicionarMinutosISO(DURACAO_SESSAO_MINUTOS)
-    })
-    .select()
-    .single();
-
-  if (error || !data) {
-    console.error("Erro ao criar sessão da mesa:", mesaId, error);
-    return null;
-  }
-
-  return data;
-}
-
-async function renovarSessaoMesa(sessaoAtual){
-  if (!sessaoAtual?.id) return null;
-
-  const novoToken = gerarTokenSeguro();
-
-  const { data, error } = await sb
-    .from("sessoes_mesa")
-    .update({
-      token: novoToken,
-      ativa: true,
-      ultimo_acesso_em: agoraISO(),
-      expira_em: adicionarMinutosISO(DURACAO_SESSAO_MINUTOS),
-      encerrada_em: null
-    })
-    .eq("id", sessaoAtual.id)
-    .select()
-    .single();
-
-  if (error || !data) {
-    console.error("Erro ao renovar sessão da mesa:", sessaoAtual.id, error);
-    return null;
-  }
-
-  return data;
-}
-
-async function obterOuCriarSessaoValidaMesa(mesaId, mesaLivre){
+async function obterSessaoValidaMesa(mesaId){
   let sessao = await buscarSessaoAtivaMesa(mesaId);
 
   if (sessao && expirouSessao(sessao)) {
     await encerrarSessaoMesa(sessao.id);
     sessao = null;
-  }
-
-  if (!sessao && mesaLivre) {
-    sessao = await criarSessaoMesa(mesaId);
   }
 
   return sessao;
@@ -479,11 +413,12 @@ async function atualizarOuCriarCardMesa(mesa){
     texto = "OCUPADA";
   }
 
-  const urlMesa = sessao
-    ? montarUrlMesa(mesa.id, sessao.token)
-    : `${location.origin}/bar/mesa.html?mesa=${encodeURIComponent(mesa.id)}`;
+  const urlMesa = montarUrlMesa(mesa.id);
 
-  const expiraTxt = sessao?.expira_em ? `QR válido até ${formatarHoraBR(sessao.expira_em)}` : "";
+  const expiraTxt = sessao?.expira_em
+    ? `Sessão ativa até ${formatarHoraBR(sessao.expira_em)}`
+    : "QR fixo da mesa";
+
   const clienteTexto = mesa.cliente_nome ? mesa.cliente_nome : (mesaSemPendencias ? "Disponível para novo acesso" : "");
 
   card.className = `card ${classe}`;
@@ -499,30 +434,7 @@ async function atualizarOuCriarCardMesa(mesa){
 
   await desenharQrSeMudou(card, urlMesa);
 
-  card.onclick = async () => {
-    if (mesaSemPendencias) {
-      let sessaoAtual = await buscarSessaoAtivaMesa(mesa.id);
-
-      if (sessaoAtual && expirouSessao(sessaoAtual)) {
-        await encerrarSessaoMesa(sessaoAtual.id);
-        sessaoAtual = null;
-      }
-
-      if (!sessaoAtual) {
-        sessaoAtual = await criarSessaoMesa(mesa.id);
-      } else {
-        sessaoAtual = await renovarSessaoMesa(sessaoAtual);
-      }
-
-      if (!sessaoAtual?.token) {
-        alert("Não foi possível abrir a mesa.");
-        return;
-      }
-
-      location.href = montarUrlMesa(mesa.id, sessaoAtual.token);
-      return;
-    }
-
+  card.onclick = () => {
     location.href = urlMesa;
   };
 
@@ -640,7 +552,7 @@ async function carregarMesas(){
         m.cliente_nome = null;
       }
 
-      const sessao = await obterOuCriarSessaoValidaMesa(m.id, mesaSemPendencias);
+      const sessao = await obterSessaoValidaMesa(m.id);
 
       await atualizarOuCriarCardMesa({
         ...m,
