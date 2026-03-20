@@ -110,12 +110,41 @@
       color: #fff;
     }
 
+    .aviso-funcionamento {
+      margin-top: 290px;
+      margin-left: 10px;
+      margin-right: 10px;
+      margin-bottom: 5px;
+      background: #fff8e1;
+      border: 1px solid #facc15;
+      color: #92400e;
+      padding: 14px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.08);
+      display: none;
+    }
+
+    .aviso-funcionamento h3 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+    }
+
+    .aviso-funcionamento p {
+      margin: 4px 0;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
     .produtos {
       margin-top: 290px;
       padding: 10px;
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 10px;
+    }
+
+    body.com-aviso .produtos {
+      margin-top: 10px;
     }
 
     @media (min-width: 768px) {
@@ -288,6 +317,15 @@
     .tema-capivara .categorias button.ativo {
       background: #e5391b;
       color: #fff;
+    }
+
+    .modo-vitrine .btn-add,
+    .modo-vitrine #btnCarrinho,
+    .modo-vitrine #btnComprarNovamente,
+    .modo-fechada .btn-add,
+    .modo-fechada #btnCarrinho,
+    .modo-fechada #btnComprarNovamente {
+      display: none !important;
     }
 
     .modal-produto {
@@ -474,11 +512,22 @@
         padding: 6px 10px;
       }
 
+      .aviso-funcionamento {
+        margin-top: 225px;
+        margin-left: 8px;
+        margin-right: 8px;
+        padding: 12px;
+      }
+
       .produtos {
         margin-top: 225px;
         padding: 8px;
         gap: 8px;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      body.com-aviso .produtos {
+        margin-top: 8px;
       }
 
       .card {
@@ -570,6 +619,7 @@
 
   <div class="banner" id="bannerArea"></div>
   <div class="categorias" id="listaCategorias"></div>
+  <div id="avisoFuncionamento" class="aviso-funcionamento"></div>
   <section class="produtos" id="listaProdutos"></section>
 
   <button id="btnComprarNovamente">🔁 Comprar novamente</button>
@@ -797,8 +847,9 @@
     let totalCarrinhoAtual = 0;
     let formaPagamentoWhats = "";
     let nomeLojaAtual = "";
-    let lojaFechadaAgora = false;
     let mensagemLojaFechada = "Estamos fechados no momento. Tente novamente mais tarde.";
+    let modoExibicaoLoja = "aberta";
+    let horarioFuncionamento = "";
 
     function formatarReal(valor) {
       return Number(valor || 0).toLocaleString("pt-BR", {
@@ -821,46 +872,69 @@
       return "whatsapp";
     }
 
-    function mostrarTelaLojaFechada() {
-      document.body.innerHTML = `
-        <div style="
-          min-height:100vh;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          background:#020617;
-          color:#fff;
-          padding:20px;
-          text-align:center;
-          font-family:Arial,sans-serif;
-        ">
-          <div style="
-            background:#0f172a;
-            padding:30px;
-            border-radius:18px;
-            max-width:500px;
-            width:100%;
-            box-shadow:0 10px 30px rgba(0,0,0,.35);
-          ">
-            <h1 style="margin-top:0;">🚫 Loja fechada</h1>
-            <p style="font-size:16px;line-height:1.5;">
-              ${mensagemLojaFechada}
-            </p>
-          </div>
-        </div>
-      `;
+    function podeVenderAgora() {
+      return modoExibicaoLoja === "aberta";
+    }
+
+    function aplicarModoExibicaoLoja() {
+      const aviso = document.getElementById("avisoFuncionamento");
+
+      document.body.classList.remove("modo-vitrine", "modo-fechada", "com-aviso");
+
+      if (modoExibicaoLoja === "vitrine") {
+        document.body.classList.add("modo-vitrine", "com-aviso");
+
+        if (aviso) {
+          aviso.style.display = "block";
+          aviso.innerHTML = `
+            <h3>🛍️ Vitrine online</h3>
+            <p>${mensagemLojaFechada || "No momento estamos sem pedidos online."}</p>
+            ${horarioFuncionamento ? `<p><strong>Horário de funcionamento:</strong> ${horarioFuncionamento}</p>` : ""}
+          `;
+        }
+        return;
+      }
+
+      if (modoExibicaoLoja === "fechada") {
+        document.body.classList.add("modo-fechada", "com-aviso");
+
+        if (aviso) {
+          aviso.style.display = "block";
+          aviso.innerHTML = `
+            <h3>🚫 Loja fechada</h3>
+            <p>${mensagemLojaFechada || "Estamos fechados no momento."}</p>
+            ${horarioFuncionamento ? `<p><strong>Horário de funcionamento:</strong> ${horarioFuncionamento}</p>` : ""}
+          `;
+        }
+        return;
+      }
+
+      if (aviso) {
+        aviso.style.display = "none";
+        aviso.innerHTML = "";
+      }
     }
 
     async function verificarLojaFechadaServidor() {
       const { data } = await supabase
         .from("config_site")
-        .select("loja_fechada, mensagem_fechado")
+        .select("loja_fechada, mensagem_fechado, modo_exibicao, horario_funcionamento")
         .eq("app_id", APP_ID)
         .maybeSingle();
 
+      const modo = String(data?.modo_exibicao || "").trim().toLowerCase();
+
+      let modoFinal = "aberta";
+
+      if (modo === "vitrine") modoFinal = "vitrine";
+      else if (modo === "fechada") modoFinal = "fechada";
+      else if (data?.loja_fechada === true) modoFinal = "fechada";
+
       return {
-        fechada: data?.loja_fechada === true,
-        mensagem: data?.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde."
+        fechada: modoFinal !== "aberta",
+        modo: modoFinal,
+        mensagem: data?.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde.",
+        horario: data?.horario_funcionamento || ""
       };
     }
 
@@ -961,7 +1035,7 @@
     function atualizarBotaoComprarNovamente() {
       const ultimo = JSON.parse(localStorage.getItem(ULTIMO_PEDIDO_KEY) || "[]");
 
-      if (ultimo.length) {
+      if (ultimo.length && podeVenderAgora()) {
         btnComprarNovamente.style.display = "block";
       } else {
         btnComprarNovamente.style.display = "none";
@@ -988,10 +1062,10 @@
       if (trocoPara) trocoPara.value = "";
 
       salvarCarrinhoLocal();
+      atualizarBotaoComprarNovamente();
     }
 
     salvarCarrinhoLocal();
-    atualizarBotaoComprarNovamente();
 
     async function carregar() {
       const { data: config } = await supabase
@@ -1010,12 +1084,19 @@
             : "Finalizar Pedido";
         }
 
-        lojaFechadaAgora = config.loja_fechada === true;
         mensagemLojaFechada = config.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde.";
+        horarioFuncionamento = config.horario_funcionamento || "";
 
-        if (lojaFechadaAgora) {
-          mostrarTelaLojaFechada();
-          return;
+        const modoConfig = String(config.modo_exibicao || "").trim().toLowerCase();
+
+        if (modoConfig === "vitrine") {
+          modoExibicaoLoja = "vitrine";
+        } else if (modoConfig === "fechada") {
+          modoExibicaoLoja = "fechada";
+        } else if (config.loja_fechada === true) {
+          modoExibicaoLoja = "fechada";
+        } else {
+          modoExibicaoLoja = "aberta";
         }
 
         const rua = config.loja_rua || "";
@@ -1087,6 +1168,7 @@
         modoVenda = normalizarModoVenda(config.modo_venda);
         numeroWhatsapp = apenasNumeros(config.whatsapp_numero || config.telefone || "");
         atualizarModoVendaUI();
+        aplicarModoExibicaoLoja();
       }
 
       const { data: prods } = await supabase
@@ -1298,6 +1380,7 @@
       if (btnGerarPixMP) btnGerarPixMP.style.display = "none";
 
       salvarCarrinhoLocal();
+      atualizarBotaoComprarNovamente();
     }
 
     function criarCategorias() {
@@ -1372,13 +1455,23 @@
 
           <h4>${p.nome}</h4>
           <div class="preco">${formatarReal(precoInicial)}</div>
-          <button class="btn-add">Adicionar</button>
+          ${
+            podeVenderAgora()
+              ? `<button class="btn-add">Adicionar</button>`
+              : `<div style="margin-top:8px;padding:8px;border-radius:8px;background:#f3f4f6;color:#6b7280;font-size:13px;text-align:center;">
+                  Somente vitrine
+                </div>`
+          }
         `;
 
-        card.querySelector(".btn-add").onclick = (e) => {
-          e.stopPropagation();
-          abrirModal(p, imgs);
-        };
+        const btnAdd = card.querySelector(".btn-add");
+
+        if (btnAdd) {
+          btnAdd.onclick = (e) => {
+            e.stopPropagation();
+            abrirModal(p, imgs);
+          };
+        }
 
         card.onclick = () => abrirModal(p, imgs);
 
@@ -1404,6 +1497,11 @@
     }
 
     function adicionarSugestaoDireto(produto) {
+      if (!podeVenderAgora()) {
+        alert("No momento a loja está apenas em modo vitrine.");
+        return;
+      }
+
       const variacoes = obterVariacoesProduto(produto);
 
       let variacaoFinal = "Padrão";
@@ -1806,7 +1904,17 @@
         });
       }
 
-      modalAdd.onclick = adicionarCarrinho;
+      if (podeVenderAgora()) {
+        modalAdd.style.display = "block";
+        modalAdd.innerText = "Adicionar ao Carrinho";
+        modalAdd.onclick = adicionarCarrinho;
+      } else {
+        modalAdd.style.display = "block";
+        modalAdd.innerText = "Somente vitrine";
+        modalAdd.onclick = () => {
+          alert("No momento a loja está exibindo apenas a vitrine, sem vendas online.");
+        };
+      }
     }
 
     window.fecharModal = function () {
@@ -1814,6 +1922,11 @@
     };
 
     function adicionarCarrinho() {
+      if (!podeVenderAgora()) {
+        alert("No momento a loja está apenas em modo vitrine.");
+        return;
+      }
+
       const variacoes = obterVariacoesProduto(produtoAtual);
       const precisaVariacao = variacoes.length > 0;
 
@@ -1844,6 +1957,7 @@
       }
 
       salvarCarrinhoLocal();
+      atualizarBotaoComprarNovamente();
       fecharModal();
     }
 
@@ -1878,10 +1992,22 @@
       }
     }
 
-    btnCarrinho.onclick = () => abrirCarrinho();
+    btnCarrinho.onclick = () => {
+      if (!podeVenderAgora()) {
+        alert("No momento a loja está apenas em modo vitrine.");
+        return;
+      }
+      abrirCarrinho();
+    };
+
     btnComprarNovamente.onclick = () => comprarNovamente();
 
     function abrirCarrinho() {
+      if (!podeVenderAgora()) {
+        alert("No momento a loja está apenas em modo vitrine.");
+        return;
+      }
+
       if (!carrinho.length) {
         alert("Carrinho vazio");
         return;
@@ -1944,6 +2070,7 @@
     }
 
     window.aumentarQtd = function (index) {
+      if (!podeVenderAgora()) return;
       carrinho[index].qtd++;
       salvarCarrinhoLocal();
       calcularFreteSePossivel();
@@ -1951,6 +2078,8 @@
     };
 
     window.diminuirQtd = function (index) {
+      if (!podeVenderAgora()) return;
+
       if (carrinho[index].qtd > 1) {
         carrinho[index].qtd--;
       } else {
@@ -1963,6 +2092,7 @@
     };
 
     window.removerItem = function (index) {
+      if (!podeVenderAgora()) return;
       carrinho.splice(index, 1);
       salvarCarrinhoLocal();
       calcularFreteSePossivel();
@@ -2177,10 +2307,15 @@ Enviado pela vitrine online.`;
     }
 
     window.finalizarPedidoWhatsApp = async function () {
+      if (!podeVenderAgora()) {
+        alert("No momento a loja está apenas em modo vitrine.");
+        return;
+      }
+
       if (!carrinho.length) return;
 
       const statusLoja = await verificarLojaFechadaServidor();
-      if (statusLoja.fechada) {
+      if (statusLoja.modo !== "aberta") {
         alert(statusLoja.mensagem);
         return;
       }
@@ -2252,6 +2387,11 @@ Enviado pela vitrine online.`;
     };
 
     window.comprarNovamente = function () {
+      if (!podeVenderAgora()) {
+        alert("No momento a loja está apenas em modo vitrine.");
+        return;
+      }
+
       const ultimo = JSON.parse(localStorage.getItem(ULTIMO_PEDIDO_KEY) || "[]");
 
       if (!ultimo.length) {
@@ -2270,10 +2410,15 @@ Enviado pela vitrine online.`;
     };
 
     window.finalizarPedido = async function (modoEscolhido) {
+      if (!podeVenderAgora()) {
+        alert("No momento a loja está apenas em modo vitrine.");
+        return;
+      }
+
       if (!carrinho.length) return;
 
       const statusLoja = await verificarLojaFechadaServidor();
-      if (statusLoja.fechada) {
+      if (statusLoja.modo !== "aberta") {
         alert(statusLoja.mensagem);
         return;
       }
@@ -2318,8 +2463,7 @@ Enviado pela vitrine online.`;
       valorFrete = Number(resultadoFrete?.valor || 0);
 
       const subtotalFinal = Number(subtotal || 0);
-      const freteFinal = Number(valorFrete || 0);
-      const total = Number((subtotalFinal + freteFinal).toFixed(2));
+      const total = Number((subtotalFinal + valorFrete).toFixed(2));
 
       if (!Number.isFinite(total) || total <= 0) {
         alert("Total inválido para gerar PIX.");
