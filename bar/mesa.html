@@ -782,7 +782,7 @@ const supabase = createClient(
 
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa");
-const TOKEN_URL = params.get("token") || "";
+let TOKEN_URL = params.get("token") || "";
 let APP_ID = params.get("app_id") || null;
 
 let pedidoAtual = null;
@@ -1040,11 +1040,6 @@ function iniciarMonitorSessao() {
   const verificar = async () => {
     if (!sessaoLocal) return;
 
-    if (sessaoLocal.token !== TOKEN_URL) {
-      await exigirNovoScanQR("Este acesso não é mais válido neste aparelho. Escaneie novamente o QR da mesa.");
-      return;
-    }
-
     if (sessaoExpiradaLocal()) {
       await encerrarSessaoMesaSeExistir();
       await exigirNovoScanQR("Sua sessão expirou neste aparelho. Escaneie novamente o QR para novos pedidos. A conta continua disponível.");
@@ -1190,17 +1185,20 @@ async function carregarMesa() {
 }
 
 async function buscarSessaoMesaAtual() {
-  if (!mesaId || !APP_ID || !TOKEN_URL) return null;
+  if (!mesaId || !APP_ID) return null;
 
-  const { data, error } = await supabase
+  const query = supabase
     .from("sessoes_mesa")
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .eq("token", TOKEN_URL)
     .eq("ativa", true)
     .order("created_at", { ascending: false })
     .limit(1);
+
+  const { data, error } = TOKEN_URL
+    ? await query.eq("token", TOKEN_URL)
+    : await query;
 
   if (error) {
     console.error("Erro ao buscar sessão da mesa:", error);
@@ -1208,6 +1206,73 @@ async function buscarSessaoMesaAtual() {
   }
 
   return data?.[0] || null;
+}
+
+async function criarOuRecuperarSessaoMesaAoAbrir() {
+  if (!mesaId || !APP_ID) return false;
+
+  let sessao = await buscarSessaoMesaAtual();
+
+  if (sessao && sessao.expira_em && new Date(sessao.expira_em).getTime() <= Date.now()) {
+    await supabase
+      .from("sessoes_mesa")
+      .update({
+        ativa: false,
+        encerrada_em: new Date().toISOString()
+      })
+      .eq("id", sessao.id);
+
+    sessao = null;
+  }
+
+  if (!sessao) {
+    const novoToken = gerarToken();
+
+    const { data: novaSessao, error: erroNova } = await supabase
+      .from("sessoes_mesa")
+      .insert({
+        mesa_id: mesaId,
+        app_id: APP_ID,
+        token: novoToken,
+        ativa: true,
+        ultimo_acesso_em: new Date().toISOString(),
+        expira_em: adicionarMinutosISO(15)
+      })
+      .select()
+      .single();
+
+    if (erroNova || !novaSessao) {
+      console.error("Erro ao criar sessão da mesa:", erroNova);
+      return false;
+    }
+
+    sessao = novaSessao;
+  } else if (!TOKEN_URL) {
+    const novoToken = gerarToken();
+
+    const { data: sessaoRenovada, error: erroRenova } = await supabase
+      .from("sessoes_mesa")
+      .update({
+        token: novoToken,
+        ultimo_acesso_em: new Date().toISOString(),
+        expira_em: adicionarMinutosISO(15)
+      })
+      .eq("id", sessao.id)
+      .select()
+      .single();
+
+    if (erroRenova || !sessaoRenovada) {
+      console.error("Erro ao renovar token da sessão da mesa:", erroRenova);
+      return false;
+    }
+
+    sessao = sessaoRenovada;
+  }
+
+  TOKEN_URL = sessao.token;
+  sessaoMesaRegistro = sessao;
+  acessoMesaLiberado = true;
+  return true;
 }
 
 async function tocarSessaoMesa() {
@@ -1235,34 +1300,8 @@ async function encerrarSessaoMesaSeExistir() {
   sessaoMesaRegistro = null;
 }
 
-async function validarSessaoMesaNoBanco() {
-  if (!TOKEN_URL) {
-    bloquearTelaExpirada("QR obrigatório", "Abra esta mesa escaneando o QR.");
-    return false;
-  }
-
-  const sessaoMesa = await buscarSessaoMesaAtual();
-
-  if (!sessaoMesa) {
-    bloquearTelaExpirada("QR inválido ou expirado", "Esse acesso não é mais válido. Escaneie novamente o QR da mesa.");
-    return false;
-  }
-
-  if (sessaoMesa.expira_em && new Date(sessaoMesa.expira_em).getTime() <= Date.now()) {
-    sessaoMesaRegistro = sessaoMesa;
-    await encerrarSessaoMesaSeExistir();
-    bloquearTelaExpirada("Sessão expirada", "O acesso desta mesa expirou. Escaneie novamente o QR.");
-    return false;
-  }
-
-  sessaoMesaRegistro = sessaoMesa;
-  acessoMesaLiberado = true;
-  esconderTelaExpirada();
-  return true;
-}
-
 async function validarSessaoMesaNoBancoSilencioso() {
-  if (!TOKEN_URL || !acessoMesaLiberado) return;
+  if (!acessoMesaLiberado) return;
 
   const sessaoMesa = await buscarSessaoMesaAtual();
 
@@ -1281,6 +1320,7 @@ async function validarSessaoMesaNoBancoSilencioso() {
   }
 
   sessaoMesaRegistro = sessaoMesa;
+  TOKEN_URL = sessaoMesa.token || TOKEN_URL;
 }
 
 async function validarSessaoApp() {
@@ -1383,6 +1423,7 @@ async function buscarDebitosClienteEmOutrasMesas(clienteId, mesaAtualId) {
     .from("pedidos")
     .select("id, mesa_id, status, cliente_id, cliente_nome, cliente_telefone, created_at")
     .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
     .eq("cliente_id", clienteId)
     .neq("mesa_id", mesaAtualId)
     .in("status", ["aberto", "novo", "aceito", "pronto", "conta_solicitada", "pedir_conta"])
@@ -1401,6 +1442,7 @@ async function transferirDebitosParaNovaMesa(clienteId, mesaOrigemId, mesaNovaId
     .from("pedidos")
     .select("id")
     .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
     .eq("cliente_id", clienteId)
     .eq("mesa_id", mesaOrigemId)
     .in("status", ["aberto", "novo", "aceito", "pronto", "conta_solicitada", "pedir_conta"]);
@@ -1445,28 +1487,7 @@ async function transferirDebitosParaNovaMesa(clienteId, mesaOrigemId, mesaNovaId
 }
 
 async function irParaMesaComDebito(mesaAntigaId) {
-  const { data: sessaoAntiga, error } = await supabase
-    .from("sessoes_mesa")
-    .select("*")
-    .eq("mesa_id", mesaAntigaId)
-    .eq("app_id", APP_ID)
-    .eq("ativa", true)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (error) {
-    console.error(error);
-    alert("Não foi possível abrir a mesa antiga.");
-    return;
-  }
-
-  const sessao = sessaoAntiga?.[0];
-  if (!sessao?.token) {
-    alert("A mesa antiga não possui sessão ativa no momento.");
-    return;
-  }
-
-  location.href = `${location.pathname}?mesa=${encodeURIComponent(mesaAntigaId)}&token=${encodeURIComponent(sessao.token)}`;
+  location.href = `${location.pathname}?mesa=${encodeURIComponent(mesaAntigaId)}`;
 }
 
 async function tratarDebitoClienteAntesDeAbrir(clienteId, clienteNome, clienteTelefone) {
@@ -1508,12 +1529,10 @@ async function iniciarSistema() {
     return;
   }
 
-  const sessaoMesaOk = await validarSessaoMesaNoBanco();
-  if (!sessaoMesaOk) return;
-
-  if (sessaoLocal && sessaoLocal.token !== TOKEN_URL) {
-    removerSessaoLocal();
-    ativarModoSomenteConta("Escaneie novamente o QR desta mesa para liberar novos pedidos.");
+  const sessaoMesaOk = await criarOuRecuperarSessaoMesaAoAbrir();
+  if (!sessaoMesaOk) {
+    alert("Não foi possível abrir a sessão da mesa.");
+    return;
   }
 
   await tocarSessaoMesa();
@@ -1532,6 +1551,7 @@ async function sincronizarSessaoComPedidos() {
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -1590,8 +1610,7 @@ async function sincronizarSessaoComPedidos() {
       responsavel_nome: pedidoMaisRecenteAtivo.responsavel_nome,
       garcom_nome: pedidoMaisRecenteAtivo.garcom_nome,
       funcionario_id: pedidoMaisRecenteAtivo.funcionario_id,
-      sessao_expira_em: pedidoMaisRecenteAtivo.sessao_expira_em,
-      token: TOKEN_URL
+      sessao_expira_em: pedidoMaisRecenteAtivo.sessao_expira_em
     });
 
     document.getElementById("clienteNome").value = pedidoMaisRecenteAtivo.cliente_nome || "";
@@ -1625,7 +1644,7 @@ async function sincronizarSessaoComPedidos() {
 
 async function iniciarAtendimentoManual() {
   if (!acessoMesaLiberado) {
-    bloquearTelaExpirada("QR obrigatório", "Escaneie o QR da mesa para iniciar.");
+    alert("Escaneie o QR da mesa para iniciar.");
     return;
   }
 
@@ -1642,7 +1661,6 @@ async function iniciarAtendimentoManual() {
   if (
     sessaoLocal &&
     sessaoLocal.cliente_id === clienteId &&
-    sessaoLocal.token === TOKEN_URL &&
     !sessaoExpiradaLocal()
   ) {
     desativarModoSomenteConta();
@@ -1661,8 +1679,7 @@ async function iniciarAtendimentoManual() {
     responsavel_nome: clienteNome,
     garcom_nome: FUNCIONARIO_LOGADO?.nome || null,
     funcionario_id: FUNCIONARIO_LOGADO?.id || null,
-    sessao_expira_em: adicionarMinutosISO(15),
-    token: TOKEN_URL
+    sessao_expira_em: adicionarMinutosISO(15)
   };
 
   salvarSessaoLocal(sessao);
@@ -1693,11 +1710,6 @@ async function validarSessaoPedido() {
   if (!sessaoLocal) {
     ativarModoSomenteConta("Escaneie novamente o QR da mesa para liberar novos pedidos.");
     alert("Sessão expirada. Escaneie novamente o QR para fazer novos pedidos.");
-    return false;
-  }
-
-  if (sessaoLocal.token !== TOKEN_URL) {
-    await exigirNovoScanQR("A sessão desta mesa não é válida neste aparelho. Escaneie novamente o QR para novos pedidos.");
     return false;
   }
 
@@ -2062,6 +2074,7 @@ async function carregarHistoricoPedidosEnviados() {
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
     .neq("status", "aberto")
     .order("created_at", { ascending: true });
 
@@ -2115,6 +2128,7 @@ async function calcularTotalGeralMesa() {
     .select("id,status")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
     .in("status", ["aberto","novo","aceito","pronto","conta_solicitada","pago","pedir_conta"]);
 
   if (erroPedidos) {
@@ -2267,6 +2281,7 @@ document.getElementById("btnConta").onclick = async () => {
     .select("id,status")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
     .in("status", ["aberto","novo","aceito","pronto","conta_solicitada","pedir_conta"]);
 
   if (error) {
