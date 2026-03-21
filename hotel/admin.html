@@ -8,28 +8,106 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{margin:0;background:#020617;color:#fff;font-family:Segoe UI,sans-serif}
-.banner{width:100%;height:260px;object-fit:cover}
-.container{max-width:1100px;margin:auto;padding:20px}
-.card{background:#0f172a;padding:20px;border-radius:18px;margin-bottom:20px}
-.quartos{display:grid;gap:16px}
-.quarto{background:#020617;border-radius:16px;overflow:hidden}
-.quarto img{width:100%;height:180px;object-fit:cover}
-.info{padding:14px}
-.preco{color:#22c55e;font-weight:800}
-.btn{display:inline-block;background:#16a34a;color:#fff;padding:10px 14px;border-radius:12px;text-decoration:none;font-weight:700}
-@media(min-width:768px){.quartos{grid-template-columns:repeat(2,1fr)}}
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  background:#020617;
+  color:#fff;
+  font-family:Segoe UI,sans-serif;
+}
+
+.banner{
+  width:100%;
+  height:260px;
+  object-fit:cover;
+  display:none;
+}
+
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:20px;
+}
+
+.card{
+  background:#0f172a;
+  padding:20px;
+  border-radius:18px;
+  margin-bottom:20px;
+  border:1px solid rgba(255,255,255,.05);
+}
+
+.quartos{
+  display:grid;
+  gap:16px;
+}
+
+.quarto{
+  background:#020617;
+  border-radius:16px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.05);
+}
+
+.quarto img{
+  width:100%;
+  height:180px;
+  object-fit:cover;
+  display:block;
+}
+
+.info{
+  padding:14px;
+}
+
+.info h3{
+  margin:0 0 10px 0;
+}
+
+.preco{
+  color:#22c55e;
+  font-weight:800;
+  margin-bottom:12px;
+}
+
+.btn{
+  display:inline-block;
+  background:#16a34a;
+  color:#fff;
+  padding:10px 14px;
+  border-radius:12px;
+  text-decoration:none;
+  font-weight:700;
+}
+
+.btn:hover{
+  background:#15803d;
+}
+
+.vazio,
+.erro{
+  opacity:.85;
+  text-align:center;
+  padding:20px;
+}
+
+@media(min-width:768px){
+  .quartos{
+    grid-template-columns:repeat(2,1fr);
+  }
+}
 </style>
 </head>
 
 <body>
 
-<img id="bannerHotel" class="banner" style="display:none">
+<img id="bannerHotel" class="banner" alt="Banner do hotel">
 
 <div class="container">
   <div class="card">
-    <h1>Hotel</h1>
-    <p>Quartos disponíveis</p>
+    <h1 id="tituloHotel">Hotel</h1>
+    <p id="subtituloHotel">Quartos disponíveis</p>
   </div>
 
   <div class="card">
@@ -38,67 +116,146 @@ body{margin:0;background:#020617;color:#fff;font-family:Segoe UI,sans-serif}
 </div>
 
 <script>
-const params = new URLSearchParams(window.location.search);
-const negocio_id = params.get("id") || params.get("app_id");
+const supabaseUrl = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const supabaseKey = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
-if(!negocio_id){
-  document.body.innerHTML = "Negócio não informado";
-  throw new Error("Sem negocio_id");
+const sb = window.supabase.createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false }
+});
+
+const params = new URLSearchParams(window.location.search);
+const negocioId = params.get("id") || params.get("app_id") || params.get("app");
+
+const lista = document.getElementById("lista");
+const banner = document.getElementById("bannerHotel");
+const tituloHotel = document.getElementById("tituloHotel");
+const subtituloHotel = document.getElementById("subtituloHotel");
+
+if (!negocioId) {
+  document.body.innerHTML = `
+    <div style="padding:30px;text-align:center;color:#fff;background:#020617">
+      Negócio não informado
+    </div>
+  `;
+  throw new Error("Sem negocioId na URL");
 }
 
-/* ===== BANNER ===== */
-const banner = document.getElementById("bannerHotel");
+function moedaBR(valor){
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
 
-banner.src = `https://pdajixsoowcyhnjwhgpc.supabase.co/storage/v1/object/public/banners/${negocio_id}/banner.jpg`;
-banner.style.display = "block";
-banner.onerror = () => banner.style.display = "none";
+function escaparHtml(texto){
+  return String(texto ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
-/* ===== SUPABASE ===== */
-const sb = window.supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
-  { auth:{ persistSession:false } }
-);
+function obterPrimeiraFoto(fotos){
+  if (!fotos) return "";
+  if (Array.isArray(fotos)) return fotos[0] || "";
+  if (typeof fotos === "string") return fotos;
+  return "";
+}
 
-/* ===== LISTA ===== */
-const lista = document.getElementById("lista");
+function carregarBanner(){
+  banner.src = `${supabaseUrl}/storage/v1/object/public/banners/${negocioId}/banner.jpg`;
+  banner.onload = () => {
+    banner.style.display = "block";
+  };
+  banner.onerror = () => {
+    banner.style.display = "none";
+  };
+}
 
-/* ===== CARREGAR QUARTOS ===== */
+async function carregarConfigHotel(){
+  try{
+    const { data, error } = await sb
+      .from("config_site")
+      .select("nome_empresa, whatsapp, slogan")
+      .eq("app_id", negocioId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("Erro ao carregar config:", error);
+      return { whatsapp: "" };
+    }
+
+    if (data?.nome_empresa) {
+      tituloHotel.textContent = data.nome_empresa;
+      document.title = data.nome_empresa;
+    }
+
+    if (data?.slogan) {
+      subtituloHotel.textContent = data.slogan;
+    } else {
+      subtituloHotel.textContent = "Quartos disponíveis";
+    }
+
+    return {
+      whatsapp: data?.whatsapp || ""
+    };
+  }catch(err){
+    console.warn("Falha ao carregar config:", err);
+    return { whatsapp: "" };
+  }
+}
+
+function montarLinkWhatsApp(numero, texto){
+  const mensagem = encodeURIComponent(texto);
+
+  if (!numero) {
+    return `https://wa.me/?text=${mensagem}`;
+  }
+
+  const numeroLimpo = String(numero).replace(/\D/g, "");
+  return `https://wa.me/${numeroLimpo}?text=${mensagem}`;
+}
+
 async function carregarQuartos(){
   lista.innerHTML = "Carregando quartos...";
 
+  const config = await carregarConfigHotel();
+
   const { data, error } = await sb
     .from("hotel_quartos")
-    .select("tipo, preco_diaria, fotos")
-    .eq("negocio_id", negocio_id)
-    .eq("status","livre");
+    .select("id, tipo, preco_diaria, fotos")
+    .eq("negocio_id", negocioId)
+    .eq("status", "livre")
+    .order("tipo", { ascending: true });
 
-  if(error){
+  if (error) {
     console.error(error);
-    lista.innerHTML = "Erro ao carregar quartos";
+    lista.innerHTML = `<div class="erro">Erro ao carregar quartos</div>`;
     return;
   }
 
-  if(!data || data.length === 0){
-    lista.innerHTML = "Nenhum quarto disponível";
+  if (!data || data.length === 0) {
+    lista.innerHTML = `<div class="vazio">Nenhum quarto disponível</div>`;
     return;
   }
 
   lista.innerHTML = "";
 
-  data.forEach(q=>{
-    const foto = q.fotos?.[0] || "";
+  data.forEach((q) => {
+    const foto = obterPrimeiraFoto(q.fotos);
+    const tipo = escaparHtml(q.tipo || "Quarto");
+    const preco = moedaBR(q.preco_diaria);
+    const textoReserva = `Olá, quero reservar o quarto ${q.tipo || "Quarto"}.`;
+    const linkWhats = montarLinkWhatsApp(config.whatsapp, textoReserva);
 
     lista.innerHTML += `
       <div class="quarto">
-        ${foto ? `<img src="${foto}">` : ""}
+        ${foto ? `<img src="${foto}" alt="${tipo}">` : ""}
         <div class="info">
-          <h3>${q.tipo}</h3>
-          <div class="preco">
-            Diária: R$ ${Number(q.preco_diaria).toFixed(2)}
-          </div>
-          <a class="btn" target="_blank"
-            href="https://wa.me/?text=${encodeURIComponent('Quero reservar ' + q.tipo)}">
+          <h3>${tipo}</h3>
+          <div class="preco">Diária: ${preco}</div>
+          <a class="btn" target="_blank" rel="noopener noreferrer" href="${linkWhats}">
             Reservar no WhatsApp
           </a>
         </div>
@@ -107,6 +264,7 @@ async function carregarQuartos(){
   });
 }
 
+carregarBanner();
 carregarQuartos();
 </script>
 
