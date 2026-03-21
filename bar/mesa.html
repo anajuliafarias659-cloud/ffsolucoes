@@ -5,6 +5,8 @@
 <title>Pedido da Mesa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<script type="module" src="../js/auth.js"></script>
+
 <style>
 *{box-sizing:border-box}
 
@@ -661,14 +663,15 @@ input:focus{
 </button>
 
 <script type="module">
-import { supabase as sb } from "../js/supabase.js";
+import { supabase } from "../js/supabase.js";
+
+const sb = supabase;
 
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa_id") || params.get("mesa");
 const numeroMesaUrl = params.get("mesa_numero") || params.get("numero") || params.get("mesa");
 
 let APP_ID = null;
-let usuarioLogado = null;
 let mesaInfo = null;
 let pedidoAtual = null;
 let produtosCache = [];
@@ -681,6 +684,13 @@ let canalMesaStatus = null;
 if (!mesaId) {
   alert("Mesa não informada.");
   history.back();
+}
+
+async function aguardarSessao(){
+  while(!window.APP_ID){
+    await new Promise(r => setTimeout(r, 100));
+  }
+  APP_ID = window.APP_ID;
 }
 
 function formatarMoeda(valor){
@@ -921,38 +931,6 @@ function ativarRealtimeMesaStatus(){
     .subscribe();
 }
 
-async function validarLogin(){
-  const { data, error } = await sb.auth.getSession();
-
-  if (error || !data.session) {
-    window.location.href = "/auth/login.html";
-    return false;
-  }
-
-  const { data: usuario, error: erroUsuario } = await sb
-    .from("usuarios")
-    .select("id, nome, email, app_id")
-    .eq("id", data.session.user.id)
-    .single();
-
-  if (erroUsuario || !usuario) {
-    console.error("Erro ao buscar usuário:", erroUsuario);
-    alert("Usuário não encontrado.");
-    window.location.href = "/auth/login.html";
-    return false;
-  }
-
-  usuarioLogado = usuario;
-  APP_ID = usuario.app_id || null;
-
-  if (!APP_ID) {
-    alert("Negócio não identificado no usuário.");
-    return false;
-  }
-
-  return true;
-}
-
 async function carregarMesa(){
   const { data, error } = await sb
     .from("mesas")
@@ -968,7 +946,7 @@ async function carregarMesa(){
   }
 
   if (!data) {
-    alert("Mesa não encontrada para este usuário.");
+    alert("Mesa não encontrada.");
     return false;
   }
 
@@ -1154,11 +1132,7 @@ async function buscarOuCriarComanda(){
         cliente_nome: clienteNome,
         cliente_telefone: clienteTelefone,
         responsavel_nome: clienteNome,
-        atendente_id: usuarioLogado?.id || null,
-        atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null,
-        status: (normalizarStatus(comandaAtiva.status) === "conta_solicitada" || normalizarStatus(comandaAtiva.status) === "pedir_conta")
-          ? "ocupada"
-          : comandaAtiva.status
+        status: (normalizarStatus(comandaAtiva.status) === "conta_solicitada" || normalizarStatus(comandaAtiva.status) === "pedir_conta") ? "ocupada" : comandaAtiva.status
       })
       .eq("id", comandaAtiva.id)
       .eq("app_id", APP_ID)
@@ -1195,9 +1169,7 @@ async function buscarOuCriarComanda(){
       cliente_id: clienteId,
       cliente_nome: clienteNome,
       cliente_telefone: clienteTelefone,
-      responsavel_nome: clienteNome,
-      atendente_id: usuarioLogado?.id || null,
-      atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null
+      responsavel_nome: clienteNome
     })
     .select()
     .single();
@@ -1259,9 +1231,7 @@ async function addProduto(produtoId){
       status: "novo",
       cliente_nome: clienteNome || null,
       cliente_telefone: clienteTelefone || null,
-      responsavel_nome: clienteNome || null,
-      atendente_id: usuarioLogado?.id || null,
-      atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null
+      responsavel_nome: clienteNome || null
     })
     .eq("id", comanda.id)
     .eq("app_id", APP_ID)
@@ -1560,9 +1530,7 @@ document.getElementById("btnEnviar").onclick = async () => {
       status:"novo",
       cliente_nome:clienteNome || null,
       cliente_telefone:clienteTelefone || null,
-      responsavel_nome:clienteNome || null,
-      atendente_id: usuarioLogado?.id || null,
-      atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null
+      responsavel_nome:clienteNome || null
     })
     .eq("id", comanda.id)
     .eq("app_id", APP_ID)
@@ -1635,9 +1603,13 @@ document.getElementById("busca").oninput = aplicarFiltros;
 document.getElementById("clienteNome").oninput = atualizarInfoClienteMesa;
 document.getElementById("clienteTelefone").oninput = atualizarInfoClienteMesa;
 
+window.voltarMesas = voltarMesas;
+window.recarregarTudo = recarregarTudo;
+window.fecharPedidoFlutuante = fecharPedidoFlutuante;
+window.togglePedidoFlutuante = togglePedidoFlutuante;
+
 async function iniciarSistema(){
-  const okLogin = await validarLogin();
-  if (!okLogin) return;
+  await aguardarSessao();
 
   const okMesa = await carregarMesa();
   if (!okMesa) return;
@@ -1647,11 +1619,6 @@ async function iniciarSistema(){
   ativarRealtimeMesa();
   ativarRealtimeMesaStatus();
 }
-
-window.voltarMesas = voltarMesas;
-window.recarregarTudo = recarregarTudo;
-window.fecharPedidoFlutuante = fecharPedidoFlutuante;
-window.togglePedidoFlutuante = togglePedidoFlutuante;
 
 document.addEventListener("DOMContentLoaded", iniciarSistema);
 </script>
