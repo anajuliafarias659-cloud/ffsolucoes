@@ -711,6 +711,7 @@ function normalizarStatus(status){
 function nomeStatus(status){
   const mapa = {
     aberto:"Em edição",
+    rascunho:"Em montagem",
     novo:"Enviado",
     aceito:"Aceito pela cozinha",
     pronto:"Pronto",
@@ -811,7 +812,7 @@ function togglePedidoFlutuante(){
   else fecharPedidoFlutuante();
 }
 
-function atualizarInfoStatus(){
+async function atualizarInfoStatus(){
   const div = document.getElementById("statusPedido");
 
   if (!pedidoAtual) {
@@ -832,15 +833,40 @@ function atualizarInfoStatus(){
     return;
   }
 
-  div.innerHTML = `Status da comanda: <strong>${nomeStatus(pedidoAtual.status || "aberto")}</strong><br><small>Todos os itens desta mesa ficam na mesma comanda.</small>`;
+  const { data: itens } = await sb
+    .from("pedido_itens")
+    .select("status")
+    .eq("pedido_id", pedidoAtual.id);
+
+  const temRascunho = (itens || []).some(i => {
+    const s = normalizarStatus(i.status || "");
+    return s === "rascunho" || s === "aberto";
+  });
+
+  if (temRascunho) {
+    div.innerHTML = `Há itens em montagem.<br><small>Os itens enviados não podem mais ser editados nem removidos.</small>`;
+  } else {
+    div.innerHTML = `Status da comanda: <strong>${nomeStatus(pedidoAtual.status || "novo")}</strong><br><small>Último lote já foi enviado e está travado.</small>`;
+  }
 }
 
 function pedidoPodeSerEditado(){
   if (!pedidoAtual) return true;
+
   const s = normalizarStatus(pedidoAtual.status);
+
   if (statusFechado(s)) return false;
   if (s === "conta_solicitada" || s === "pedir_conta") return false;
+
   return true;
+}
+
+function itemPodeSerEditado(item){
+  if (!pedidoPodeSerEditado()) return false;
+
+  const statusItem = normalizarStatus(item?.status || "rascunho");
+
+  return statusItem === "rascunho" || statusItem === "aberto";
 }
 
 function limparTelaPedidoAtual(){
@@ -1213,7 +1239,7 @@ async function addProduto(produtoId){
       nome_produto: produto.nome,
       preco: Number(produto.preco || 0),
       quantidade: 1,
-      status: "novo",
+      status: "rascunho",
       cliente_nome: clienteNome,
       cliente_telefone: clienteTelefone,
       responsavel_nome: clienteNome
@@ -1228,7 +1254,6 @@ async function addProduto(produtoId){
   const { data: pedidoAtualizado } = await sb
     .from("pedidos")
     .update({
-      status: "novo",
       cliente_nome: clienteNome || null,
       cliente_telefone: clienteTelefone || null,
       responsavel_nome: clienteNome || null
@@ -1246,8 +1271,8 @@ async function addProduto(produtoId){
 }
 
 async function aumentarItem(item){
-  if (!pedidoAtual || !pedidoPodeSerEditado()) {
-    alert("Não é possível alterar este lote.");
+  if (!pedidoAtual || !itemPodeSerEditado(item)) {
+    alert("Este item já foi enviado e não pode mais ser alterado.");
     return;
   }
 
@@ -1270,15 +1295,15 @@ async function aumentarItem(item){
 }
 
 async function diminuirItem(item){
-  if (!pedidoAtual || !pedidoPodeSerEditado()) {
-    alert("Não é possível alterar este lote.");
+  if (!pedidoAtual || !itemPodeSerEditado(item)) {
+    alert("Este item já foi enviado e não pode mais ser alterado.");
     return;
   }
 
   const qtd = Number(item.quantidade || 0);
 
   if (qtd <= 1) {
-    await removerItem(item.id);
+    await removerItem(item.id, item);
     return;
   }
 
@@ -1300,8 +1325,18 @@ async function diminuirItem(item){
   await calcularTotalGeralMesa();
 }
 
-async function removerItem(itemId){
-  if (!pedidoAtual || !pedidoPodeSerEditado()) {
+async function removerItem(itemId, item=null){
+  if (!pedidoAtual) {
+    alert("Nenhuma comanda ativa.");
+    return;
+  }
+
+  if (item && !itemPodeSerEditado(item)) {
+    alert("Este item já foi enviado e não pode mais ser removido.");
+    return;
+  }
+
+  if (!item && !pedidoPodeSerEditado()) {
     alert("Não é possível remover item deste lote.");
     return;
   }
@@ -1326,7 +1361,7 @@ async function carregarPedidoAtual(){
   if (!pedidoAtual || statusFechado(pedidoAtual.status)) {
     pedidoAtual = null;
     limparTelaPedidoAtual();
-    atualizarInfoStatus();
+    await atualizarInfoStatus();
     await calcularTotalGeralMesa();
     return;
   }
@@ -1356,9 +1391,13 @@ async function carregarPedidoAtual(){
   itens.forEach(i => {
     total += Number(i.preco || 0) * Number(i.quantidade || 0);
 
-    const bloqueado = !pedidoPodeSerEditado();
+    const editavel = itemPodeSerEditado(i);
     const produtoRel = produtosCache.find(p => String(p.id) === String(i.produto_id)) || null;
     const imgItem = produtoRel ? obterImagemProduto(produtoRel) : "https://via.placeholder.com/600x600?text=Produto";
+    const statusItem = normalizarStatus(i.status || "rascunho");
+    const etiqueta = statusItem === "rascunho"
+      ? `<small style="color:#b45309;font-weight:bold;">Não enviado</small>`
+      : `<small style="color:#16a34a;font-weight:bold;">Enviado</small>`;
 
     const item = document.createElement("div");
     item.className = "item";
@@ -1366,12 +1405,13 @@ async function carregarPedidoAtual(){
       <img class="thumb-item" src="${imgItem}" alt="${i.nome_produto}" onerror="this.onerror=null;this.src='https://via.placeholder.com/600x600?text=Produto'">
       <div class="item-centro">
         <strong>${i.nome_produto}</strong>
+        ${etiqueta}
         <div class="linha-preco">${formatarMoeda(Number(i.preco || 0) * Number(i.quantidade || 0))}</div>
         <div class="item-acoes">
-          <button class="btn-menor" ${bloqueado ? "disabled" : ""}>−</button>
+          <button class="btn-menor" ${editavel ? "" : "disabled"}>−</button>
           <div class="qtd-badge">${i.quantidade}</div>
-          <button class="btn-maior" ${bloqueado ? "disabled" : ""}>+</button>
-          <button class="btn-remover" ${bloqueado ? "disabled" : ""}>Remover</button>
+          <button class="btn-maior" ${editavel ? "" : "disabled"}>+</button>
+          <button class="btn-remover" ${editavel ? "" : "disabled"}>Remover</button>
         </div>
       </div>
     `;
@@ -1379,13 +1419,13 @@ async function carregarPedidoAtual(){
     const botoes = item.querySelectorAll("button");
     botoes[0].onclick = () => diminuirItem(i);
     botoes[1].onclick = () => aumentarItem(i);
-    botoes[2].onclick = () => removerItem(i.id);
+    botoes[2].onclick = () => removerItem(i.id, i);
 
     div.appendChild(item);
   });
 
   atualizarTotaisLote(total);
-  atualizarInfoStatus();
+  await atualizarInfoStatus();
   await calcularTotalGeralMesa();
 }
 
@@ -1467,7 +1507,7 @@ async function sincronizarMesaComPedidos(){
     });
 
     await calcularTotalGeralMesa();
-    atualizarInfoStatus();
+    await atualizarInfoStatus();
     return;
   }
 
@@ -1495,7 +1535,7 @@ async function sincronizarMesaComPedidos(){
   });
 
   atualizarInfoClienteMesa();
-  atualizarInfoStatus();
+  await atualizarInfoStatus();
   ativarRealtimePedidoAtual();
   await carregarPedidoAtual();
 }
@@ -1504,11 +1544,11 @@ document.getElementById("btnEnviar").onclick = async () => {
   const comanda = await buscarOuCriarComanda();
   if (!comanda) return;
 
-  const { data: itens, error: erroItens } = await sb
+  const { data: itensRascunho, error: erroItens } = await sb
     .from("pedido_itens")
     .select("id")
     .eq("pedido_id", comanda.id)
-    .limit(1);
+    .in("status", ["rascunho", "aberto"]);
 
   if (erroItens) {
     console.error(erroItens);
@@ -1516,13 +1556,30 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
-  if (!itens || itens.length === 0) {
-    alert("Adicione pelo menos um item antes de enviar.");
+  if (!itensRascunho || itensRascunho.length === 0) {
+    alert("Não há itens novos para enviar.");
     return;
   }
 
   const clienteNome = document.getElementById("clienteNome").value.trim();
   const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
+
+  const { error: erroEnviarItens } = await sb
+    .from("pedido_itens")
+    .update({
+      status: "novo",
+      cliente_nome: clienteNome || null,
+      cliente_telefone: clienteTelefone || null,
+      responsavel_nome: clienteNome || null
+    })
+    .eq("pedido_id", comanda.id)
+    .in("status", ["rascunho", "aberto"]);
+
+  if (erroEnviarItens) {
+    console.error(erroEnviarItens);
+    alert("Erro ao enviar itens.");
+    return;
+  }
 
   const { data: atualizado, error } = await sb
     .from("pedidos")
@@ -1553,7 +1610,7 @@ document.getElementById("btnEnviar").onclick = async () => {
     cliente_celular:clienteTelefone || null
   });
 
-  alert("Comanda atualizada com sucesso.");
+  alert("Pedido enviado com sucesso.");
   fecharPedidoFlutuante();
   await sincronizarMesaComPedidos();
 };
