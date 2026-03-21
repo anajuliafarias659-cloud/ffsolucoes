@@ -66,19 +66,25 @@
 </div>
 
 <script>
-/* ===== SESSÃO ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if (!admin || !admin.app_id) {
-  alert("Sessão inválida");
-  location.href = "login.html";
-}
-const negocio_id = admin.app_id;
-
 /* ===== SUPABASE ===== */
 const sb = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
+
+/* ===== SESSÃO ===== */
+const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
+
+if (!admin?.app_id) {
+  alert("Sessão inválida. Faça login novamente.");
+  location.href = "../auth/login.html";
+  throw new Error("Sem sessão");
+}
+
+const negocio_id = admin.app_id;
+
+/* padrão do sistema */
+localStorage.setItem("app_id", negocio_id);
 
 /* ===== ELEMENTOS ===== */
 const elNumero = document.getElementById("numero");
@@ -96,6 +102,14 @@ function safeName(name) {
     .replace(/[^a-zA-Z0-9._-]/g, "");
 }
 
+function formatarPreco(valor){
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style:"currency",
+    currency:"BRL"
+  });
+}
+
+/* ===== UPLOAD ===== */
 async function uploadFotos(quartoId) {
   const files = elFotos.files;
   if (!files || !files.length) return [];
@@ -103,96 +117,116 @@ async function uploadFotos(quartoId) {
   const urls = [];
 
   for (let i = 0; i < files.length; i++) {
-    const file = files[i];
+    try{
+      const file = files[i];
 
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const fileName = `${Date.now()}_${i}_${safeName(file.name) || ("foto."+ext)}`;
-    const path = `${negocio_id}/${quartoId}/${fileName}`;
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const fileName = `${Date.now()}_${i}_${safeName(file.name)}`;
+      const path = `${negocio_id}/${quartoId}/${fileName}`;
 
-    const { error } = await sb.storage
-      .from("hotel-quartos")
-      .upload(path, file, { upsert: true, contentType: file.type || "image/jpeg" });
+      const { error } = await sb.storage
+        .from("hotel-quartos")
+        .upload(path, file, { upsert: true });
 
-    if (error) {
-      console.error("Erro upload:", error);
-      // não trava tudo, só pula essa foto
-      continue;
+      if (error) {
+        console.error("Erro upload:", error);
+        continue;
+      }
+
+      const { data } = sb.storage.from("hotel-quartos").getPublicUrl(path);
+      urls.push(data.publicUrl);
+
+    }catch(e){
+      console.error("Erro foto:", e);
     }
-
-    const { data } = sb.storage.from("hotel-quartos").getPublicUrl(path);
-    urls.push(data.publicUrl);
   }
 
   return urls;
 }
 
-/* ===== CRUD ===== */
+/* ===== SALVAR ===== */
 async function salvarQuarto() {
   const numero = elNumero.value.trim();
   const tipo = elTipo.value.trim();
   const preco = parseFloat(elPreco.value);
 
   if (!numero || !tipo || !preco || preco <= 0) {
-    alert("Preencha todos os campos corretamente.");
+    alert("Preencha corretamente.");
     return;
   }
 
   btnSalvar.disabled = true;
-  btnSalvar.textContent = "Salvando...";
+  btnSalvar.innerText = "Salvando...";
 
-  // 1) cria o quarto (sem fotos primeiro)
-  const { data: quarto, error: errInsert } = await sb
-    .from("hotel_quartos")
-    .insert([{ negocio_id, numero, tipo, preco_diaria: preco, status: "livre", fotos: [] }])
-    .select()
-    .single();
-
-  if (errInsert) {
-    btnSalvar.disabled = false;
-    btnSalvar.textContent = "Salvar Quarto";
-    alert("Erro ao salvar quarto: " + errInsert.message);
-    return;
-  }
-
-  // 2) upload das fotos
-  const fotosUrls = await uploadFotos(quarto.id);
-
-  // 3) salva urls no banco
-  if (fotosUrls.length) {
-    const { error: errUp } = await sb
+  try{
+    const { data: quarto, error } = await sb
       .from("hotel_quartos")
-      .update({ fotos: fotosUrls })
-      .eq("id", quarto.id);
+      .insert([{
+        negocio_id,
+        numero,
+        tipo,
+        preco_diaria: preco,
+        status: "livre",
+        fotos: []
+      }])
+      .select()
+      .single();
 
-    if (errUp) console.error("Erro ao salvar URLs:", errUp);
+    if (error) throw error;
+
+    const fotosUrls = await uploadFotos(quarto.id);
+
+    if (fotosUrls.length) {
+      await sb
+        .from("hotel_quartos")
+        .update({ fotos: fotosUrls })
+        .eq("id", quarto.id);
+    }
+
+    elNumero.value = "";
+    elTipo.value = "";
+    elPreco.value = "";
+    elFotos.value = "";
+
+    await carregarQuartos();
+
+  }catch(e){
+    alert("Erro: " + e.message);
+    console.error(e);
   }
-
-  // limpa formulário
-  elNumero.value = "";
-  elTipo.value = "";
-  elPreco.value = "";
-  elFotos.value = "";
 
   btnSalvar.disabled = false;
-  btnSalvar.textContent = "Salvar Quarto";
-
-  await carregarQuartos();
+  btnSalvar.innerText = "Salvar Quarto";
 }
 
+/* ===== EXCLUIR ===== */
 async function excluirFotos(id) {
-  if (!confirm("Excluir TODAS as fotos desse quarto?")) return;
-  const { error } = await sb.from("hotel_quartos").update({ fotos: [] }).eq("id", id);
-  if (error) alert("Erro ao excluir fotos: " + error.message);
-  await carregarQuartos();
+  if (!confirm("Excluir todas fotos?")) return;
+
+  const { error } = await sb
+    .from("hotel_quartos")
+    .update({ fotos: [] })
+    .eq("id", id);
+
+  if (error) alert(error.message);
+
+  carregarQuartos();
 }
 
 async function excluirQuarto(id) {
   if (!confirm("Excluir quarto?")) return;
-  const { error } = await sb.from("hotel_quartos").delete().eq("id", id);
-  if (error) alert("Erro ao excluir quarto: " + error.message);
-  await carregarQuartos();
+
+  const { error } = await sb
+    .from("hotel_quartos")
+    .delete()
+    .eq("id", id);
+
+  if (error) alert(error.message);
+
+  carregarQuartos();
 }
 
+/* ===== LISTAR ===== */
 async function carregarQuartos() {
   elTabela.innerHTML = `<tr><td colspan="5">Carregando...</td></tr>`;
 
@@ -203,7 +237,7 @@ async function carregarQuartos() {
     .order("numero", { ascending: true });
 
   if (error) {
-    elTabela.innerHTML = `<tr><td colspan="5">Erro ao carregar: ${error.message}</td></tr>`;
+    elTabela.innerHTML = `<tr><td colspan="5">Erro: ${error.message}</td></tr>`;
     return;
   }
 
@@ -213,30 +247,24 @@ async function carregarQuartos() {
   }
 
   elTabela.innerHTML = "";
+
   data.forEach(q => {
-    const fotosHtml = (q.fotos || []).map(url => `<img src="${url}" alt="foto">`).join("");
+    const fotosHtml = (q.fotos || []).map(f=>`<img src="${f}">`).join("");
+
     elTabela.innerHTML += `
       <tr>
         <td>${q.numero}</td>
         <td>${q.tipo}</td>
-        <td>R$ ${Number(q.preco_diaria).toFixed(2)}</td>
-        <td><div class="fotos">${fotosHtml || ""}</div></td>
+        <td>${formatarPreco(q.preco_diaria)}</td>
+        <td><div class="fotos">${fotosHtml}</div></td>
         <td>
           <div class="acoes">
-            <button class="btn-red mini" data-excluir-fotos="${q.id}">Excluir Fotos</button>
-            <button class="btn-red mini" data-excluir-quarto="${q.id}">Excluir Quarto</button>
+            <button class="btn-red mini" onclick="excluirFotos('${q.id}')">Fotos</button>
+            <button class="btn-red mini" onclick="excluirQuarto('${q.id}')">Excluir</button>
           </div>
         </td>
       </tr>
     `;
-  });
-
-  // listeners nos botões gerados
-  document.querySelectorAll("[data-excluir-fotos]").forEach(b => {
-    b.addEventListener("click", () => excluirFotos(b.getAttribute("data-excluir-fotos")));
-  });
-  document.querySelectorAll("[data-excluir-quarto]").forEach(b => {
-    b.addEventListener("click", () => excluirQuarto(b.getAttribute("data-excluir-quarto")));
   });
 }
 
