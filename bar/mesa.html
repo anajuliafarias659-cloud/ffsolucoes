@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -802,7 +801,7 @@ let sessaoMesaRegistro = null;
 let modoSomenteConta = false;
 let debitoPendenteTransferencia = null;
 
-const CHAVE_SESSAO = `mesa_sessao_${mesaId}_${TOKEN_URL || "sem_token"}`;
+const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
 let sessaoLocal = null;
 
 if (!mesaId) {
@@ -920,18 +919,14 @@ function carregarSessaoLocal() {
   const expirada = !sessaoLocal.sessao_expira_em ||
     new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
 
-  const tokenDivergente = !TOKEN_URL || sessaoLocal.token_qr !== TOKEN_URL;
-
-  if (expirada || tokenDivergente) {
-    localStorage.removeItem(CHAVE_SESSAO);
-    sessaoLocal = null;
-  }
+  sessaoLocal.expirada = !!expirada;
 }
 
 function salvarSessaoLocal(sessao) {
   sessaoLocal = {
     ...sessao,
-    token_qr: TOKEN_URL
+    token_qr_atual: TOKEN_URL || null,
+    expirada: false
   };
 
   localStorage.setItem(CHAVE_SESSAO, JSON.stringify(sessaoLocal));
@@ -939,9 +934,15 @@ function salvarSessaoLocal(sessao) {
   iniciarMonitorSessao();
 }
 
-function removerSessaoLocal() {
-  sessaoLocal = null;
-  localStorage.removeItem(CHAVE_SESSAO);
+function removerSessaoLocal(apagarTudo = true) {
+  if (apagarTudo) {
+    sessaoLocal = null;
+    localStorage.removeItem(CHAVE_SESSAO);
+  } else if (sessaoLocal) {
+    sessaoLocal.expirada = true;
+    localStorage.setItem(CHAVE_SESSAO, JSON.stringify(sessaoLocal));
+  }
+
   atualizarSessaoNaTela();
   pararMonitorSessao();
 }
@@ -956,7 +957,7 @@ function carregarFuncionarioLogado() {
 
 function sessaoExpiradaLocal() {
   if (!sessaoLocal?.sessao_expira_em) return false;
-  return new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
+  return new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now() || !!sessaoLocal.expirada;
 }
 
 function bloquearTelaExpirada(titulo, texto) {
@@ -1043,7 +1044,7 @@ async function exigirNovoScanQR(motivo = "Sessão expirada. Escaneie novamente o
   acessoMesaLiberado = false;
   sessaoMesaRegistro = null;
 
-  removerSessaoLocal();
+  removerSessaoLocal(false);
   pedidoAtual = null;
   removerCanalPedidoAtual();
   atualizarTotaisLote(0);
@@ -1115,7 +1116,9 @@ function atualizarSessaoNaTela() {
     ? new Date(sessaoLocal.sessao_expira_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
     : "-";
 
-  info.innerHTML = "Sessão validada neste aparelho.";
+  info.innerHTML = sessaoExpiradaLocal()
+    ? "Sessão expirada. Escaneie novamente o QR para novos pedidos."
+    : "Sessão validada neste aparelho.";
 
   [
     `Cliente: ${cliente}`,
@@ -1297,7 +1300,7 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
   sessaoMesaRegistro = data;
   acessoMesaLiberado = true;
   esconderTelaExpirada();
-  desativarModoSomenteConta();
+  if (!sessaoExpiradaLocal()) desativarModoSomenteConta();
   return true;
 }
 
@@ -1461,6 +1464,25 @@ async function buscarMesaPorId(idMesa) {
   return data || null;
 }
 
+async function buscarDebitosClienteNaMesaAtual(clienteId) {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
+    .eq("mesa_id", mesaId)
+    .eq("cliente_id", clienteId)
+    .in("status", ["aberto", "novo", "aceito", "pronto", "conta_solicitada", "pedir_conta"])
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Erro ao buscar débitos na mesa atual:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
 async function buscarDebitosClienteEmOutrasMesas(clienteId, mesaAtualId) {
   const { data, error } = await supabase
     .from("pedidos")
@@ -1542,18 +1564,12 @@ async function tratarDebitoClienteAntesDeAbrir(clienteId, clienteNome, clienteTe
   const mesaDebitoInfo = await buscarMesaPorId(mesaDebitoId);
   const numeroMesa = mesaDebitoInfo?.numero_mesa || mesaDebitoId;
 
-  return new Promise((resolve) => {
-    debitoPendenteTransferencia = {
-      clienteId,
-      clienteNome,
-      clienteTelefone,
-      mesaOrigemId: mesaDebitoId,
-      mesaOrigemNumero: numeroMesa,
-      resolve
-    };
+  const ok = await transferirDebitosParaNovaMesa(clienteId, mesaDebitoId, mesaId);
 
-    abrirModalDebito(`Existe débito seu na mesa ${numeroMesa}. Acerte a mesa antiga ou traga o débito para esta mesa.`);
-  });
+  if (!ok) return { ok: false };
+
+  alert(`Débito da mesa ${numeroMesa} foi trazido automaticamente para esta mesa.`);
+  return { ok: true, transferido: true, mesaOrigemId: mesaDebitoId, mesaOrigemNumero: numeroMesa };
 }
 
 async function iniciarSistema() {
@@ -1586,6 +1602,8 @@ async function iniciarSistema() {
 
   if (sessaoLocal && !sessaoExpiradaLocal()) {
     iniciarMonitorSessao();
+  } else if (sessaoLocal && sessaoExpiradaLocal()) {
+    ativarModoSomenteConta("Sessão expirada. Escaneie novamente o QR para novos pedidos. A conta continua disponível.");
   }
 }
 
@@ -1678,6 +1696,42 @@ async function iniciarAtendimentoManual() {
 
   const clienteId = gerarClienteId(clienteNome, clienteTelefone);
 
+  const debitosNaMesa = await buscarDebitosClienteNaMesaAtual(clienteId);
+
+  if (debitosNaMesa.length > 0) {
+    const sessao = {
+      sessao_token: gerarToken(),
+      cliente_id: clienteId,
+      cliente_nome: clienteNome,
+      cliente_telefone: clienteTelefone,
+      responsavel_nome: clienteNome,
+      garcom_nome: FUNCIONARIO_LOGADO?.nome || null,
+      funcionario_id: FUNCIONARIO_LOGADO?.id || null,
+      sessao_expira_em: adicionarMinutosISO(15)
+    };
+
+    salvarSessaoLocal(sessao);
+    desativarModoSomenteConta();
+    await tocarSessaoMesa();
+
+    pedidoAtual =
+      debitosNaMesa.find(p => normalizarStatus(p.status) === "aberto") ||
+      debitosNaMesa[0] ||
+      null;
+
+    await atualizarMesaStatus({
+      ocupada: true,
+      pedir_conta: debitosNaMesa.some(p => ["conta_solicitada", "pedir_conta"].includes(normalizarStatus(p.status))),
+      status: "ocupada",
+      cliente_nome: clienteNome,
+      cliente_celular: clienteTelefone
+    });
+
+    alert("Sessão retomada. Débito anterior encontrado nesta mesa.");
+    await sincronizarSessaoComPedidos();
+    return;
+  }
+
   if (
     sessaoLocal &&
     sessaoLocal.cliente_id === clienteId &&
@@ -1693,7 +1747,6 @@ async function iniciarAtendimentoManual() {
 
   const sessao = {
     sessao_token: gerarToken(),
-    token_qr: TOKEN_URL,
     cliente_id: clienteId,
     cliente_nome: clienteNome,
     cliente_telefone: clienteTelefone,
