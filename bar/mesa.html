@@ -665,16 +665,15 @@ input:focus{
   <span id="fabBadge" class="fab-badge">0</span>
 </button>
 
-<script>
-const supabaseUrl = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-const supabaseKey = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-const sb = supabase.createClient(supabaseUrl, supabaseKey);
+<script type="module">
+import { supabase as sb } from "../js/supabase.js";
 
 const params = new URLSearchParams(location.search);
 const mesaId = params.get("mesa_id") || params.get("mesa");
 const numeroMesaUrl = params.get("mesa_numero") || params.get("numero") || params.get("mesa");
 
 let APP_ID = null;
+let usuarioLogado = null;
 let mesaInfo = null;
 let pedidoAtual = null;
 let produtosCache = [];
@@ -927,11 +926,44 @@ function ativarRealtimeMesaStatus(){
     .subscribe();
 }
 
+async function validarLogin(){
+  const { data, error } = await sb.auth.getSession();
+
+  if (error || !data.session) {
+    window.location.href = "/auth/login.html";
+    return false;
+  }
+
+  const { data: usuario, error: erroUsuario } = await sb
+    .from("usuarios")
+    .select("id, nome, email, app_id")
+    .eq("id", data.session.user.id)
+    .single();
+
+  if (erroUsuario || !usuario) {
+    console.error("Erro ao buscar usuário:", erroUsuario);
+    alert("Usuário não encontrado.");
+    window.location.href = "/auth/login.html";
+    return false;
+  }
+
+  usuarioLogado = usuario;
+  APP_ID = usuario.app_id || null;
+
+  if (!APP_ID) {
+    alert("Negócio não identificado no usuário.");
+    return false;
+  }
+
+  return true;
+}
+
 async function carregarMesa(){
   const { data, error } = await sb
     .from("mesas")
     .select("*")
     .eq("id", mesaId)
+    .eq("app_id", APP_ID)
     .maybeSingle();
 
   if (error) {
@@ -941,12 +973,11 @@ async function carregarMesa(){
   }
 
   if (!data) {
-    alert("Mesa não encontrada.");
+    alert("Mesa não encontrada para este usuário.");
     return false;
   }
 
   mesaInfo = data;
-  APP_ID = data.app_id || localStorage.getItem("app_id") || null;
 
   document.getElementById("tituloMesa").innerText = `Mesa ${data.numero_mesa || numeroMesaUrl || ""}`;
 
@@ -980,6 +1011,7 @@ async function atualizarMesaStatus({
     .from("mesas")
     .update(payload)
     .eq("id", mesaId)
+    .eq("app_id", APP_ID)
     .select()
     .maybeSingle();
 
@@ -1127,9 +1159,12 @@ async function buscarOuCriarComanda(){
         cliente_nome: clienteNome,
         cliente_telefone: clienteTelefone,
         responsavel_nome: clienteNome,
+        atendente_id: usuarioLogado?.id || null,
+        atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null,
         status: (normalizarStatus(comandaAtiva.status) === "conta_solicitada" || normalizarStatus(comandaAtiva.status) === "pedir_conta") ? "ocupada" : comandaAtiva.status
       })
       .eq("id", comandaAtiva.id)
+      .eq("app_id", APP_ID)
       .select()
       .single();
 
@@ -1163,7 +1198,9 @@ async function buscarOuCriarComanda(){
       cliente_id: clienteId,
       cliente_nome: clienteNome,
       cliente_telefone: clienteTelefone,
-      responsavel_nome: clienteNome
+      responsavel_nome: clienteNome,
+      atendente_id: usuarioLogado?.id || null,
+      atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null
     })
     .select()
     .single();
@@ -1219,16 +1256,18 @@ async function addProduto(produtoId){
     return;
   }
 
-  // faz a comanda voltar a chamar atenção do bar quando entrar item novo
   const { data: pedidoAtualizado } = await sb
     .from("pedidos")
     .update({
       status: "novo",
       cliente_nome: clienteNome || null,
       cliente_telefone: clienteTelefone || null,
-      responsavel_nome: clienteNome || null
+      responsavel_nome: clienteNome || null,
+      atendente_id: usuarioLogado?.id || null,
+      atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null
     })
     .eq("id", comanda.id)
+    .eq("app_id", APP_ID)
     .select()
     .maybeSingle();
 
@@ -1524,7 +1563,9 @@ document.getElementById("btnEnviar").onclick = async () => {
       status:"novo",
       cliente_nome:clienteNome || null,
       cliente_telefone:clienteTelefone || null,
-      responsavel_nome:clienteNome || null
+      responsavel_nome:clienteNome || null,
+      atendente_id: usuarioLogado?.id || null,
+      atendente_nome: usuarioLogado?.nome || usuarioLogado?.email || null
     })
     .eq("id", comanda.id)
     .eq("app_id", APP_ID)
@@ -1593,21 +1634,16 @@ document.getElementById("btnConta").onclick = async () => {
 };
 
 document.getElementById("btnTogglePedido").onclick = fecharPedidoFlutuante;
-
 document.getElementById("busca").oninput = aplicarFiltros;
 document.getElementById("clienteNome").oninput = atualizarInfoClienteMesa;
 document.getElementById("clienteTelefone").oninput = atualizarInfoClienteMesa;
 
 async function iniciarSistema(){
+  const okLogin = await validarLogin();
+  if (!okLogin) return;
+
   const okMesa = await carregarMesa();
   if (!okMesa) return;
-
-  if (!APP_ID) {
-    alert("APP_ID não encontrado nesta mesa.");
-    return;
-  }
-
-  localStorage.setItem("app_id", APP_ID);
 
   await carregarProdutos();
   await sincronizarMesaComPedidos();
