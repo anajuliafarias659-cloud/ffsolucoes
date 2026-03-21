@@ -72,26 +72,27 @@ button { padding:10px 16px; border:none; border-radius:8px; cursor:pointer; back
 </div>
 
 <script>
-/* ================= SESSÃO CENTRAL ================= */
-function getSessao() {
-  const admin = JSON.parse(localStorage.getItem("admin_logado"));
-  if (!admin || !admin.app_id) {
-    alert("Sessão inválida");
-    location.replace("login.html");
-    throw new Error("Sessão inválida");
-  }
-  return { admin, negocio_id: admin.app_id };
-}
-
-const { negocio_id } = getSessao();
-
-/* ================= SUPABASE ================= */
+/* ========= SUPABASE ========= */
 const db = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ================= ELEMENTOS ================= */
+/* ========= SESSÃO ========= */
+const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
+
+if (!admin?.app_id) {
+  alert("Sessão inválida. Faça login novamente.");
+  location.href = "../auth/login.html";
+  throw new Error("Sem sessão");
+}
+
+const negocio_id = admin.app_id;
+
+/* padrão sistema */
+localStorage.setItem("app_id", negocio_id);
+
+/* ========= ELEMENTOS ========= */
 const hospedeSelect = document.getElementById("hospede");
 const quartoSelect  = document.getElementById("quarto");
 const form          = document.getElementById("formReserva");
@@ -99,13 +100,9 @@ const valorInput    = document.getElementById("valor");
 const checkinInput  = document.getElementById("checkin");
 const checkoutInput = document.getElementById("checkout");
 const tabela        = document.getElementById("tabelaReservas");
+const btnSalvar     = form.querySelector("button");
 
-/* ================= CORREÇÃO MULTI-NEGÓCIO (USO MANUAL SE PRECISAR) ================= */
-async function corrigirRegistro(tabela, id) {
-  await db.from(tabela).update({ negocio_id }).eq("id", id);
-}
-
-/* ================= HÓSPEDES ================= */
+/* ========= HÓSPEDES ========= */
 async function carregarHospedes() {
   const { data, error } = await db
     .from("hotel_hospedes")
@@ -120,7 +117,7 @@ async function carregarHospedes() {
   });
 }
 
-/* ================= QUARTOS ================= */
+/* ========= QUARTOS ========= */
 async function carregarQuartos() {
   const { data, error } = await db
     .from("hotel_quartos")
@@ -131,21 +128,31 @@ async function carregarQuartos() {
   if (error) return console.error(error);
 
   quartoSelect.innerHTML = "<option value=''>Selecione o quarto</option>";
+
   data.forEach(q => {
     quartoSelect.innerHTML += `
       <option value="${q.id}" data-preco="${q.preco_diaria}">
-        Quarto ${q.numero} - R$ ${q.preco_diaria}
+        Quarto ${q.numero} - ${formatarPreco(q.preco_diaria)}
       </option>`;
   });
 }
 
-/* ================= VALOR ================= */
+/* ========= HELPERS ========= */
+function formatarPreco(v){
+  return Number(v || 0).toLocaleString("pt-BR", {
+    style:"currency",
+    currency:"BRL"
+  });
+}
+
+/* ========= VALOR ========= */
 function calcularValor() {
   const opt = quartoSelect.selectedOptions[0];
   if (!opt || !checkinInput.value || !checkoutInput.value) return;
 
   const preco = Number(opt.dataset.preco);
   const dias = (new Date(checkoutInput.value) - new Date(checkinInput.value)) / 86400000;
+
   valorInput.value = dias > 0 ? (dias * preco).toFixed(2) : 0;
 }
 
@@ -153,33 +160,47 @@ checkinInput.onchange = calcularValor;
 checkoutInput.onchange = calcularValor;
 quartoSelect.onchange = calcularValor;
 
-/* ================= SALVAR ================= */
+/* ========= SALVAR ========= */
 form.addEventListener("submit", async e => {
   e.preventDefault();
 
-  const reserva = {
-    negocio_id,
-    hospede_id: hospedeSelect.value,
-    quarto_id: quartoSelect.value,
-    data_checkin: checkinInput.value,
-    data_checkout: checkoutInput.value,
-    valor_total: Number(valorInput.value),
-    status: "reservado"
-  };
+  btnSalvar.disabled = true;
+  btnSalvar.innerText = "Salvando...";
 
-  const { error } = await db.from("hotel_reservas").insert(reserva);
-  if (error) return alert(error.message);
+  try{
+    const reserva = {
+      negocio_id,
+      hospede_id: hospedeSelect.value,
+      quarto_id: quartoSelect.value,
+      data_checkin: checkinInput.value,
+      data_checkout: checkoutInput.value,
+      valor_total: Number(valorInput.value),
+      status: "reservado"
+    };
 
-  await db.from("hotel_quartos")
-    .update({ status: "ocupado" })
-    .eq("id", reserva.quarto_id);
+    const { error } = await db.from("hotel_reservas").insert(reserva);
+    if (error) throw error;
 
-  form.reset();
-  valorInput.value = "";
-  carregarTudo();
+    /* ocupa quarto */
+    await db.from("hotel_quartos")
+      .update({ status: "ocupado" })
+      .eq("id", reserva.quarto_id);
+
+    form.reset();
+    valorInput.value = "";
+
+    await carregarTudo();
+
+  }catch(e){
+    alert("Erro: " + e.message);
+    console.error(e);
+  }
+
+  btnSalvar.disabled = false;
+  btnSalvar.innerText = "Salvar Reserva";
 });
 
-/* ================= LISTAR ================= */
+/* ========= LISTAR ========= */
 async function carregarReservas() {
   tabela.innerHTML = "<tr><td colspan='7'>Carregando...</td></tr>";
 
@@ -189,14 +210,18 @@ async function carregarReservas() {
     .eq("negocio_id", negocio_id)
     .order("data_checkin", { ascending: false });
 
-  if (error) return console.error(error);
+  if (error) {
+    tabela.innerHTML = "<tr><td colspan='7'>Erro</td></tr>";
+    console.error(error);
+    return;
+  }
 
-  tabela.innerHTML = "";
-
-  if (!data.length) {
+  if (!data || !data.length) {
     tabela.innerHTML = "<tr><td colspan='7'>Nenhuma reserva</td></tr>";
     return;
   }
+
+  tabela.innerHTML = "";
 
   data.forEach(r => {
     tabela.innerHTML += `
@@ -205,7 +230,7 @@ async function carregarReservas() {
         <td>${r.hotel_quartos?.numero || "-"}</td>
         <td>${r.data_checkin}</td>
         <td>${r.data_checkout}</td>
-        <td>R$ ${r.valor_total.toFixed(2)}</td>
+        <td>${formatarPreco(r.valor_total)}</td>
         <td><span class="status ${r.status}">${r.status}</span></td>
         <td>
           ${r.status === "reservado"
@@ -218,24 +243,30 @@ async function carregarReservas() {
   });
 }
 
-/* ================= STATUS ================= */
+/* ========= STATUS ========= */
 window.mudarStatus = async (id, status) => {
-  const { data } = await db
-    .from("hotel_reservas")
-    .update({ status })
-    .eq("id", id)
-    .select();
+  try{
+    const { data } = await db
+      .from("hotel_reservas")
+      .update({ status })
+      .eq("id", id)
+      .select()
+      .single();
 
-  if (status === "finalizado") {
-    await db.from("hotel_quartos")
-      .update({ status: "limpeza" })
-      .eq("id", data[0].quarto_id);
+    if (status === "finalizado") {
+      await db.from("hotel_quartos")
+        .update({ status: "limpeza" })
+        .eq("id", data.quarto_id);
+    }
+
+    carregarTudo();
+
+  }catch(e){
+    alert("Erro: " + e.message);
   }
-
-  carregarTudo();
 };
 
-/* ================= START ================= */
+/* ========= START ========= */
 function carregarTudo() {
   carregarHospedes();
   carregarQuartos();
