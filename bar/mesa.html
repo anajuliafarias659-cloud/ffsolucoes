@@ -913,6 +913,14 @@ function carregarSessaoLocal() {
   } catch {
     sessaoLocal = null;
   }
+
+  if (sessaoLocal?.sessao_expira_em) {
+    const expirada = new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
+    if (expirada) {
+      localStorage.removeItem(CHAVE_SESSAO);
+      sessaoLocal = null;
+    }
+  }
 }
 
 function salvarSessaoLocal(sessao) {
@@ -1116,6 +1124,12 @@ function atualizarInfoStatus() {
     return;
   }
 
+  if (!sessaoLocal) {
+    div.style.display = "block";
+    div.innerHTML = `Identifique o cliente para começar.<br><small>Preencha nome e celular antes de adicionar itens.</small>`;
+    return;
+  }
+
   if (!pedidoAtual) {
     div.style.display = "block";
     div.innerHTML = `Nenhum pedido em aberto no momento.<br><small>Toque em um produto para começar um novo lote.</small>`;
@@ -1274,6 +1288,8 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
   TOKEN_URL = sessao.token;
   sessaoMesaRegistro = sessao;
   acessoMesaLiberado = true;
+  esconderTelaExpirada();
+  desativarModoSomenteConta();
   return true;
 }
 
@@ -1520,6 +1536,11 @@ async function iniciarSistema() {
   configurarTogglePedido();
   carregarSessaoLocal();
   carregarFuncionarioLogado();
+
+  if (!TOKEN_URL) {
+    removerSessaoLocal();
+  }
+
   atualizarSessaoNaTela();
 
   const mesaOk = await carregarMesa();
@@ -1544,7 +1565,9 @@ async function iniciarSistema() {
   ativarRealtimeMesaStatus();
   configurarModalDebito();
 
-  if (sessaoLocal) iniciarMonitorSessao();
+  if (sessaoLocal && !sessaoExpiradaLocal()) {
+    iniciarMonitorSessao();
+  }
 }
 
 async function sincronizarSessaoComPedidos() {
@@ -1678,7 +1701,7 @@ async function iniciarAtendimentoManual() {
 
 async function validarSessaoPedido() {
   if (!acessoMesaLiberado) {
-    alert("Escaneie novamente o QR da mesa para fazer novos pedidos.");
+    alert("Abra a mesa pelo QR para fazer pedidos.");
     return false;
   }
 
@@ -1686,8 +1709,9 @@ async function validarSessaoPedido() {
   if (!acessoMesaLiberado) return false;
 
   if (!sessaoLocal) {
-    ativarModoSomenteConta("Escaneie novamente o QR da mesa para liberar novos pedidos.");
-    alert("Sessão expirada. Escaneie novamente o QR para fazer novos pedidos.");
+    document.getElementById("formSessao")?.classList.remove("oculto");
+    document.getElementById("btnToggleSessao").textContent = "Fechar";
+    alert("Informe nome e celular para iniciar o atendimento nesta mesa.");
     return false;
   }
 
@@ -1852,6 +1876,13 @@ function aplicarFiltros() {
 }
 
 async function addProduto(produtoId) {
+  if (!sessaoLocal) {
+    document.getElementById("formSessao")?.classList.remove("oculto");
+    document.getElementById("btnToggleSessao").textContent = "Fechar";
+    alert("Informe nome e celular antes de adicionar produtos.");
+    return;
+  }
+
   if (modoSomenteConta) {
     alert("Sua sessão expirou. Escaneie novamente o QR da mesa para pedir novos itens.");
     return;
