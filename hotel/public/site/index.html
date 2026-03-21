@@ -26,7 +26,6 @@ body[data-tema="black"]{--bg:#000;--card:#111;--primary:#ffffff}
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
 body{background:var(--bg);color:var(--text)}
 
-/* ===== BANNER ===== */
 .banner{width:100%;height:220px;object-fit:cover}
 @media(max-width:768px){.banner{height:150px}}
 
@@ -34,20 +33,42 @@ body{background:var(--bg);color:var(--text)}
 .card{background:var(--card);padding:16px;border-radius:16px;margin-bottom:16px}
 .endereco{opacity:.65;font-size:13px;margin-top:6px}
 
-/* ===== QUARTOS ===== */
-.quartos{display:grid;gap:12px}
-
-/* MOBILE – 3 POR LINHA */
+.filtros{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:10px;
+  margin-top:10px;
+}
 @media(max-width:768px){
-  .quartos{grid-template-columns:repeat(3,1fr)}
+  .filtros{grid-template-columns:1fr}
+}
+
+.filtros input,.filtros button{
+  width:100%;
+  padding:12px;
+  border:none;
+  border-radius:10px;
+}
+.filtros input{
+  background:#020617;
+  color:#fff;
+}
+.filtros button{
+  background:var(--primary);
+  color:#000;
+  font-weight:700;
+  cursor:pointer;
+}
+
+.quartos{display:grid;gap:12px}
+@media(max-width:768px){
+  .quartos{grid-template-columns:repeat(2,1fr)}
   .quarto img{height:100px}
   .info{padding:8px}
   .info h3{font-size:13px}
   .preco{font-size:13px}
-  .btn{padding:6px 8px;font-size:12px}
+  .btn{padding:8px 8px;font-size:12px}
 }
-
-/* DESKTOP */
 @media(min-width:769px){
   .quartos{grid-template-columns:repeat(2,1fr)}
   .quarto img{height:180px}
@@ -57,6 +78,7 @@ body{background:var(--bg);color:var(--text)}
   background:#020617;
   border-radius:14px;
   overflow:hidden;
+  border:1px solid rgba(255,255,255,.05);
 }
 .quarto img{
   width:100%;
@@ -65,6 +87,13 @@ body{background:var(--bg);color:var(--text)}
 }
 .info{padding:12px}
 .preco{margin:6px 0;font-weight:800;color:var(--primary)}
+.status{
+  margin:8px 0 10px 0;
+  font-size:13px;
+  font-weight:700;
+}
+.status.livre{color:#22c55e}
+.status.ocupado{color:#f87171}
 .btn{
   background:var(--primary);
   color:#000;
@@ -73,8 +102,20 @@ body{background:var(--bg);color:var(--text)}
   font-weight:700;
   cursor:pointer;
 }
+.btn-sec{
+  background:#334155;
+  color:#fff;
+  border:none;
+  border-radius:10px;
+  font-weight:700;
+  padding:10px 12px;
+}
+.msg{
+  opacity:.75;
+  font-size:13px;
+  margin-top:10px;
+}
 
-/* ===== MODAIS ===== */
 .modal{
   position:fixed;
   inset:0;
@@ -83,9 +124,9 @@ body{background:var(--bg);color:var(--text)}
   align-items:center;
   justify-content:center;
   z-index:60;
+  padding:14px;
 }
 
-/* GALERIA */
 .galeria-box{
   background:#000;
   padding:12px;
@@ -101,7 +142,6 @@ body{background:var(--bg);color:var(--text)}
   margin-bottom:10px;
 }
 
-/* FORMULÁRIO WHATS */
 .modal-box{
   background:linear-gradient(180deg,#25d366,#128c7e);
   padding:18px;
@@ -138,6 +178,16 @@ body{background:var(--bg);color:var(--text)}
   <div class="card">
     <h1 id="nomeHotel">Hotel</h1>
     <div id="enderecoHotel" class="endereco"></div>
+
+    <div class="filtros">
+      <input id="checkinFiltro" type="date">
+      <input id="checkoutFiltro" type="date">
+      <button id="btnBuscar">Buscar disponibilidade</button>
+    </div>
+
+    <div class="msg" id="msgBusca">
+      Escolha check-in e check-out para ver os quartos disponíveis.
+    </div>
   </div>
 
   <div class="card">
@@ -145,7 +195,6 @@ body{background:var(--bg);color:var(--text)}
   </div>
 </div>
 
-<!-- GALERIA -->
 <div class="modal" id="modalGaleria">
   <div class="galeria-box">
     <button class="btn" onclick="fecharGaleria()">Fechar</button>
@@ -153,7 +202,6 @@ body{background:var(--bg);color:var(--text)}
   </div>
 </div>
 
-<!-- RESERVA -->
 <div class="modal" id="modalReserva">
   <div class="modal-box">
     <h3 id="tituloReserva"></h3>
@@ -175,46 +223,58 @@ body{background:var(--bg);color:var(--text)}
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-/* ===== SUPABASE ===== */
 const sb = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== PEGA APP_ID ===== */
 const params = new URLSearchParams(window.location.search);
 
 let negocio_id =
   params.get("app_id") ||
   params.get("id") ||
+  params.get("app") ||
   localStorage.getItem("app_id");
 
-/* fallback (caso veio do painel) */
 if(!negocio_id){
   const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
   negocio_id = admin.app_id;
 }
 
 if(!negocio_id){
-  document.body.innerHTML = `
-    <div style="padding:30px;text-align:center">
-      ❌ Hotel não identificado
-    </div>
-  `;
+  document.body.innerHTML = `<div style="padding:30px;text-align:center">❌ Hotel não identificado</div>`;
   throw new Error("Sem app_id");
 }
 
-/* ===== ELEMENTOS ===== */
 const lista = document.getElementById("lista");
 const nomeHotel = document.getElementById("nomeHotel");
 const enderecoHotel = document.getElementById("enderecoHotel");
 const banner = document.getElementById("bannerHotel");
+const checkinFiltro = document.getElementById("checkinFiltro");
+const checkoutFiltro = document.getElementById("checkoutFiltro");
+const btnBuscar = document.getElementById("btnBuscar");
+const msgBusca = document.getElementById("msgBusca");
 
-/* ===== CONFIG ===== */
-let dadosConfig = {
-  nome_site: "Hotel",
-  whatsapp: ""
-};
+let dadosConfig = { nome_site:"Hotel", whatsapp:"" };
+let quartosCache = [];
+let quartoSelecionado = null;
+
+function hojeISO(){
+  const d = new Date();
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth()+1).padStart(2,"0");
+  const dia = String(d.getDate()).padStart(2,"0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+function addDias(dataStr, dias){
+  const d = new Date(dataStr + "T00:00:00");
+  d.setDate(d.getDate() + dias);
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth()+1).padStart(2,"0");
+  const dia = String(d.getDate()).padStart(2,"0");
+  return `${ano}-${mes}-${dia}`;
+}
 
 function formatarPreco(valor){
   return Number(valor || 0).toLocaleString("pt-BR", {
@@ -227,19 +287,17 @@ function limparNumero(numero){
   return String(numero || "").replace(/\D/g, "");
 }
 
-function montarLinkWhatsApp(tipo, preco){
-  const numero = limparNumero(dadosConfig.whatsapp);
-
-  const msg = encodeURIComponent(
-    `Olá! Quero reservar o quarto ${tipo}\nValor: ${formatarPreco(preco)}`
-  );
-
-  if(!numero) return null;
-
-  return `https://wa.me/55${numero}?text=${msg}`;
+function formatarDataBR(data){
+  if(!data) return "";
+  const [ano, mes, dia] = String(data).split("-");
+  if(!ano || !mes || !dia) return data;
+  return `${dia}/${mes}/${ano}`;
 }
 
-/* ===== CONFIG ===== */
+function intervaloValido(entrada, saida){
+  return !!entrada && !!saida && saida > entrada;
+}
+
 async function carregarConfig(){
   const { data, error } = await sb
     .from("config_site")
@@ -254,57 +312,83 @@ async function carregarConfig(){
 
   if(data){
     dadosConfig = data;
-
     nomeHotel.textContent = data.nome_site || "Hotel";
-    enderecoHotel.textContent = `${data.endereco || ""} ${data.cidade || ""}`;
+    enderecoHotel.textContent = `${data.endereco || ""} ${data.cidade || ""}`.trim();
 
     if(data.banner_url){
       banner.src = data.banner_url;
     }
 
-    /* aplica tema */
     if(data.tema_site){
       document.body.setAttribute("data-tema", data.tema_site);
     }
   }
 }
 
-/* ===== QUARTOS ===== */
-async function carregarQuartos(){
+async function carregarQuartosBase(){
   const { data, error } = await sb
     .from("hotel_quartos")
     .select("*")
     .eq("negocio_id", negocio_id)
-    .eq("status","livre");
+    .in("status", ["livre", "limpeza", null]);
 
   if(error){
     console.error(error);
     lista.innerHTML = "Erro ao carregar quartos";
-    return;
+    return [];
   }
 
-  if(!data || data.length === 0){
+  quartosCache = data || [];
+  return quartosCache;
+}
+
+async function buscarReservasOcupadas(checkin, checkout){
+  const { data, error } = await sb
+    .from("hotel_reservas")
+    .select("id, quarto_id, data_checkin, data_checkout, status")
+    .eq("negocio_id", negocio_id)
+    .in("status", ["reservado", "confirmado", "hospedado"])
+    .lt("data_checkin", checkout)
+    .gt("data_checkout", checkin);
+
+  if(error){
+    console.error("Erro reservas:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+function renderizarQuartos(quartos, reservas, checkin, checkout){
+  if(!quartos.length){
     lista.innerHTML = "Nenhum quarto disponível";
     return;
   }
 
+  const idsBloqueados = new Set((reservas || []).map(r => r.quarto_id));
   lista.innerHTML = "";
 
-  data.forEach(q=>{
+  quartos.forEach(q => {
     const foto = q.fotos?.[0] || "";
-    const zap = montarLinkWhatsApp(q.tipo, q.preco_diaria);
+    const bloqueadoPorReserva = idsBloqueados.has(q.id);
+    const indisponivelPorStatus = q.status && q.status !== "livre";
+    const disponivel = !bloqueadoPorReserva && !indisponivelPorStatus;
 
     lista.innerHTML += `
       <div class="quarto">
         ${foto ? `<img src="${foto}" onclick='abrirGaleria(${JSON.stringify(q.fotos || [])})'>` : ""}
 
         <div class="info">
-          <h3>${q.tipo}</h3>
+          <h3>${q.tipo}${q.numero ? " - Nº " + q.numero : ""}</h3>
           <div class="preco">${formatarPreco(q.preco_diaria)}</div>
+          <div class="status ${disponivel ? "livre" : "ocupado"}">
+            ${disponivel ? "Disponível nessas datas" : "Indisponível nessas datas"}
+          </div>
 
-          ${zap
-            ? `<button class="btn" onclick="abrirReserva('${q.tipo}', ${q.preco_diaria})">Reservar</button>`
-            : `<button class="btn">Sem WhatsApp</button>`
+          ${
+            disponivel
+              ? `<button class="btn" onclick="abrirReserva('${q.id}','${String(q.tipo).replaceAll("'","")}', ${q.preco_diaria || 0}, '${q.numero || ""}')">Reservar</button>`
+              : `<button class="btn-sec" disabled>Bloqueado</button>`
           }
         </div>
       </div>
@@ -312,57 +396,156 @@ async function carregarQuartos(){
   });
 }
 
-/* ===== GALERIA ===== */
 window.abrirGaleria = function(fotos){
   const box = document.getElementById("galeriaFotos");
   box.innerHTML = fotos.map(f=>`<img src="${f}">`).join("");
-  document.getElementById("modalGaleria").style.display="flex";
-}
+  document.getElementById("modalGaleria").style.display = "flex";
+};
 
 window.fecharGaleria = function(){
-  document.getElementById("modalGaleria").style.display="none";
-}
+  document.getElementById("modalGaleria").style.display = "none";
+};
 
-/* ===== RESERVA ===== */
-let quartoSelecionado = null;
+window.abrirReserva = function(quartoId, tipo, preco, numero){
+  const entrada = checkinFiltro.value;
+  const saida = checkoutFiltro.value;
 
-window.abrirReserva = function(tipo, preco){
-  quartoSelecionado = {tipo, preco};
-  document.getElementById("tituloReserva").innerText = tipo;
-  document.getElementById("modalReserva").style.display="flex";
-}
+  if(!intervaloValido(entrada, saida)){
+    alert("Escolha check-in e check-out válidos antes de reservar.");
+    return;
+  }
+
+  quartoSelecionado = { quartoId, tipo, preco, numero };
+
+  document.getElementById("tituloReserva").innerText = `${tipo}${numero ? " - Nº " + numero : ""}`;
+  document.getElementById("dataEntrada").value = entrada;
+  document.getElementById("dataSaida").value = saida;
+  document.getElementById("dataEntrada").min = hojeISO();
+  document.getElementById("dataSaida").min = addDias(entrada, 1);
+
+  document.getElementById("modalReserva").style.display = "flex";
+};
 
 window.fecharReserva = function(){
-  document.getElementById("modalReserva").style.display="none";
-}
+  document.getElementById("modalReserva").style.display = "none";
+};
 
-/* ===== ENVIAR ===== */
-window.enviarReserva = function(){
-  const nome = document.getElementById("nomeCliente").value;
-  const tel = document.getElementById("telefoneCliente").value;
+window.enviarReserva = async function(){
+  const nome = document.getElementById("nomeCliente").value.trim();
+  const tel = document.getElementById("telefoneCliente").value.trim();
+  const cpf = document.getElementById("cpfCliente").value.trim();
+  const entrada = document.getElementById("dataEntrada").value;
+  const saida = document.getElementById("dataSaida").value;
+  const obs = document.getElementById("obs").value.trim();
 
-  if(!nome || !tel){
-    alert("Preencha nome e telefone");
+  if(!nome || !tel || !entrada || !saida){
+    alert("Preencha nome, telefone, entrada e saída.");
+    return;
+  }
+
+  if(!intervaloValido(entrada, saida)){
+    alert("Data de saída deve ser maior que a data de entrada.");
+    return;
+  }
+
+  const reservas = await buscarReservasOcupadas(entrada, saida);
+  const quartoJaOcupado = reservas.some(r => r.quarto_id === quartoSelecionado.quartoId);
+
+  if(quartoJaOcupado){
+    alert("Esse quarto acabou de ser reservado para esse período. Escolha outro.");
+    await buscarDisponibilidade();
+    fecharReserva();
+    return;
+  }
+
+  const dias = (new Date(saida + "T00:00:00") - new Date(entrada + "T00:00:00")) / 86400000;
+  const valorTotal = dias > 0 ? dias * Number(quartoSelecionado.preco || 0) : 0;
+
+  const { error } = await sb
+    .from("hotel_reservas")
+    .insert([{
+      negocio_id,
+      quarto_id: quartoSelecionado.quartoId,
+      nome_hospede: nome,
+      telefone: tel,
+      cpf: cpf || null,
+      data_checkin: entrada,
+      data_checkout: saida,
+      valor_total: valorTotal,
+      observacoes: obs || null,
+      status: "reservado",
+      origem: "site"
+    }]);
+
+  if(error){
+    console.error(error);
+    alert("Erro ao salvar reserva: " + error.message);
     return;
   }
 
   const numero = limparNumero(dadosConfig.whatsapp);
-
-  const msg = encodeURIComponent(
-`Reserva de quarto
-Nome: ${nome}
+  const mensagem = encodeURIComponent(
+`Nova reserva online
+Hotel: ${dadosConfig.nome_site || "Hotel"}
+Hóspede: ${nome}
 Telefone: ${tel}
-Quarto: ${quartoSelecionado.tipo}
-Valor: ${formatarPreco(quartoSelecionado.preco)}`
+CPF: ${cpf || "-"}
+Quarto: ${quartoSelecionado.tipo}${quartoSelecionado.numero ? " - Nº " + quartoSelecionado.numero : ""}
+Check-in: ${formatarDataBR(entrada)}
+Check-out: ${formatarDataBR(saida)}
+Valor total: ${formatarPreco(valorTotal)}
+Observações: ${obs || "Nenhuma"}`
   );
 
-  window.open(`https://wa.me/55${numero}?text=${msg}`, "_blank");
+  fecharReserva();
+  await buscarDisponibilidade();
+
+  if(numero){
+    window.open(`https://wa.me/55${numero}?text=${mensagem}`, "_blank");
+  }else{
+    alert("Reserva enviada com sucesso.");
+  }
+};
+
+async function buscarDisponibilidade(){
+  const checkin = checkinFiltro.value;
+  const checkout = checkoutFiltro.value;
+
+  if(!intervaloValido(checkin, checkout)){
+    msgBusca.textContent = "Escolha check-in e check-out válidos para consultar.";
+    renderizarQuartos(quartosCache, [], "", "");
+    return;
+  }
+
+  msgBusca.textContent = `Buscando disponibilidade de ${formatarDataBR(checkin)} até ${formatarDataBR(checkout)}...`;
+
+  const reservas = await buscarReservasOcupadas(checkin, checkout);
+  renderizarQuartos(quartosCache, reservas, checkin, checkout);
+
+  msgBusca.textContent = `Mostrando disponibilidade de ${formatarDataBR(checkin)} até ${formatarDataBR(checkout)}.`;
 }
 
-/* ===== START ===== */
+btnBuscar.addEventListener("click", buscarDisponibilidade);
+
+checkinFiltro.addEventListener("change", () => {
+  if(checkinFiltro.value){
+    checkoutFiltro.min = addDias(checkinFiltro.value, 1);
+    if(!checkoutFiltro.value || checkoutFiltro.value <= checkinFiltro.value){
+      checkoutFiltro.value = addDias(checkinFiltro.value, 1);
+    }
+  }
+});
+
 async function iniciar(){
+  const hoje = hojeISO();
+  checkinFiltro.min = hoje;
+  checkinFiltro.value = hoje;
+  checkoutFiltro.min = addDias(hoje, 1);
+  checkoutFiltro.value = addDias(hoje, 1);
+
   await carregarConfig();
-  await carregarQuartos();
+  await carregarQuartosBase();
+  await buscarDisponibilidade();
 }
 
 iniciar();
