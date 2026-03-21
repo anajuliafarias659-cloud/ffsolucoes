@@ -65,28 +65,11 @@
 
 </div>
 
-<script>
-/* ===== SUPABASE ===== */
-const sb = window.supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
-/* ===== SESSÃO ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
+let negocio_id = null;
 
-if (!admin?.app_id) {
-  alert("Sessão inválida. Faça login novamente.");
-  location.href = "../auth/login.html";
-  throw new Error("Sem sessão");
-}
-
-const negocio_id = admin.app_id;
-
-/* padrão do sistema */
-localStorage.setItem("app_id", negocio_id);
-
-/* ===== ELEMENTOS ===== */
 const elNumero = document.getElementById("numero");
 const elTipo = document.getElementById("tipo");
 const elPreco = document.getElementById("preco");
@@ -94,8 +77,41 @@ const elFotos = document.getElementById("fotosQuarto");
 const elTabela = document.getElementById("tabela");
 const btnSalvar = document.getElementById("btnSalvar");
 
+/* ===== SESSÃO ===== */
+async function verificarSessao(){
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  if(!session){
+    window.location.href = "/auth/login.html";
+    return null;
+  }
+
+  return session.user.id;
+}
+
+/* ===== INICIAR ===== */
+async function iniciar(){
+  const userId = await verificarSessao();
+  if(!userId) return;
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  if(!usuario?.app_id){
+    alert("Erro ao identificar negócio");
+    return;
+  }
+
+  negocio_id = usuario.app_id;
+
+  carregarQuartos();
+}
+
 /* ===== HELPERS ===== */
-function safeName(name) {
+function safeName(name){
   return name
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, "_")
@@ -110,170 +126,144 @@ function formatarPreco(valor){
 }
 
 /* ===== UPLOAD ===== */
-async function uploadFotos(quartoId) {
+async function uploadFotos(quartoId){
   const files = elFotos.files;
-  if (!files || !files.length) return [];
+  if(!files.length) return [];
 
   const urls = [];
 
-  for (let i = 0; i < files.length; i++) {
-    try{
-      const file = files[i];
+  for(let i=0;i<files.length;i++){
+    const file = files[i];
+    const fileName = `${Date.now()}_${i}_${safeName(file.name)}`;
+    const path = `${negocio_id}/${quartoId}/${fileName}`;
 
-      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-      const fileName = `${Date.now()}_${i}_${safeName(file.name)}`;
-      const path = `${negocio_id}/${quartoId}/${fileName}`;
+    const { error } = await supabase.storage
+      .from("hotel-quartos")
+      .upload(path,file,{upsert:true});
 
-      const { error } = await sb.storage
-        .from("hotel-quartos")
-        .upload(path, file, { upsert: true });
+    if(error) continue;
 
-      if (error) {
-        console.error("Erro upload:", error);
-        continue;
-      }
-
-      const { data } = sb.storage.from("hotel-quartos").getPublicUrl(path);
-      urls.push(data.publicUrl);
-
-    }catch(e){
-      console.error("Erro foto:", e);
-    }
+    const { data } = supabase.storage.from("hotel-quartos").getPublicUrl(path);
+    urls.push(data.publicUrl);
   }
 
   return urls;
 }
 
 /* ===== SALVAR ===== */
-async function salvarQuarto() {
+async function salvarQuarto(){
   const numero = elNumero.value.trim();
   const tipo = elTipo.value.trim();
   const preco = parseFloat(elPreco.value);
 
-  if (!numero || !tipo || !preco || preco <= 0) {
-    alert("Preencha corretamente.");
+  if(!numero || !tipo || !preco){
+    alert("Preencha corretamente");
     return;
   }
 
   btnSalvar.disabled = true;
   btnSalvar.innerText = "Salvando...";
 
-  try{
-    const { data: quarto, error } = await sb
-      .from("hotel_quartos")
-      .insert([{
-        negocio_id,
-        numero,
-        tipo,
-        preco_diaria: preco,
-        status: "livre",
-        fotos: []
-      }])
-      .select()
-      .single();
+  const { data: quarto, error } = await supabase
+    .from("hotel_quartos")
+    .insert([{
+      negocio_id,
+      numero,
+      tipo,
+      preco_diaria: preco,
+      status: "livre",
+      fotos:[]
+    }])
+    .select()
+    .single();
 
-    if (error) throw error;
-
-    const fotosUrls = await uploadFotos(quarto.id);
-
-    if (fotosUrls.length) {
-      await sb
-        .from("hotel_quartos")
-        .update({ fotos: fotosUrls })
-        .eq("id", quarto.id);
-    }
-
-    elNumero.value = "";
-    elTipo.value = "";
-    elPreco.value = "";
-    elFotos.value = "";
-
-    await carregarQuartos();
-
-  }catch(e){
-    alert("Erro: " + e.message);
-    console.error(e);
+  if(error){
+    alert(error.message);
+    return;
   }
 
+  const fotos = await uploadFotos(quarto.id);
+
+  if(fotos.length){
+    await supabase
+      .from("hotel_quartos")
+      .update({ fotos })
+      .eq("id", quarto.id);
+  }
+
+  elNumero.value = "";
+  elTipo.value = "";
+  elPreco.value = "";
+  elFotos.value = "";
+
   btnSalvar.disabled = false;
-  btnSalvar.innerText = "Salvar Quarto";
-}
-
-/* ===== EXCLUIR ===== */
-async function excluirFotos(id) {
-  if (!confirm("Excluir todas fotos?")) return;
-
-  const { error } = await sb
-    .from("hotel_quartos")
-    .update({ fotos: [] })
-    .eq("id", id);
-
-  if (error) alert(error.message);
+  btnSalvar.innerText = "Salvar";
 
   carregarQuartos();
 }
 
-async function excluirQuarto(id) {
-  if (!confirm("Excluir quarto?")) return;
+/* ===== EXCLUIR ===== */
+window.excluirQuarto = async function(id){
+  if(!confirm("Excluir quarto?")) return;
 
-  const { error } = await sb
+  await supabase
     .from("hotel_quartos")
     .delete()
     .eq("id", id);
 
-  if (error) alert(error.message);
+  carregarQuartos();
+};
+
+window.excluirFotos = async function(id){
+  if(!confirm("Excluir fotos?")) return;
+
+  await supabase
+    .from("hotel_quartos")
+    .update({ fotos: [] })
+    .eq("id", id);
 
   carregarQuartos();
-}
+};
 
 /* ===== LISTAR ===== */
-async function carregarQuartos() {
+async function carregarQuartos(){
   elTabela.innerHTML = `<tr><td colspan="5">Carregando...</td></tr>`;
 
-  const { data, error } = await sb
+  const { data } = await supabase
     .from("hotel_quartos")
     .select("*")
     .eq("negocio_id", negocio_id)
-    .order("numero", { ascending: true });
+    .order("numero");
 
-  if (error) {
-    elTabela.innerHTML = `<tr><td colspan="5">Erro: ${error.message}</td></tr>`;
-    return;
-  }
-
-  if (!data || !data.length) {
-    elTabela.innerHTML = `<tr><td colspan="5">Nenhum quarto cadastrado</td></tr>`;
+  if(!data || !data.length){
+    elTabela.innerHTML = `<tr><td colspan="5">Nenhum quarto</td></tr>`;
     return;
   }
 
   elTabela.innerHTML = "";
 
-  data.forEach(q => {
-    const fotosHtml = (q.fotos || []).map(f=>`<img src="${f}">`).join("");
+  data.forEach(q=>{
+    const fotos = (q.fotos||[]).map(f=>`<img src="${f}">`).join("");
 
     elTabela.innerHTML += `
       <tr>
         <td>${q.numero}</td>
         <td>${q.tipo}</td>
         <td>${formatarPreco(q.preco_diaria)}</td>
-        <td><div class="fotos">${fotosHtml}</div></td>
+        <td>${fotos}</td>
         <td>
-          <div class="acoes">
-            <button class="btn-red mini" onclick="excluirFotos('${q.id}')">Fotos</button>
-            <button class="btn-red mini" onclick="excluirQuarto('${q.id}')">Excluir</button>
-          </div>
+          <button onclick="excluirFotos('${q.id}')">Fotos</button>
+          <button onclick="excluirQuarto('${q.id}')">Excluir</button>
         </td>
       </tr>
     `;
   });
 }
 
-/* ===== EVENTOS ===== */
-btnSalvar.addEventListener("click", salvarQuarto);
+/* EVENTO */
+btnSalvar.onclick = salvarQuarto;
 
-/* START */
-carregarQuartos();
+iniciar();
 </script>
-
 </body>
 </html>
