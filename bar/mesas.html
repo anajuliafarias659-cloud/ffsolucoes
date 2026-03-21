@@ -153,6 +153,11 @@ body{
   font-size:13px;
 }
 
+.btn-card:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
 .btn-abrir{background:#22c55e;color:#052e16}
 .btn-pedidos{background:#2563eb;color:#fff}
 .btn-conta{background:#fde047;color:#111827}
@@ -342,7 +347,7 @@ function atualizarResumo(mesas){
 
   mesas.forEach(m => {
     if (m.mesaPediuConta) contas++;
-    else if (m.pedidoAberto || m.ocupada) ocupadas++;
+    else if (m.ocupada) ocupadas++;
     else livres++;
   });
 
@@ -384,16 +389,16 @@ async function atualizarOuCriarCardMesa(mesa){
     grid.appendChild(card);
   }
 
-  const pedidoAberto = mesa.pedidoAberto;
-  const mesaPediuConta = mesa.mesaPediuConta;
+  const estaOcupada = !!mesa.ocupada;
+  const pediuConta = !!mesa.mesaPediuConta;
 
   let classe = "livre";
   let texto = "LIVRE";
 
-  if (mesaPediuConta) {
+  if (pediuConta) {
     classe = "conta";
     texto = "PEDIU A CONTA";
-  } else if (pedidoAberto || mesa.ocupada) {
+  } else if (estaOcupada) {
     classe = "preparando";
     texto = "OCUPADA";
   }
@@ -448,10 +453,10 @@ async function atualizarOuCriarCardMesa(mesa){
     await removerMesa(mesa);
   };
 
-  btnAbrir.disabled = !!(pedidoAberto || mesaPediuConta || mesa.ocupada);
-  btnConta.disabled = !(pedidoAberto || mesa.ocupada);
-  btnLiberar.disabled = !!pedidoAberto;
-  btnRemover.disabled = !!(pedidoAberto || mesaPediuConta);
+  btnAbrir.disabled = !!mesa.ocupada;
+  btnConta.disabled = !mesa.ocupada;
+  btnLiberar.disabled = false;
+  btnRemover.disabled = !!mesa.ocupada;
 }
 
 async function carregarMesas(){
@@ -508,41 +513,43 @@ async function carregarMesas(){
         .filter(p => !statusFechado(p.status))
         .reduce((soma, p) => soma + Number(p.total || 0), 0);
 
-      const deveEstarOcupada = mesaPediuConta || !!pedidoAberto;
+      if (pedidoAberto) {
+        const novoStatus = mesaPediuConta ? "conta_solicitada" : "ocupada";
 
-      if (deveEstarOcupada && (!m.ocupada || Number(m.total_aberto || 0) !== totalAberto)) {
-        await sb
-          .from("mesas")
-          .update({
-            ocupada: true,
-            status: mesaPediuConta ? "conta_solicitada" : "ocupada",
-            total_aberto: totalAberto
-          })
-          .eq("id", m.id);
+        if (!m.ocupada || m.status !== novoStatus || Number(m.total_aberto || 0) !== totalAberto) {
+          await sb
+            .from("mesas")
+            .update({
+              ocupada: true,
+              pedir_conta: mesaPediuConta,
+              status: novoStatus,
+              total_aberto: totalAberto
+            })
+            .eq("id", m.id);
 
-        m.ocupada = true;
-        m.status = mesaPediuConta ? "conta_solicitada" : "ocupada";
-        m.total_aberto = totalAberto;
-      }
+          m.ocupada = true;
+          m.pedir_conta = mesaPediuConta;
+          m.status = novoStatus;
+          m.total_aberto = totalAberto;
+        }
+      } else if (!pedidoAberto && m.ocupada) {
+        m.status = m.pedir_conta ? "conta_solicitada" : "ocupada";
+        m.total_aberto = Number(m.total_aberto || 0);
+      } else if (!pedidoAberto && !m.ocupada) {
+        if (m.status !== "livre" || m.pedir_conta || Number(m.total_aberto || 0) !== 0) {
+          await sb
+            .from("mesas")
+            .update({
+              status: "livre",
+              pedir_conta: false,
+              total_aberto: 0
+            })
+            .eq("id", m.id);
 
-      if (!deveEstarOcupada && (m.ocupada || m.pedir_conta || m.status !== "livre" || m.cliente_nome || Number(m.total_aberto || 0) !== 0)) {
-        await sb
-          .from("mesas")
-          .update({
-            ocupada: false,
-            pedir_conta: false,
-            status: "livre",
-            cliente_nome: null,
-            cliente_celular: null,
-            total_aberto: 0
-          })
-          .eq("id", m.id);
-
-        m.ocupada = false;
-        m.pedir_conta = false;
-        m.status = "livre";
-        m.cliente_nome = null;
-        m.total_aberto = 0;
+          m.status = "livre";
+          m.pedir_conta = false;
+          m.total_aberto = 0;
+        }
       }
 
       const mesaTratada = {
@@ -613,7 +620,7 @@ async function adicionarMesa(){
       return;
     }
 
-    carregarMesas();
+    await carregarMesas();
   } finally {
     criandoMesa = false;
   }
@@ -623,13 +630,20 @@ async function abrirMesa(mesa){
   const nome = prompt(`Nome do cliente/responsável da Mesa ${mesa.numero_mesa}:`, mesa.cliente_nome || "");
   if (nome === null) return;
 
+  const nomeLimpo = nome.trim();
+
+  if (!nomeLimpo) {
+    alert("Digite o nome do cliente.");
+    return;
+  }
+
   const { error } = await sb
     .from("mesas")
     .update({
       ocupada: true,
       pedir_conta: false,
       status: "ocupada",
-      cliente_nome: nome.trim() || null
+      cliente_nome: nomeLimpo
     })
     .eq("id", mesa.id);
 
@@ -639,7 +653,7 @@ async function abrirMesa(mesa){
     return;
   }
 
-  carregarMesas();
+  await carregarMesas();
 }
 
 function abrirTelaPedidos(mesa){
@@ -665,7 +679,7 @@ async function pedirContaMesa(mesa){
     return;
   }
 
-  carregarMesas();
+  await carregarMesas();
 }
 
 async function liberarMesa(mesa){
@@ -690,7 +704,7 @@ async function liberarMesa(mesa){
     return;
   }
 
-  carregarMesas();
+  await carregarMesas();
 }
 
 async function removerMesa(mesa){
@@ -720,7 +734,7 @@ async function removerMesa(mesa){
   if (card) card.remove();
   cardsRenderizados.delete(mesa.id);
 
-  carregarMesas();
+  await carregarMesas();
 }
 
 function vendaAvulsa(){
