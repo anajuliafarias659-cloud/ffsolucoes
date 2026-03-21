@@ -4,23 +4,37 @@
 <meta charset="UTF-8">
 <title>Configurar Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
+*{box-sizing:border-box}
+
 body{
   background:#020617;
   color:#fff;
   font-family:'Segoe UI',system-ui,sans-serif;
+  margin:0;
+  padding:20px;
 }
+
 .container{
   max-width:520px;
   margin:40px auto;
   padding:24px;
   background:#0f172a;
   border-radius:18px;
+  border:1px solid rgba(255,255,255,.05);
 }
-h2{text-align:center;margin-bottom:10px}
-label{display:block;margin-top:14px}
+
+h2{
+  text-align:center;
+  margin-bottom:10px;
+}
+
+label{
+  display:block;
+  margin-top:14px;
+}
+
 input,select,button{
   width:100%;
   padding:14px;
@@ -28,7 +42,12 @@ input,select,button{
   border-radius:12px;
   border:none;
 }
-input,select{background:#020617;color:#fff}
+
+input,select{
+  background:#020617;
+  color:#fff;
+}
+
 button{
   background:#22c55e;
   color:#022c22;
@@ -36,15 +55,26 @@ button{
   margin-top:22px;
   cursor:pointer;
 }
+
+button:disabled{
+  opacity:.7;
+  cursor:not-allowed;
+}
+
 .preview{
   margin-top:10px;
   width:100%;
-  max-height:180px;
+  max-height:220px;
   object-fit:cover;
   border-radius:12px;
   display:none;
 }
-small{opacity:.6}
+
+small{
+  opacity:.8;
+  display:block;
+  margin-top:10px;
+}
 </style>
 </head>
 
@@ -77,34 +107,17 @@ small{opacity:.6}
 
   <label>Banner do site</label>
   <input type="file" id="bannerInput" accept="image/*">
-  <img id="bannerPreview" class="preview">
+  <img id="bannerPreview" class="preview" alt="Preview do banner">
 
-  <button onclick="salvar()">Salvar configurações</button>
+  <button id="btnSalvar">Salvar configurações</button>
   <small id="status"></small>
 </div>
 
-<script>
-/* ===== SUPABASE ===== */
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
-/* ===== SESSÃO ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
+let app_id = null;
 
-if(!admin?.app_id){
-  alert("Sessão expirada. Faça login novamente.");
-  location.href = "../auth/login.html";
-  throw new Error("Sem sessão");
-}
-
-const app_id = admin.app_id;
-
-/* mantém padrão do sistema */
-localStorage.setItem("app_id", app_id);
-
-/* ===== ELEMENTOS ===== */
 const nomeInput = document.getElementById("nome");
 const whatsappInput = document.getElementById("whatsapp");
 const enderecoInput = document.getElementById("endereco");
@@ -113,72 +126,111 @@ const temaSelect = document.getElementById("tema");
 const bannerInput = document.getElementById("bannerInput");
 const bannerPreview = document.getElementById("bannerPreview");
 const statusEl = document.getElementById("status");
-const btnSalvar = document.querySelector("button");
+const btnSalvar = document.getElementById("btnSalvar");
 
-/* ===== PREVIEW ===== */
-bannerInput.onchange = ()=>{
-  const f = bannerInput.files[0];
-  if(f){
-    bannerPreview.src = URL.createObjectURL(f);
-    bannerPreview.style.display="block";
+async function verificarSessao(){
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  if(!session){
+    window.location.href = "/auth/login.html";
+    return null;
   }
-};
 
-/* ===== UPLOAD ===== */
+  return session.user.id;
+}
+
+async function carregarUsuario(){
+  const userId = await verificarSessao();
+  if(!userId) return false;
+
+  const { data: usuario, error } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  if(error || !usuario?.app_id){
+    alert("Não foi possível identificar o negócio.");
+    return false;
+  }
+
+  app_id = usuario.app_id;
+  localStorage.setItem("app_id", app_id);
+  return true;
+}
+
+bannerInput.addEventListener("change", () => {
+  const file = bannerInput.files?.[0];
+  if(!file) return;
+
+  bannerPreview.src = URL.createObjectURL(file);
+  bannerPreview.style.display = "block";
+});
+
 async function uploadBanner(file){
   try{
-    const ext = file.name.split(".").pop();
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${app_id}/${Date.now()}.${ext}`;
 
-    const { error } = await sb.storage
+    const { error } = await supabase.storage
       .from("banners")
-      .upload(path,file,{upsert:true});
+      .upload(path, file, { upsert: true });
 
     if(error){
       console.error(error);
       return null;
     }
 
-    return sb.storage.from("banners").getPublicUrl(path).data.publicUrl;
-
+    return supabase.storage.from("banners").getPublicUrl(path).data.publicUrl;
   }catch(e){
     console.error(e);
     return null;
   }
 }
 
-/* ===== SALVAR ===== */
 async function salvar(){
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
   btnSalvar.disabled = true;
   btnSalvar.innerText = "Salvando...";
   statusEl.innerText = "";
 
   let banner_url = null;
 
-  if(bannerInput.files[0]){
+  if(bannerInput.files?.[0]){
     banner_url = await uploadBanner(bannerInput.files[0]);
   }
 
   const payload = {
     app_id,
-    nome_site: nomeInput.value || null,
-    whatsapp: whatsappInput.value || null,
-    endereco: enderecoInput.value || null,
-    cidade: cidadeInput.value || null,
+    nome_site: nomeInput.value.trim() || null,
+    whatsapp: whatsappInput.value.trim() || null,
+    endereco: enderecoInput.value.trim() || null,
+    cidade: cidadeInput.value.trim() || null,
     tema_site: temaSelect.value || "padrao"
   };
 
   if(banner_url) payload.banner_url = banner_url;
 
-  const { data: existente } = await sb
+  const { data: existente, error: erroBusca } = await supabase
     .from("config_site")
     .select("id")
-    .eq("app_id",app_id)
+    .eq("app_id", app_id)
     .maybeSingle();
 
+  if(erroBusca){
+    btnSalvar.disabled = false;
+    btnSalvar.innerText = "Salvar configurações";
+    alert("Erro ao verificar configuração: " + erroBusca.message);
+    return;
+  }
+
   const res = existente
-    ? await sb.from("config_site").update(payload).eq("app_id",app_id)
-    : await sb.from("config_site").insert(payload);
+    ? await supabase.from("config_site").update(payload).eq("app_id", app_id)
+    : await supabase.from("config_site").insert(payload);
 
   btnSalvar.disabled = false;
   btnSalvar.innerText = "Salvar configurações";
@@ -193,12 +245,13 @@ async function salvar(){
   statusEl.innerText = "✅ Salvo com sucesso!";
 }
 
-/* ===== LOAD ===== */
 async function carregar(){
-  const { data, error } = await sb
+  if(!app_id) return;
+
+  const { data, error } = await supabase
     .from("config_site")
     .select("*")
-    .eq("app_id",app_id)
+    .eq("app_id", app_id)
     .maybeSingle();
 
   if(error){
@@ -216,12 +269,19 @@ async function carregar(){
 
   if(data.banner_url){
     bannerPreview.src = data.banner_url;
-    bannerPreview.style.display="block";
+    bannerPreview.style.display = "block";
   }
 }
 
-/* ===== START ===== */
-carregar();
+btnSalvar.addEventListener("click", salvar);
+
+async function iniciar(){
+  const ok = await carregarUsuario();
+  if(!ok) return;
+  await carregar();
+}
+
+iniciar();
 </script>
 
 </body>
