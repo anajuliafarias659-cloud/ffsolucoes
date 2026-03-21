@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="../js/auth.js"></script>
 
 <style>
 *{box-sizing:border-box}
@@ -398,6 +399,7 @@ const mesaId = params.get("mesa_id") || params.get("mesa");
 const numeroMesaUrl = params.get("mesa_numero") || params.get("numero") || params.get("mesa");
 
 let APP_ID = null;
+let usuarioLogado = null;
 let mesaInfo = null;
 let pedidoAtual = null;
 let produtosCache = [];
@@ -411,6 +413,42 @@ let ultimoAvisoStatus = "";
 if (!mesaId) {
   alert("Mesa não informada.");
   history.back();
+}
+
+function obterSessaoInterna(){
+  let funcionario = null;
+  let admin = null;
+
+  try { funcionario = JSON.parse(localStorage.getItem("funcionario_logado") || "null"); } catch {}
+  try { admin = JSON.parse(localStorage.getItem("admin_logado") || "null"); } catch {}
+
+  if (funcionario && funcionario.app_id) {
+    return { tipo: "funcionario", dados: funcionario, app_id: funcionario.app_id };
+  }
+
+  if (admin && admin.app_id) {
+    return { tipo: "admin", dados: admin, app_id: admin.app_id };
+  }
+
+  if (window.APP_ID) {
+    return { tipo: "fallback", dados: null, app_id: window.APP_ID };
+  }
+
+  return null;
+}
+
+function exigirLoginInterno(){
+  const sessao = obterSessaoInterna();
+
+  if (!sessao || !sessao.app_id) {
+    alert("Faça login no sistema para acessar esta mesa.");
+    location.href = "/auth/login.html";
+    return null;
+  }
+
+  APP_ID = sessao.app_id;
+  usuarioLogado = sessao;
+  return sessao;
 }
 
 function formatarMoeda(valor){
@@ -597,22 +635,42 @@ function ativarRealtimeMesaStatus(){
 }
 
 async function carregarMesa(){
-  const { data, error } = await sb.from("mesas").select("*").eq("id", mesaId).maybeSingle();
+  const { data, error } = await sb
+    .from("mesas")
+    .select("*")
+    .eq("id", mesaId)
+    .maybeSingle();
+
   if (error) {
     console.error(error);
     alert("Erro ao carregar mesa.");
     return false;
   }
+
   if (!data) {
     alert("Mesa não encontrada.");
     return false;
   }
 
+  if (!APP_ID) {
+    alert("Sessão inválida.");
+    location.href = "/auth/login.html";
+    return false;
+  }
+
+  if (String(data.app_id || "") !== String(APP_ID || "")) {
+    alert("Acesso negado. Esta mesa pertence a outro sistema.");
+    location.href = "mesas.html";
+    return false;
+  }
+
   mesaInfo = data;
-  APP_ID = data.app_id || localStorage.getItem("app_id") || null;
+
   document.getElementById("tituloMesa").innerText = `Mesa ${data.numero_mesa || numeroMesaUrl || ""}`;
+
   if (data.cliente_nome) document.getElementById("clienteNome").value = data.cliente_nome;
   if (data.cliente_celular) document.getElementById("clienteTelefone").value = data.cliente_celular;
+
   atualizarInfoClienteMesa();
   return true;
 }
@@ -1146,14 +1204,12 @@ document.getElementById("clienteNome").oninput = atualizarInfoClienteMesa;
 document.getElementById("clienteTelefone").oninput = atualizarInfoClienteMesa;
 
 async function iniciarSistema(){
+  const sessao = exigirLoginInterno();
+  if (!sessao) return;
+
   const okMesa = await carregarMesa();
   if (!okMesa) return;
-  if (!APP_ID) {
-    alert("APP_ID não encontrado nesta mesa.");
-    return;
-  }
 
-  localStorage.setItem("app_id", APP_ID);
   await carregarProdutos();
   await sincronizarMesaComPedidos();
   ativarRealtimeMesa();
