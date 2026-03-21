@@ -90,13 +90,19 @@ const sb = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== ADMIN ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
+/* ===== SESSÃO ===== */
+const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
+
 if(!admin?.app_id){
-  alert("Sessão expirada");
-  location.href="../auth/login.html";
+  alert("Sessão expirada. Faça login novamente.");
+  location.href = "../auth/login.html";
+  throw new Error("Sem sessão");
 }
+
 const app_id = admin.app_id;
+
+/* mantém padrão do sistema */
+localStorage.setItem("app_id", app_id);
 
 /* ===== ELEMENTOS ===== */
 const nomeInput = document.getElementById("nome");
@@ -107,6 +113,7 @@ const temaSelect = document.getElementById("tema");
 const bannerInput = document.getElementById("bannerInput");
 const bannerPreview = document.getElementById("bannerPreview");
 const statusEl = document.getElementById("status");
+const btnSalvar = document.querySelector("button");
 
 /* ===== PREVIEW ===== */
 bannerInput.onchange = ()=>{
@@ -119,25 +126,35 @@ bannerInput.onchange = ()=>{
 
 /* ===== UPLOAD ===== */
 async function uploadBanner(file){
-  if(!file) return null;
+  try{
+    const ext = file.name.split(".").pop();
+    const path = `${app_id}/${Date.now()}.${ext}`;
 
-  const ext = file.name.split(".").pop();
-  const path = `${app_id}/${Date.now()}.${ext}`;
+    const { error } = await sb.storage
+      .from("banners")
+      .upload(path,file,{upsert:true});
 
-  const { error } = await sb.storage
-    .from("banners")
-    .upload(path,file,{upsert:true});
+    if(error){
+      console.error(error);
+      return null;
+    }
 
-  if(error) return null;
+    return sb.storage.from("banners").getPublicUrl(path).data.publicUrl;
 
-  return sb.storage.from("banners").getPublicUrl(path).data.publicUrl;
+  }catch(e){
+    console.error(e);
+    return null;
+  }
 }
 
 /* ===== SALVAR ===== */
 async function salvar(){
-  statusEl.innerText = "Salvando...";
+  btnSalvar.disabled = true;
+  btnSalvar.innerText = "Salvando...";
+  statusEl.innerText = "";
 
   let banner_url = null;
+
   if(bannerInput.files[0]){
     banner_url = await uploadBanner(bannerInput.files[0]);
   }
@@ -163,23 +180,31 @@ async function salvar(){
     ? await sb.from("config_site").update(payload).eq("app_id",app_id)
     : await sb.from("config_site").insert(payload);
 
+  btnSalvar.disabled = false;
+  btnSalvar.innerText = "Salvar configurações";
+
   if(res.error){
     console.error(res.error);
-    statusEl.innerText="";
-    alert("Erro ao salvar no banco");
+    statusEl.innerText = "";
+    alert("Erro ao salvar: " + res.error.message);
     return;
   }
 
-  statusEl.innerText="Salvo com sucesso 🔥";
+  statusEl.innerText = "✅ Salvo com sucesso!";
 }
 
 /* ===== LOAD ===== */
-(async()=>{
-  const { data } = await sb
+async function carregar(){
+  const { data, error } = await sb
     .from("config_site")
-    .select("nome_site, whatsapp, endereco, cidade, banner_url, tema_site")
+    .select("*")
     .eq("app_id",app_id)
     .maybeSingle();
+
+  if(error){
+    console.error(error);
+    return;
+  }
 
   if(!data) return;
 
@@ -193,7 +218,10 @@ async function salvar(){
     bannerPreview.src = data.banner_url;
     bannerPreview.style.display="block";
   }
-})();
+}
+
+/* ===== START ===== */
+carregar();
 </script>
 
 </body>
