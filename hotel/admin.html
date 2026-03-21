@@ -300,103 +300,69 @@ body{
 </div>
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { supabase } from "../js/supabase.js";
 
-const sb = createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+let app_id = null;
 
-/* ===== PEGA ID DO HOTEL ===== */
-const params = new URLSearchParams(window.location.search);
-const negocio_id = params.get("app_id") || params.get("id");
+/* ===== SESSÃO ===== */
+async function verificarSessao(){
+  const { data:{ session }, error } = await supabase.auth.getSession();
 
-if(!negocio_id){
-  document.body.innerHTML = "Hotel não informado";
-  throw new Error("Sem app_id");
-}
-
-/* ===== ELEMENTOS ===== */
-const lista = document.getElementById("lista");
-const contador = document.getElementById("contadorQuartos");
-const nomeHotel = document.getElementById("nomeHotel");
-const subHotel = document.getElementById("subHotel");
-const banner = document.getElementById("bannerHotel");
-
-let dadosConfig = {};
-
-/* ===== FORMATOS ===== */
-function formatarPreco(v){
-  return Number(v || 0).toLocaleString("pt-BR", {
-    style:"currency",
-    currency:"BRL"
-  });
-}
-
-/* ===== CONFIG ===== */
-async function carregarConfig(){
-  const { data } = await sb
-    .from("config_site")
-    .select("*")
-    .eq("app_id", negocio_id)
-    .maybeSingle();
-
-  if(data){
-    dadosConfig = data;
-
-    nomeHotel.textContent = data.nome_site || "Hotel";
-    subHotel.textContent = data.cidade || "";
-
-    if(data.banner_url){
-      banner.src = data.banner_url;
-      banner.style.display = "block";
-    }
+  if(error || !session){
+    window.location.href = "/auth/login.html";
+    return null;
   }
+
+  return session.user.id;
 }
 
-/* ===== QUARTOS ===== */
-async function carregarQuartos(){
-  const { data } = await sb
-    .from("hotel_quartos")
-    .select("*")
-    .eq("negocio_id", negocio_id)
-    .eq("status","livre");
+/* ===== USUÁRIO ===== */
+async function carregarUsuario(){
+  const userId = await verificarSessao();
+  if(!userId) return;
 
-  if(!data || !data.length){
-    lista.innerHTML = "Nenhum quarto disponível";
+  const { data: usuario, error } = await supabase
+    .from("usuarios")
+    .select("nome, app_id")
+    .eq("id", userId)
+    .single();
+
+  if(error || !usuario){
+    alert("Erro ao carregar usuário");
+    console.error(error);
     return;
   }
 
-  contador.innerText = data.length + " quartos";
+  app_id = usuario.app_id;
 
-  lista.innerHTML = "";
-
-  data.forEach(q=>{
-    const foto = q.fotos?.[0] || "";
-
-    lista.innerHTML += `
-      <div class="quarto">
-        ${foto ? `<img src="${foto}">` : ""}
-        <div class="info">
-          <h3>${q.tipo}</h3>
-          <div class="preco">${formatarPreco(q.preco_diaria)}</div>
-          <a class="btn" target="_blank"
-            href="https://wa.me/55${(dadosConfig.whatsapp || "").replace(/\D/g,"")}?text=Quero reservar ${q.tipo}">
-            Reservar
-          </a>
-        </div>
-      </div>
-    `;
-  });
+  document.getElementById("nome").innerText = usuario.nome || "";
+  document.getElementById("appId").innerText = usuario.app_id || "";
 }
 
-/* ===== START ===== */
-async function iniciar(){
-  await carregarConfig();
-  await carregarQuartos();
-}
+/* ===== NAVEGAÇÃO ===== */
+window.ir = function(pagina){
+  window.location.href = pagina;
+};
 
-iniciar();
+/* ===== ABRIR SITE ===== */
+window.abrirSite = function(){
+  if(!app_id){
+    alert("Negócio não identificado");
+    return;
+  }
+
+  const url = `${location.origin}/hotel/public/?id=${app_id}`;
+  window.open(url, "_blank");
+};
+
+/* ===== LOGOUT ===== */
+window.logout = async function(){
+  await supabase.auth.signOut();
+  window.location.href = "/auth/login.html";
+};
+
+/* START */
+carregarUsuario();
 </script>
 </body>
 </html>
