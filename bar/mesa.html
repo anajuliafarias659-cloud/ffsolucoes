@@ -773,9 +773,9 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
   {
     auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
     }
   }
 );
@@ -801,7 +801,7 @@ let sessaoMesaRegistro = null;
 let modoSomenteConta = false;
 let debitoPendenteTransferencia = null;
 
-const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
+const CHAVE_SESSAO = `mesa_sessao_${mesaId}_${TOKEN_URL || "sem_token"}`;
 let sessaoLocal = null;
 
 if (!mesaId) {
@@ -914,18 +914,26 @@ function carregarSessaoLocal() {
     sessaoLocal = null;
   }
 
-  if (sessaoLocal?.sessao_expira_em) {
-    const expirada = new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
-    if (expirada) {
-      localStorage.removeItem(CHAVE_SESSAO);
-      sessaoLocal = null;
-    }
+  if (!sessaoLocal) return;
+
+  const expirada = !sessaoLocal.sessao_expira_em ||
+    new Date(sessaoLocal.sessao_expira_em).getTime() <= Date.now();
+
+  const tokenDivergente = !TOKEN_URL || sessaoLocal.token_qr !== TOKEN_URL;
+
+  if (expirada || tokenDivergente) {
+    localStorage.removeItem(CHAVE_SESSAO);
+    sessaoLocal = null;
   }
 }
 
 function salvarSessaoLocal(sessao) {
-  sessaoLocal = sessao;
-  localStorage.setItem(CHAVE_SESSAO, JSON.stringify(sessao));
+  sessaoLocal = {
+    ...sessao,
+    token_qr: TOKEN_URL
+  };
+
+  localStorage.setItem(CHAVE_SESSAO, JSON.stringify(sessaoLocal));
   atualizarSessaoNaTela();
   iniciarMonitorSessao();
 }
@@ -1031,11 +1039,20 @@ function desativarModoSomenteConta() {
 }
 
 async function exigirNovoScanQR(motivo = "Sessão expirada. Escaneie novamente o QR da mesa para novos pedidos.") {
+  acessoMesaLiberado = false;
+  sessaoMesaRegistro = null;
+
   removerSessaoLocal();
   pedidoAtual = null;
   removerCanalPedidoAtual();
   atualizarTotaisLote(0);
   ativarModoSomenteConta(motivo);
+
+  bloquearTelaExpirada(
+    "Sessão encerrada",
+    "Sua sessão venceu após 15 minutos. Escaneie novamente o QR da mesa para continuar."
+  );
+
   await carregarHistoricoPedidosEnviados();
   await calcularTotalGeralMesa();
 }
@@ -1199,22 +1216,17 @@ async function carregarMesa() {
 }
 
 async function buscarSessaoMesaAtual() {
-  if (!mesaId || !APP_ID) return null;
+  if (!mesaId || !APP_ID || !TOKEN_URL) return null;
 
-  let query = supabase
+  const { data, error } = await supabase
     .from("sessoes_mesa")
     .select("*")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
+    .eq("token", TOKEN_URL)
     .eq("ativa", true)
     .order("created_at", { ascending: false })
     .limit(1);
-
-  if (TOKEN_URL) {
-    query = query.eq("token", TOKEN_URL);
-  }
-
-  const { data, error } = await query;
 
   if (error) {
     console.error("Erro ao buscar sessão da mesa:", error);
@@ -1227,66 +1239,61 @@ async function buscarSessaoMesaAtual() {
 async function criarOuRecuperarSessaoMesaAoAbrir() {
   if (!mesaId || !APP_ID) return false;
 
-  let sessao = await buscarSessaoMesaAtual();
+  if (!TOKEN_URL) {
+    acessoMesaLiberado = false;
+    bloquearTelaExpirada(
+      "Acesso inválido",
+      "Para acessar esta mesa, escaneie novamente o QR Code na mesa."
+    );
+    return false;
+  }
 
-  if (sessao && sessao.expira_em && new Date(sessao.expira_em).getTime() <= Date.now()) {
+  const { data, error } = await supabase
+    .from("sessoes_mesa")
+    .select("*")
+    .eq("mesa_id", mesaId)
+    .eq("app_id", APP_ID)
+    .eq("token", TOKEN_URL)
+    .eq("ativa", true)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Erro ao validar sessão da mesa:", error);
+    acessoMesaLiberado = false;
+    bloquearTelaExpirada(
+      "Erro ao validar acesso",
+      "Não foi possível validar o QR desta mesa."
+    );
+    return false;
+  }
+
+  if (!data) {
+    acessoMesaLiberado = false;
+    bloquearTelaExpirada(
+      "QR inválido ou expirado",
+      "Este acesso não é mais válido. Escaneie novamente o QR da mesa."
+    );
+    return false;
+  }
+
+  if (data.expira_em && new Date(data.expira_em).getTime() <= Date.now()) {
     await supabase
       .from("sessoes_mesa")
       .update({
         ativa: false,
         encerrada_em: new Date().toISOString()
       })
-      .eq("id", sessao.id);
+      .eq("id", data.id);
 
-    sessao = null;
+    acessoMesaLiberado = false;
+    bloquearTelaExpirada(
+      "QR expirado",
+      "O QR desta mesa expirou. Escaneie novamente para continuar."
+    );
+    return false;
   }
 
-  if (!sessao) {
-    const novoToken = gerarToken();
-
-    const { data: novaSessao, error: erroNova } = await supabase
-      .from("sessoes_mesa")
-      .insert({
-        mesa_id: mesaId,
-        app_id: APP_ID,
-        token: novoToken,
-        ativa: true,
-        ultimo_acesso_em: new Date().toISOString(),
-        expira_em: adicionarMinutosISO(15)
-      })
-      .select()
-      .single();
-
-    if (erroNova || !novaSessao) {
-      console.error("Erro ao criar sessão da mesa:", erroNova);
-      return false;
-    }
-
-    sessao = novaSessao;
-  } else if (!TOKEN_URL) {
-    const novoToken = gerarToken();
-
-    const { data: sessaoRenovada, error: erroRenova } = await supabase
-      .from("sessoes_mesa")
-      .update({
-        token: novoToken,
-        ultimo_acesso_em: new Date().toISOString(),
-        expira_em: adicionarMinutosISO(15)
-      })
-      .eq("id", sessao.id)
-      .select()
-      .single();
-
-    if (erroRenova || !sessaoRenovada) {
-      console.error("Erro ao renovar token da sessão da mesa:", erroRenova);
-      return false;
-    }
-
-    sessao = sessaoRenovada;
-  }
-
-  TOKEN_URL = sessao.token;
-  sessaoMesaRegistro = sessao;
+  sessaoMesaRegistro = data;
   acessoMesaLiberado = true;
   esconderTelaExpirada();
   desativarModoSomenteConta();
@@ -1294,14 +1301,19 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
 }
 
 async function tocarSessaoMesa() {
-  if (!sessaoMesaRegistro?.id) return;
+  if (!sessaoMesaRegistro?.id || !acessoMesaLiberado) return;
 
-  await supabase
+  const { data, error } = await supabase
     .from("sessoes_mesa")
     .update({
       ultimo_acesso_em: new Date().toISOString()
     })
-    .eq("id", sessaoMesaRegistro.id);
+    .eq("id", sessaoMesaRegistro.id)
+    .eq("token", TOKEN_URL)
+    .select()
+    .maybeSingle();
+
+  if (!error && data) sessaoMesaRegistro = data;
 }
 
 async function encerrarSessaoMesaSeExistir() {
@@ -1319,9 +1331,25 @@ async function encerrarSessaoMesaSeExistir() {
 }
 
 async function validarSessaoMesaNoBancoSilencioso() {
-  if (!acessoMesaLiberado) return;
+  if (!mesaId || !APP_ID || !TOKEN_URL) {
+    acessoMesaLiberado = false;
+    await exigirNovoScanQR("Acesso inválido. Escaneie novamente o QR da mesa.");
+    return;
+  }
 
-  const sessaoMesa = await buscarSessaoMesaAtual();
+  const { data: sessaoMesa, error } = await supabase
+    .from("sessoes_mesa")
+    .select("*")
+    .eq("mesa_id", mesaId)
+    .eq("app_id", APP_ID)
+    .eq("token", TOKEN_URL)
+    .eq("ativa", true)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Erro ao validar sessão da mesa:", error);
+    return;
+  }
 
   if (!sessaoMesa) {
     acessoMesaLiberado = false;
@@ -1330,15 +1358,21 @@ async function validarSessaoMesaNoBancoSilencioso() {
   }
 
   if (sessaoMesa.expira_em && new Date(sessaoMesa.expira_em).getTime() <= Date.now()) {
-    sessaoMesaRegistro = sessaoMesa;
-    await encerrarSessaoMesaSeExistir();
+    await supabase
+      .from("sessoes_mesa")
+      .update({
+        ativa: false,
+        encerrada_em: new Date().toISOString()
+      })
+      .eq("id", sessaoMesa.id);
+
     acessoMesaLiberado = false;
     await exigirNovoScanQR("A sessão desta mesa expirou. Escaneie novamente o QR.");
     return;
   }
 
   sessaoMesaRegistro = sessaoMesa;
-  TOKEN_URL = sessaoMesa.token || TOKEN_URL;
+  acessoMesaLiberado = true;
 }
 
 async function validarSessaoApp() {
@@ -1534,13 +1568,8 @@ async function tratarDebitoClienteAntesDeAbrir(clienteId, clienteNome, clienteTe
 async function iniciarSistema() {
   configurarToggleSessao();
   configurarTogglePedido();
-  carregarSessaoLocal();
   carregarFuncionarioLogado();
-
-  if (!TOKEN_URL) {
-    removerSessaoLocal();
-  }
-
+  carregarSessaoLocal();
   atualizarSessaoNaTela();
 
   const mesaOk = await carregarMesa();
@@ -1554,7 +1583,6 @@ async function iniciarSistema() {
 
   const sessaoMesaOk = await criarOuRecuperarSessaoMesaAoAbrir();
   if (!sessaoMesaOk) {
-    alert("Não foi possível abrir a sessão da mesa.");
     return;
   }
 
@@ -1674,6 +1702,7 @@ async function iniciarAtendimentoManual() {
 
   const sessao = {
     sessao_token: gerarToken(),
+    token_qr: TOKEN_URL,
     cliente_id: clienteId,
     cliente_nome: clienteNome,
     cliente_telefone: clienteTelefone,
