@@ -307,96 +307,54 @@ const sb = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let negocio_id = null;
+/* ===== PEGA ID DO HOTEL ===== */
+const params = new URLSearchParams(window.location.search);
+const negocio_id = params.get("app_id") || params.get("id");
 
-/* ===== PEGAR USUÁRIO LOGADO (IGUAL ADMIN) ===== */
-async function verificarSessao(){
-  const { data:{ session } } = await sb.auth.getSession();
-
-  if(!session){
-    window.location.href = "/auth/login.html";
-    return null;
-  }
-
-  return session.user.id;
+if(!negocio_id){
+  document.body.innerHTML = "Hotel não informado";
+  throw new Error("Sem app_id");
 }
 
-async function carregarUsuario(){
-  const userId = await verificarSessao();
-  if(!userId) return;
-
-  const { data: usuario, error } = await sb
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", userId)
-    .single();
-
-  if(error || !usuario){
-    alert("Erro ao carregar usuário");
-    return;
-  }
-
-  negocio_id = usuario.app_id;
-
-  iniciar(); // só inicia depois de ter o app_id
-}
-
-/* ===== RESTO DO SISTEMA ===== */
-
+/* ===== ELEMENTOS ===== */
 const lista = document.getElementById("lista");
 const contador = document.getElementById("contadorQuartos");
 const nomeHotel = document.getElementById("nomeHotel");
 const subHotel = document.getElementById("subHotel");
 const banner = document.getElementById("bannerHotel");
 
-let dadosConfig = {
-  nome_negocio: "Hotel",
-  whatsapp: ""
-};
+let dadosConfig = {};
 
-function formatarPreco(valor){
-  return Number(valor || 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL"
+/* ===== FORMATOS ===== */
+function formatarPreco(v){
+  return Number(v || 0).toLocaleString("pt-BR", {
+    style:"currency",
+    currency:"BRL"
   });
 }
 
-function limparNumero(numero){
-  return String(numero || "").replace(/\D/g, "");
-}
-
-function montarLinkWhatsApp(tipo, preco){
-  const numero = limparNumero(dadosConfig.whatsapp);
-
-  const msg = encodeURIComponent(
-    `Olá! Quero reservar o quarto ${tipo}.\nValor da diária: ${formatarPreco(preco)}.`
-  );
-
-  if(!numero) return null;
-
-  return `https://wa.me/55${numero}?text=${msg}`;
-}
-
+/* ===== CONFIG ===== */
 async function carregarConfig(){
   const { data } = await sb
     .from("config_site")
-    .select("nome_negocio, whatsapp, descricao")
+    .select("*")
     .eq("app_id", negocio_id)
     .maybeSingle();
 
   if(data){
     dadosConfig = data;
-    nomeHotel.textContent = data.nome_negocio || "Hotel";
-    subHotel.textContent = data.descricao || "";
+
+    nomeHotel.textContent = data.nome_site || "Hotel";
+    subHotel.textContent = data.cidade || "";
+
+    if(data.banner_url){
+      banner.src = data.banner_url;
+      banner.style.display = "block";
+    }
   }
 }
 
-function carregarBanner(){
-  banner.src = `https://pdajixsoowcyhnjwhgpc.supabase.co/storage/v1/object/public/banners/${negocio_id}/banner.jpg`;
-  banner.style.display = "block";
-  banner.onerror = () => banner.style.display = "none";
-}
-
+/* ===== QUARTOS ===== */
 async function carregarQuartos(){
   const { data } = await sb
     .from("hotel_quartos")
@@ -404,38 +362,41 @@ async function carregarQuartos(){
     .eq("negocio_id", negocio_id)
     .eq("status","livre");
 
-  if(!data || data.length === 0){
+  if(!data || !data.length){
     lista.innerHTML = "Nenhum quarto disponível";
     return;
   }
+
+  contador.innerText = data.length + " quartos";
 
   lista.innerHTML = "";
 
   data.forEach(q=>{
     const foto = q.fotos?.[0] || "";
-    const zap = montarLinkWhatsApp(q.tipo, q.preco_diaria);
 
     lista.innerHTML += `
       <div class="quarto">
         ${foto ? `<img src="${foto}">` : ""}
         <div class="info">
           <h3>${q.tipo}</h3>
-          <div class="preco">R$ ${Number(q.preco_diaria).toFixed(2)}</div>
-          ${zap ? `<a class="btn" href="${zap}" target="_blank">Reservar</a>` : ""}
+          <div class="preco">${formatarPreco(q.preco_diaria)}</div>
+          <a class="btn" target="_blank"
+            href="https://wa.me/55${(dadosConfig.whatsapp || "").replace(/\D/g,"")}?text=Quero reservar ${q.tipo}">
+            Reservar
+          </a>
         </div>
       </div>
     `;
   });
 }
 
+/* ===== START ===== */
 async function iniciar(){
-  carregarBanner();
   await carregarConfig();
   await carregarQuartos();
 }
 
-/* START */
-carregarUsuario();
+iniciar();
 </script>
 </body>
 </html>
