@@ -802,7 +802,6 @@ let modoSomenteConta = false;
 let debitoPendenteTransferencia = null;
 
 const CHAVE_SESSAO = `mesa_sessao_${mesaId}`;
-const CHAVE_CLIENTE_MESA = `mesa_cliente_${mesaId}`;
 let sessaoLocal = null;
 
 if (!mesaId) {
@@ -862,29 +861,6 @@ function gerarClienteId(nome, telefone) {
   if (fone) return "cli_" + fone;
   const base = (nome || "").trim().toLowerCase();
   return "cli_" + btoa(unescape(encodeURIComponent(base || "cliente"))).replace(/=/g, "");
-}
-
-function salvarClienteRecente(cliente) {
-  try {
-    localStorage.setItem(CHAVE_CLIENTE_MESA, JSON.stringify({
-      cliente_id: cliente?.cliente_id || null,
-      cliente_nome: cliente?.cliente_nome || "",
-      cliente_telefone: cliente?.cliente_telefone || ""
-    }));
-  } catch {}
-}
-
-function carregarClienteRecente() {
-  try {
-    return JSON.parse(localStorage.getItem(CHAVE_CLIENTE_MESA) || "null");
-  } catch {
-    return null;
-  }
-}
-
-function preencherClienteNaTela(nome = "", telefone = "") {
-  document.getElementById("clienteNome").value = nome || "";
-  document.getElementById("clienteTelefone").value = telefone || "";
 }
 
 function pedidoPodeSerEditado() {
@@ -954,7 +930,6 @@ function salvarSessaoLocal(sessao) {
   };
 
   localStorage.setItem(CHAVE_SESSAO, JSON.stringify(sessaoLocal));
-  salvarClienteRecente(sessaoLocal);
   atualizarSessaoNaTela();
   iniciarMonitorSessao();
 }
@@ -1265,14 +1240,32 @@ async function buscarSessaoMesaAtual() {
   return data?.[0] || null;
 }
 
+function ehFuncionarioAtendendo() {
+  return !!FUNCIONARIO_LOGADO?.id;
+}
+
 async function criarOuRecuperarSessaoMesaAoAbrir() {
   if (!mesaId || !APP_ID) return false;
+
+  if (ehFuncionarioAtendendo()) {
+    acessoMesaLiberado = true;
+    esconderTelaExpirada();
+    sessaoMesaRegistro = {
+      id: `funcionario-${mesaId}`,
+      mesa_id: mesaId,
+      app_id: APP_ID,
+      ativa: true,
+      origem: "funcionario"
+    };
+    if (!sessaoExpiradaLocal()) desativarModoSomenteConta();
+    return true;
+  }
 
   if (!TOKEN_URL) {
     acessoMesaLiberado = false;
     bloquearTelaExpirada(
-      "Acesso inválido",
-      "Para acessar esta mesa, escaneie novamente o QR Code na mesa."
+      "QR inválido",
+      "Escaneie novamente o QR da mesa."
     );
     return false;
   }
@@ -1293,14 +1286,14 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
     console.error("Erro ao validar sessão da mesa:", error);
     acessoMesaLiberado = false;
     bloquearTelaExpirada(
-      "Erro ao validar acesso",
-      "Não foi possível validar o QR desta mesa."
+      "Erro ao validar QR",
+      "Não foi possível validar este QR agora."
     );
     return false;
   }
 
   if (!data) {
-    const { data: novaSessao, error: erroNovaSessao } = await supabase
+    const { data: novaSessao, error: erroNova } = await supabase
       .from("sessoes_mesa")
       .insert({
         mesa_id: mesaId,
@@ -1314,12 +1307,12 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
       .select()
       .maybeSingle();
 
-    if (erroNovaSessao) {
-      console.error("Erro ao criar sessão da mesa:", erroNovaSessao);
+    if (erroNova) {
+      console.error("Erro ao criar sessão da mesa:", erroNova);
       acessoMesaLiberado = false;
       bloquearTelaExpirada(
         "Erro ao abrir mesa",
-        "Não foi possível abrir a sessão desta mesa. Escaneie novamente o QR."
+        "Não foi possível abrir esta mesa agora."
       );
       return false;
     }
@@ -1336,8 +1329,8 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
       .from("sessoes_mesa")
       .update({
         ativa: true,
-        expira_em: expiraEm,
         ultimo_acesso_em: agora,
+        expira_em: expiraEm,
         encerrada_em: null
       })
       .eq("id", data.id)
@@ -1345,11 +1338,11 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
       .maybeSingle();
 
     if (erroRenovar) {
-      console.error("Erro ao renovar sessão da mesa:", erroRenovar);
+      console.error("Erro ao renovar sessão:", erroRenovar);
       acessoMesaLiberado = false;
       bloquearTelaExpirada(
         "QR expirado",
-        "O QR desta mesa expirou. Escaneie novamente para continuar."
+        "Não foi possível renovar o QR desta mesa."
       );
       return false;
     }
@@ -1369,14 +1362,13 @@ async function criarOuRecuperarSessaoMesaAoAbrir() {
 }
 
 async function tocarSessaoMesa() {
+  if (ehFuncionarioAtendendo()) return;
   if (!sessaoMesaRegistro?.id || !acessoMesaLiberado) return;
 
   const { data, error } = await supabase
     .from("sessoes_mesa")
     .update({
-      ultimo_acesso_em: new Date().toISOString(),
-      expira_em: adicionarMinutosISO(60),
-      ativa: true
+      ultimo_acesso_em: new Date().toISOString()
     })
     .eq("id", sessaoMesaRegistro.id)
     .eq("token", TOKEN_URL)
@@ -1387,6 +1379,11 @@ async function tocarSessaoMesa() {
 }
 
 async function encerrarSessaoMesaSeExistir() {
+  if (ehFuncionarioAtendendo()) {
+    sessaoMesaRegistro = null;
+    return;
+  }
+
   if (!sessaoMesaRegistro?.id) {
     sessaoMesaRegistro = null;
     return;
@@ -1408,6 +1405,11 @@ async function encerrarSessaoMesaSeExistir() {
 }
 
 async function validarSessaoMesaNoBancoSilencioso() {
+  if (ehFuncionarioAtendendo()) {
+    acessoMesaLiberado = true;
+    return;
+  }
+
   if (!mesaId || !APP_ID || !TOKEN_URL) {
     return;
   }
@@ -1431,6 +1433,14 @@ async function validarSessaoMesaNoBancoSilencioso() {
   }
 
   if (sessaoMesa.expira_em && new Date(sessaoMesa.expira_em).getTime() <= Date.now()) {
+    await supabase
+      .from("sessoes_mesa")
+      .update({
+        ativa: false,
+        encerrada_em: new Date().toISOString()
+      })
+      .eq("id", sessaoMesa.id);
+
     acessoMesaLiberado = false;
     await exigirNovoScanQR("A sessão desta mesa expirou. Escaneie novamente o QR.");
     return;
@@ -1643,86 +1653,14 @@ async function tratarDebitoClienteAntesDeAbrir(clienteId, clienteNome, clienteTe
   return { ok: true, transferido: true, mesaOrigemId: mesaDebitoId, mesaOrigemNumero: numeroMesa };
 }
 
-async function buscarPedidosAtivosMesa() {
-  const { data, error } = await supabase
-    .from("pedidos")
-    .select("*")
-    .eq("app_id", APP_ID)
-    .eq("origem", "mesa")
-    .eq("mesa_id", mesaId)
-    .in("status", ["aberto", "novo", "aceito", "pronto", "conta_solicitada", "pedir_conta"])
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("Erro ao buscar pedidos ativos da mesa:", error);
-    return [];
-  }
-
-  return data || [];
-}
-
-async function verificarConflitoClienteNaMesa(clienteId) {
-  const pedidosAtivosMesa = await buscarPedidosAtivosMesa();
-
-  if (!pedidosAtivosMesa.length) return null;
-
-  const pedidoDeOutroCliente = pedidosAtivosMesa.find(p => {
-    const outroClienteId = p.cliente_id || gerarClienteId(p.cliente_nome || "", p.cliente_telefone || "");
-    return outroClienteId && outroClienteId !== clienteId;
-  });
-
-  return pedidoDeOutroCliente || null;
-}
-
-async function restaurarSessaoAutomaticaDaMesa() {
-  if (sessaoLocal && !sessaoExpiradaLocal()) return false;
-
-  const pedidosAtivosMesa = await buscarPedidosAtivosMesa();
-  if (!pedidosAtivosMesa.length) return false;
-
-  const pedidoBase = pedidosAtivosMesa[0];
-  const clienteNome = pedidoBase.cliente_nome || "";
-  const clienteTelefone = pedidoBase.cliente_telefone || "";
-  const clienteId = pedidoBase.cliente_id || gerarClienteId(clienteNome, clienteTelefone);
-
-  if (!clienteNome && !clienteTelefone) return false;
-
-  const sessao = {
-    sessao_token: pedidoBase.sessao_token || gerarToken(),
-    cliente_id: clienteId,
-    cliente_nome: clienteNome,
-    cliente_telefone: clienteTelefone,
-    responsavel_nome: pedidoBase.responsavel_nome || clienteNome,
-    garcom_nome: pedidoBase.garcom_nome || FUNCIONARIO_LOGADO?.nome || null,
-    funcionario_id: pedidoBase.funcionario_id || FUNCIONARIO_LOGADO?.id || null,
-    sessao_expira_em: adicionarMinutosISO(15)
-  };
-
-  salvarSessaoLocal(sessao);
-  preencherClienteNaTela(clienteNome, clienteTelefone);
-  desativarModoSomenteConta();
-  await tocarSessaoMesa();
-  return true;
-}
-
-function preencherClienteRecenteSeHouver() {
-  if (sessaoLocal && !sessaoExpiradaLocal()) {
-    preencherClienteNaTela(sessaoLocal.cliente_nome, sessaoLocal.cliente_telefone);
-    return;
-  }
-
-  const clienteRecente = carregarClienteRecente();
-  if (clienteRecente?.cliente_nome || clienteRecente?.cliente_telefone) {
-    preencherClienteNaTela(clienteRecente.cliente_nome, clienteRecente.cliente_telefone);
-  }
-}
-
 async function iniciarSistema() {
   configurarToggleSessao();
   configurarTogglePedido();
   carregarFuncionarioLogado();
   carregarSessaoLocal();
   atualizarSessaoNaTela();
+
+  document.getElementById("btnIniciarSessao").onclick = iniciarAtendimentoManual;
 
   const mesaOk = await carregarMesa();
   if (!mesaOk) return;
@@ -1738,11 +1676,8 @@ async function iniciarSistema() {
     return;
   }
 
-  preencherClienteRecenteSeHouver();
   await tocarSessaoMesa();
   await carregarProdutos();
-  await sincronizarSessaoComPedidos();
-  await restaurarSessaoAutomaticaDaMesa();
   await sincronizarSessaoComPedidos();
   ativarRealtimeMesa();
   ativarRealtimeMesaStatus();
@@ -1798,31 +1733,9 @@ async function sincronizarSessaoComPedidos() {
 
   pedidoAtual = pedidoAberto;
 
-  if (pedidoMaisRecenteAtivo?.cliente_nome || pedidoMaisRecenteAtivo?.cliente_telefone) {
-    preencherClienteNaTela(
-      pedidoMaisRecenteAtivo?.cliente_nome || "",
-      pedidoMaisRecenteAtivo?.cliente_telefone || ""
-    );
-  }
-
-  if ((!sessaoLocal || sessaoExpiradaLocal()) && pedidoMaisRecenteAtivo) {
-    const clienteIdAuto = pedidoMaisRecenteAtivo.cliente_id || gerarClienteId(
-      pedidoMaisRecenteAtivo.cliente_nome || "",
-      pedidoMaisRecenteAtivo.cliente_telefone || ""
-    );
-
-    salvarSessaoLocal({
-      sessao_token: pedidoMaisRecenteAtivo.sessao_token || gerarToken(),
-      cliente_id: clienteIdAuto,
-      cliente_nome: pedidoMaisRecenteAtivo.cliente_nome || "",
-      cliente_telefone: pedidoMaisRecenteAtivo.cliente_telefone || "",
-      responsavel_nome: pedidoMaisRecenteAtivo.responsavel_nome || pedidoMaisRecenteAtivo.cliente_nome || "",
-      garcom_nome: pedidoMaisRecenteAtivo.garcom_nome || FUNCIONARIO_LOGADO?.nome || null,
-      funcionario_id: pedidoMaisRecenteAtivo.funcionario_id || FUNCIONARIO_LOGADO?.id || null,
-      sessao_expira_em: adicionarMinutosISO(15)
-    });
-
-    desativarModoSomenteConta();
+  if (pedidoMaisRecenteAtivo?.cliente_nome) {
+    document.getElementById("clienteNome").value = pedidoMaisRecenteAtivo.cliente_nome || "";
+    document.getElementById("clienteTelefone").value = pedidoMaisRecenteAtivo.cliente_telefone || "";
   }
 
   const totalMesa = await calcularTotalGeralMesa();
@@ -1850,8 +1763,30 @@ async function sincronizarSessaoComPedidos() {
   aplicarFiltros();
 }
 
+async function verificarConflitoClienteNaMesa(clienteId) {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id, cliente_id, cliente_nome, cliente_telefone, status")
+    .eq("app_id", APP_ID)
+    .eq("origem", "mesa")
+    .eq("mesa_id", mesaId)
+    .in("status", ["aberto", "novo", "aceito", "pronto", "conta_solicitada", "pedir_conta"])
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Erro ao validar cliente atual da mesa:", error);
+    return null;
+  }
+
+  const pedidosAtivos = data || [];
+  if (!pedidosAtivos.length) return null;
+
+  const outroCliente = pedidosAtivos.find(p => p.cliente_id && p.cliente_id !== clienteId);
+  return outroCliente || null;
+}
+
 async function iniciarAtendimentoManual() {
-  if (!acessoMesaLiberado) {
+  if (!acessoMesaLiberado && !ehFuncionarioAtendendo()) {
     alert("Escaneie o QR da mesa para iniciar.");
     return;
   }
@@ -1865,14 +1800,10 @@ async function iniciarAtendimentoManual() {
   }
 
   const clienteId = gerarClienteId(clienteNome, clienteTelefone);
-
   const conflito = await verificarConflitoClienteNaMesa(clienteId);
-  if (conflito) {
-    alert(
-      `Esta mesa já está com débito ativo para ${conflito.cliente_nome || "outro cliente"}. ` +
-      `Para evitar misturar comandas, continue com o mesmo cliente ou peça para liberar a mesa antes de trocar.`
-    );
-    preencherClienteNaTela(conflito.cliente_nome || "", conflito.cliente_telefone || "");
+
+  if (conflito && !ehFuncionarioAtendendo()) {
+    alert(`Esta mesa já está em atendimento para ${conflito.cliente_nome || "outro cliente"}. Para evitar misturar a conta, finalize ou peça a conta da mesa atual antes de iniciar outro cliente.`);
     return;
   }
 
@@ -1880,7 +1811,7 @@ async function iniciarAtendimentoManual() {
 
   if (debitosNaMesa.length > 0) {
     const sessao = {
-      sessao_token: debitosNaMesa[0].sessao_token || gerarToken(),
+      sessao_token: gerarToken(),
       cliente_id: clienteId,
       cliente_nome: clienteNome,
       cliente_telefone: clienteTelefone,
@@ -1907,7 +1838,7 @@ async function iniciarAtendimentoManual() {
       cliente_celular: clienteTelefone
     });
 
-    alert("Cliente reconhecido. Débito anterior encontrado nesta mesa.");
+    alert("Sessão retomada. Débito anterior encontrado nesta mesa.");
     await sincronizarSessaoComPedidos();
     return;
   }
@@ -1918,9 +1849,7 @@ async function iniciarAtendimentoManual() {
     !sessaoExpiradaLocal()
   ) {
     desativarModoSomenteConta();
-    await tocarSessaoMesa();
     alert("Cliente reconhecido. Sessão retomada com sucesso.");
-    await sincronizarSessaoComPedidos();
     return;
   }
 
@@ -1955,6 +1884,12 @@ async function iniciarAtendimentoManual() {
 }
 
 async function validarSessaoPedido() {
+  if (ehFuncionarioAtendendo()) {
+    acessoMesaLiberado = true;
+    esconderTelaExpirada();
+    return true;
+  }
+
   if (!acessoMesaLiberado) {
     alert("Abra a mesa pelo QR para fazer pedidos.");
     return false;
