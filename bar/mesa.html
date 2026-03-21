@@ -845,22 +845,31 @@ function atualizarInfoStatus(){
 
   if (!pedidoAtual) {
     div.style.display = "block";
-    div.innerHTML = `Nenhum lote em aberto.<br><small>Toque em um produto para começar.</small>`;
+    div.innerHTML = `Nenhuma comanda ativa.<br><small>Toque em um produto para começar.</small>`;
     return;
   }
 
   div.style.display = "block";
 
-  if (normalizarStatus(pedidoAtual.status) === "aberto") {
-    div.innerHTML = `Status do lote: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>Você ainda pode alterar antes de enviar.</small>`;
-  } else {
-    div.innerHTML = `Status do lote: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>Esse lote já foi enviado e está travado.</small>`;
+  if (statusFechado(pedidoAtual.status)) {
+    div.innerHTML = `Comanda encerrada: <strong>${nomeStatus(pedidoAtual.status)}</strong>`;
+    return;
   }
+
+  if (normalizarStatus(pedidoAtual.status) === "conta_solicitada" || normalizarStatus(pedidoAtual.status) === "pedir_conta") {
+    div.innerHTML = `Status da comanda: <strong>${nomeStatus(pedidoAtual.status)}</strong><br><small>Aguardando fechamento da conta.</small>`;
+    return;
+  }
+
+  div.innerHTML = `Status da comanda: <strong>${nomeStatus(pedidoAtual.status || "aberto")}</strong><br><small>Todos os itens desta mesa ficam na mesma comanda.</small>`;
 }
 
 function pedidoPodeSerEditado(){
   if (!pedidoAtual) return true;
-  return normalizarStatus(pedidoAtual.status) === "aberto";
+  const s = normalizarStatus(pedidoAtual.status);
+  if (statusFechado(s)) return false;
+  if (s === "conta_solicitada" || s === "pedir_conta") return false;
+  return true;
 }
 
 function limparTelaPedidoAtual(){
@@ -1115,21 +1124,69 @@ function aplicarFiltros(){
   });
 }
 
-async function criarPedidoSeNecessario(){
-  if (pedidoAtual && normalizarStatus(pedidoAtual.status) === "aberto") return true;
-
+async function buscarOuCriarComanda(){
   const clienteNome = document.getElementById("clienteNome").value.trim();
   const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
 
   if (!clienteNome) {
     alert("Preencha ao menos o nome do cliente/responsável.");
     document.getElementById("clienteNome").focus();
-    return false;
+    return null;
   }
 
   const clienteId = gerarClienteId(clienteNome, clienteTelefone);
 
-  const { data, error } = await sb
+  const { data: comandaExistente, error: erroBusca } = await sb
+    .from("pedidos")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .eq("mesa_id", mesaId)
+    .eq("origem", "mesa")
+    .order("created_at", { ascending:false });
+
+  if (erroBusca) {
+    console.error(erroBusca);
+    alert("Erro ao buscar comanda da mesa.");
+    return null;
+  }
+
+  const comandaAtiva = (comandaExistente || []).find(p => !statusFechado(p.status)) || null;
+
+  if (comandaAtiva) {
+    const { data: atualizada, error: erroAtualiza } = await sb
+      .from("pedidos")
+      .update({
+        cliente_id: clienteId,
+        cliente_nome: clienteNome,
+        cliente_telefone: clienteTelefone,
+        responsavel_nome: clienteNome,
+        status: (normalizarStatus(comandaAtiva.status) === "conta_solicitada" || normalizarStatus(comandaAtiva.status) === "pedir_conta") ? "ocupada" : comandaAtiva.status
+      })
+      .eq("id", comandaAtiva.id)
+      .select()
+      .single();
+
+    if (erroAtualiza) {
+      console.error(erroAtualiza);
+      alert("Erro ao atualizar a comanda.");
+      return null;
+    }
+
+    pedidoAtual = atualizada;
+
+    await atualizarMesaStatus({
+      ocupada: true,
+      pedir_conta: false,
+      status: "ocupada",
+      cliente_nome: clienteNome,
+      cliente_celular: clienteTelefone
+    });
+
+    ativarRealtimePedidoAtual();
+    return pedidoAtual;
+  }
+
+  const { data: novaComanda, error: erroCriacao } = await sb
     .from("pedidos")
     .insert({
       app_id: APP_ID,
@@ -1144,13 +1201,13 @@ async function criarPedidoSeNecessario(){
     .select()
     .single();
 
-  if (error) {
-    console.error(error);
-    alert("Erro ao criar pedido.");
-    return false;
+  if (erroCriacao) {
+    console.error(erroCriacao);
+    alert("Erro ao criar comanda.");
+    return null;
   }
 
-  pedidoAtual = data;
+  pedidoAtual = novaComanda;
   ativarRealtimePedidoAtual();
 
   await atualizarMesaStatus({
@@ -1161,14 +1218,12 @@ async function criarPedidoSeNecessario(){
     cliente_celular: clienteTelefone
   });
 
-  atualizarInfoClienteMesa();
-  atualizarInfoStatus();
-  return true;
+  return pedidoAtual;
 }
 
 async function addProduto(produtoId){
-  const ok = await criarPedidoSeNecessario();
-  if (!ok) return;
+  const comanda = await buscarOuCriarComanda();
+  if (!comanda) return;
 
   const produto = produtosCache.find(p => String(p.id) === String(produtoId));
   if (!produto) return;
@@ -1180,7 +1235,7 @@ async function addProduto(produtoId){
     .from("pedido_itens")
     .insert({
       app_id: APP_ID,
-      pedido_id: pedidoAtual.id,
+      pedido_id: comanda.id,
       produto_id: produto.id,
       nome_produto: produto.nome,
       preco: Number(produto.preco || 0),
@@ -1196,6 +1251,21 @@ async function addProduto(produtoId){
     alert("Erro ao adicionar produto.");
     return;
   }
+
+  // faz a comanda voltar a chamar atenção do bar quando entrar item novo
+  const { data: pedidoAtualizado } = await sb
+    .from("pedidos")
+    .update({
+      status: "novo",
+      cliente_nome: clienteNome || null,
+      cliente_telefone: clienteTelefone || null,
+      responsavel_nome: clienteNome || null
+    })
+    .eq("id", comanda.id)
+    .select()
+    .maybeSingle();
+
+  if (pedidoAtualizado) pedidoAtual = pedidoAtualizado;
 
   abrirPedidoFlutuante();
   await carregarPedidoAtual();
@@ -1281,7 +1351,8 @@ async function removerItem(itemId){
 }
 
 async function carregarPedidoAtual(){
-  if (!pedidoAtual) {
+  if (!pedidoAtual || statusFechado(pedidoAtual.status)) {
+    pedidoAtual = null;
     limparTelaPedidoAtual();
     atualizarInfoStatus();
     await calcularTotalGeralMesa();
@@ -1307,7 +1378,7 @@ async function carregarPedidoAtual(){
   atualizarFabPedido(itens.reduce((s,i)=>s+Number(i.quantidade||0),0));
 
   if (itens.length === 0) {
-    div.innerHTML = `<div class="msg-vazio">Nenhum item neste lote.</div>`;
+    div.innerHTML = `<div class="msg-vazio">Nenhum item nesta comanda.</div>`;
   }
 
   itens.forEach(i => {
@@ -1355,7 +1426,6 @@ async function carregarHistoricoPedidosEnviados(){
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
     .eq("origem", "mesa")
-    .neq("status", "aberto")
     .order("created_at", { ascending:true });
 
   if (error) {
@@ -1364,16 +1434,18 @@ async function carregarHistoricoPedidosEnviados(){
     return;
   }
 
-  if (!pedidos || pedidos.length === 0) {
+  const pedidosFechados = (pedidos || []).filter(p => statusFechado(p.status));
+
+  if (pedidosFechados.length === 0) {
     box.style.display = "none";
     box.innerHTML = "";
     return;
   }
 
-  let html = `<h4>Pedidos já enviados</h4>`;
+  let html = `<h4>Histórico de comandas encerradas</h4>`;
 
-  for (let idx = 0; idx < pedidos.length; idx++) {
-    const p = pedidos[idx];
+  for (let idx = 0; idx < pedidosFechados.length; idx++) {
+    const p = pedidosFechados[idx];
 
     const { data: itens } = await sb
       .from("pedido_itens")
@@ -1383,12 +1455,11 @@ async function carregarHistoricoPedidosEnviados(){
 
     let subtotal = 0;
     html += `<div class="divisor"></div>`;
-    html += `<div class="lote-tag">Lote ${idx + 1} — ${nomeStatus(p.status)}</div>`;
+    html += `<div class="lote-tag">Comanda ${idx + 1} — ${nomeStatus(p.status)}</div>`;
 
     (itens || []).forEach((i, itemIndex) => {
       const sub = Number(i.preco || 0) * Number(i.quantidade || 0);
       subtotal += sub;
-
       html += `
         <div class="linha-historico">
           ${itemIndex + 1}. ${i.quantidade}x ${i.nome_produto} — ${formatarMoeda(sub)}
@@ -1396,7 +1467,7 @@ async function carregarHistoricoPedidosEnviados(){
       `;
     });
 
-    html += `<small>Total do lote ${idx + 1}: ${formatarMoeda(subtotal)}</small>`;
+    html += `<small>Total da comanda ${idx + 1}: ${formatarMoeda(subtotal)}</small>`;
   }
 
   box.innerHTML = html;
@@ -1409,8 +1480,7 @@ async function calcularTotalGeralMesa(){
     .select("id,status")
     .eq("mesa_id", mesaId)
     .eq("app_id", APP_ID)
-    .eq("origem", "mesa")
-    .in("status", ["aberto","novo","aceito","pronto","conta_solicitada","pedir_conta"]);
+    .eq("origem", "mesa");
 
   if (erroPedidos) {
     console.error(erroPedidos);
@@ -1418,13 +1488,15 @@ async function calcularTotalGeralMesa(){
     return 0;
   }
 
-  if (!pedidos || pedidos.length === 0) {
+  const pedidosAtivos = (pedidos || []).filter(p => !statusFechado(p.status));
+
+  if (pedidosAtivos.length === 0) {
     atualizarTotaisMesa(0);
     await atualizarMesaStatus({ total_aberto:0 });
     return 0;
   }
 
-  const ids = pedidos.map(p => p.id);
+  const ids = pedidosAtivos.map(p => p.id);
 
   const { data: itens, error: erroItens } = await sb
     .from("pedido_itens")
@@ -1463,10 +1535,9 @@ async function sincronizarMesaComPedidos(){
 
   const pedidos = data || [];
   const pedidosAtivos = pedidos.filter(p => !statusFechado(p.status));
-  const pedidoAberto = pedidosAtivos.find(p => normalizarStatus(p.status) === "aberto") || null;
-  const pedidoMaisRecenteAtivo = pedidosAtivos[0] || null;
+  const comandaAtiva = pedidosAtivos[0] || null;
 
-  if (pedidosAtivos.length === 0) {
+  if (!comandaAtiva) {
     pedidoAtual = null;
     removerCanalPedidoAtual();
     limparTelaPedidoAtual();
@@ -1486,60 +1557,44 @@ async function sincronizarMesaComPedidos(){
     return;
   }
 
-  pedidoAtual = pedidoAberto;
+  pedidoAtual = comandaAtiva;
 
-  if (pedidoMaisRecenteAtivo?.cliente_nome && !document.getElementById("clienteNome").value.trim()) {
-    document.getElementById("clienteNome").value = pedidoMaisRecenteAtivo.cliente_nome || "";
+  if (comandaAtiva.cliente_nome && !document.getElementById("clienteNome").value.trim()) {
+    document.getElementById("clienteNome").value = comandaAtiva.cliente_nome || "";
   }
 
-  if (pedidoMaisRecenteAtivo?.cliente_telefone && !document.getElementById("clienteTelefone").value.trim()) {
-    document.getElementById("clienteTelefone").value = pedidoMaisRecenteAtivo.cliente_telefone || "";
+  if (comandaAtiva.cliente_telefone && !document.getElementById("clienteTelefone").value.trim()) {
+    document.getElementById("clienteTelefone").value = comandaAtiva.cliente_telefone || "";
   }
 
   const totalMesa = await calcularTotalGeralMesa();
-  const pediuConta = pedidosAtivos.some(p => {
-    const s = normalizarStatus(p.status);
-    return s === "conta_solicitada" || s === "pedir_conta";
-  });
+  const s = normalizarStatus(comandaAtiva.status);
+  const pediuConta = s === "conta_solicitada" || s === "pedir_conta";
 
   await atualizarMesaStatus({
     ocupada:true,
     pedir_conta:pediuConta,
     status:pediuConta ? "conta_solicitada" : "ocupada",
-    cliente_nome:document.getElementById("clienteNome").value.trim() || pedidoMaisRecenteAtivo?.cliente_nome || null,
-    cliente_celular:document.getElementById("clienteTelefone").value.trim() || pedidoMaisRecenteAtivo?.cliente_telefone || null,
+    cliente_nome:document.getElementById("clienteNome").value.trim() || comandaAtiva.cliente_nome || null,
+    cliente_celular:document.getElementById("clienteTelefone").value.trim() || comandaAtiva.cliente_telefone || null,
     total_aberto:totalMesa
   });
 
   atualizarInfoClienteMesa();
   atualizarInfoStatus();
-
-  if (pedidoAtual) {
-    ativarRealtimePedidoAtual();
-    await carregarPedidoAtual();
-  } else {
-    removerCanalPedidoAtual();
-    limparTelaPedidoAtual();
-  }
-
+  ativarRealtimePedidoAtual();
+  await carregarPedidoAtual();
   await carregarHistoricoPedidosEnviados();
 }
 
 document.getElementById("btnEnviar").onclick = async () => {
-  if (!pedidoAtual) {
-    alert("Nenhum lote em aberto.");
-    return;
-  }
-
-  if (!pedidoPodeSerEditado()) {
-    alert("Esse lote já foi enviado.");
-    return;
-  }
+  const comanda = await buscarOuCriarComanda();
+  if (!comanda) return;
 
   const { data: itens, error: erroItens } = await sb
     .from("pedido_itens")
     .select("id")
-    .eq("pedido_id", pedidoAtual.id)
+    .eq("pedido_id", comanda.id)
     .limit(1);
 
   if (erroItens) {
@@ -1556,7 +1611,7 @@ document.getElementById("btnEnviar").onclick = async () => {
   const clienteNome = document.getElementById("clienteNome").value.trim();
   const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
 
-  const { error } = await sb
+  const { data: atualizado, error } = await sb
     .from("pedidos")
     .update({
       status:"novo",
@@ -1564,15 +1619,18 @@ document.getElementById("btnEnviar").onclick = async () => {
       cliente_telefone:clienteTelefone || null,
       responsavel_nome:clienteNome || null
     })
-    .eq("id", pedidoAtual.id)
+    .eq("id", comanda.id)
     .eq("app_id", APP_ID)
-    .eq("status", "aberto");
+    .select()
+    .maybeSingle();
 
   if (error) {
     console.error(error);
     alert("Erro ao enviar pedido.");
     return;
   }
+
+  if (atualizado) pedidoAtual = atualizado;
 
   await atualizarMesaStatus({
     ocupada:true,
@@ -1582,7 +1640,7 @@ document.getElementById("btnEnviar").onclick = async () => {
     cliente_celular:clienteTelefone || null
   });
 
-  alert("Pedido enviado com sucesso.");
+  alert("Comanda atualizada com sucesso.");
   fecharPedidoFlutuante();
   await sincronizarMesaComPedidos();
 };
@@ -1595,44 +1653,24 @@ document.getElementById("btnConta").onclick = async () => {
     return;
   }
 
-  const { data: pedidosAtivos, error } = await sb
-    .from("pedidos")
-    .select("id,status")
-    .eq("mesa_id", mesaId)
-    .eq("app_id", APP_ID)
-    .eq("origem", "mesa")
-    .in("status", ["aberto","novo","aceito","pronto","conta_solicitada","pedir_conta"]);
+  const comanda = await buscarOuCriarComanda();
+  if (!comanda) return;
 
-  if (error) {
-    console.error(error);
-    alert("Erro ao verificar pedidos.");
-    return;
-  }
-
-  if (!pedidosAtivos || pedidosAtivos.length === 0) {
-    alert("Não há pedidos pendentes nesta mesa.");
-    return;
-  }
-
-  const temAberto = pedidosAtivos.some(p => normalizarStatus(p.status) === "aberto");
-  if (temAberto) {
-    alert("Existe um lote em aberto. Envie o pedido atual antes de pedir conta.");
-    return;
-  }
-
-  const ids = pedidosAtivos.map(p => p.id);
-
-  const { error:errorUpdate } = await sb
+  const { data: atualizada, error:errorUpdate } = await sb
     .from("pedidos")
     .update({ status:"conta_solicitada" })
-    .in("id", ids)
-    .eq("app_id", APP_ID);
+    .eq("id", comanda.id)
+    .eq("app_id", APP_ID)
+    .select()
+    .maybeSingle();
 
   if (errorUpdate) {
     console.error(errorUpdate);
     alert("Erro ao pedir conta.");
     return;
   }
+
+  if (atualizada) pedidoAtual = atualizada;
 
   await atualizarMesaStatus({
     ocupada:true,
