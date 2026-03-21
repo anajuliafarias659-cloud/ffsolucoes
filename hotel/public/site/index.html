@@ -24,10 +24,18 @@ body[data-tema="pascoa"]{--bg:#2e1065;--card:#4c1d95;--primary:#a855f7}
 body[data-tema="black"]{--bg:#000;--card:#111;--primary:#ffffff}
 
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
-body{background:var(--bg);color:var(--text)}
+body{background:var(--bg);color:var(--text);min-height:100vh}
 
-.banner{width:100%;height:220px;object-fit:cover}
-@media(max-width:768px){.banner{height:150px}}
+.banner{
+  width:100%;
+  height:220px;
+  object-fit:cover;
+  display:block;
+  background:#0b1220;
+}
+@media(max-width:768px){
+  .banner{height:150px}
+}
 
 .container{max-width:1100px;margin:auto;padding:16px}
 .card{background:var(--card);padding:16px;border-radius:16px;margin-bottom:16px}
@@ -67,7 +75,7 @@ body{background:var(--bg);color:var(--text)}
   .info{padding:8px}
   .info h3{font-size:13px}
   .preco{font-size:13px}
-  .btn{padding:8px 8px;font-size:12px}
+  .btn,.btn-sec{padding:8px 8px;font-size:12px}
 }
 @media(min-width:769px){
   .quartos{grid-template-columns:repeat(2,1fr)}
@@ -84,6 +92,8 @@ body{background:var(--bg);color:var(--text)}
   width:100%;
   object-fit:cover;
   cursor:pointer;
+  display:block;
+  background:#0b1220;
 }
 .info{padding:12px}
 .preco{margin:6px 0;font-weight:800;color:var(--primary)}
@@ -140,6 +150,8 @@ body{background:var(--bg);color:var(--text)}
   width:100%;
   border-radius:12px;
   margin-bottom:10px;
+  display:block;
+  background:#111;
 }
 
 .modal-box{
@@ -165,6 +177,10 @@ body{background:var(--bg);color:var(--text)}
   background:#0b141a;
   color:#fff;
 }
+.modal-box textarea{
+  min-height:90px;
+  resize:vertical;
+}
 .acoes{display:flex;gap:10px;margin-top:12px}
 .acoes button{flex:1}
 </style>
@@ -172,7 +188,7 @@ body{background:var(--bg);color:var(--text)}
 
 <body data-tema="padrao">
 
-<img id="bannerHotel" class="banner">
+<img id="bannerHotel" class="banner" alt="Banner do hotel">
 
 <div class="container">
   <div class="card">
@@ -298,6 +314,59 @@ function intervaloValido(entrada, saida){
   return !!entrada && !!saida && saida > entrada;
 }
 
+function parsePossivelJSON(valor){
+  if(valor == null) return null;
+  if(Array.isArray(valor) || typeof valor === "object") return valor;
+
+  if(typeof valor !== "string") return valor;
+
+  const txt = valor.trim();
+  if(!txt) return "";
+
+  try{
+    return JSON.parse(txt);
+  }catch{
+    return valor;
+  }
+}
+
+function extrairPrimeiraUrl(valor){
+  const convertido = parsePossivelJSON(valor);
+
+  if(Array.isArray(convertido)){
+    return convertido[0] || "";
+  }
+
+  if(typeof convertido === "string"){
+    return convertido;
+  }
+
+  return "";
+}
+
+function normalizarFotos(valor){
+  const convertido = parsePossivelJSON(valor);
+
+  if(Array.isArray(convertido)){
+    return convertido.filter(Boolean).map(String);
+  }
+
+  if(typeof convertido === "string" && convertido.trim()){
+    return [convertido.trim()];
+  }
+
+  return [];
+}
+
+function escAttr(texto){
+  return String(texto || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 async function carregarConfig(){
   const { data, error } = await sb
     .from("config_site")
@@ -315,8 +384,15 @@ async function carregarConfig(){
     nomeHotel.textContent = data.nome_site || "Hotel";
     enderecoHotel.textContent = `${data.endereco || ""} ${data.cidade || ""}`.trim();
 
-    if(data.banner_url){
-      banner.src = data.banner_url;
+    const bannerUrl = extrairPrimeiraUrl(data.banner_url);
+    if(bannerUrl){
+      banner.src = bannerUrl;
+      banner.onerror = () => {
+        banner.removeAttribute("src");
+        banner.style.display = "none";
+      };
+    }else{
+      banner.style.display = "none";
     }
 
     if(data.tema_site){
@@ -338,7 +414,11 @@ async function carregarQuartosBase(){
     return [];
   }
 
-  quartosCache = data || [];
+  quartosCache = (data || []).map(q => ({
+    ...q,
+    fotosNormalizadas: normalizarFotos(q.fotos)
+  }));
+
   return quartosCache;
 }
 
@@ -359,7 +439,7 @@ async function buscarReservasOcupadas(checkin, checkout){
   return data || [];
 }
 
-function renderizarQuartos(quartos, reservas, checkin, checkout){
+function renderizarQuartos(quartos, reservas){
   if(!quartos.length){
     lista.innerHTML = "Nenhum quarto disponível";
     return;
@@ -369,17 +449,22 @@ function renderizarQuartos(quartos, reservas, checkin, checkout){
   lista.innerHTML = "";
 
   quartos.forEach(q => {
-    const foto = q.fotos?.[0] || "";
+    const fotos = q.fotosNormalizadas || [];
+    const foto = fotos[0] || "";
     const bloqueadoPorReserva = idsBloqueados.has(q.id);
     const indisponivelPorStatus = q.status && q.status !== "livre";
     const disponivel = !bloqueadoPorReserva && !indisponivelPorStatus;
 
+    const htmlFoto = foto
+      ? `<img src="${escAttr(foto)}" alt="${escAttr(q.tipo || "Quarto")}" onclick="abrirGaleriaPorQuarto('${escAttr(q.id)}')">`
+      : `<div style="height:180px;background:#111;display:flex;align-items:center;justify-content:center;color:#94a3b8">Sem foto</div>`;
+
     lista.innerHTML += `
       <div class="quarto">
-        ${foto ? `<img src="${foto}" onclick='abrirGaleria(${JSON.stringify(q.fotos || [])})'>` : ""}
+        ${htmlFoto}
 
         <div class="info">
-          <h3>${q.tipo}${q.numero ? " - Nº " + q.numero : ""}</h3>
+          <h3>${escAttr(q.tipo || "Quarto")}${q.numero ? " - Nº " + escAttr(q.numero) : ""}</h3>
           <div class="preco">${formatarPreco(q.preco_diaria)}</div>
           <div class="status ${disponivel ? "livre" : "ocupado"}">
             ${disponivel ? "Disponível nessas datas" : "Indisponível nessas datas"}
@@ -387,7 +472,7 @@ function renderizarQuartos(quartos, reservas, checkin, checkout){
 
           ${
             disponivel
-              ? `<button class="btn" onclick="abrirReserva('${q.id}','${String(q.tipo).replaceAll("'","")}', ${q.preco_diaria || 0}, '${q.numero || ""}')">Reservar</button>`
+              ? `<button class="btn" onclick="abrirReserva('${escAttr(q.id)}')">Reservar</button>`
               : `<button class="btn-sec" disabled>Bloqueado</button>`
           }
         </div>
@@ -396,9 +481,18 @@ function renderizarQuartos(quartos, reservas, checkin, checkout){
   });
 }
 
+window.abrirGaleriaPorQuarto = function(quartoId){
+  const quarto = quartosCache.find(q => String(q.id) === String(quartoId));
+  const fotos = quarto?.fotosNormalizadas || [];
+  abrirGaleria(fotos);
+};
+
 window.abrirGaleria = function(fotos){
   const box = document.getElementById("galeriaFotos");
-  box.innerHTML = fotos.map(f=>`<img src="${f}">`).join("");
+  const listaFotos = Array.isArray(fotos) ? fotos : [];
+  box.innerHTML = listaFotos.length
+    ? listaFotos.map(f => `<img src="${escAttr(f)}" alt="Foto do quarto">`).join("")
+    : `<div style="padding:20px;text-align:center;color:#94a3b8">Sem fotos</div>`;
   document.getElementById("modalGaleria").style.display = "flex";
 };
 
@@ -406,7 +500,7 @@ window.fecharGaleria = function(){
   document.getElementById("modalGaleria").style.display = "none";
 };
 
-window.abrirReserva = function(quartoId, tipo, preco, numero){
+window.abrirReserva = function(quartoId){
   const entrada = checkinFiltro.value;
   const saida = checkoutFiltro.value;
 
@@ -415,9 +509,22 @@ window.abrirReserva = function(quartoId, tipo, preco, numero){
     return;
   }
 
-  quartoSelecionado = { quartoId, tipo, preco, numero };
+  const quarto = quartosCache.find(q => String(q.id) === String(quartoId));
+  if(!quarto){
+    alert("Quarto não encontrado.");
+    return;
+  }
 
-  document.getElementById("tituloReserva").innerText = `${tipo}${numero ? " - Nº " + numero : ""}`;
+  quartoSelecionado = {
+    quartoId: quarto.id,
+    tipo: quarto.tipo || "Quarto",
+    preco: quarto.preco_diaria || 0,
+    numero: quarto.numero || ""
+  };
+
+  document.getElementById("tituloReserva").innerText =
+    `${quartoSelecionado.tipo}${quartoSelecionado.numero ? " - Nº " + quartoSelecionado.numero : ""}`;
+
   document.getElementById("dataEntrada").value = entrada;
   document.getElementById("dataSaida").value = saida;
   document.getElementById("dataEntrada").min = hojeISO();
@@ -438,6 +545,11 @@ window.enviarReserva = async function(){
   const saida = document.getElementById("dataSaida").value;
   const obs = document.getElementById("obs").value.trim();
 
+  if(!quartoSelecionado){
+    alert("Selecione um quarto.");
+    return;
+  }
+
   if(!nome || !tel || !entrada || !saida){
     alert("Preencha nome, telefone, entrada e saída.");
     return;
@@ -449,7 +561,7 @@ window.enviarReserva = async function(){
   }
 
   const reservas = await buscarReservasOcupadas(entrada, saida);
-  const quartoJaOcupado = reservas.some(r => r.quarto_id === quartoSelecionado.quartoId);
+  const quartoJaOcupado = reservas.some(r => String(r.quarto_id) === String(quartoSelecionado.quartoId));
 
   if(quartoJaOcupado){
     alert("Esse quarto acabou de ser reservado para esse período. Escolha outro.");
@@ -513,14 +625,14 @@ async function buscarDisponibilidade(){
 
   if(!intervaloValido(checkin, checkout)){
     msgBusca.textContent = "Escolha check-in e check-out válidos para consultar.";
-    renderizarQuartos(quartosCache, [], "", "");
+    renderizarQuartos(quartosCache, []);
     return;
   }
 
   msgBusca.textContent = `Buscando disponibilidade de ${formatarDataBR(checkin)} até ${formatarDataBR(checkout)}...`;
 
   const reservas = await buscarReservasOcupadas(checkin, checkout);
-  renderizarQuartos(quartosCache, reservas, checkin, checkout);
+  renderizarQuartos(quartosCache, reservas);
 
   msgBusca.textContent = `Mostrando disponibilidade de ${formatarDataBR(checkin)} até ${formatarDataBR(checkout)}.`;
 }
@@ -532,6 +644,17 @@ checkinFiltro.addEventListener("change", () => {
     checkoutFiltro.min = addDias(checkinFiltro.value, 1);
     if(!checkoutFiltro.value || checkoutFiltro.value <= checkinFiltro.value){
       checkoutFiltro.value = addDias(checkinFiltro.value, 1);
+    }
+  }
+});
+
+document.getElementById("dataEntrada").addEventListener("change", () => {
+  const entrada = document.getElementById("dataEntrada").value;
+  const saida = document.getElementById("dataSaida");
+  if(entrada){
+    saida.min = addDias(entrada, 1);
+    if(!saida.value || saida.value <= entrada){
+      saida.value = addDias(entrada, 1);
     }
   }
 });
