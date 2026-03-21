@@ -5,154 +5,143 @@
 <title>👤 Hóspedes - Hotel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- SUPABASE SDK -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<script>
-/* ========= SUPABASE ========= */
-const db = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-/* ========= SESSÃO ========= */
-const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
-
-if (!admin?.app_id) {
-  alert("Sessão inválida. Faça login novamente.");
-  location.href = "../auth/login.html";
-  throw new Error("Sem sessão");
+<style>
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#020617;
+  color:#fff;
 }
 
-const negocio_id = admin.app_id;
+.container{
+  max-width:900px;
+  margin:30px auto;
+  padding:20px;
+}
 
-/* mantém padrão do sistema */
-localStorage.setItem("app_id", negocio_id);
+.card{
+  background:#0f172a;
+  padding:20px;
+  border-radius:16px;
+  margin-bottom:20px;
+}
 
-/* ========= ELEMENTOS ========= */
-const form = document.getElementById("formHospede");
-const tabela = document.getElementById("tabelaHospedes");
+input{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border:none;
+  border-radius:8px;
+  background:#1e293b;
+  color:#fff;
+}
 
-/* ========= CADASTRAR ========= */
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
+button{
+  margin-top:12px;
+  padding:10px 14px;
+  border:none;
+  border-radius:8px;
+  background:#22c55e;
+  color:#fff;
+  cursor:pointer;
+}
 
-  const btn = form.querySelector("button");
-  btn.disabled = true;
-  btn.innerText = "Salvando...";
+.btn-red{
+  background:#dc2626;
+}
 
-  const nome = document.getElementById("nome").value.trim();
-  const documento = document.getElementById("documento").value.trim();
-  const telefone = document.getElementById("telefone").value.trim();
-  const email = document.getElementById("email").value.trim();
+table{
+  width:100%;
+  border-collapse:collapse;
+}
 
-  if (!nome) {
-    alert("Informe o nome do hóspede.");
-    btn.disabled = false;
-    btn.innerText = "Salvar Hóspede";
+td,th{
+  padding:10px;
+  border-bottom:1px solid #1e293b;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <div class="card">
+    <h2>👤 Cadastro de Hóspede</h2>
+
+    <form id="formHospede">
+      <input id="nome" placeholder="Nome">
+      <input id="documento" placeholder="Documento">
+      <input id="telefone" placeholder="Telefone">
+      <input id="email" placeholder="Email">
+      <button>Salvar Hóspede</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <input id="busca" placeholder="Buscar hóspede..." oninput="carregarHospedes()">
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Documento</th>
+          <th>Telefone</th>
+          <th>Email</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="tabelaHospedes">
+        <tr><td colspan="5">Carregando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+let negocio_id = null;
+
+/* ===== SESSÃO ===== */
+async function verificarSessao(){
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  if(!session){
+    window.location.href = "/auth/login.html";
+    return null;
+  }
+
+  return session.user.id;
+}
+
+/* ===== CARREGAR USUARIO ===== */
+async function iniciar(){
+  const userId = await verificarSessao();
+  if(!userId) return;
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  if(!usuario?.app_id){
+    alert("Erro ao identificar negócio");
     return;
   }
 
-  const { error } = await db.from("hotel_hospedes").insert([{
-    negocio_id,
-    nome,
-    documento,
-    telefone,
-    email
-  }]);
+  negocio_id = usuario.app_id;
 
-  btn.disabled = false;
-  btn.innerText = "Salvar Hóspede";
+  document.getElementById("formHospede")
+    .addEventListener("submit", salvarHospede);
 
-  if (error) {
-    alert("Erro ao salvar: " + error.message);
-    console.error(error);
-    return;
-  }
-
-  form.reset();
   carregarHospedes();
-});
-
-/* ========= LISTAR ========= */
-async function carregarHospedes() {
-  const termo = document.getElementById("busca").value.trim();
-
-  tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
-
-  let query = db
-    .from("hotel_hospedes")
-    .select("*")
-    .eq("negocio_id", negocio_id);
-
-  if (termo) {
-    query = query.ilike("nome", `%${termo}%`);
-  }
-
-  const { data, error } = await query.order("nome", { ascending: true });
-
-  if (error) {
-    tabela.innerHTML = "<tr><td colspan='5'>Erro ao carregar</td></tr>";
-    console.error(error);
-    return;
-  }
-
-  if (!data || data.length === 0) {
-    tabela.innerHTML = "<tr><td colspan='5'>Nenhum hóspede encontrado</td></tr>";
-    return;
-  }
-
-  tabela.innerHTML = "";
-
-  data.forEach(h => {
-    tabela.innerHTML += `
-      <tr>
-        <td>${h.nome}</td>
-        <td>${h.documento || "-"}</td>
-        <td>${h.telefone || "-"}</td>
-        <td>${h.email || "-"}</td>
-        <td>
-          <button class="btn-red" onclick="excluirHospede('${h.id}')">Excluir</button>
-        </td>
-      </tr>
-    `;
-  });
 }
 
-/* ========= EXCLUIR ========= */
-window.excluirHospede = async function(id) {
-  if (!confirm("Deseja excluir este hóspede?")) return;
-
-  const { error } = await db
-    .from("hotel_hospedes")
-    .delete()
-    .eq("id", id)
-    .eq("negocio_id", negocio_id);
-
-  if (error) {
-    alert("Erro ao excluir: " + error.message);
-    console.error(error);
-    return;
-  }
-
-  carregarHospedes();
-};
-
-/* ========= START ========= */
-carregarHospedes();
-</script>
-/* ========= SESSÃO ========= */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if (!admin || !admin.app_id) {
-  alert("Sessão inválida. Faça login novamente.");
-  location.replace("login.html");
-}
-const negocio_id = admin.app_id;
-
-/* ========= CADASTRAR ========= */
-const form = document.getElementById("formHospede");
-
-form.addEventListener("submit", async (e) => {
+/* ===== CADASTRAR ===== */
+async function salvarHospede(e){
   e.preventDefault();
 
   const nome = document.getElementById("nome").value.trim();
@@ -160,59 +149,49 @@ form.addEventListener("submit", async (e) => {
   const telefone = document.getElementById("telefone").value.trim();
   const email = document.getElementById("email").value.trim();
 
-  if (!nome) {
-    alert("Informe o nome do hóspede.");
+  if(!nome){
+    alert("Informe o nome");
     return;
   }
 
-  const { error } = await db.from("hotel_hospedes").insert([{
-    negocio_id,
-    nome,
-    documento,
-    telefone,
-    email
-  }]);
+  const { error } = await supabase
+    .from("hotel_hospedes")
+    .insert([{ negocio_id, nome, documento, telefone, email }]);
 
-  if (error) {
-    alert("Erro ao salvar: " + error.message);
-    console.error(error);
+  if(error){
+    alert(error.message);
     return;
   }
 
-  form.reset();
+  e.target.reset();
   carregarHospedes();
-});
+}
 
-/* ========= LISTAR ========= */
-async function carregarHospedes() {
+/* ===== LISTAR ===== */
+window.carregarHospedes = async function(){
   const tabela = document.getElementById("tabelaHospedes");
   const termo = document.getElementById("busca").value.trim();
 
   tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
 
-  let query = db
+  let query = supabase
     .from("hotel_hospedes")
     .select("*")
     .eq("negocio_id", negocio_id);
 
-  if (termo) {
+  if(termo){
     query = query.ilike("nome", `%${termo}%`);
   }
 
-  const { data, error } = await query.order("nome", { ascending: true });
+  const { data } = await query.order("nome");
 
-  if (error) {
-    tabela.innerHTML = "<tr><td colspan='5'>Erro ao carregar</td></tr>";
-    console.error(error);
-    return;
-  }
-
-  if (!data || data.length === 0) {
-    tabela.innerHTML = "<tr><td colspan='5'>Nenhum hóspede encontrado</td></tr>";
+  if(!data || !data.length){
+    tabela.innerHTML = "<tr><td colspan='5'>Nenhum hóspede</td></tr>";
     return;
   }
 
   tabela.innerHTML = "";
+
   data.forEach(h => {
     tabela.innerHTML += `
       <tr>
@@ -221,34 +200,27 @@ async function carregarHospedes() {
         <td>${h.telefone || "-"}</td>
         <td>${h.email || "-"}</td>
         <td>
-          <button class="btn-red" onclick="excluirHospede('${h.id}')">Excluir</button>
+          <button class="btn-red" onclick="excluir('${h.id}')">Excluir</button>
         </td>
       </tr>
     `;
   });
-}
+};
 
-/* ========= EXCLUIR ========= */
-async function excluirHospede(id) {
-  if (!confirm("Deseja excluir este hóspede?")) return;
+/* ===== EXCLUIR ===== */
+window.excluir = async function(id){
+  if(!confirm("Excluir hóspede?")) return;
 
-  const { error } = await db
+  await supabase
     .from("hotel_hospedes")
     .delete()
     .eq("id", id)
     .eq("negocio_id", negocio_id);
 
-  if (error) {
-    alert("Erro ao excluir: " + error.message);
-    console.error(error);
-    return;
-  }
-
   carregarHospedes();
-}
+};
 
-/* ========= START ========= */
-carregarHospedes();
+iniciar();
 </script>
 
 </body>
