@@ -181,14 +181,24 @@ const sb = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* ===== PEGA ID IGUAL AO PAINEL ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-const negocio_id = admin?.app_id;
+/* ===== PEGA APP_ID ===== */
+const params = new URLSearchParams(window.location.search);
+
+let negocio_id =
+  params.get("app_id") ||
+  params.get("id") ||
+  localStorage.getItem("app_id");
+
+/* fallback (caso veio do painel) */
+if(!negocio_id){
+  const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
+  negocio_id = admin.app_id;
+}
 
 if(!negocio_id){
   document.body.innerHTML = `
-    <div style="padding:30px;max-width:700px;margin:40px auto">
-      <div class="card aviso">Sessão inválida. Faça login novamente.</div>
+    <div style="padding:30px;text-align:center">
+      ❌ Hotel não identificado
     </div>
   `;
   throw new Error("Sem app_id");
@@ -196,9 +206,8 @@ if(!negocio_id){
 
 /* ===== ELEMENTOS ===== */
 const lista = document.getElementById("lista");
-const contador = document.getElementById("contadorQuartos");
 const nomeHotel = document.getElementById("nomeHotel");
-const subHotel = document.getElementById("subHotel");
+const enderecoHotel = document.getElementById("enderecoHotel");
 const banner = document.getElementById("bannerHotel");
 
 /* ===== CONFIG ===== */
@@ -222,7 +231,7 @@ function montarLinkWhatsApp(tipo, preco){
   const numero = limparNumero(dadosConfig.whatsapp);
 
   const msg = encodeURIComponent(
-    `Olá! Quero reservar o quarto ${tipo}.\nValor da diária: ${formatarPreco(preco)}.`
+    `Olá! Quero reservar o quarto ${tipo}\nValor: ${formatarPreco(preco)}`
   );
 
   if(!numero) return null;
@@ -230,11 +239,11 @@ function montarLinkWhatsApp(tipo, preco){
   return `https://wa.me/55${numero}?text=${msg}`;
 }
 
-/* ===== CARREGAR CONFIG (CORRIGIDO) ===== */
+/* ===== CONFIG ===== */
 async function carregarConfig(){
   const { data, error } = await sb
     .from("config_site")
-    .select("*") // 🔥 evita erro 400
+    .select("*")
     .eq("app_id", negocio_id)
     .maybeSingle();
 
@@ -247,11 +256,15 @@ async function carregarConfig(){
     dadosConfig = data;
 
     nomeHotel.textContent = data.nome_site || "Hotel";
-    subHotel.textContent = data.cidade || "Quartos disponíveis";
+    enderecoHotel.textContent = `${data.endereco || ""} ${data.cidade || ""}`;
 
     if(data.banner_url){
       banner.src = data.banner_url;
-      banner.style.display = "block";
+    }
+
+    /* aplica tema */
+    if(data.tema_site){
+      document.body.setAttribute("data-tema", data.tema_site);
     }
   }
 }
@@ -275,8 +288,6 @@ async function carregarQuartos(){
     return;
   }
 
-  contador.innerText = data.length + " quartos";
-
   lista.innerHTML = "";
 
   data.forEach(q=>{
@@ -285,29 +296,67 @@ async function carregarQuartos(){
 
     lista.innerHTML += `
       <div class="quarto">
-        <div class="foto-box">
-          ${foto ? `<img src="${foto}">` : `<div class="sem-foto">Sem foto</div>`}
-        </div>
+        ${foto ? `<img src="${foto}" onclick='abrirGaleria(${JSON.stringify(q.fotos || [])})'>` : ""}
 
         <div class="info">
           <h3>${q.tipo}</h3>
-
-          <div class="linha">
-            <div class="preco">
-              ${formatarPreco(q.preco_diaria)}
-              <small>/ diária</small>
-            </div>
-            <div class="status">Disponível</div>
-          </div>
+          <div class="preco">${formatarPreco(q.preco_diaria)}</div>
 
           ${zap
-            ? `<a class="btn" href="${zap}" target="_blank">💬 Reservar</a>`
+            ? `<button class="btn" onclick="abrirReserva('${q.tipo}', ${q.preco_diaria})">Reservar</button>`
             : `<button class="btn">Sem WhatsApp</button>`
           }
         </div>
       </div>
     `;
   });
+}
+
+/* ===== GALERIA ===== */
+window.abrirGaleria = function(fotos){
+  const box = document.getElementById("galeriaFotos");
+  box.innerHTML = fotos.map(f=>`<img src="${f}">`).join("");
+  document.getElementById("modalGaleria").style.display="flex";
+}
+
+window.fecharGaleria = function(){
+  document.getElementById("modalGaleria").style.display="none";
+}
+
+/* ===== RESERVA ===== */
+let quartoSelecionado = null;
+
+window.abrirReserva = function(tipo, preco){
+  quartoSelecionado = {tipo, preco};
+  document.getElementById("tituloReserva").innerText = tipo;
+  document.getElementById("modalReserva").style.display="flex";
+}
+
+window.fecharReserva = function(){
+  document.getElementById("modalReserva").style.display="none";
+}
+
+/* ===== ENVIAR ===== */
+window.enviarReserva = function(){
+  const nome = document.getElementById("nomeCliente").value;
+  const tel = document.getElementById("telefoneCliente").value;
+
+  if(!nome || !tel){
+    alert("Preencha nome e telefone");
+    return;
+  }
+
+  const numero = limparNumero(dadosConfig.whatsapp);
+
+  const msg = encodeURIComponent(
+`Reserva de quarto
+Nome: ${nome}
+Telefone: ${tel}
+Quarto: ${quartoSelecionado.tipo}
+Valor: ${formatarPreco(quartoSelecionado.preco)}`
+  );
+
+  window.open(`https://wa.me/55${numero}?text=${msg}`, "_blank");
 }
 
 /* ===== START ===== */
