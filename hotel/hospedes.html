@@ -9,130 +9,138 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
-  const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-  const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+/* ========= SUPABASE ========= */
+const db = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
 
-  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-</script>
+/* ========= SESSÃO ========= */
+const admin = JSON.parse(localStorage.getItem("admin_logado") || "{}");
 
+if (!admin?.app_id) {
+  alert("Sessão inválida. Faça login novamente.");
+  location.href = "../auth/login.html";
+  throw new Error("Sem sessão");
+}
 
-<link rel="icon" href="data:,">
+const negocio_id = admin.app_id;
 
-<style>
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-  background: #020617;
-  color: #fff;
-}
-.topo {
-  background: #0f172a;
-  padding: 16px 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.voltar {
-  background: #1e293b;
-  color: #fff;
-  border: none;
-  padding: 10px 16px;
-  border-radius: 10px;
-  cursor: pointer;
-}
-.container {
-  padding: 32px;
-  max-width: 1000px;
-  margin: auto;
-}
-form {
-  background: #0f172a;
-  padding: 20px;
-  border-radius: 14px;
-  margin-bottom: 30px;
-}
-input {
-  width: 100%;
-  padding: 10px;
-  border-radius: 8px;
-  border: none;
-  margin-bottom: 12px;
-  background: #1e293b;
-  color: #fff;
-}
-button {
-  padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  background: #16a34a;
-  color: #fff;
-  font-weight: bold;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-th, td {
-  padding: 12px;
-  border-bottom: 1px solid #1e293b;
-}
-.btn-red {
-  background: #dc2626;
-}
-.busca {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.busca input {
-  flex: 1;
-}
-</style>
-</head>
+/* mantém padrão do sistema */
+localStorage.setItem("app_id", negocio_id);
 
-<body>
+/* ========= ELEMENTOS ========= */
+const form = document.getElementById("formHospede");
+const tabela = document.getElementById("tabelaHospedes");
 
-<div class="topo">
-  <h2>👤 Hóspedes - Hotel</h2>
-  <button class="voltar" onclick="history.back()">⬅ Voltar</button>
-</div>
+/* ========= CADASTRAR ========= */
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
 
-<div class="container">
+  const btn = form.querySelector("button");
+  btn.disabled = true;
+  btn.innerText = "Salvando...";
 
-  <h3>Cadastrar Hóspede</h3>
+  const nome = document.getElementById("nome").value.trim();
+  const documento = document.getElementById("documento").value.trim();
+  const telefone = document.getElementById("telefone").value.trim();
+  const email = document.getElementById("email").value.trim();
 
-  <form id="formHospede">
-    <input type="text" id="nome" placeholder="Nome completo" required>
-    <input type="text" id="documento" placeholder="Documento (CPF ou RG)">
-    <input type="text" id="telefone" placeholder="Telefone (WhatsApp)">
-    <input type="email" id="email" placeholder="E-mail">
-    <button type="submit">Salvar Hóspede</button>
-  </form>
+  if (!nome) {
+    alert("Informe o nome do hóspede.");
+    btn.disabled = false;
+    btn.innerText = "Salvar Hóspede";
+    return;
+  }
 
-  <h3>Lista de Hóspedes</h3>
+  const { error } = await db.from("hotel_hospedes").insert([{
+    negocio_id,
+    nome,
+    documento,
+    telefone,
+    email
+  }]);
 
-  <div class="busca">
-    <input type="text" id="busca" placeholder="Buscar hóspede pelo nome...">
-    <button onclick="carregarHospedes()">🔍 Buscar</button>
-  </div>
+  btn.disabled = false;
+  btn.innerText = "Salvar Hóspede";
 
-  <table>
-    <thead>
+  if (error) {
+    alert("Erro ao salvar: " + error.message);
+    console.error(error);
+    return;
+  }
+
+  form.reset();
+  carregarHospedes();
+});
+
+/* ========= LISTAR ========= */
+async function carregarHospedes() {
+  const termo = document.getElementById("busca").value.trim();
+
+  tabela.innerHTML = "<tr><td colspan='5'>Carregando...</td></tr>";
+
+  let query = db
+    .from("hotel_hospedes")
+    .select("*")
+    .eq("negocio_id", negocio_id);
+
+  if (termo) {
+    query = query.ilike("nome", `%${termo}%`);
+  }
+
+  const { data, error } = await query.order("nome", { ascending: true });
+
+  if (error) {
+    tabela.innerHTML = "<tr><td colspan='5'>Erro ao carregar</td></tr>";
+    console.error(error);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    tabela.innerHTML = "<tr><td colspan='5'>Nenhum hóspede encontrado</td></tr>";
+    return;
+  }
+
+  tabela.innerHTML = "";
+
+  data.forEach(h => {
+    tabela.innerHTML += `
       <tr>
-        <th>Nome</th>
-        <th>Documento</th>
-        <th>Telefone</th>
-        <th>E-mail</th>
-        <th>Ações</th>
+        <td>${h.nome}</td>
+        <td>${h.documento || "-"}</td>
+        <td>${h.telefone || "-"}</td>
+        <td>${h.email || "-"}</td>
+        <td>
+          <button class="btn-red" onclick="excluirHospede('${h.id}')">Excluir</button>
+        </td>
       </tr>
-    </thead>
-    <tbody id="tabelaHospedes"></tbody>
-  </table>
+    `;
+  });
+}
 
-</div>
+/* ========= EXCLUIR ========= */
+window.excluirHospede = async function(id) {
+  if (!confirm("Deseja excluir este hóspede?")) return;
 
-<script>
+  const { error } = await db
+    .from("hotel_hospedes")
+    .delete()
+    .eq("id", id)
+    .eq("negocio_id", negocio_id);
+
+  if (error) {
+    alert("Erro ao excluir: " + error.message);
+    console.error(error);
+    return;
+  }
+
+  carregarHospedes();
+};
+
+/* ========= START ========= */
+carregarHospedes();
+</script>
 /* ========= SESSÃO ========= */
 const admin = JSON.parse(localStorage.getItem("admin_logado"));
 if (!admin || !admin.app_id) {
