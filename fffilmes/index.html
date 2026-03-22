@@ -81,9 +81,7 @@
       align-items:center;
     }
 
-    .hero-left{
-      padding:10px 4px;
-    }
+    .hero-left{padding:10px 4px}
 
     .tag{
       display:inline-flex;
@@ -242,7 +240,8 @@
       margin-bottom:12px;
     }
 
-    .btn-login:disabled{
+    .btn-login:disabled,
+    .btn-outline:disabled{
       opacity:.65;
       cursor:not-allowed;
     }
@@ -258,11 +257,6 @@
       font-weight:800;
       cursor:pointer;
       border:1px solid rgba(255,255,255,.1);
-    }
-
-    .btn-outline:disabled{
-      opacity:.65;
-      cursor:not-allowed;
     }
 
     .msg{
@@ -336,7 +330,7 @@
           </div>
         </div>
 
-        <div class="login-card" id="loginCard">
+        <div class="login-card">
           <div class="login-content">
             <h2>Entrar na conta</h2>
             <p>Faça login com seu e-mail e senha cadastrados no Supabase.</p>
@@ -346,12 +340,12 @@
             <form id="formLogin" autocomplete="on">
               <div class="campo">
                 <label for="email">E-mail</label>
-                <input type="email" id="email" name="email" autocomplete="email" placeholder="Digite seu e-mail" required />
+                <input type="email" id="email" autocomplete="email" placeholder="Digite seu e-mail" required />
               </div>
 
               <div class="campo">
                 <label for="senha">Senha</label>
-                <input type="password" id="senha" name="password" autocomplete="current-password" placeholder="Digite sua senha" required />
+                <input type="password" id="senha" autocomplete="current-password" placeholder="Digite sua senha" required />
               </div>
 
               <div class="linha">
@@ -368,24 +362,25 @@
             </form>
 
             <div class="login-footer">
-              Depois do login, o usuário será enviado para:
+              Redirecionamento automático:
               <br>
-              <strong>filmes.html</strong>
+              <strong>admin → painel-admin.html</strong>
+              <br>
+              <strong>cliente → filmes.html</strong>
             </div>
           </div>
         </div>
       </section>
 
-      <div class="rodape" id="rodapeLogin">
-        © 2026 FF Filmes
-      </div>
+      <div class="rodape" id="rodapeLogin">© 2026 FF Filmes</div>
     </main>
   </div>
 
   <script>
     const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-    const REDIRECT_POS_LOGIN = "filmes.html";
+    const PAGINA_ADMIN = "painel-admin.html";
+    const PAGINA_CLIENTE = "filmes.html";
 
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -431,7 +426,7 @@
       }
     }
 
-    async function carregarConfigTema() {
+    async function carregarConfigTemaPadrao() {
       try {
         const { data, error } = await supabaseClient
           .from("config_filmes")
@@ -445,56 +440,93 @@
       } catch (e) {}
     }
 
-    async function buscarAdminValido(user) {
-      if (!user) return null;
+    async function carregarTemaPorAdmin(adminId) {
+      if (!adminId) return;
 
-      const campos = "id, user_id, email, ativo, tipo, plano, limite_clientes";
-
-      if (user.id) {
-        const { data: porId, error: erroId } = await supabaseClient
-          .from("admin_filmes")
-          .select(campos)
-          .eq("user_id", user.id)
+      try {
+        const { data, error } = await supabaseClient
+          .from("config_filmes")
+          .select("*")
+          .eq("admin_id", adminId)
           .maybeSingle();
 
-        if (!erroId && porId) return porId;
-      }
-
-      if (user.email) {
-        const { data: porEmail, error: erroEmail } = await supabaseClient
-          .from("admin_filmes")
-          .select(campos)
-          .eq("email", user.email)
-          .maybeSingle();
-
-        if (!erroEmail && porEmail) {
-          if (!porEmail.user_id && user.id) {
-            const { error: erroUpdate } = await supabaseClient
-              .from("admin_filmes")
-              .update({ user_id: user.id })
-              .eq("id", porEmail.id);
-
-            if (!erroUpdate) porEmail.user_id = user.id;
-          }
-          return porEmail;
+        if (!error && data) {
+          aplicarTema(data);
         }
-      }
+      } catch (e) {}
+    }
 
-      return null;
+    function salvarSessaoAdmin(admin) {
+      localStorage.setItem("tipo_usuario_filmes", "admin");
+      localStorage.setItem("admin_id_filmes", String(admin.id || ""));
+      localStorage.setItem("admin_email_filmes", admin.email || "");
+      localStorage.removeItem("cliente_id_filmes");
+      localStorage.removeItem("cliente_nome_filmes");
+      localStorage.removeItem("cliente_email_filmes");
+    }
+
+    function salvarSessaoCliente(cliente, authUserId) {
+      localStorage.setItem("tipo_usuario_filmes", "cliente");
+      localStorage.setItem("cliente_id_filmes", String(cliente.id || ""));
+      localStorage.setItem("cliente_nome_filmes", cliente.nome || "");
+      localStorage.setItem("cliente_email_filmes", cliente.email || "");
+      localStorage.setItem("cliente_user_id_filmes", authUserId || "");
+      localStorage.setItem("admin_id_filmes", String(cliente.admin_id || ""));
     }
 
     async function validarAcesso(user) {
-      const admin = await buscarAdminValido(user);
+      const { data: cliente, error: erroCliente } = await supabaseClient
+        .from("admin_clientes")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
-      if (!admin) {
-        return { ok: false, motivo: "Usuário não vinculado ao painel." };
+      if (!erroCliente && cliente) {
+        if (cliente.ativo === false) {
+          return { ok: false, motivo: "Seu acesso foi bloqueado." };
+        }
+
+        return {
+          ok: true,
+          tipo: "cliente",
+          cliente
+        };
       }
 
-      if (admin.ativo === false) {
-        return { ok: false, motivo: "Usuário desativado." };
+      const { data: admin, error: erroAdmin } = await supabaseClient
+        .from("admin_filmes")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!erroAdmin && admin) {
+        if (admin.ativo === false) {
+          return { ok: false, motivo: "Admin desativado." };
+        }
+
+        return {
+          ok: true,
+          tipo: "admin",
+          admin
+        };
       }
 
-      return { ok: true, admin };
+      return { ok: false, motivo: "Usuário não vinculado ao painel." };
+    }
+
+    async function redirecionarPorTipo(validacao, authUser) {
+      if (validacao.tipo === "cliente") {
+        salvarSessaoCliente(validacao.cliente, authUser.id);
+        await carregarTemaPorAdmin(validacao.cliente.admin_id);
+        window.location.href = PAGINA_CLIENTE;
+        return;
+      }
+
+      if (validacao.tipo === "admin") {
+        salvarSessaoAdmin(validacao.admin);
+        await carregarTemaPorAdmin(validacao.admin.id);
+        window.location.href = PAGINA_ADMIN;
+      }
     }
 
     async function verificarSessao() {
@@ -509,7 +541,7 @@
           return;
         }
 
-        window.location.href = REDIRECT_POS_LOGIN;
+        await redirecionarPorTipo(validacao, data.session.user);
       } catch (e) {}
     }
 
@@ -534,7 +566,7 @@
         });
 
         if (error || !data?.user) {
-          mostrarMensagem(error?.message || "Não foi possível fazer login.");
+          mostrarMensagem("E-mail ou senha inválidos.");
           setLoading(false);
           return;
         }
@@ -548,11 +580,14 @@
           return;
         }
 
-        mostrarMensagem("Login realizado com sucesso. Redirecionando...", "success");
+        if (document.getElementById("lembrar").checked) {
+          localStorage.setItem("lembrar_email_filmes", email);
+        } else {
+          localStorage.removeItem("lembrar_email_filmes");
+        }
 
-        setTimeout(() => {
-          window.location.href = REDIRECT_POS_LOGIN;
-        }, 500);
+        mostrarMensagem("Login realizado com sucesso. Redirecionando...", "success");
+        await redirecionarPorTipo(validacao, data.user);
 
       } catch (err) {
         mostrarMensagem("Erro inesperado ao fazer login.");
@@ -560,100 +595,9 @@
       }
     });
 
-    btnCadastro.addEventListener("click", async () => {
+    btnCadastro.addEventListener("click", () => {
       limparMensagem();
-
-      const email = document.getElementById("email").value.trim().toLowerCase();
-      const senha = document.getElementById("senha").value;
-
-      if (!email || !senha) {
-        mostrarMensagem("Digite e-mail e senha para criar a conta.");
-        return;
-      }
-
-      if (senha.length < 6) {
-        mostrarMensagem("A senha deve ter pelo menos 6 caracteres.");
-        return;
-      }
-
-      setLoading(true, "Processando...");
-
-      try {
-        const { data, error } = await supabaseClient.auth.signUp({
-          email,
-          password: senha
-        });
-
-        if (error) {
-          mostrarMensagem(error.message || "Não foi possível criar a conta.");
-          setLoading(false);
-          return;
-        }
-
-        const user = data?.user;
-
-        if (!user) {
-          mostrarMensagem("Conta criada, mas não foi possível obter o usuário.");
-          setLoading(false);
-          return;
-        }
-
-        const { data: existente, error: erroBusca } = await supabaseClient
-          .from("admin_filmes")
-          .select("id, user_id, email, ativo, tipo, plano, limite_clientes")
-          .eq("email", email)
-          .maybeSingle();
-
-        if (erroBusca) {
-          mostrarMensagem("Conta criada no Auth, mas houve erro ao vincular no painel.");
-          setLoading(false);
-          return;
-        }
-
-        if (existente) {
-          const { error: erroUpdate } = await supabaseClient
-            .from("admin_filmes")
-            .update({
-              user_id: user.id,
-              email: email
-            })
-            .eq("id", existente.id);
-
-          if (erroUpdate) {
-            mostrarMensagem("Conta criada no Auth, mas não foi possível atualizar o vínculo.");
-            setLoading(false);
-            return;
-          }
-        } else {
-          const { error: erroInsert } = await supabaseClient
-            .from("admin_filmes")
-            .insert([{
-              user_id: user.id,
-              email: email,
-              ativo: true,
-              tipo: "admin",
-              plano: "basico",
-              limite_clientes: 20
-            }]);
-
-          if (erroInsert) {
-            mostrarMensagem("Conta criada no Auth, mas não foi possível criar o admin.");
-            setLoading(false);
-            return;
-          }
-        }
-
-        if (data?.user && !data?.session) {
-          mostrarMensagem("Conta criada. Confira seu e-mail para confirmar o cadastro.", "success");
-        } else {
-          mostrarMensagem("Conta criada com sucesso. Você já pode entrar.", "success");
-        }
-
-      } catch (err) {
-        mostrarMensagem("Erro inesperado ao criar conta.");
-      }
-
-      setLoading(false);
+      mostrarMensagem("A criação de conta é feita pelo admin do painel.");
     });
 
     async function recuperarSenha() {
@@ -668,11 +612,11 @@
 
       try {
         const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin + window.location.pathname
+          redirectTo: window.location.origin + "/redefinir-senha.html"
         });
 
         if (error) {
-          mostrarMensagem(error.message || "Não foi possível enviar a recuperação.");
+          mostrarMensagem("Não foi possível enviar a recuperação.");
           return;
         }
 
@@ -682,7 +626,16 @@
       }
     }
 
-    carregarConfigTema();
+    function carregarEmailSalvo() {
+      const emailSalvo = localStorage.getItem("lembrar_email_filmes");
+      if (emailSalvo) {
+        document.getElementById("email").value = emailSalvo;
+        document.getElementById("lembrar").checked = true;
+      }
+    }
+
+    carregarEmailSalvo();
+    carregarConfigTemaPadrao();
     verificarSessao();
   </script>
 </body>
