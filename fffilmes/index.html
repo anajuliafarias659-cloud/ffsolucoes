@@ -404,10 +404,10 @@
       mensagem.textContent = "";
     }
 
-    function setLoading(loading, textoBotao = "Entrar no sistema") {
+    function setLoading(loading, texto = "Entrando...") {
       btnEntrar.disabled = loading;
       btnCadastro.disabled = loading;
-      btnEntrar.textContent = textoBotao;
+      btnEntrar.textContent = loading ? texto : "Entrar no sistema";
     }
 
     function aplicarTema(config) {
@@ -439,40 +439,82 @@
           .order("id", { ascending: true })
           .limit(1);
 
-        if (error) return;
-        if (data && data.length > 0) aplicarTema(data[0]);
+        if (!error && data && data.length > 0) {
+          aplicarTema(data[0]);
+        }
       } catch (e) {}
     }
 
-    async function buscarAdminPorUserId(userId) {
-      const { data, error } = await supabaseClient
-        .from("admin_filmes")
-        .select("*")
-        .eq("user_id", userId)
-        .limit(1);
+    async function buscarAdminNaTabela(tabela, user) {
+      if (!user) return null;
 
-      if (error) {
-        return { ok: false, admin: null, error };
+      const campos = "id, user_id, email, ativo";
+
+      if (user.id) {
+        const { data: porId, error: erroId } = await supabaseClient
+          .from(tabela)
+          .select(campos)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (!erroId && porId) {
+          return {
+            origem: tabela,
+            dados: porId
+          };
+        }
       }
 
-      if (!data || data.length === 0) {
-        return { ok: false, admin: null, error: null };
+      if (user.email) {
+        const { data: porEmail, error: erroEmail } = await supabaseClient
+          .from(tabela)
+          .select(campos)
+          .eq("email", user.email)
+          .maybeSingle();
+
+        if (!erroEmail && porEmail) {
+          if (!porEmail.user_id && user.id) {
+            const { error: erroUpdate } = await supabaseClient
+              .from(tabela)
+              .update({ user_id: user.id })
+              .eq("id", porEmail.id);
+
+            if (!erroUpdate) {
+              porEmail.user_id = user.id;
+            }
+          }
+
+          return {
+            origem: tabela,
+            dados: porEmail
+          };
+        }
       }
 
-      return { ok: true, admin: data[0], error: null };
+      return null;
     }
 
-    async function validarAcessoPorUserId(userId) {
-      const resultado = await buscarAdminPorUserId(userId);
+    async function buscarAdminValido(user) {
+      let registro = await buscarAdminNaTabela("admin_filmes", user);
+      if (registro) return registro;
 
-      if (!resultado.ok || !resultado.admin) {
+      registro = await buscarAdminNaTabela("super_admin_filmes", user);
+      if (registro) return registro;
+
+      return null;
+    }
+
+    async function validarAcesso(user) {
+      const registro = await buscarAdminValido(user);
+
+      if (!registro || !registro.dados) {
         return {
           ok: false,
           motivo: "Seu usuário existe no Auth, mas não está vinculado ao painel."
         };
       }
 
-      if (resultado.admin.ativo === false) {
+      if (registro.dados.ativo === false) {
         return {
           ok: false,
           motivo: "Seu acesso está desativado."
@@ -481,7 +523,8 @@
 
       return {
         ok: true,
-        admin: resultado.admin
+        tipo: registro.origem,
+        admin: registro.dados
       };
     }
 
@@ -490,8 +533,8 @@
         const { data, error } = await supabaseClient.auth.getSession();
         if (error || !data?.session?.user) return;
 
-        const userId = data.session.user.id;
-        const validacao = await validarAcessoPorUserId(userId);
+        const user = data.session.user;
+        const validacao = await validarAcesso(user);
 
         if (!validacao.ok) {
           await supabaseClient.auth.signOut();
@@ -528,7 +571,7 @@
           return;
         }
 
-        const validacao = await validarAcessoPorUserId(data.user.id);
+        const validacao = await validarAcesso(data.user);
 
         if (!validacao.ok) {
           await supabaseClient.auth.signOut();
@@ -579,63 +622,49 @@
           return;
         }
 
-        const novoUserId = data?.user?.id;
+        const user = data?.user;
 
-        if (!novoUserId) {
-          mostrarMensagem("Conta criada, mas não foi possível obter o ID do usuário.");
+        if (!user) {
+          mostrarMensagem("Conta criada, mas não foi possível obter o usuário.");
           setLoading(false);
           return;
         }
 
-        const { data: adminExistente, error: erroBuscaAdmin } = await supabaseClient
-          .from("admin_filmes")
-          .select("id, user_id, email, ativo")
-          .eq("email", email)
-          .limit(1);
+        const existenteAdmin = await buscarAdminNaTabela("admin_filmes", { email, id: user.id });
+        const existenteSuper = await buscarAdminNaTabela("super_admin_filmes", { email, id: user.id });
 
-        if (erroBuscaAdmin) {
-          mostrarMensagem("Conta criada no Auth, mas houve erro ao verificar vínculo no painel.");
-          setLoading(false);
-          return;
-        }
-
-        if (adminExistente && adminExistente.length > 0) {
-          const admin = adminExistente[0];
-
-          const { error: erroUpdate } = await supabaseClient
+        if (existenteAdmin?.dados) {
+          await supabaseClient
             .from("admin_filmes")
             .update({
-              user_id: novoUserId,
+              user_id: user.id,
               email: email
             })
-            .eq("id", admin.id);
-
-          if (erroUpdate) {
-            mostrarMensagem("Conta criada no Auth, mas não foi possível vincular ao painel.");
-            setLoading(false);
-            return;
-          }
-
-          mostrarMensagem("Conta criada e vinculada com sucesso. Você já pode entrar.", "success");
-          setLoading(false);
-          return;
+            .eq("id", existenteAdmin.dados.id);
+        } else if (existenteSuper?.dados) {
+          await supabaseClient
+            .from("super_admin_filmes")
+            .update({
+              user_id: user.id,
+              email: email
+            })
+            .eq("id", existenteSuper.dados.id);
+        } else {
+          await supabaseClient
+            .from("admin_filmes")
+            .insert([{
+              user_id: user.id,
+              email: email,
+              ativo: true
+            }]);
         }
 
-        const { error: erroInsert } = await supabaseClient
-          .from("admin_filmes")
-          .insert([{
-            user_id: novoUserId,
-            email: email,
-            ativo: true
-          }]);
-
-        if (erroInsert) {
-          mostrarMensagem("Conta criada no Auth, mas não foi possível criar o vínculo no painel.");
-          setLoading(false);
-          return;
+        if (data?.user && !data?.session) {
+          mostrarMensagem("Conta criada. Confira seu e-mail para confirmar o cadastro.", "success");
+        } else {
+          mostrarMensagem("Conta criada com sucesso. Você já pode entrar.", "success");
         }
 
-        mostrarMensagem("Conta criada com sucesso. Você já pode entrar.", "success");
       } catch (err) {
         mostrarMensagem("Erro inesperado ao criar conta.");
       }
