@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>()</title>
+  <title>FF Filmes - Login</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
@@ -445,29 +445,24 @@
       } catch (e) {}
     }
 
-    async function buscarAdminNaTabela(tabela, user) {
+    async function buscarAdminValido(user) {
       if (!user) return null;
 
-      const campos = "id, user_id, email, ativo";
+      const campos = "id, user_id, email, ativo, tipo";
 
       if (user.id) {
         const { data: porId, error: erroId } = await supabaseClient
-          .from(tabela)
+          .from("admin_filmes")
           .select(campos)
           .eq("user_id", user.id)
           .maybeSingle();
 
-        if (!erroId && porId) {
-          return {
-            origem: tabela,
-            dados: porId
-          };
-        }
+        if (!erroId && porId) return porId;
       }
 
       if (user.email) {
         const { data: porEmail, error: erroEmail } = await supabaseClient
-          .from(tabela)
+          .from("admin_filmes")
           .select(campos)
           .eq("email", user.email)
           .maybeSingle();
@@ -475,7 +470,7 @@
         if (!erroEmail && porEmail) {
           if (!porEmail.user_id && user.id) {
             const { error: erroUpdate } = await supabaseClient
-              .from(tabela)
+              .from("admin_filmes")
               .update({ user_id: user.id })
               .eq("id", porEmail.id);
 
@@ -483,49 +478,25 @@
               porEmail.user_id = user.id;
             }
           }
-
-          return {
-            origem: tabela,
-            dados: porEmail
-          };
+          return porEmail;
         }
       }
 
       return null;
     }
 
-    async function buscarAdminValido(user) {
-      let registro = await buscarAdminNaTabela("admin_filmes", user);
-      if (registro) return registro;
-
-      registro = await buscarAdminNaTabela("super_admin_filmes", user);
-      if (registro) return registro;
-
-      return null;
-    }
-
     async function validarAcesso(user) {
-      const registro = await buscarAdminValido(user);
+      const admin = await buscarAdminValido(user);
 
-      if (!registro || !registro.dados) {
-        return {
-          ok: false,
-          motivo: "Seu usuário existe no Auth, mas não está vinculado ao painel."
-        };
+      if (!admin) {
+        return { ok: false, motivo: "Usuário não vinculado ao painel." };
       }
 
-      if (registro.dados.ativo === false) {
-        return {
-          ok: false,
-          motivo: "Seu acesso está desativado."
-        };
+      if (admin.ativo === false) {
+        return { ok: false, motivo: "Usuário desativado." };
       }
 
-      return {
-        ok: true,
-        tipo: registro.origem,
-        admin: registro.dados
-      };
+      return { ok: true, admin };
     }
 
     async function verificarSessao() {
@@ -533,8 +504,7 @@
         const { data, error } = await supabaseClient.auth.getSession();
         if (error || !data?.session?.user) return;
 
-        const user = data.session.user;
-        const validacao = await validarAcesso(user);
+        const validacao = await validarAcesso(data.session.user);
 
         if (!validacao.ok) {
           await supabaseClient.auth.signOut();
@@ -630,32 +600,28 @@
           return;
         }
 
-        const existenteAdmin = await buscarAdminNaTabela("admin_filmes", { email, id: user.id });
-        const existenteSuper = await buscarAdminNaTabela("super_admin_filmes", { email, id: user.id });
+        const { data: existente } = await supabaseClient
+          .from("admin_filmes")
+          .select("id, user_id, email, ativo, tipo")
+          .eq("email", email)
+          .maybeSingle();
 
-        if (existenteAdmin?.dados) {
+        if (existente) {
           await supabaseClient
             .from("admin_filmes")
             .update({
               user_id: user.id,
               email: email
             })
-            .eq("id", existenteAdmin.dados.id);
-        } else if (existenteSuper?.dados) {
-          await supabaseClient
-            .from("super_admin_filmes")
-            .update({
-              user_id: user.id,
-              email: email
-            })
-            .eq("id", existenteSuper.dados.id);
+            .eq("id", existente.id);
         } else {
           await supabaseClient
             .from("admin_filmes")
             .insert([{
               user_id: user.id,
               email: email,
-              ativo: true
+              ativo: true,
+              tipo: "admin"
             }]);
         }
 
