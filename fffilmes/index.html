@@ -260,6 +260,11 @@
       border:1px solid rgba(255,255,255,.1);
     }
 
+    .btn-outline:disabled{
+      opacity:.65;
+      cursor:not-allowed;
+    }
+
     .msg{
       display:none;
       margin-bottom:14px;
@@ -382,7 +387,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
     const REDIRECT_POS_LOGIN = "filmes.html";
 
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const formLogin = document.getElementById("formLogin");
     const btnEntrar = document.getElementById("btnEntrar");
@@ -399,10 +404,10 @@
       mensagem.textContent = "";
     }
 
-    function setLoading(loading) {
+    function setLoading(loading, textoBotao = "Entrar no sistema") {
       btnEntrar.disabled = loading;
       btnCadastro.disabled = loading;
-      btnEntrar.textContent = loading ? "Entrando..." : "Entrar no sistema";
+      btnEntrar.textContent = textoBotao;
     }
 
     function aplicarTema(config) {
@@ -439,13 +444,61 @@
       } catch (e) {}
     }
 
+    async function buscarAdminPorUserId(userId) {
+      const { data, error } = await supabaseClient
+        .from("admin_filmes")
+        .select("*")
+        .eq("user_id", userId)
+        .limit(1);
+
+      if (error) {
+        return { ok: false, admin: null, error };
+      }
+
+      if (!data || data.length === 0) {
+        return { ok: false, admin: null, error: null };
+      }
+
+      return { ok: true, admin: data[0], error: null };
+    }
+
+    async function validarAcessoPorUserId(userId) {
+      const resultado = await buscarAdminPorUserId(userId);
+
+      if (!resultado.ok || !resultado.admin) {
+        return {
+          ok: false,
+          motivo: "Seu usuário existe no Auth, mas não está vinculado ao painel."
+        };
+      }
+
+      if (resultado.admin.ativo === false) {
+        return {
+          ok: false,
+          motivo: "Seu acesso está desativado."
+        };
+      }
+
+      return {
+        ok: true,
+        admin: resultado.admin
+      };
+    }
+
     async function verificarSessao() {
       try {
         const { data, error } = await supabaseClient.auth.getSession();
-        if (error) return;
-        if (data?.session?.user) {
-          window.location.href = REDIRECT_POS_LOGIN;
+        if (error || !data?.session?.user) return;
+
+        const userId = data.session.user.id;
+        const validacao = await validarAcessoPorUserId(userId);
+
+        if (!validacao.ok) {
+          await supabaseClient.auth.signOut();
+          return;
         }
+
+        window.location.href = REDIRECT_POS_LOGIN;
       } catch (e) {}
     }
 
@@ -461,16 +514,25 @@
         return;
       }
 
-      setLoading(true);
+      setLoading(true, "Entrando...");
 
       try {
-        const { error } = await supabaseClient.auth.signInWithPassword({
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
           email,
           password: senha
         });
 
-        if (error) {
-          mostrarMensagem(error.message || "Não foi possível fazer login.");
+        if (error || !data?.user) {
+          mostrarMensagem(error?.message || "Não foi possível fazer login.");
+          setLoading(false);
+          return;
+        }
+
+        const validacao = await validarAcessoPorUserId(data.user.id);
+
+        if (!validacao.ok) {
+          await supabaseClient.auth.signOut();
+          mostrarMensagem(validacao.motivo);
           setLoading(false);
           return;
         }
@@ -503,7 +565,7 @@
         return;
       }
 
-      setLoading(true);
+      setLoading(true, "Processando...");
 
       try {
         const { data, error } = await supabaseClient.auth.signUp({
@@ -517,11 +579,63 @@
           return;
         }
 
-        if (data?.user && !data?.session) {
-          mostrarMensagem("Conta criada. Confira seu e-mail para confirmar o cadastro.", "success");
-        } else {
-          mostrarMensagem("Conta criada com sucesso. Você já pode entrar.", "success");
+        const novoUserId = data?.user?.id;
+
+        if (!novoUserId) {
+          mostrarMensagem("Conta criada, mas não foi possível obter o ID do usuário.");
+          setLoading(false);
+          return;
         }
+
+        const { data: adminExistente, error: erroBuscaAdmin } = await supabaseClient
+          .from("admin_filmes")
+          .select("id, user_id, email, ativo")
+          .eq("email", email)
+          .limit(1);
+
+        if (erroBuscaAdmin) {
+          mostrarMensagem("Conta criada no Auth, mas houve erro ao verificar vínculo no painel.");
+          setLoading(false);
+          return;
+        }
+
+        if (adminExistente && adminExistente.length > 0) {
+          const admin = adminExistente[0];
+
+          const { error: erroUpdate } = await supabaseClient
+            .from("admin_filmes")
+            .update({
+              user_id: novoUserId,
+              email: email
+            })
+            .eq("id", admin.id);
+
+          if (erroUpdate) {
+            mostrarMensagem("Conta criada no Auth, mas não foi possível vincular ao painel.");
+            setLoading(false);
+            return;
+          }
+
+          mostrarMensagem("Conta criada e vinculada com sucesso. Você já pode entrar.", "success");
+          setLoading(false);
+          return;
+        }
+
+        const { error: erroInsert } = await supabaseClient
+          .from("admin_filmes")
+          .insert([{
+            user_id: novoUserId,
+            email: email,
+            ativo: true
+          }]);
+
+        if (erroInsert) {
+          mostrarMensagem("Conta criada no Auth, mas não foi possível criar o vínculo no painel.");
+          setLoading(false);
+          return;
+        }
+
+        mostrarMensagem("Conta criada com sucesso. Você já pode entrar.", "success");
       } catch (err) {
         mostrarMensagem("Erro inesperado ao criar conta.");
       }
