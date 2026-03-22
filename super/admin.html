@@ -17,6 +17,7 @@ window.criarSuperAdmin = async () => {
   const email = document.getElementById("emailAdmin").value.trim().toLowerCase();
   const senha = document.getElementById("senhaAdmin").value.trim();
   const botao = document.getElementById("btnCriar");
+  const resultado = document.getElementById("resultado");
 
   if (!email || !senha) {
     alert("Preencha e-mail e senha");
@@ -30,36 +31,71 @@ window.criarSuperAdmin = async () => {
 
   botao.disabled = true;
   botao.textContent = "Criando...";
+  resultado.innerHTML = "";
 
   try {
+    let userId = null;
+
+    // 1) tenta criar
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password: senha
     });
 
-    if (authError) throw authError;
-    if (!authData?.user?.id) throw new Error("Não foi possível criar o usuário no Auth");
+    if (!authError && authData?.user?.id) {
+      userId = authData.user.id;
+    }
 
-    const userId = authData.user.id;
-
-    const { error: superError } = await supabase
-      .from("super_admins")
-      .insert({
-        user_id: userId,
-        email: email
+    // 2) se já existir, tenta logar para pegar o id
+    if (authError && String(authError.message || "").toLowerCase().includes("already registered")) {
+      const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+        email,
+        password: senha
       });
 
-    if (superError) throw superError;
+      if (loginError) {
+        throw new Error("Esse usuário já existe. Use a senha correta dele para vinculá-lo como super admin.");
+      }
 
-    document.getElementById("resultado").innerHTML = `
+      if (!loginData?.user?.id) {
+        throw new Error("Não foi possível obter o ID do usuário existente.");
+      }
+
+      userId = loginData.user.id;
+    }
+
+    // 3) outros erros
+    if (!userId && authError) {
+      throw authError;
+    }
+
+    // 4) grava em super_admins se ainda não existir
+    const { data: existente } = await supabase
+      .from("super_admins")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!existente) {
+      const { error: superError } = await supabase
+        .from("super_admins")
+        .insert({
+          user_id: userId,
+          email: email
+        });
+
+      if (superError) throw superError;
+    }
+
+    resultado.innerHTML = `
       <div style="margin-top:15px;padding:12px;border-radius:12px;background:#052e16;color:#bbf7d0">
-        Super admin criado com sucesso!<br><br>
+        Super admin vinculado com sucesso!<br><br>
         <b>User ID:</b> ${userId}<br>
         <b>Email:</b> ${email}
       </div>
     `;
 
-    alert("Super admin criado com sucesso!");
+    alert("Super admin criado/vinculado com sucesso!");
 
   } catch (err) {
     console.error("Erro ao criar super admin:", err);
@@ -111,17 +147,12 @@ button:disabled{
 </head>
 
 <body>
-
 <div class="box">
   <h2>👑 Criar Super Admin</h2>
-
   <input id="emailAdmin" type="email" placeholder="E-mail do super admin">
   <input id="senhaAdmin" type="password" placeholder="Senha">
-
   <button id="btnCriar" onclick="criarSuperAdmin()">Criar Super Admin</button>
-
   <div id="resultado"></div>
 </div>
-
 </body>
 </html>
