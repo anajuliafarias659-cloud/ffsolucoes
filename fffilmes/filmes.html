@@ -486,6 +486,8 @@
     let usuarioDerrubado = false;
     let canalTempoReal = null;
     let clienteAtual = null;
+    let adminAtual = null;
+    let tipoUsuarioAtual = null;
     let toquesAdmin = 0;
     let timerToquesAdmin = null;
 
@@ -722,32 +724,65 @@
         .eq("user_id", authUser.id)
         .maybeSingle();
 
-      if (erroCliente || !cliente) {
-        await derrubarUsuario("Usuário não vinculado ao painel.");
-        return null;
+      if (!erroCliente && cliente) {
+        if (cliente.ativo === false) {
+          await derrubarUsuario("Seu acesso foi bloqueado.");
+          return null;
+        }
+
+        clienteAtual = cliente;
+        adminAtual = null;
+        tipoUsuarioAtual = "cliente";
+
+        localStorage.setItem("tipo_usuario_filmes", "cliente");
+        localStorage.setItem("cliente_id_filmes", String(cliente.id || ""));
+        localStorage.setItem("cliente_nome_filmes", cliente.nome || "");
+        localStorage.setItem("cliente_email_filmes", cliente.email || "");
+        localStorage.setItem("cliente_user_id_filmes", authUser.id || "");
+        localStorage.setItem("admin_id_filmes", String(cliente.admin_id || ""));
+
+        return cliente;
       }
 
-      if (cliente.ativo === false) {
-        await derrubarUsuario("Seu acesso foi bloqueado.");
-        return null;
+      const { data: admin, error: erroAdmin } = await supabaseClient
+        .from("admin_filmes")
+        .select("*")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+
+      if (!erroAdmin && admin) {
+        if (admin.ativo === false) {
+          await derrubarUsuario("Admin desativado.");
+          return null;
+        }
+
+        adminAtual = admin;
+        clienteAtual = {
+          id: null,
+          nome: "Admin",
+          email: admin.email || "",
+          admin_id: admin.id,
+          ativo: true
+        };
+        tipoUsuarioAtual = "admin";
+
+        localStorage.setItem("tipo_usuario_filmes", "admin");
+        localStorage.setItem("admin_id_filmes", String(admin.id || ""));
+        localStorage.setItem("admin_email_filmes", admin.email || "");
+
+        return clienteAtual;
       }
 
-      clienteAtual = cliente;
-
-      localStorage.setItem("tipo_usuario_filmes", "cliente");
-      localStorage.setItem("cliente_id_filmes", String(cliente.id || ""));
-      localStorage.setItem("cliente_nome_filmes", cliente.nome || "");
-      localStorage.setItem("cliente_email_filmes", cliente.email || "");
-      localStorage.setItem("cliente_user_id_filmes", authUser.id || "");
-      localStorage.setItem("admin_id_filmes", String(cliente.admin_id || ""));
-
-      return cliente;
+      await derrubarUsuario("Usuário não vinculado.");
+      return null;
     }
 
     async function mostrarUsuario() {
       if (!clienteAtual) return;
+
+      const prefixo = tipoUsuarioAtual === "admin" ? "Admin: " : "Logado como: ";
       document.getElementById("userInfo").textContent =
-        "Logado como: " + (clienteAtual.email || "usuário");
+        prefixo + (clienteAtual.email || "usuário");
     }
 
     async function carregarConfigTema() {
@@ -800,6 +835,8 @@
     }
 
     function ativarBloqueioTempoReal(clienteId) {
+      if (!clienteId) return;
+
       try {
         if (canalTempoReal) {
           supabaseClient.removeChannel(canalTempoReal);
@@ -848,7 +885,10 @@
       await mostrarUsuario();
       await carregarConfigTema();
       await carregarFilmes();
-      ativarBloqueioTempoReal(cliente.id);
+
+      if (tipoUsuarioAtual === "cliente" && cliente.id) {
+        ativarBloqueioTempoReal(cliente.id);
+      }
     }
 
     function resetToquesAdmin() {
