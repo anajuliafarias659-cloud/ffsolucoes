@@ -343,15 +343,15 @@
 
             <div id="mensagem" class="msg"></div>
 
-            <form id="formLogin">
+            <form id="formLogin" autocomplete="on">
               <div class="campo">
                 <label for="email">E-mail</label>
-                <input type="email" id="email" placeholder="Digite seu e-mail" required />
+                <input type="email" id="email" name="email" autocomplete="email" placeholder="Digite seu e-mail" required />
               </div>
 
               <div class="campo">
                 <label for="senha">Senha</label>
-                <input type="password" id="senha" placeholder="Digite sua senha" required />
+                <input type="password" id="senha" name="password" autocomplete="current-password" placeholder="Digite sua senha" required />
               </div>
 
               <div class="linha">
@@ -448,7 +448,7 @@
     async function buscarAdminValido(user) {
       if (!user) return null;
 
-      const campos = "id, user_id, email, ativo, tipo";
+      const campos = "id, user_id, email, ativo, tipo, plano, limite_clientes";
 
       if (user.id) {
         const { data: porId, error: erroId } = await supabaseClient
@@ -474,9 +474,7 @@
               .update({ user_id: user.id })
               .eq("id", porEmail.id);
 
-            if (!erroUpdate) {
-              porEmail.user_id = user.id;
-            }
+            if (!erroUpdate) porEmail.user_id = user.id;
           }
           return porEmail;
         }
@@ -519,8 +517,8 @@
       e.preventDefault();
       limparMensagem();
 
-      const email = document.getElementById("email").value.trim();
-      const senha = document.getElementById("senha").value.trim();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const senha = document.getElementById("senha").value;
 
       if (!email || !senha) {
         mostrarMensagem("Preencha e-mail e senha.");
@@ -554,7 +552,7 @@
 
         setTimeout(() => {
           window.location.href = REDIRECT_POS_LOGIN;
-        }, 700);
+        }, 500);
 
       } catch (err) {
         mostrarMensagem("Erro inesperado ao fazer login.");
@@ -565,8 +563,8 @@
     btnCadastro.addEventListener("click", async () => {
       limparMensagem();
 
-      const email = document.getElementById("email").value.trim();
-      const senha = document.getElementById("senha").value.trim();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const senha = document.getElementById("senha").value;
 
       if (!email || !senha) {
         mostrarMensagem("Digite e-mail e senha para criar a conta.");
@@ -600,29 +598,49 @@
           return;
         }
 
-        const { data: existente } = await supabaseClient
+        const { data: existente, error: erroBusca } = await supabaseClient
           .from("admin_filmes")
-          .select("id, user_id, email, ativo, tipo")
+          .select("id, user_id, email, ativo, tipo, plano, limite_clientes")
           .eq("email", email)
           .maybeSingle();
 
+        if (erroBusca) {
+          mostrarMensagem("Conta criada no Auth, mas houve erro ao vincular no painel.");
+          setLoading(false);
+          return;
+        }
+
         if (existente) {
-          await supabaseClient
+          const { error: erroUpdate } = await supabaseClient
             .from("admin_filmes")
             .update({
               user_id: user.id,
               email: email
             })
             .eq("id", existente.id);
+
+          if (erroUpdate) {
+            mostrarMensagem("Conta criada no Auth, mas não foi possível atualizar o vínculo.");
+            setLoading(false);
+            return;
+          }
         } else {
-          await supabaseClient
+          const { error: erroInsert } = await supabaseClient
             .from("admin_filmes")
             .insert([{
               user_id: user.id,
               email: email,
               ativo: true,
-              tipo: "admin"
+              tipo: "admin",
+              plano: "basico",
+              limite_clientes: 20
             }]);
+
+          if (erroInsert) {
+            mostrarMensagem("Conta criada no Auth, mas não foi possível criar o admin.");
+            setLoading(false);
+            return;
+          }
         }
 
         if (data?.user && !data?.session) {
@@ -641,7 +659,7 @@
     async function recuperarSenha() {
       limparMensagem();
 
-      const email = document.getElementById("email").value.trim();
+      const email = document.getElementById("email").value.trim().toLowerCase();
 
       if (!email) {
         mostrarMensagem("Digite seu e-mail para recuperar a senha.");
