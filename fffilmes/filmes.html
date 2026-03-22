@@ -108,16 +108,26 @@
       cursor:pointer;
     }
 
-    .subtitulo{
+    .categorias-wrap{
+      margin-top:24px;
+    }
+
+    .categoria-bloco{
+      margin-bottom:30px;
+    }
+
+    .categoria-titulo{
       font-size:24px;
-      margin:24px 0 16px;
+      margin:0 0 14px;
+      color:#fff;
+      border-left:5px solid var(--primary);
+      padding-left:12px;
     }
 
     .gallery{
       display:grid;
       grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
       gap:16px;
-      margin-top:20px;
     }
 
     .movie{
@@ -286,6 +296,10 @@
         min-width:auto;
         width:100%;
       }
+
+      .categoria-titulo{
+        font-size:20px;
+      }
     }
   </style>
 </head>
@@ -309,8 +323,7 @@
         <button id="btnAssistirDestaque" class="btn-assistir" style="display:none;">Assistir agora</button>
       </div>
 
-      <h2 class="subtitulo">Catálogo</h2>
-      <div id="gallery" class="gallery"></div>
+      <div id="categoriasWrap" class="categorias-wrap"></div>
     </div>
   </div>
 
@@ -372,7 +385,29 @@
       return arr;
     }
 
-    async function abrirPlayer(videoId, titulo = "", descricao = "") {
+    function normalizarCategoria(categoria) {
+      const texto = String(categoria || "").trim();
+      return texto || "Sem categoria";
+    }
+
+    function agruparPorCategoria(filmes) {
+      const grupos = {};
+
+      filmes.forEach(filme => {
+        const categoria = normalizarCategoria(filme.categoria);
+        if (!grupos[categoria]) grupos[categoria] = [];
+        grupos[categoria].push(filme);
+      });
+
+      const categoriasOrdenadas = Object.keys(grupos).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+      return categoriasOrdenadas.map(categoria => ({
+        categoria,
+        filmes: embaralharArray(grupos[categoria])
+      }));
+    }
+
+    async function abrirPlayer(videoId, titulo = "") {
       const overlay = document.getElementById("playerOverlay");
       const overlayPlayer = document.getElementById("overlayPlayer");
       const overlayTitulo = document.getElementById("overlayTitulo");
@@ -455,13 +490,39 @@
       } catch (e) {}
     }
 
+    function renderizarCategorias(filmes) {
+      const categoriasWrap = document.getElementById("categoriasWrap");
+
+      if (!filmes.length) {
+        categoriasWrap.innerHTML = '<div class="vazio">Nenhum filme ativo cadastrado.</div>';
+        return;
+      }
+
+      const grupos = agruparPorCategoria(filmes);
+
+      categoriasWrap.innerHTML = grupos.map(grupo => `
+        <section class="categoria-bloco">
+          <h2 class="categoria-titulo">${grupo.categoria}</h2>
+          <div class="gallery">
+            ${grupo.filmes.map(filme => `
+              <div class="movie" onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}')">
+                <img src="${filme.thumb || ''}" alt="${filme.titulo || ''}">
+                <div class="movie-title">${filme.titulo || ''}</div>
+                <div class="movie-cat">${normalizarCategoria(filme.categoria)}</div>
+              </div>
+            `).join("")}
+          </div>
+        </section>
+      `).join("");
+    }
+
     async function carregarFilmes() {
-      const gallery = document.getElementById("gallery");
+      const categoriasWrap = document.getElementById("categoriasWrap");
       const tituloPlayer = document.getElementById("tituloPlayer");
       const descricaoPlayer = document.getElementById("descricaoPlayer");
       const btnAssistirDestaque = document.getElementById("btnAssistirDestaque");
 
-      gallery.innerHTML = '<div class="vazio">Carregando filmes...</div>';
+      categoriasWrap.innerHTML = '<div class="vazio">Carregando filmes...</div>';
 
       try {
         const { data, error } = await supabaseClient
@@ -479,7 +540,7 @@
           tituloPlayer.textContent = "Nenhum filme cadastrado";
           descricaoPlayer.textContent = "";
           btnAssistirDestaque.style.display = "none";
-          gallery.innerHTML = '<div class="vazio">Nenhum filme ativo cadastrado.</div>';
+          categoriasWrap.innerHTML = '<div class="vazio">Nenhum filme ativo cadastrado.</div>';
           return;
         }
 
@@ -489,20 +550,13 @@
         btnAssistirDestaque.style.display = "inline-block";
         btnAssistirDestaque.onclick = () => abrirPlayer(
           filmeDestaque.video_id,
-          filmeDestaque.titulo,
-          filmeDestaque.descricao || ""
+          filmeDestaque.titulo
         );
 
-        gallery.innerHTML = filmes.map(filme => `
-          <div class="movie" onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}', '${escaparTexto(filme.descricao || "")}')">
-            <img src="${filme.thumb || ''}" alt="${filme.titulo || ''}">
-            <div class="movie-title">${filme.titulo || ''}</div>
-            <div class="movie-cat">${filme.categoria || "Sem categoria"}</div>
-          </div>
-        `).join("");
+        renderizarCategorias(filmes);
 
       } catch (error) {
-        gallery.innerHTML = `<div class="vazio" style="color:#fca5a5">${error.message || "Erro ao carregar filmes."}</div>`;
+        categoriasWrap.innerHTML = `<div class="vazio" style="color:#fca5a5">${error.message || "Erro ao carregar filmes."}</div>`;
       }
     }
 
