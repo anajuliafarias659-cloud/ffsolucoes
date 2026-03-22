@@ -512,6 +512,10 @@
     let filmeDestaque = null;
     let categoriaAtual = "Todos";
 
+    let usuarioDerrubado = false;
+    let validacaoRodando = false;
+    let intervaloProtecao = null;
+
     function aplicarTema(config) {
       if (!config) return;
 
@@ -716,24 +720,129 @@
       if (e.key === "Escape") fecharPlayer();
     });
 
-    async function protegerPagina() {
+    async function derrubarUsuario(msg = "Seu acesso foi bloqueado.") {
+      if (usuarioDerrubado) return;
+      usuarioDerrubado = true;
+
+      try {
+        clearInterval(intervaloProtecao);
+      } catch (e) {}
+
+      try {
+        await supabaseClient.auth.signOut();
+      } catch (e) {}
+
+      alert(msg);
+      window.location.href = "index.html";
+    }
+
+    async function buscarAdminLogado(user) {
+      if (!user) return null;
+
+      const campos = "id, user_id, email, ativo, tipo, plano, limite_clientes";
+
+      if (user.id) {
+        const { data: porId, error: erroId } = await supabaseClient
+          .from("admin_filmes")
+          .select(campos)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (!erroId && porId) {
+          return porId;
+        }
+      }
+
+      if (user.email) {
+        const { data: porEmail, error: erroEmail } = await supabaseClient
+          .from("admin_filmes")
+          .select(campos)
+          .eq("email", user.email)
+          .maybeSingle();
+
+        if (!erroEmail && porEmail) {
+          if (!porEmail.user_id && user.id) {
+            const { error: erroUpdate } = await supabaseClient
+              .from("admin_filmes")
+              .update({ user_id: user.id })
+              .eq("id", porEmail.id);
+
+            if (!erroUpdate) {
+              porEmail.user_id = user.id;
+            }
+          }
+          return porEmail;
+        }
+      }
+
+      return null;
+    }
+
+    async function validarAcessoAtual() {
+      if (validacaoRodando || usuarioDerrubado) return false;
+      validacaoRodando = true;
+
       try {
         const { data, error } = await supabaseClient.auth.getSession();
 
         if (error || !data?.session?.user) {
+          validacaoRodando = false;
           window.location.href = "index.html";
-          return;
+          return false;
         }
 
-        document.getElementById("loadingTela").style.display = "none";
-        document.getElementById("conteudo").style.display = "block";
+        const user = data.session.user;
+        const admin = await buscarAdminLogado(user);
 
-        await mostrarUsuario();
-        await carregarConfigTema();
-        await carregarFilmes();
+        if (!admin) {
+          validacaoRodando = false;
+          await derrubarUsuario("Seu usuário não está mais vinculado ao painel.");
+          return false;
+        }
+
+        if (admin.ativo === false) {
+          validacaoRodando = false;
+          await derrubarUsuario("Seu acesso foi bloqueado.");
+          return false;
+        }
+
+        window.adminLogado = admin;
+        validacaoRodando = false;
+        return true;
+
       } catch (e) {
-        window.location.href = "index.html";
+        validacaoRodando = false;
+        await derrubarUsuario("Erro ao validar acesso.");
+        return false;
       }
+    }
+
+    async function protegerPagina() {
+      const ok = await validarAcessoAtual();
+      if (!ok) return;
+
+      document.getElementById("loadingTela").style.display = "none";
+      document.getElementById("conteudo").style.display = "block";
+
+      await mostrarUsuario();
+      await carregarConfigTema();
+      await carregarFilmes();
+    }
+
+    function iniciarProtecaoTempoReal() {
+      intervaloProtecao = setInterval(() => {
+        validarAcessoAtual();
+      }, 2000);
+
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          validarAcessoAtual();
+        }
+      });
+
+      window.addEventListener("focus", () => {
+        validarAcessoAtual();
+      });
     }
 
     async function mostrarUsuario() {
@@ -796,12 +905,16 @@
     }
 
     async function logout() {
+      try {
+        clearInterval(intervaloProtecao);
+      } catch (e) {}
+
       await supabaseClient.auth.signOut();
       window.location.href = "index.html";
     }
 
     supabaseClient.auth.onAuthStateChange((event, session) => {
-      if (!session) {
+      if (!session && !usuarioDerrubado) {
         window.location.href = "index.html";
       }
     });
@@ -816,6 +929,7 @@
     });
 
     protegerPagina();
+    iniciarProtecaoTempoReal();
   </script>
 </body>
 </html>
