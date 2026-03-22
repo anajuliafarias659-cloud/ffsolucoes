@@ -1248,47 +1248,79 @@
     }
 
     async function carregarConfigTema() {
-      if (!clienteAtual?.admin_id) return;
+  if (!clienteAtual?.admin_id) return;
 
-      let cfg = null;
+  let cfgAdmin = null;
+  let cfgGlobal = null;
 
-      const { data: dataAdmin, error: errorAdmin } = await supabaseClient
-        .from("config_filmes")
-        .select("*")
-        .eq("admin_id", clienteAtual.admin_id)
-        .maybeSingle();
+  // 🔹 busca config do admin
+  const { data: dataAdmin, error: errorAdmin } = await supabaseClient
+    .from("config_filmes")
+    .select("*")
+    .eq("admin_id", clienteAtual.admin_id)
+    .maybeSingle();
 
-      if (!errorAdmin && dataAdmin) {
-        cfg = dataAdmin;
-      } else {
-        const { data: dataGlobal, error: errorGlobal } = await supabaseClient
-          .from("config_filmes")
-          .select("*")
-          .eq("admin_id", 0)
-          .maybeSingle();
+  if (!errorAdmin && dataAdmin) {
+    cfgAdmin = dataAdmin;
+  }
 
-        if (!errorGlobal && dataGlobal) {
-          cfg = dataGlobal;
-        }
-      }
+  // 🔹 busca config global (MASTER)
+  const { data: dataGlobal, error: errorGlobal } = await supabaseClient
+    .from("config_filmes")
+    .select("*")
+    .eq("admin_id", 0)
+    .maybeSingle();
 
-      if (cfg) {
-        aplicarTema(cfg);
+  if (!errorGlobal && dataGlobal) {
+    cfgGlobal = dataGlobal;
+  }
 
-        const legendasBanco = montarLegendas(cfg.legendas_player);
-        if (legendasBanco.length) {
-          frasesLegendas = legendasBanco;
-        }
+  // 🔹 junta as duas configs (admin sobrescreve global)
+  const cfg = {
+    ...(cfgGlobal || {}),
+    ...(cfgAdmin || {})
+  };
 
-        legendaMinMinutos = Number(cfg.legenda_min_minutos || 10);
-        legendaMaxMinutos = Number(cfg.legenda_max_minutos || 15);
-        legendaDuracaoSegundos = Number(cfg.legenda_duracao_segundos || 6);
+  if (!cfg || Object.keys(cfg).length === 0) {
+    console.log("Nenhuma config encontrada");
+    return;
+  }
 
-        if (legendaMinMinutos < 1) legendaMinMinutos = 1;
-        if (legendaMaxMinutos < legendaMinMinutos) legendaMaxMinutos = legendaMinMinutos;
-        if (legendaDuracaoSegundos < 1) legendaDuracaoSegundos = 1;
-      }
-    }
+  // 🔹 aplica tema (sem mexer no visual atual)
+  aplicarTema(cfg);
+
+  // 🔥 AQUI É O QUE FAZ A LEGENDA FUNCIONAR
+  let legendasBanco = montarLegendas(cfg.legendas_player);
+
+  // 🔴 fallback se vier vazio
+  if (!legendasBanco.length && cfgGlobal?.legendas_player) {
+    legendasBanco = montarLegendas(cfgGlobal.legendas_player);
+  }
+
+  if (legendasBanco.length) {
+    frasesLegendas = legendasBanco;
+  } else {
+    console.log("⚠️ Nenhuma legenda encontrada no banco");
+  }
+
+  // 🔹 tempos configuráveis
+  legendaMinMinutos = Number(cfg.legenda_min_minutos || 10);
+  legendaMaxMinutos = Number(cfg.legenda_max_minutos || 15);
+  legendaDuracaoSegundos = Number(cfg.legenda_duracao_segundos || 6);
+
+  // 🔒 proteção
+  if (legendaMinMinutos < 1) legendaMinMinutos = 1;
+  if (legendaMaxMinutos < legendaMinMinutos) legendaMaxMinutos = legendaMinMinutos;
+  if (legendaDuracaoSegundos < 1) legendaDuracaoSegundos = 1;
+
+  // 🔍 debug (pode deixar)
+  console.log("🔥 CONFIG PLAYER:");
+  console.log("Legendas:", frasesLegendas);
+  console.log("Min:", legendaMinMinutos);
+  console.log("Max:", legendaMaxMinutos);
+  console.log("Duração:", legendaDuracaoSegundos);
+}
+
 
     async function carregarFilmes() {
       const catalogo = document.getElementById("catalogoNetflix");
