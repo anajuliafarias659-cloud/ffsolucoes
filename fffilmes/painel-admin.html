@@ -17,6 +17,8 @@
   --line:rgba(255,255,255,.08);
   --green:#22c55e;
   --red:#ef4444;
+  --blue:#2563eb;
+  --gray:#334155;
 }
 body{
   margin:0;
@@ -36,7 +38,7 @@ body{
 .topo strong{font-size:14px}
 .container{
   padding:20px;
-  max-width:1000px;
+  max-width:1100px;
   margin:auto;
 }
 .card{
@@ -60,7 +62,7 @@ p.info{
   grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
   gap:12px;
 }
-input,select,textarea{
+input,select{
   width:100%;
   padding:12px 14px;
   margin-top:10px;
@@ -82,6 +84,9 @@ button{
 }
 .salvar{background:var(--green);color:#000}
 .sair{background:#fff;color:#111}
+.editar{background:var(--blue);color:#fff}
+.excluir{background:var(--red);color:#fff}
+.cancelar{background:var(--gray);color:#fff}
 .lista{margin-top:14px}
 .item{
   background:#020617;
@@ -89,6 +94,23 @@ button{
   border-radius:14px;
   margin-top:10px;
   border:1px solid var(--line);
+}
+.item-topo{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.item-acoes{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.item-acoes button{
+  margin-top:0;
+  padding:10px 12px;
+  font-size:14px;
 }
 .small{
   font-size:13px;
@@ -120,6 +142,15 @@ button{
   padding:8px 12px;
   font-size:13px;
 }
+.row-buttons{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.row-buttons button{
+  flex:1;
+  min-width:180px;
+}
 @media (max-width:640px){
   h2{font-size:22px}
 }
@@ -145,15 +176,20 @@ button{
       <div class="badge" id="limiteInfo">0 / 0</div>
     </div>
 
-    <p class="info">Aqui o admin cria o cliente com login real no Supabase Auth.</p>
+    <p class="info">Aqui o admin cria, edita e remove clientes com login real no Supabase Auth.</p>
 
-    <div class="grid">
-      <input id="nomeCliente" placeholder="Nome do cliente">
-      <input id="emailCliente" type="email" placeholder="E-mail do cliente">
-      <input id="senhaCliente" type="password" placeholder="Senha do cliente">
-    </div>
+    <form onsubmit="event.preventDefault(); salvarOuEditarCliente();">
+      <div class="grid">
+        <input id="nomeCliente" placeholder="Nome do cliente">
+        <input id="emailCliente" type="email" placeholder="E-mail do cliente">
+        <input id="senhaCliente" type="password" placeholder="Senha do cliente">
+      </div>
 
-    <button class="salvar" id="btnCadastrar" onclick="salvarCliente()">Cadastrar Cliente</button>
+      <div class="row-buttons">
+        <button type="submit" class="salvar" id="btnSalvarCliente">Cadastrar Cliente</button>
+        <button type="button" class="cancelar" id="btnCancelarEdicao" onclick="cancelarEdicao()" style="display:none;">Cancelar edição</button>
+      </div>
+    </form>
 
     <div id="listaClientes" class="lista"></div>
   </div>
@@ -189,10 +225,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let adminAuthUser = null;
-let adminRegistro = null;
 let adminId = null;
 let limite = 0;
 let totalClientes = 0;
+let modoEdicao = false;
+let clienteEditando = null;
 
 const msgBox = document.getElementById("mensagem");
 
@@ -206,10 +243,43 @@ function limparMsg(){
   msgBox.textContent = "";
 }
 
-function setCadastroLoading(loading){
-  const btn = document.getElementById("btnCadastrar");
+function resetFormularioCliente(){
+  document.getElementById("nomeCliente").value = "";
+  document.getElementById("emailCliente").value = "";
+  document.getElementById("senhaCliente").value = "";
+}
+
+function atualizarTextoBotao(){
+  document.getElementById("btnSalvarCliente").textContent =
+    modoEdicao ? "Salvar Alterações" : "Cadastrar Cliente";
+}
+
+function setCadastroLoading(loading, texto="Processando..."){
+  const btn = document.getElementById("btnSalvarCliente");
   btn.disabled = loading;
-  btn.textContent = loading ? "Cadastrando..." : "Cadastrar Cliente";
+  btn.textContent = loading ? texto : (modoEdicao ? "Salvar Alterações" : "Cadastrar Cliente");
+}
+
+function entrarModoEdicao(cliente){
+  modoEdicao = true;
+  clienteEditando = cliente;
+
+  document.getElementById("nomeCliente").value = cliente.nome || "";
+  document.getElementById("emailCliente").value = cliente.email || "";
+  document.getElementById("senhaCliente").value = "";
+
+  atualizarTextoBotao();
+  document.getElementById("btnCancelarEdicao").style.display = "inline-block";
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function cancelarEdicao(){
+  modoEdicao = false;
+  clienteEditando = null;
+  resetFormularioCliente();
+  atualizarTextoBotao();
+  document.getElementById("btnCancelarEdicao").style.display = "none";
 }
 
 function aplicarPresetTema(){
@@ -249,6 +319,34 @@ function aplicarPresetTema(){
   document.getElementById("corTexto").value = p.cor_texto;
 }
 
+async function getAccessToken(){
+  const { data: sessao, error } = await supabaseClient.auth.getSession();
+  if(error || !sessao?.session?.access_token) return null;
+  return sessao.session.access_token;
+}
+
+async function chamarFunction(nomeFunction, body){
+  const token = await getAccessToken();
+  if(!token) throw new Error("Sessão do admin inválida.");
+
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/${nomeFunction}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  const json = await resp.json().catch(() => ({}));
+
+  if(!resp.ok){
+    throw new Error(json?.error || "Erro na operação.");
+  }
+
+  return json;
+}
+
 async function init(){
   limparMsg();
 
@@ -286,7 +384,6 @@ async function init(){
     return;
   }
 
-  adminRegistro = admin;
   adminId = admin.id;
   limite = Number(admin.limite_clientes || 0);
 
@@ -312,13 +409,41 @@ async function carregarClientes(){
   totalClientes = data ? data.length : 0;
   document.getElementById("limiteInfo").textContent = `${totalClientes} / ${limite}`;
 
-  document.getElementById("listaClientes").innerHTML = (data || []).map(c => `
+  const html = (data || []).map(c => `
     <div class="item">
-      <strong>${c.nome || "-"}</strong><br>
-      ${c.email || "-"}
-      <div class="small">Status: ${c.ativo === false ? "Bloqueado" : "Ativo"}</div>
+      <div class="item-topo">
+        <div>
+          <strong>${c.nome || "-"}</strong><br>
+          ${c.email || "-"}
+          <div class="small">Status: ${c.ativo === false ? "Bloqueado" : "Ativo"}</div>
+        </div>
+
+        <div class="item-acoes">
+          <button class="editar" onclick="prepararEdicao(${c.id})">Editar</button>
+          <button class="excluir" onclick="removerCliente(${c.id}, ${JSON.stringify(c.nome || "")})">Remover</button>
+        </div>
+      </div>
     </div>
-  `).join("") || `<div class="item">Nenhum cliente cadastrado ainda.</div>`;
+  `).join("");
+
+  document.getElementById("listaClientes").innerHTML =
+    html || `<div class="item">Nenhum cliente cadastrado ainda.</div>`;
+
+  window.__clientesAdmin = data || [];
+}
+
+function prepararEdicao(clienteId){
+  const cliente = (window.__clientesAdmin || []).find(c => Number(c.id) === Number(clienteId));
+  if(!cliente) return;
+  entrarModoEdicao(cliente);
+}
+
+async function salvarOuEditarCliente(){
+  if(modoEdicao){
+    await editarCliente();
+  }else{
+    await salvarCliente();
+  }
 }
 
 async function salvarCliente(){
@@ -343,52 +468,93 @@ async function salvarCliente(){
     return;
   }
 
-  setCadastroLoading(true);
+  setCadastroLoading(true, "Cadastrando...");
 
   try{
-    const { data: sessao } = await supabaseClient.auth.getSession();
-    const token = sessao?.session?.access_token;
-
-    if(!token){
-      mostrarMsg("Sessão do admin inválida.");
-      setCadastroLoading(false);
-      return;
-    }
-
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/criar-cliente-admin`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        admin_id: adminId,
-        nome,
-        email,
-        senha
-      })
+    await chamarFunction("criar-cliente-admin", {
+      admin_id: adminId,
+      nome,
+      email,
+      senha
     });
 
-    const json = await resp.json();
-
-    if(!resp.ok){
-      mostrarMsg(json?.error || "Erro ao criar cliente.");
-      setCadastroLoading(false);
-      return;
-    }
-
-    document.getElementById("nomeCliente").value = "";
-    document.getElementById("emailCliente").value = "";
-    document.getElementById("senhaCliente").value = "";
-
+    resetFormularioCliente();
     mostrarMsg("Cliente cadastrado com login e senha com sucesso.", "ok");
     await carregarClientes();
 
   }catch(e){
-    mostrarMsg("Erro inesperado ao cadastrar cliente.");
+    mostrarMsg(e.message || "Erro inesperado ao cadastrar cliente.");
   }
 
   setCadastroLoading(false);
+}
+
+async function editarCliente(){
+  limparMsg();
+
+  if(!clienteEditando?.id){
+    mostrarMsg("Cliente inválido para edição.");
+    return;
+  }
+
+  const nome = document.getElementById("nomeCliente").value.trim();
+  const email = document.getElementById("emailCliente").value.trim().toLowerCase();
+  const senha = document.getElementById("senhaCliente").value.trim();
+
+  if(!nome || !email){
+    mostrarMsg("Preencha nome e e-mail.");
+    return;
+  }
+
+  if(senha && senha.length < 6){
+    mostrarMsg("A nova senha precisa ter no mínimo 6 caracteres.");
+    return;
+  }
+
+  setCadastroLoading(true, "Salvando...");
+
+  try{
+    await chamarFunction("editar-cliente-admin", {
+      admin_id: adminId,
+      cliente_id: clienteEditando.id,
+      nome,
+      email,
+      senha
+    });
+
+    cancelarEdicao();
+    mostrarMsg("Cliente atualizado com sucesso.", "ok");
+    await carregarClientes();
+
+  }catch(e){
+    mostrarMsg(e.message || "Erro inesperado ao editar cliente.");
+  }
+
+  setCadastroLoading(false);
+}
+
+async function removerCliente(clienteId, nomeCliente){
+  limparMsg();
+
+  const confirmou = confirm(`Remover o cliente "${nomeCliente}"? Essa ação apaga o cadastro e o login dele.`);
+  if(!confirmou) return;
+
+  try{
+    await chamarFunction("remover-cliente-admin", {
+      admin_id: adminId,
+      cliente_id: clienteId
+    });
+
+    if(clienteEditando?.id === clienteId){
+      cancelarEdicao();
+    }
+
+    mostrarMsg("Cliente removido com sucesso.", "ok");
+    await carregarClientes();
+
+  }catch(e){
+    mostrarMsg(e.message || "Erro inesperado ao remover cliente.");
+  }
 }
 
 async function salvarTema(){
@@ -461,5 +627,6 @@ async function logout(){
 
 init();
 </script>
+
 </body>
 </html>
