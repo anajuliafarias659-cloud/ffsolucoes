@@ -288,7 +288,7 @@
         <div class="card">
           <h2>Cadastrar admin</h2>
           <div class="sub">
-            Agora o admin é criado automaticamente no Auth e vinculado na tabela do sistema.
+            O admin é criado no Auth e vinculado automaticamente na tabela do sistema.
           </div>
 
           <div class="campo">
@@ -408,7 +408,6 @@
 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // cliente separado só para criar usuário sem bagunçar a sessão do master
     const supabaseAuthIsolado = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: {
         persistSession: false,
@@ -538,6 +537,21 @@
       return typeof senha === "string" && senha.length >= 6;
     }
 
+    function mensagemErroAuth(error) {
+      const txt = (error?.message || "").toLowerCase();
+
+      if (txt.includes("user already registered")) {
+        return "Esse e-mail já está cadastrado no Auth.";
+      }
+      if (txt.includes("password")) {
+        return "Senha inválida. Use pelo menos 6 caracteres.";
+      }
+      if (txt.includes("invalid email")) {
+        return "E-mail inválido.";
+      }
+      return error?.message || "Erro ao criar admin.";
+    }
+
     async function salvarAdmin() {
       limparMsg(msgAdmin);
 
@@ -573,7 +587,7 @@
 
       try {
         if (!editAdminId) {
-          const { data: adminExistentePorEmail, error: erroBusca } = await supabaseClient
+          const { data: adminExistente, error: erroBusca } = await supabaseClient
             .from("admin_filmes")
             .select("id, email")
             .eq("email", emailVal)
@@ -581,7 +595,7 @@
 
           if (erroBusca) throw erroBusca;
 
-          if (adminExistentePorEmail) {
+          if (adminExistente) {
             throw new Error("Já existe um admin cadastrado com esse e-mail.");
           }
 
@@ -590,12 +604,15 @@
             password: senhaVal
           });
 
-          if (authError) throw authError;
+          if (authError) {
+            throw new Error(mensagemErroAuth(authError));
+          }
 
           const novoUserId = authCriado?.user?.id;
+          const precisaConfirmarEmail = !authCriado?.user?.confirmed_at;
 
           if (!novoUserId) {
-            throw new Error("Não foi possível obter o user_id do Auth. Verifique a configuração de confirmação de e-mail e tente novamente.");
+            throw new Error("Não foi possível obter o user_id do Auth.");
           }
 
           const { error: insertError } = await supabaseClient
@@ -610,14 +627,18 @@
               tipo: "admin"
             }]);
 
-          if (insertError) throw insertError;
+          if (insertError) {
+            throw insertError;
+          }
 
-          mostrarMsg(
-            msgAdmin,
-            `Admin criado com sucesso.\nE-mail: ${emailVal}\nSenha: ${senhaVal}`,
-            "ok"
-          );
+          await supabaseAuthIsolado.auth.signOut();
 
+          let msg = `Admin criado com sucesso.\nE-mail: ${emailVal}\nSenha: ${senhaVal}`;
+          if (precisaConfirmarEmail) {
+            msg += "\n\nATENÇÃO: o Supabase está exigindo confirmação de e-mail. Esse admin só vai conseguir logar depois de confirmar o e-mail, ou se você desligar 'Confirm email' no Auth.";
+          }
+
+          mostrarMsg(msgAdmin, msg, "ok");
         } else {
           const { error: updateError } = await supabaseClient
             .from("admin_filmes")
@@ -639,10 +660,10 @@
 
       } catch (error) {
         mostrarMsg(msgAdmin, error.message || "Erro ao salvar admin.", "erro");
+      } finally {
+        btnSalvarAdmin.disabled = false;
+        btnSalvarAdmin.textContent = editAdminId ? "Atualizar admin" : "Salvar admin";
       }
-
-      btnSalvarAdmin.disabled = false;
-      btnSalvarAdmin.textContent = editAdminId ? "Atualizar admin" : "Salvar admin";
     }
 
     btnSalvarAdmin.addEventListener("click", salvarAdmin);
@@ -796,10 +817,10 @@
 
       } catch (error) {
         mostrarMsg(msgFilme, error.message || "Erro ao salvar filme.", "erro");
+      } finally {
+        btnSalvarFilme.disabled = false;
+        btnSalvarFilme.textContent = editFilmeId ? "Atualizar filme" : "Salvar filme";
       }
-
-      btnSalvarFilme.disabled = false;
-      btnSalvarFilme.textContent = editFilmeId ? "Atualizar filme" : "Salvar filme";
     }
 
     btnSalvarFilme.addEventListener("click", salvarFilme);
