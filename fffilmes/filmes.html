@@ -8,34 +8,51 @@
 
   <style>
     *{box-sizing:border-box}
+    :root{
+      --primary:#e50914;
+      --secondary:#b20710;
+      --bg:#141414;
+      --card:#1c1c1c;
+      --text:#ffffff;
+      --muted:#94a3b8;
+      --bg-filmes:url('https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=1600&q=80');
+    }
+
     body{
       margin:0;
-      background:#141414;
       font-family:Arial,sans-serif;
-      color:#fff;
+      color:var(--text);
+      background:
+        linear-gradient(rgba(0,0,0,.84), rgba(0,0,0,.92)),
+        var(--bg-filmes) center/cover fixed no-repeat;
     }
+
     header{
-      background:#000;
+      background:rgba(0,0,0,.86);
+      backdrop-filter:blur(8px);
       padding:16px 20px;
       font-size:28px;
       font-weight:bold;
-      color:#ef4444;
+      color:var(--primary);
       text-align:center;
       position:sticky;
       top:0;
       z-index:20;
+      border-bottom:1px solid rgba(255,255,255,.08);
     }
+
     .top-bar{
       position:relative;
       max-width:1400px;
       margin:0 auto;
     }
+
     .btn-sair{
       position:absolute;
       right:0;
       top:50%;
       transform:translateY(-50%);
-      background:#ef4444;
+      background:linear-gradient(135deg,var(--primary),var(--secondary));
       color:#fff;
       border:none;
       padding:10px 14px;
@@ -43,20 +60,20 @@
       font-weight:700;
       cursor:pointer;
     }
-    .btn-sair:hover{
-      opacity:.92;
-    }
+
     .user-info{
       text-align:center;
-      color:#94a3b8;
+      color:var(--muted);
       font-size:14px;
       padding:10px 16px 0;
     }
+
     .container{
       padding:20px;
       max-width:1400px;
       margin:0 auto;
     }
+
     .player{
       margin-top:10px;
       position:relative;
@@ -66,6 +83,7 @@
       overflow:hidden;
       box-shadow:0 10px 30px rgba(0,0,0,.35);
     }
+
     iframe{
       position:absolute;
       top:0;
@@ -74,39 +92,47 @@
       height:100%;
       border:none;
     }
+
     .titulo-player{
       margin:16px 0 6px;
       font-size:26px;
       font-weight:800;
     }
+
     .descricao-player{
       color:#cbd5e1;
       line-height:1.6;
       margin-bottom:24px;
       white-space:pre-line;
     }
+
     .subtitulo{
       font-size:24px;
       margin:0 0 16px;
     }
+
     .gallery{
       display:grid;
       grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
       gap:16px;
       margin-top:20px;
     }
+
     .movie{
       cursor:pointer;
-      background:#1c1c1c;
+      background:rgba(28,28,28,.88);
       border-radius:14px;
       overflow:hidden;
       transition:.2s;
       border:1px solid rgba(255,255,255,.06);
+      backdrop-filter:blur(6px);
     }
+
     .movie:hover{
       transform:translateY(-4px);
-      border-color:rgba(239,68,68,.35);
+      border-color:color-mix(in srgb, var(--primary) 36%, transparent);
     }
+
     .movie img{
       width:100%;
       height:240px;
@@ -114,22 +140,26 @@
       display:block;
       background:#0f172a;
     }
+
     .movie-title{
       font-size:15px;
       padding:12px 12px 6px;
       line-height:1.4;
       font-weight:700;
     }
+
     .movie-cat{
-      color:#94a3b8;
+      color:var(--muted);
       font-size:12px;
       padding:0 12px 12px;
     }
+
     .vazio{
-      color:#94a3b8;
+      color:var(--muted);
       font-size:16px;
       padding:20px 0;
     }
+
     .loading-tela{
       min-height:100vh;
       display:flex;
@@ -139,6 +169,7 @@
       font-size:18px;
       background:#141414;
     }
+
     @media (max-width:700px){
       header{
         font-size:22px;
@@ -196,7 +227,24 @@
 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    let filmesCache = [];
+    function aplicarTema(config) {
+      if (!config) return;
+
+      document.documentElement.style.setProperty("--primary", config.cor_primaria || "#e50914");
+      document.documentElement.style.setProperty("--secondary", config.cor_secundaria || "#b20710");
+      document.documentElement.style.setProperty("--bg", config.cor_fundo || "#141414");
+      document.documentElement.style.setProperty("--card", config.cor_card || "#1c1c1c");
+      document.documentElement.style.setProperty("--text", config.cor_texto || "#ffffff");
+
+      if (config.bg_filmes) {
+        document.documentElement.style.setProperty("--bg-filmes", `url('${config.bg_filmes}')`);
+      }
+
+      if (config.nome_site) {
+        document.title = config.nome_site;
+        document.getElementById("nomeSiteTopo").textContent = config.nome_site;
+      }
+    }
 
     function escaparTexto(texto) {
       return String(texto || "")
@@ -225,12 +273,7 @@
       try {
         const { data, error } = await supabaseClient.auth.getSession();
 
-        if (error) {
-          window.location.href = "index.html";
-          return;
-        }
-
-        if (!data?.session?.user) {
+        if (error || !data?.session?.user) {
           window.location.href = "index.html";
           return;
         }
@@ -239,9 +282,8 @@
         document.getElementById("conteudo").style.display = "block";
 
         await mostrarUsuario();
-        await carregarNomeSite();
+        await carregarConfigTema();
         await carregarFilmes();
-
       } catch (e) {
         window.location.href = "index.html";
       }
@@ -249,29 +291,25 @@
 
     async function mostrarUsuario() {
       try {
-        const { data, error } = await supabaseClient.auth.getUser();
+        const { data } = await supabaseClient.auth.getUser();
 
-        if (error || !data?.user) return;
-
-        document.getElementById("userInfo").textContent =
-          "Logado como: " + (data.user.email || "usuário");
+        if (data?.user) {
+          document.getElementById("userInfo").textContent =
+            "Logado como: " + (data.user.email || "usuário");
+        }
       } catch (e) {}
     }
 
-    async function carregarNomeSite() {
+    async function carregarConfigTema() {
       try {
         const { data, error } = await supabaseClient
           .from("config_filmes")
-          .select("nome_site")
+          .select("*")
           .order("id", { ascending: true })
           .limit(1);
 
         if (error) return;
-
-        if (data && data.length > 0 && data[0].nome_site) {
-          document.getElementById("nomeSiteTopo").textContent = data[0].nome_site;
-          document.title = data[0].nome_site;
-        }
+        if (data && data.length > 0) aplicarTema(data[0]);
       } catch (e) {}
     }
 
@@ -288,9 +326,9 @@
 
         if (error) throw error;
 
-        filmesCache = data || [];
+        const filmes = data || [];
 
-        if (!filmesCache.length) {
+        if (!filmes.length) {
           document.getElementById("mainPlayer").src = "";
           document.getElementById("tituloPlayer").textContent = "Nenhum filme cadastrado";
           document.getElementById("descricaoPlayer").textContent = "";
@@ -298,17 +336,16 @@
           return;
         }
 
-        const primeiro = filmesCache[0];
+        const primeiro = filmes[0];
         playMovie(primeiro.video_id, primeiro.titulo, primeiro.descricao || "");
 
-        gallery.innerHTML = filmesCache.map(filme => `
+        gallery.innerHTML = filmes.map(filme => `
           <div class="movie" onclick="playMovie('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}', '${escaparTexto(filme.descricao || "")}')">
             <img src="${filme.thumb || ''}" alt="${filme.titulo || ''}">
             <div class="movie-title">${filme.titulo || ''}</div>
             <div class="movie-cat">${filme.categoria || "Sem categoria"}</div>
           </div>
         `).join("");
-
       } catch (error) {
         gallery.innerHTML = `<div class="vazio" style="color:#fca5a5">${error.message || "Erro ao carregar filmes."}</div>`;
       }
