@@ -11,7 +11,6 @@
 :root{
   --bg:#020617;
   --card:#0f172a;
-  --card2:#111827;
   --text:#fff;
   --muted:#94a3b8;
   --line:rgba(255,255,255,.08);
@@ -19,6 +18,7 @@
   --red:#ef4444;
   --blue:#2563eb;
   --gray:#334155;
+  --orange:#f59e0b;
 }
 body{
   margin:0;
@@ -35,7 +35,6 @@ body{
   gap:12px;
   border-bottom:1px solid var(--line);
 }
-.topo strong{font-size:14px}
 .container{
   padding:20px;
   max-width:1100px;
@@ -87,6 +86,8 @@ button{
 .editar{background:var(--blue);color:#fff}
 .excluir{background:var(--red);color:#fff}
 .cancelar{background:var(--gray);color:#fff}
+.bloquear{background:var(--orange);color:#111}
+.desbloquear{background:var(--green);color:#000}
 .lista{margin-top:14px}
 .item{
   background:#020617;
@@ -167,7 +168,6 @@ button{
 </div>
 
 <div class="container">
-
   <div id="mensagem" class="msg"></div>
 
   <div class="card">
@@ -176,7 +176,7 @@ button{
       <div class="badge" id="limiteInfo">0 / 0</div>
     </div>
 
-    <p class="info">Aqui o admin cria, edita e remove clientes com login real no Supabase Auth.</p>
+    <p class="info">Crie, edite, remova, bloqueie e desbloqueie clientes.</p>
 
     <form onsubmit="event.preventDefault(); salvarOuEditarCliente();">
       <div class="grid">
@@ -196,7 +196,7 @@ button{
 
   <div class="card">
     <h2>🎨 Tema do Site</h2>
-    <p class="info">Agora salvando nos mesmos campos que o login usa.</p>
+    <p class="info">Salva o tema no mesmo lugar que o login lê.</p>
 
     <select id="tema" onchange="aplicarPresetTema()">
       <option value="dark">Dark</option>
@@ -216,7 +216,6 @@ button{
 
     <button class="salvar" onclick="salvarTema()">Salvar Tema</button>
   </div>
-
 </div>
 
 <script>
@@ -224,12 +223,12 @@ const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let adminAuthUser = null;
 let adminId = null;
 let limite = 0;
 let totalClientes = 0;
 let modoEdicao = false;
 let clienteEditando = null;
+window.__clientesAdmin = [];
 
 const msgBox = document.getElementById("mensagem");
 
@@ -263,14 +262,11 @@ function setCadastroLoading(loading, texto="Processando..."){
 function entrarModoEdicao(cliente){
   modoEdicao = true;
   clienteEditando = cliente;
-
   document.getElementById("nomeCliente").value = cliente.nome || "";
   document.getElementById("emailCliente").value = cliente.email || "";
   document.getElementById("senhaCliente").value = "";
-
   atualizarTextoBotao();
   document.getElementById("btnCancelarEdicao").style.display = "inline-block";
-
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -348,8 +344,6 @@ async function chamarFunction(nomeFunction, body){
 }
 
 async function init(){
-  limparMsg();
-
   const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
   if(authError || !authData?.user){
@@ -357,13 +351,12 @@ async function init(){
     return;
   }
 
-  adminAuthUser = authData.user;
-  document.getElementById("userInfo").textContent = adminAuthUser.email || "Admin";
+  document.getElementById("userInfo").textContent = authData.user.email || "Admin";
 
   const { data: admin, error: adminError } = await supabaseClient
     .from("admin_filmes")
     .select("*")
-    .eq("user_id", adminAuthUser.id)
+    .eq("user_id", authData.user.id)
     .maybeSingle();
 
   if(adminError){
@@ -372,14 +365,12 @@ async function init(){
   }
 
   if(!admin){
-    alert("Você não é admin.");
     location.href = "index.html";
     return;
   }
 
   if(admin.ativo === false){
     await supabaseClient.auth.signOut();
-    alert("Seu acesso foi desativado.");
     location.href = "index.html";
     return;
   }
@@ -406,10 +397,11 @@ async function carregarClientes(){
     return;
   }
 
-  totalClientes = data ? data.length : 0;
+  window.__clientesAdmin = data || [];
+  totalClientes = window.__clientesAdmin.length;
   document.getElementById("limiteInfo").textContent = `${totalClientes} / ${limite}`;
 
-  const html = (data || []).map(c => `
+  const html = window.__clientesAdmin.map(c => `
     <div class="item">
       <div class="item-topo">
         <div>
@@ -420,6 +412,9 @@ async function carregarClientes(){
 
         <div class="item-acoes">
           <button class="editar" onclick="prepararEdicao(${c.id})">Editar</button>
+          <button class="${c.ativo === false ? 'desbloquear' : 'bloquear'}" onclick="alternarStatusCliente(${c.id})">
+            ${c.ativo === false ? 'Desbloquear' : 'Bloquear'}
+          </button>
           <button class="excluir" onclick="removerCliente(${c.id}, ${JSON.stringify(c.nome || "")})">Remover</button>
         </div>
       </div>
@@ -428,12 +423,10 @@ async function carregarClientes(){
 
   document.getElementById("listaClientes").innerHTML =
     html || `<div class="item">Nenhum cliente cadastrado ainda.</div>`;
-
-  window.__clientesAdmin = data || [];
 }
 
 function prepararEdicao(clienteId){
-  const cliente = (window.__clientesAdmin || []).find(c => Number(c.id) === Number(clienteId));
+  const cliente = window.__clientesAdmin.find(c => Number(c.id) === Number(clienteId));
   if(!cliente) return;
   entrarModoEdicao(cliente);
 }
@@ -483,7 +476,7 @@ async function salvarCliente(){
     await carregarClientes();
 
   }catch(e){
-    mostrarMsg(e.message || "Erro inesperado ao cadastrar cliente.");
+    mostrarMsg(e.message || "Erro ao cadastrar cliente.");
   }
 
   setCadastroLoading(false);
@@ -527,10 +520,41 @@ async function editarCliente(){
     await carregarClientes();
 
   }catch(e){
-    mostrarMsg(e.message || "Erro inesperado ao editar cliente.");
+    mostrarMsg(e.message || "Erro ao editar cliente.");
   }
 
   setCadastroLoading(false);
+}
+
+async function alternarStatusCliente(clienteId){
+  limparMsg();
+
+  const cliente = window.__clientesAdmin.find(c => Number(c.id) === Number(clienteId));
+  if(!cliente) return;
+
+  const novoStatus = !(cliente.ativo === true);
+  const texto = novoStatus ? "desbloquear" : "bloquear";
+
+  const confirmou = confirm(`Deseja ${texto} o cliente "${cliente.nome}"?`);
+  if(!confirmou) return;
+
+  try{
+    await chamarFunction("status-cliente-admin", {
+      admin_id: adminId,
+      cliente_id: cliente.id,
+      ativo: novoStatus
+    });
+
+    if(clienteEditando?.id === cliente.id){
+      cancelarEdicao();
+    }
+
+    mostrarMsg(`Cliente ${novoStatus ? "desbloqueado" : "bloqueado"} com sucesso.`, "ok");
+    await carregarClientes();
+
+  }catch(e){
+    mostrarMsg(e.message || "Erro ao alterar status.");
+  }
 }
 
 async function removerCliente(clienteId, nomeCliente){
@@ -553,7 +577,7 @@ async function removerCliente(clienteId, nomeCliente){
     await carregarClientes();
 
   }catch(e){
-    mostrarMsg(e.message || "Erro inesperado ao remover cliente.");
+    mostrarMsg(e.message || "Erro ao remover cliente.");
   }
 }
 
@@ -600,10 +624,7 @@ async function carregarTema(){
     .eq("admin_id", adminId)
     .maybeSingle();
 
-  if(error){
-    console.error(error);
-    return;
-  }
+  if(error) return;
 
   if(!data){
     aplicarPresetTema();
@@ -627,6 +648,5 @@ async function logout(){
 
 init();
 </script>
-
 </body>
 </html>
