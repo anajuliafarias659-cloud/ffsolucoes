@@ -8,6 +8,7 @@
 
   <style>
     *{box-sizing:border-box}
+
     :root{
       --primary:#e50914;
       --secondary:#b20710;
@@ -74,27 +75,17 @@
       margin:0 auto;
     }
 
-    .player{
-      margin-top:10px;
-      position:relative;
-      padding-top:56.25%;
-      background:#000;
-      border-radius:14px;
-      overflow:hidden;
-      box-shadow:0 10px 30px rgba(0,0,0,.35);
-    }
-
-    iframe{
-      position:absolute;
-      top:0;
-      left:0;
-      width:100%;
-      height:100%;
-      border:none;
+    .destaque-box{
+      background:rgba(0,0,0,.45);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:18px;
+      padding:20px;
+      margin-top:12px;
+      backdrop-filter:blur(8px);
     }
 
     .titulo-player{
-      margin:16px 0 6px;
+      margin:0 0 8px;
       font-size:26px;
       font-weight:800;
     }
@@ -102,13 +93,24 @@
     .descricao-player{
       color:#cbd5e1;
       line-height:1.6;
-      margin-bottom:24px;
+      margin-bottom:16px;
       white-space:pre-line;
+    }
+
+    .btn-assistir{
+      background:linear-gradient(135deg,var(--primary),var(--secondary));
+      color:#fff;
+      border:none;
+      padding:12px 18px;
+      border-radius:12px;
+      font-size:15px;
+      font-weight:800;
+      cursor:pointer;
     }
 
     .subtitulo{
       font-size:24px;
-      margin:0 0 16px;
+      margin:24px 0 16px;
     }
 
     .gallery{
@@ -170,27 +172,119 @@
       background:#141414;
     }
 
+    .player-overlay{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.96);
+      z-index:9999;
+      display:none;
+      flex-direction:column;
+    }
+
+    .player-overlay.show{
+      display:flex;
+    }
+
+    .player-topo{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      padding:12px;
+      background:rgba(0,0,0,.85);
+      border-bottom:1px solid rgba(255,255,255,.08);
+      flex-wrap:wrap;
+    }
+
+    .player-acoes{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .btn-overlay{
+      border:none;
+      padding:10px 14px;
+      border-radius:10px;
+      font-weight:800;
+      cursor:pointer;
+      color:#fff;
+    }
+
+    .btn-voltar{
+      background:#334155;
+    }
+
+    .btn-fechar{
+      background:linear-gradient(135deg,var(--primary),var(--secondary));
+    }
+
+    .player-titulo{
+      font-size:16px;
+      font-weight:800;
+      color:#fff;
+      flex:1;
+      min-width:220px;
+    }
+
+    .player-area{
+      position:relative;
+      flex:1;
+      background:#000;
+    }
+
+    .player-area iframe{
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      border:none;
+    }
+
     @media (max-width:700px){
       header{
         font-size:22px;
         padding:14px 12px;
       }
+
       .btn-sair{
         position:static;
         transform:none;
         display:block;
         margin:10px auto 0;
       }
+
       .top-bar{
         display:flex;
         flex-direction:column;
         align-items:center;
       }
+
       .titulo-player{
         font-size:22px;
       }
+
       .movie img{
         height:220px;
+      }
+
+      .player-topo{
+        align-items:stretch;
+      }
+
+      .player-acoes{
+        width:100%;
+        display:grid;
+        grid-template-columns:1fr 1fr;
+      }
+
+      .btn-overlay{
+        width:100%;
+      }
+
+      .player-titulo{
+        min-width:auto;
+        width:100%;
       }
     }
   </style>
@@ -209,15 +303,27 @@
     <div id="userInfo" class="user-info"></div>
 
     <div class="container">
-      <div class="player">
-        <iframe id="mainPlayer" src="" allowfullscreen></iframe>
+      <div class="destaque-box">
+        <div id="tituloPlayer" class="titulo-player">Carregando...</div>
+        <div id="descricaoPlayer" class="descricao-player"></div>
+        <button id="btnAssistirDestaque" class="btn-assistir" style="display:none;">Assistir agora</button>
       </div>
-
-      <div id="tituloPlayer" class="titulo-player">Carregando...</div>
-      <div id="descricaoPlayer" class="descricao-player"></div>
 
       <h2 class="subtitulo">Catálogo</h2>
       <div id="gallery" class="gallery"></div>
+    </div>
+  </div>
+
+  <div id="playerOverlay" class="player-overlay">
+    <div class="player-topo">
+      <div id="overlayTitulo" class="player-titulo">Assistindo</div>
+      <div class="player-acoes">
+        <button class="btn-overlay btn-voltar" onclick="fecharPlayer()">Voltar</button>
+        <button class="btn-overlay btn-fechar" onclick="fecharPlayer()">Fechar</button>
+      </div>
+    </div>
+    <div id="playerArea" class="player-area">
+      <iframe id="overlayPlayer" src="" allow="autoplay; fullscreen" allowfullscreen></iframe>
     </div>
   </div>
 
@@ -226,6 +332,9 @@
     const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let filmesCache = [];
+    let filmeDestaque = null;
 
     function aplicarTema(config) {
       if (!config) return;
@@ -254,20 +363,53 @@
         .replace(/\r/g, "");
     }
 
-    function playMovie(videoId, titulo = "", descricao = "") {
-      const player = document.getElementById("mainPlayer");
-      const tituloPlayer = document.getElementById("tituloPlayer");
-      const descricaoPlayer = document.getElementById("descricaoPlayer");
-
-      player.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-      tituloPlayer.textContent = titulo || "Sem título";
-      descricaoPlayer.textContent = descricao || "";
-
-      document.querySelector(".player").scrollIntoView({
-        behavior: "smooth",
-        block: "start"
-      });
+    function embaralharArray(lista) {
+      const arr = [...lista];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
     }
+
+    async function abrirPlayer(videoId, titulo = "", descricao = "") {
+      const overlay = document.getElementById("playerOverlay");
+      const overlayPlayer = document.getElementById("overlayPlayer");
+      const overlayTitulo = document.getElementById("overlayTitulo");
+      const playerArea = document.getElementById("playerArea");
+
+      overlayTitulo.textContent = titulo || "Assistindo";
+      overlayPlayer.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
+      overlay.classList.add("show");
+      document.body.style.overflow = "hidden";
+
+      try {
+        if (playerArea.requestFullscreen) {
+          await playerArea.requestFullscreen();
+        }
+      } catch (e) {}
+    }
+
+    async function fecharPlayer() {
+      const overlay = document.getElementById("playerOverlay");
+      const overlayPlayer = document.getElementById("overlayPlayer");
+
+      overlayPlayer.src = "";
+      overlay.classList.remove("show");
+      document.body.style.overflow = "";
+
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        }
+      } catch (e) {}
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        fecharPlayer();
+      }
+    });
 
     async function protegerPagina() {
       try {
@@ -315,37 +457,50 @@
 
     async function carregarFilmes() {
       const gallery = document.getElementById("gallery");
+      const tituloPlayer = document.getElementById("tituloPlayer");
+      const descricaoPlayer = document.getElementById("descricaoPlayer");
+      const btnAssistirDestaque = document.getElementById("btnAssistirDestaque");
+
       gallery.innerHTML = '<div class="vazio">Carregando filmes...</div>';
 
       try {
         const { data, error } = await supabaseClient
           .from("filmes")
           .select("*")
-          .eq("ativo", true)
-          .order("id", { ascending: false });
+          .eq("ativo", true);
 
         if (error) throw error;
 
-        const filmes = data || [];
+        let filmes = data || [];
+        filmes = embaralharArray(filmes);
+        filmesCache = filmes;
 
         if (!filmes.length) {
-          document.getElementById("mainPlayer").src = "";
-          document.getElementById("tituloPlayer").textContent = "Nenhum filme cadastrado";
-          document.getElementById("descricaoPlayer").textContent = "";
+          tituloPlayer.textContent = "Nenhum filme cadastrado";
+          descricaoPlayer.textContent = "";
+          btnAssistirDestaque.style.display = "none";
           gallery.innerHTML = '<div class="vazio">Nenhum filme ativo cadastrado.</div>';
           return;
         }
 
-        const primeiro = filmes[0];
-        playMovie(primeiro.video_id, primeiro.titulo, primeiro.descricao || "");
+        filmeDestaque = filmes[0];
+        tituloPlayer.textContent = filmeDestaque.titulo || "Sem título";
+        descricaoPlayer.textContent = filmeDestaque.descricao || "";
+        btnAssistirDestaque.style.display = "inline-block";
+        btnAssistirDestaque.onclick = () => abrirPlayer(
+          filmeDestaque.video_id,
+          filmeDestaque.titulo,
+          filmeDestaque.descricao || ""
+        );
 
         gallery.innerHTML = filmes.map(filme => `
-          <div class="movie" onclick="playMovie('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}', '${escaparTexto(filme.descricao || "")}')">
+          <div class="movie" onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}', '${escaparTexto(filme.descricao || "")}')">
             <img src="${filme.thumb || ''}" alt="${filme.titulo || ''}">
             <div class="movie-title">${filme.titulo || ''}</div>
             <div class="movie-cat">${filme.categoria || "Sem categoria"}</div>
           </div>
         `).join("");
+
       } catch (error) {
         gallery.innerHTML = `<div class="vazio" style="color:#fca5a5">${error.message || "Erro ao carregar filmes."}</div>`;
       }
@@ -359,6 +514,15 @@
     supabaseClient.auth.onAuthStateChange((event, session) => {
       if (!session) {
         window.location.href = "index.html";
+      }
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+      if (!document.fullscreenElement) {
+        const overlay = document.getElementById("playerOverlay");
+        if (overlay.classList.contains("show")) {
+          document.body.style.overflow = "hidden";
+        }
       }
     });
 
