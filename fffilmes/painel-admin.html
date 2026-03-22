@@ -1,1 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Painel Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{margin:0;background:#020617;color:#fff;font-family:Arial}
+.topo{padding:16px;background:#0f172a;display:flex;justify-content:space-between}
+.container{padding:20px;max-width:900px;margin:auto}
+.card{background:#0f172a;padding:20px;border-radius:16px;margin-bottom:20px}
+input,select{width:100%;padding:10px;margin-top:10px;border-radius:10px;border:none}
+button{margin-top:10px;padding:12px;border:none;border-radius:10px;font-weight:bold;cursor:pointer}
+.salvar{background:#22c55e}
+.lista{margin-top:10px}
+.item{background:#020617;padding:10px;border-radius:10px;margin-top:10px}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <div id="userInfo">Carregando...</div>
+  <button onclick="logout()">Sair</button>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <h2>👥 Meus Clientes</h2>
+
+    <input id="nomeCliente" placeholder="Nome do cliente">
+    <input id="emailCliente" placeholder="Email">
+
+    <button class="salvar" onclick="salvarCliente()">Cadastrar Cliente</button>
+
+    <div id="listaClientes" class="lista"></div>
+  </div>
+
+  <div class="card">
+    <h2>🎨 Tema do Site</h2>
+
+    <select id="tema">
+      <option value="dark">Dark</option>
+      <option value="netflix">Netflix</option>
+      <option value="blue">Azul</option>
+    </select>
+
+    <input id="cor1" placeholder="Cor primária (#ff0000)">
+    <input id="cor2" placeholder="Cor secundária (#000000)">
+
+    <button class="salvar" onclick="salvarTema()">Salvar Tema</button>
+  </div>
+
+</div>
+
+<script>
+const supabaseClient = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let adminId = null;
+let limite = 0;
+
+async function init(){
+  const { data } = await supabaseClient.auth.getUser();
+
+  if(!data?.user){
+    location.href="index.html";
+    return;
+  }
+
+  document.getElementById("userInfo").textContent = data.user.email;
+
+  // pega admin
+  const { data: admin } = await supabaseClient
+    .from("admin_filmes")
+    .select("*")
+    .eq("user_id", data.user.id)
+    .single();
+
+  if(!admin){
+    alert("Você não é admin");
+    location.href="index.html";
+    return;
+  }
+
+  adminId = admin.id;
+  limite = admin.limite_clientes;
+
+  carregarClientes();
+  carregarTema();
+}
+
+async function salvarCliente(){
+  const nome = document.getElementById("nomeCliente").value;
+  const email = document.getElementById("emailCliente").value;
+
+  const { data: clientes } = await supabaseClient
+    .from("admin_clientes")
+    .select("id")
+    .eq("admin_id", adminId);
+
+  if(clientes.length >= limite){
+    alert("Limite do plano atingido");
+    return;
+  }
+
+  await supabaseClient.from("admin_clientes").insert({
+    admin_id: adminId,
+    nome,
+    email
+  });
+
+  carregarClientes();
+}
+
+async function carregarClientes(){
+  const { data } = await supabaseClient
+    .from("admin_clientes")
+    .select("*")
+    .eq("admin_id", adminId);
+
+  document.getElementById("listaClientes").innerHTML =
+    data.map(c=>`<div class="item">${c.nome} - ${c.email}</div>`).join("");
+}
+
+async function salvarTema(){
+  const tema = document.getElementById("tema").value;
+  const cor1 = document.getElementById("cor1").value;
+  const cor2 = document.getElementById("cor2").value;
+
+  await supabaseClient.from("admin_config").upsert({
+    admin_id: adminId,
+    tema,
+    cor_primaria: cor1,
+    cor_secundaria: cor2
+  });
+
+  alert("Tema salvo!");
+}
+
+async function carregarTema(){
+  const { data } = await supabaseClient
+    .from("admin_config")
+    .select("*")
+    .eq("admin_id", adminId)
+    .single();
+
+  if(data){
+    document.getElementById("tema").value = data.tema;
+    document.getElementById("cor1").value = data.cor_primaria;
+    document.getElementById("cor2").value = data.cor_secundaria;
+  }
+}
+
+async function logout(){
+  await supabaseClient.auth.signOut();
+  location.href="index.html";
+}
+
+init();
+</script>
+
+</body>
+</html>
