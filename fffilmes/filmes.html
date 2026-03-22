@@ -426,6 +426,32 @@
       border:none;
     }
 
+    .legenda-flutuante{
+      position:absolute;
+      left:50%;
+      bottom:50px;
+      transform:translateX(-50%);
+      max-width:85%;
+      background:rgba(0,0,0,.72);
+      color:#fff;
+      padding:10px 16px;
+      border-radius:12px;
+      font-size:18px;
+      line-height:1.4;
+      text-align:center;
+      z-index:20;
+      display:none;
+      box-shadow:0 8px 24px rgba(0,0,0,.35);
+      pointer-events:none;
+      opacity:0;
+      transition:opacity .35s ease;
+    }
+
+    .legenda-flutuante.show{
+      display:block;
+      opacity:1;
+    }
+
     .btn-admin-secreto{
       position:fixed;
       right:12px;
@@ -634,6 +660,13 @@
         border-radius:12px;
       }
 
+      .legenda-flutuante{
+        bottom:30px;
+        font-size:14px;
+        padding:8px 12px;
+        max-width:92%;
+      }
+
       .btn-admin-secreto{
         bottom:calc(12px + env(safe-area-inset-bottom));
       }
@@ -724,6 +757,7 @@
     </div>
     <div id="playerArea" class="player-area">
       <iframe id="overlayPlayer" src="" allow="autoplay; fullscreen" allowfullscreen></iframe>
+      <div id="legendaFlutuante" class="legenda-flutuante"></div>
     </div>
   </div>
 
@@ -747,6 +781,18 @@
     let tipoUsuarioAtual = null;
     let toquesAdmin = 0;
     let timerToquesAdmin = null;
+
+    const frasesLegendas = [
+      "Aproveite seu filme 🍿",
+      "FF Filmes Online",
+      "Novos lançamentos toda semana",
+      "Seu catálogo sempre atualizado",
+      "Pegue a pipoca e curta o momento",
+      "Obrigado por assistir com a gente"
+    ];
+
+    let timerLegendaPrincipal = null;
+    let timerOcultarLegenda = null;
 
     function aplicarTema(config) {
       if (!config) return;
@@ -811,6 +857,59 @@
       }));
     }
 
+    function tempoAleatorioLegenda() {
+      const min = 10 * 60 * 1000;
+      const max = 15 * 60 * 1000;
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function mostrarLegendaAleatoria() {
+      const box = document.getElementById("legendaFlutuante");
+      if (!box) return;
+
+      const frase = frasesLegendas[Math.floor(Math.random() * frasesLegendas.length)];
+      box.textContent = frase;
+      box.style.display = "block";
+
+      requestAnimationFrame(() => {
+        box.classList.add("show");
+      });
+
+      clearTimeout(timerOcultarLegenda);
+      timerOcultarLegenda = setTimeout(() => {
+        box.classList.remove("show");
+        setTimeout(() => {
+          box.style.display = "none";
+          box.textContent = "";
+        }, 350);
+      }, 6000);
+    }
+
+    function iniciarLegendasAleatorias() {
+      pararLegendasAleatorias();
+
+      function agendar() {
+        timerLegendaPrincipal = setTimeout(() => {
+          mostrarLegendaAleatoria();
+          agendar();
+        }, tempoAleatorioLegenda());
+      }
+
+      agendar();
+    }
+
+    function pararLegendasAleatorias() {
+      clearTimeout(timerLegendaPrincipal);
+      clearTimeout(timerOcultarLegenda);
+
+      const box = document.getElementById("legendaFlutuante");
+      if (box) {
+        box.classList.remove("show");
+        box.style.display = "none";
+        box.textContent = "";
+      }
+    }
+
     async function abrirPlayer(videoId, titulo = "") {
       const overlay = document.getElementById("playerOverlay");
       const overlayPlayer = document.getElementById("overlayPlayer");
@@ -821,6 +920,8 @@
       overlayPlayer.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
       overlay.classList.add("show");
       document.body.style.overflow = "hidden";
+
+      iniciarLegendasAleatorias();
 
       try {
         if (playerArea.requestFullscreen) {
@@ -836,6 +937,8 @@
       overlayPlayer.src = "";
       overlay.classList.remove("show");
       document.body.style.overflow = "";
+
+      pararLegendasAleatorias();
 
       try {
         if (document.fullscreenElement) {
@@ -1213,6 +1316,7 @@
         }
       } catch (e) {}
 
+      pararLegendasAleatorias();
       await supabaseClient.auth.signOut();
       location.href = "index.html";
     }
@@ -1228,8 +1332,9 @@
     });
 
     document.addEventListener("fullscreenchange", () => {
+      const overlay = document.getElementById("playerOverlay");
+
       if (!document.fullscreenElement) {
-        const overlay = document.getElementById("playerOverlay");
         if (overlay.classList.contains("show")) {
           document.body.style.overflow = "hidden";
         }
