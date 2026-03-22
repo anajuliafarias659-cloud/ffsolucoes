@@ -377,186 +377,129 @@
     </main>
   </div>
 
-  <script>
-    const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-    const REDIRECT_POS_LOGIN = "filmes.html";
+    <script>
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    const formLogin = document.getElementById("formLogin");
-    const btnEntrar = document.getElementById("btnEntrar");
-    const btnCadastro = document.getElementById("btnCadastro");
-    const mensagem = document.getElementById("mensagem");
+function mostrarMsg(texto, tipo = "erro"){
+  const el = document.getElementById("msg");
+  if(!el){
+    alert(texto);
+    return;
+  }
+  el.className = "msg " + tipo;
+  el.style.display = "block";
+  el.innerText = texto;
+}
 
-    function mostrarMensagem(texto, tipo = "error") {
-      mensagem.className = "msg show " + tipo;
-      mensagem.textContent = texto;
-    }
+function limparMsg(){
+  const el = document.getElementById("msg");
+  if(!el) return;
+  el.className = "msg";
+  el.style.display = "none";
+  el.innerText = "";
+}
 
-    function limparMensagem() {
-      mensagem.className = "msg";
-      mensagem.textContent = "";
-    }
+async function validarAdmin(userId){
+  const { data, error } = await supabaseClient
+    .from("admin_filmes")
+    .select("id, user_id, email, ativo")
+    .eq("user_id", userId)
+    .single();
 
-    function setLoading(loading) {
-      btnEntrar.disabled = loading;
-      btnCadastro.disabled = loading;
-      btnEntrar.textContent = loading ? "Entrando..." : "Entrar no sistema";
-    }
+  if (error || !data) {
+    return { ok:false, motivo:"Seu usuário não está vinculado ao painel." };
+  }
 
-    function aplicarTema(config) {
-      if (!config) return;
+  if (data.ativo === false) {
+    return { ok:false, motivo:"Seu acesso está desativado." };
+  }
 
-      document.documentElement.style.setProperty("--primary", config.cor_primaria || "#e50914");
-      document.documentElement.style.setProperty("--secondary", config.cor_secundaria || "#b20710");
-      document.documentElement.style.setProperty("--bg", config.cor_fundo || "#020617");
-      document.documentElement.style.setProperty("--card", config.cor_card || "#0f172a");
-      document.documentElement.style.setProperty("--text", config.cor_texto || "#ffffff");
+  return { ok:true, admin:data };
+}
 
-      if (config.bg_login) {
-        document.documentElement.style.setProperty("--bg-login", `url('${config.bg_login}')`);
-      }
+async function verificarSessao(){
+  const { data, error } = await supabaseClient.auth.getSession();
 
-      if (config.nome_site) {
-        document.title = config.nome_site + " - Login";
-        document.getElementById("logoTopo").textContent = config.nome_site;
-        document.getElementById("tituloPrincipal").textContent = "Entre para acessar " + config.nome_site;
-        document.getElementById("rodapeLogin").textContent = "© 2026 " + config.nome_site;
-      }
-    }
+  if (error || !data.session || !data.session.user) return;
 
-    async function carregarConfigTema() {
-      try {
-        const { data, error } = await supabaseClient
-          .from("config_filmes")
-          .select("*")
-          .order("id", { ascending: true })
-          .limit(1);
+  const userId = data.session.user.id;
+  const validacao = await validarAdmin(userId);
 
-        if (error) return;
-        if (data && data.length > 0) aplicarTema(data[0]);
-      } catch (e) {}
-    }
+  if (!validacao.ok) {
+    await supabaseClient.auth.signOut();
+    return;
+  }
 
-    async function verificarSessao() {
-      try {
-        const { data, error } = await supabaseClient.auth.getSession();
-        if (error) return;
-        if (data?.session?.user) {
-          window.location.href = REDIRECT_POS_LOGIN;
-        }
-      } catch (e) {}
-    }
+  window.location.href = "filmes.html";
+}
 
-    formLogin.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      limparMensagem();
+async function fazerLogin(){
+  limparMsg();
 
-      const email = document.getElementById("email").value.trim();
-      const senha = document.getElementById("senha").value.trim();
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value;
 
-      if (!email || !senha) {
-        mostrarMensagem("Preencha e-mail e senha.");
-        return;
-      }
+  if (!email || !senha) {
+    mostrarMsg("Preencha e-mail e senha.");
+    return;
+  }
 
-      setLoading(true);
+  const { data, error } = await supabaseClient.auth.signInWithPassword({
+    email: email,
+    password: senha
+  });
 
-      try {
-        const { error } = await supabaseClient.auth.signInWithPassword({
-          email,
-          password: senha
-        });
+  if (error || !data.user) {
+    mostrarMsg(error?.message || "Erro ao fazer login.");
+    return;
+  }
 
-        if (error) {
-          mostrarMensagem(error.message || "Não foi possível fazer login.");
-          setLoading(false);
-          return;
-        }
+  const validacao = await validarAdmin(data.user.id);
 
-        mostrarMensagem("Login realizado com sucesso. Redirecionando...", "success");
+  if (!validacao.ok) {
+    await supabaseClient.auth.signOut();
+    mostrarMsg(validacao.motivo);
+    return;
+  }
 
-        setTimeout(() => {
-          window.location.href = REDIRECT_POS_LOGIN;
-        }, 700);
+  window.location.href = "filmes.html";
+}
 
-      } catch (err) {
-        mostrarMensagem("Erro inesperado ao fazer login.");
-        setLoading(false);
-      }
-    });
+async function criarConta(){
+  limparMsg();
 
-    btnCadastro.addEventListener("click", async () => {
-      limparMensagem();
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value;
 
-      const email = document.getElementById("email").value.trim();
-      const senha = document.getElementById("senha").value.trim();
+  if (!email || !senha) {
+    mostrarMsg("Preencha e-mail e senha.");
+    return;
+  }
 
-      if (!email || !senha) {
-        mostrarMensagem("Digite e-mail e senha para criar a conta.");
-        return;
-      }
+  const { data, error } = await supabaseClient.auth.signUp({
+    email: email,
+    password: senha
+  });
 
-      if (senha.length < 6) {
-        mostrarMensagem("A senha deve ter pelo menos 6 caracteres.");
-        return;
-      }
+  if (error) {
+    mostrarMsg(error.message || "Erro ao criar conta.");
+    return;
+  }
 
-      setLoading(true);
+  if (!data.user) {
+    mostrarMsg("Conta criada, mas sem retorno de usuário.");
+    return;
+  }
 
-      try {
-        const { data, error } = await supabaseClient.auth.signUp({
-          email,
-          password: senha
-        });
+  mostrarMsg("Conta criada no Auth. Agora vincule esse usuário na tabela admin_filmes.", "ok");
+  console.log("USER ID:", data.user.id);
+}
 
-        if (error) {
-          mostrarMensagem(error.message || "Não foi possível criar a conta.");
-          setLoading(false);
-          return;
-        }
+verificarSessao();
+</script>
 
-        if (data?.user && !data?.session) {
-          mostrarMensagem("Conta criada. Confira seu e-mail para confirmar o cadastro.", "success");
-        } else {
-          mostrarMensagem("Conta criada com sucesso. Você já pode entrar.", "success");
-        }
-      } catch (err) {
-        mostrarMensagem("Erro inesperado ao criar conta.");
-      }
-
-      setLoading(false);
-    });
-
-    async function recuperarSenha() {
-      limparMensagem();
-
-      const email = document.getElementById("email").value.trim();
-
-      if (!email) {
-        mostrarMensagem("Digite seu e-mail para recuperar a senha.");
-        return;
-      }
-
-      try {
-        const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin + window.location.pathname
-        });
-
-        if (error) {
-          mostrarMensagem(error.message || "Não foi possível enviar a recuperação.");
-          return;
-        }
-
-        mostrarMensagem("E-mail de recuperação enviado com sucesso.", "success");
-      } catch (err) {
-        mostrarMensagem("Erro ao solicitar recuperação de senha.");
-      }
-    }
-
-    carregarConfigTema();
-    verificarSessao();
-  </script>
 </body>
 </html>
