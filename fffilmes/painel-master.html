@@ -331,7 +331,7 @@
           </div>
 
           <div class="aviso">
-            Para aparecer no site dos filmes, o player precisa ler essas configurações da tabela <b>config_filmes</b>.
+            Esse bloco salva configuração global em <b>config_filmes</b> com <b>admin_id = 0</b>.
           </div>
 
           <div id="msgConfigPlayer" class="msg"></div>
@@ -624,15 +624,9 @@
     function mensagemErroAuth(error) {
       const txt = (error?.message || "").toLowerCase();
 
-      if (txt.includes("user already registered")) {
-        return "Esse e-mail já está cadastrado no Auth.";
-      }
-      if (txt.includes("password")) {
-        return "Senha inválida. Use pelo menos 6 caracteres.";
-      }
-      if (txt.includes("invalid email")) {
-        return "E-mail inválido.";
-      }
+      if (txt.includes("user already registered")) return "Esse e-mail já está cadastrado no Auth.";
+      if (txt.includes("password")) return "Senha inválida. Use pelo menos 6 caracteres.";
+      if (txt.includes("invalid email")) return "E-mail inválido.";
       return error?.message || "Erro ao criar admin.";
     }
 
@@ -664,7 +658,7 @@
 
       const legendas = cfgLegendasPlayer.value.trim();
       const minMinutos = Number(cfgLegendaMinMinutos.value || 0);
-      const maxMinutos = Number(cfgLegendaMaxMinMinutos?.value || cfgLegendaMaxMinutos.value || 0);
+      const maxMinutos = Number(cfgLegendaMaxMinutos.value || 0);
       const duracaoSegundos = Number(cfgLegendaDuracaoSegundos.value || 0);
 
       if (minMinutos < 1) {
@@ -686,18 +680,44 @@
       btnSalvarConfigPlayer.textContent = "Salvando...";
 
       try {
-        const { error } = await supabaseClient
+        const { data: existente, error: erroBusca } = await supabaseClient
           .from("config_filmes")
-          .upsert([{
-            admin_id: 0,
-            nome_site: "FF FILMES ONLINE",
-            legendas_player: legendas || null,
-            legenda_min_minutos: minMinutos,
-            legenda_max_minutos: maxMinutos,
-            legenda_duracao_segundos: duracaoSegundos
-          }], { onConflict: "admin_id" });
+          .select("id, admin_id")
+          .eq("admin_id", 0)
+          .maybeSingle();
 
-        if (error) throw error;
+        if (erroBusca && erroBusca.code !== "PGRST116") throw erroBusca;
+
+        let errorFinal = null;
+
+        if (existente) {
+          const { error } = await supabaseClient
+            .from("config_filmes")
+            .update({
+              legendas_player: legendas || null,
+              legenda_min_minutos: minMinutos,
+              legenda_max_minutos: maxMinutos,
+              legenda_duracao_segundos: duracaoSegundos
+            })
+            .eq("admin_id", 0);
+
+          errorFinal = error;
+        } else {
+          const { error } = await supabaseClient
+            .from("config_filmes")
+            .insert([{
+              admin_id: 0,
+              nome_site: "FF FILMES ONLINE",
+              legendas_player: legendas || null,
+              legenda_min_minutos: minMinutos,
+              legenda_max_minutos: maxMinutos,
+              legenda_duracao_segundos: duracaoSegundos
+            }]);
+
+          errorFinal = error;
+        }
+
+        if (errorFinal) throw errorFinal;
 
         mostrarMsg(msgConfigPlayer, "Configuração do player salva com sucesso.", "ok");
       } catch (error) {
@@ -751,7 +771,7 @@
             .eq("email", emailVal)
             .maybeSingle();
 
-          if (erroBusca) throw erroBusca;
+          if (erroBusca && erroBusca.code !== "PGRST116") throw erroBusca;
 
           if (adminExistente) {
             throw new Error("Já existe um admin cadastrado com esse e-mail.");
@@ -762,9 +782,7 @@
             password: senhaVal
           });
 
-          if (authError) {
-            throw new Error(mensagemErroAuth(authError));
-          }
+          if (authError) throw new Error(mensagemErroAuth(authError));
 
           const novoUserId = authCriado?.user?.id;
           const precisaConfirmarEmail = !authCriado?.user?.confirmed_at;
@@ -813,7 +831,6 @@
 
         limparFormularioAdmin();
         await carregarAdmins();
-
       } catch (error) {
         mostrarMsg(msgAdmin, error.message || "Erro ao salvar admin.", "erro");
       } finally {
@@ -857,7 +874,6 @@
             </div>
           </div>
         `).join("");
-
       } catch (error) {
         listaAdmins.innerHTML = `<div style="color:#fca5a5">${error.message || "Erro ao carregar admins."}</div>`;
       }
@@ -888,7 +904,6 @@
         editAdminId = data.id;
         btnSalvarAdmin.textContent = "Atualizar admin";
         window.scrollTo({ top: 0, behavior: "smooth" });
-
       } catch (error) {
         mostrarMsg(msgAdmin, error.message || "Erro ao carregar admin para edição.", "erro");
       }
@@ -903,7 +918,6 @@
 
         if (error) throw error;
         await carregarAdmins();
-
       } catch (error) {
         mostrarMsg(msgAdmin, error.message || "Erro ao alterar status do admin.", "erro");
       }
@@ -970,7 +984,6 @@
 
         limparFormularioFilme();
         await carregarFilmes();
-
       } catch (error) {
         mostrarMsg(msgFilme, error.message || "Erro ao salvar filme.", "erro");
       } finally {
@@ -1012,7 +1025,6 @@
             </div>
           </div>
         `).join("");
-
       } catch (error) {
         listaFilmes.innerHTML = `<div style="color:#fca5a5">${error.message || "Erro ao carregar filmes."}</div>`;
       }
@@ -1038,7 +1050,6 @@
         editFilmeId = data.id;
         btnSalvarFilme.textContent = "Atualizar filme";
         window.scrollTo({ top: 0, behavior: "smooth" });
-
       } catch (error) {
         mostrarMsg(msgFilme, error.message || "Erro ao carregar filme para edição.", "erro");
       }
@@ -1055,7 +1066,6 @@
 
         if (error) throw error;
         await carregarFilmes();
-
       } catch (error) {
         mostrarMsg(msgFilme, error.message || "Erro ao excluir filme.", "erro");
       }
@@ -1105,7 +1115,6 @@
             </div>
           </div>
         `).join("");
-
       } catch (error) {
         listaAssistindo.innerHTML = `<div style="color:#fca5a5">${error.message || "Erro ao carregar quem está assistindo."}</div>`;
       }
