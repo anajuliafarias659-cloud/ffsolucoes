@@ -772,9 +772,16 @@
       "Novos lançamentos toda semana"
     ];
 
+    let legendaMinMinutos = 10;
+    let legendaMaxMinutos = 15;
+    let legendaDuracaoSegundos = 6;
+
     let timerLegendaPrincipal = null;
     let timerOcultarLegenda = null;
     let timerEsconderLegenda = null;
+
+    let filmeAssistindoAtual = null;
+    let heartbeatAssistindo = null;
 
     function aplicarTema(config) {
       if (!config) return;
@@ -849,8 +856,8 @@
     }
 
     function tempoAleatorioLegenda() {
-      const min = 10 * 60 * 1000;
-      const max = 15 * 60 * 1000;
+      const min = legendaMinMinutos * 60 * 1000;
+      const max = legendaMaxMinutos * 60 * 1000;
       return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
@@ -876,7 +883,7 @@
           box.style.display = "none";
           box.textContent = "";
         }, 350);
-      }, 6000);
+      }, legendaDuracaoSegundos * 1000);
     }
 
     function iniciarLegendasAleatorias() {
@@ -905,7 +912,90 @@
       }
     }
 
-    async function abrirPlayer(videoId, titulo = "") {
+    async function registrarAssistindoAgora(filme) {
+      if (!clienteAtual?.admin_id || !filme) return;
+
+      filmeAssistindoAtual = filme;
+
+      const payload = {
+        user_id: localStorage.getItem("cliente_user_id_filmes") || null,
+        admin_id: Number(clienteAtual.admin_id),
+        cliente_id: clienteAtual.id || null,
+        cliente_nome: clienteAtual.nome || null,
+        cliente_email: clienteAtual.email || null,
+        filme_id: filme.id || null,
+        filme_titulo: filme.titulo || null,
+        status: "assistindo",
+        started_at: new Date().toISOString(),
+        last_ping: new Date().toISOString()
+      };
+
+      const { error } = await supabaseClient
+        .from("filmes_views")
+        .upsert([payload], { onConflict: "user_id" });
+
+      if (error) {
+        console.log("Erro ao registrar visualização:", error.message);
+      }
+    }
+
+    function iniciarHeartbeatAssistindo() {
+      pararHeartbeatAssistindo();
+
+      heartbeatAssistindo = setInterval(async () => {
+        if (!filmeAssistindoAtual || !clienteAtual?.admin_id) return;
+
+        const payload = {
+          user_id: localStorage.getItem("cliente_user_id_filmes") || null,
+          admin_id: Number(clienteAtual.admin_id),
+          cliente_id: clienteAtual.id || null,
+          cliente_nome: clienteAtual.nome || null,
+          cliente_email: clienteAtual.email || null,
+          filme_id: filmeAssistindoAtual.id || null,
+          filme_titulo: filmeAssistindoAtual.titulo || null,
+          status: "assistindo",
+          last_ping: new Date().toISOString()
+        };
+
+        const { error } = await supabaseClient
+          .from("filmes_views")
+          .upsert([payload], { onConflict: "user_id" });
+
+        if (error) {
+          console.log("Erro no heartbeat:", error.message);
+        }
+      }, 30000);
+    }
+
+    function pararHeartbeatAssistindo() {
+      if (heartbeatAssistindo) {
+        clearInterval(heartbeatAssistindo);
+        heartbeatAssistindo = null;
+      }
+    }
+
+    async function encerrarAssistindoAgora() {
+      pararHeartbeatAssistindo();
+
+      const userId = localStorage.getItem("cliente_user_id_filmes");
+      if (!userId) {
+        filmeAssistindoAtual = null;
+        return;
+      }
+
+      const { error } = await supabaseClient
+        .from("filmes_views")
+        .delete()
+        .eq("user_id", userId);
+
+      if (error) {
+        console.log("Erro ao encerrar visualização:", error.message);
+      }
+
+      filmeAssistindoAtual = null;
+    }
+
+    async function abrirPlayer(videoId, titulo = "", filmeId = null) {
       const overlay = document.getElementById("playerOverlay");
       const overlayPlayer = document.getElementById("overlayPlayer");
       const overlayTitulo = document.getElementById("overlayTitulo");
@@ -917,6 +1007,14 @@
       document.body.style.overflow = "hidden";
 
       iniciarLegendasAleatorias();
+
+      const filmeObj = filmesCache.find(f => String(f.id) === String(filmeId)) || {
+        id: filmeId,
+        titulo: titulo
+      };
+
+      await registrarAssistindoAgora(filmeObj);
+      iniciarHeartbeatAssistindo();
 
       try {
         if (playerArea.requestFullscreen) {
@@ -934,6 +1032,7 @@
       document.body.style.overflow = "";
 
       pararLegendasAleatorias();
+      await encerrarAssistindoAgora();
 
       try {
         if (document.fullscreenElement) {
@@ -1003,7 +1102,7 @@
 
           <div class="linha-scroll">
             ${grupo.filmes.map(filme => `
-              <div class="movie" onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}')">
+              <div class="movie" onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}', ${filme.id || 'null'})">
                 <img src="${filme.thumb || ''}" alt="${filme.titulo || ''}">
                 <div class="movie-body">
                   <div class="movie-title">${filme.titulo || ''}</div>
@@ -1039,7 +1138,8 @@
       btnAssistirDestaque.style.display = "inline-block";
       btnAssistirDestaque.onclick = () => abrirPlayer(
         filmeDestaque.video_id,
-        filmeDestaque.titulo
+        filmeDestaque.titulo,
+        filmeDestaque.id || null
       );
 
       btnCategoriaDestaque.style.display = "inline-block";
@@ -1055,6 +1155,10 @@
         if (canalTempoReal) {
           supabaseClient.removeChannel(canalTempoReal);
         }
+      } catch (e) {}
+
+      try {
+        await encerrarAssistindoAgora();
       } catch (e) {}
 
       try {
@@ -1126,6 +1230,7 @@
         localStorage.setItem("tipo_usuario_filmes", "admin");
         localStorage.setItem("admin_id_filmes", String(admin.id || ""));
         localStorage.setItem("admin_email_filmes", admin.email || "");
+        localStorage.setItem("cliente_user_id_filmes", authUser.id || "");
 
         return clienteAtual;
       }
@@ -1145,19 +1250,43 @@
     async function carregarConfigTema() {
       if (!clienteAtual?.admin_id) return;
 
-      const { data, error } = await supabaseClient
+      let cfg = null;
+
+      const { data: dataAdmin, error: errorAdmin } = await supabaseClient
         .from("config_filmes")
         .select("*")
         .eq("admin_id", clienteAtual.admin_id)
         .maybeSingle();
 
-      if (!error && data) {
-        aplicarTema(data);
+      if (!errorAdmin && dataAdmin) {
+        cfg = dataAdmin;
+      } else {
+        const { data: dataGlobal, error: errorGlobal } = await supabaseClient
+          .from("config_filmes")
+          .select("*")
+          .eq("admin_id", 0)
+          .maybeSingle();
 
-        const legendasBanco = montarLegendas(data.legendas_player);
+        if (!errorGlobal && dataGlobal) {
+          cfg = dataGlobal;
+        }
+      }
+
+      if (cfg) {
+        aplicarTema(cfg);
+
+        const legendasBanco = montarLegendas(cfg.legendas_player);
         if (legendasBanco.length) {
           frasesLegendas = legendasBanco;
         }
+
+        legendaMinMinutos = Number(cfg.legenda_min_minutos || 10);
+        legendaMaxMinutos = Number(cfg.legenda_max_minutos || 15);
+        legendaDuracaoSegundos = Number(cfg.legenda_duracao_segundos || 6);
+
+        if (legendaMinMinutos < 1) legendaMinMinutos = 1;
+        if (legendaMaxMinutos < legendaMinMinutos) legendaMaxMinutos = legendaMinMinutos;
+        if (legendaDuracaoSegundos < 1) legendaDuracaoSegundos = 1;
       }
     }
 
@@ -1317,6 +1446,7 @@
       } catch (e) {}
 
       pararLegendasAleatorias();
+      await encerrarAssistindoAgora();
       await supabaseClient.auth.signOut();
       location.href = "index.html";
     }
@@ -1339,6 +1469,18 @@
           document.body.style.overflow = "hidden";
         }
       }
+    });
+
+    window.addEventListener("beforeunload", () => {
+      try {
+        const userId = localStorage.getItem("cliente_user_id_filmes");
+        if (!userId) return;
+
+        navigator.sendBeacon?.(
+          `${SUPABASE_URL}/rest/v1/filmes_views?user_id=eq.${encodeURIComponent(userId)}`,
+          new Blob([], { type: "text/plain" })
+        );
+      } catch (e) {}
     });
 
     window.addEventListener("focus", async () => {
