@@ -246,6 +246,10 @@
       background:rgba(239,68,68,.15);
       color:#fecaca;
     }
+    .status.assistindo{
+      background:rgba(59,130,246,.15);
+      color:#bfdbfe;
+    }
     .bloco-lista{
       display:grid;
       gap:20px;
@@ -263,8 +267,16 @@
       font-size:12px;
       line-height:1.5;
     }
+    .mini-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+    }
     @media (max-width:980px){
       .grid{grid-template-columns:1fr}
+    }
+    @media (max-width:560px){
+      .mini-grid,.acoes,.botoes{grid-template-columns:1fr}
     }
   </style>
 </head>
@@ -284,6 +296,46 @@
   <div class="container" id="conteudo" style="display:none;">
     <div class="grid">
       <div class="coluna-esquerda">
+
+        <div class="card">
+          <h2>Configuração do player</h2>
+          <div class="sub">
+            Controle das legendas aleatórias e tempo de exibição.
+          </div>
+
+          <div class="campo">
+            <label for="cfgLegendasPlayer">Legendas do player (uma por linha)</label>
+            <textarea id="cfgLegendasPlayer" placeholder="Aproveite seu filme 🍿&#10;Bem-vindo ao FF Filmes&#10;Curta sua sessão"></textarea>
+          </div>
+
+          <div class="mini-grid">
+            <div class="campo">
+              <label for="cfgLegendaMinMinutos">Intervalo mínimo (minutos)</label>
+              <input id="cfgLegendaMinMinutos" type="number" min="1" value="10">
+            </div>
+
+            <div class="campo">
+              <label for="cfgLegendaMaxMinutos">Intervalo máximo (minutos)</label>
+              <input id="cfgLegendaMaxMinutos" type="number" min="1" value="15">
+            </div>
+          </div>
+
+          <div class="campo">
+            <label for="cfgLegendaDuracaoSegundos">Tempo da legenda na tela (segundos)</label>
+            <input id="cfgLegendaDuracaoSegundos" type="number" min="1" value="6">
+          </div>
+
+          <div class="acoes">
+            <button class="btn btn-salvar" id="btnSalvarConfigPlayer">Salvar player</button>
+            <button class="btn btn-limpar" id="btnLimparConfigPlayer">Limpar</button>
+          </div>
+
+          <div class="aviso">
+            Para aparecer no site dos filmes, o player precisa ler essas configurações da tabela <b>config_filmes</b>.
+          </div>
+
+          <div id="msgConfigPlayer" class="msg"></div>
+        </div>
 
         <div class="card">
           <h2>Cadastrar admin</h2>
@@ -384,6 +436,17 @@
 
         <div class="card">
           <div class="top-lista">
+            <h2 style="margin:0">Quem está assistindo agora</h2>
+            <button class="btn-mini" onclick="carregarAssistindoAgora()">Atualizar agora</button>
+          </div>
+          <div class="sub">
+            Mostra quem está com o player aberto e enviando atualização recente.
+          </div>
+          <div id="listaAssistindo" class="lista"></div>
+        </div>
+
+        <div class="card">
+          <div class="top-lista">
             <h2 style="margin:0">Admins cadastrados</h2>
             <button class="btn-mini" onclick="carregarAdmins()">Atualizar admins</button>
           </div>
@@ -418,6 +481,8 @@
 
     let editAdminId = null;
     let editFilmeId = null;
+    let intervaloAssistindo = null;
+    let superAdminId = null;
 
     const adminNome = document.getElementById("adminNome");
     const adminEmail = document.getElementById("adminEmail");
@@ -437,6 +502,14 @@
     const msgFilme = document.getElementById("msgFilme");
     const listaFilmes = document.getElementById("listaFilmes");
     const btnSalvarFilme = document.getElementById("btnSalvarFilme");
+
+    const cfgLegendasPlayer = document.getElementById("cfgLegendasPlayer");
+    const cfgLegendaMinMinutos = document.getElementById("cfgLegendaMinMinutos");
+    const cfgLegendaMaxMinutos = document.getElementById("cfgLegendaMaxMinutos");
+    const cfgLegendaDuracaoSegundos = document.getElementById("cfgLegendaDuracaoSegundos");
+    const btnSalvarConfigPlayer = document.getElementById("btnSalvarConfigPlayer");
+    const msgConfigPlayer = document.getElementById("msgConfigPlayer");
+    const listaAssistindo = document.getElementById("listaAssistindo");
 
     function mostrarMsg(el, texto, tipo) {
       el.className = "msg " + tipo;
@@ -501,8 +574,17 @@
       limparMsg(msgFilme);
     }
 
+    function limparFormularioConfigPlayer() {
+      cfgLegendasPlayer.value = "";
+      cfgLegendaMinMinutos.value = 10;
+      cfgLegendaMaxMinutos.value = 15;
+      cfgLegendaDuracaoSegundos.value = 6;
+      limparMsg(msgConfigPlayer);
+    }
+
     document.getElementById("btnLimparAdmin").addEventListener("click", limparFormularioAdmin);
     document.getElementById("btnLimparFilme").addEventListener("click", limparFormularioFilme);
+    document.getElementById("btnLimparConfigPlayer").addEventListener("click", limparFormularioConfigPlayer);
 
     async function protegerPainelMaster() {
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
@@ -529,6 +611,8 @@
         return;
       }
 
+      superAdminId = data.id;
+
       document.getElementById("loading").style.display = "none";
       document.getElementById("conteudo").style.display = "block";
     }
@@ -551,6 +635,80 @@
       }
       return error?.message || "Erro ao criar admin.";
     }
+
+    async function carregarConfigPlayer() {
+      limparMsg(msgConfigPlayer);
+
+      try {
+        const { data, error } = await supabaseClient
+          .from("config_filmes")
+          .select("*")
+          .eq("admin_id", 0)
+          .maybeSingle();
+
+        if (error && error.code !== "PGRST116") throw error;
+
+        if (data) {
+          cfgLegendasPlayer.value = data.legendas_player || "";
+          cfgLegendaMinMinutos.value = data.legenda_min_minutos || 10;
+          cfgLegendaMaxMinutos.value = data.legenda_max_minutos || 15;
+          cfgLegendaDuracaoSegundos.value = data.legenda_duracao_segundos || 6;
+        }
+      } catch (error) {
+        mostrarMsg(msgConfigPlayer, error.message || "Erro ao carregar configuração do player.", "erro");
+      }
+    }
+
+    async function salvarConfigPlayer() {
+      limparMsg(msgConfigPlayer);
+
+      const legendas = cfgLegendasPlayer.value.trim();
+      const minMinutos = Number(cfgLegendaMinMinutos.value || 0);
+      const maxMinutos = Number(cfgLegendaMaxMinMinutos?.value || cfgLegendaMaxMinutos.value || 0);
+      const duracaoSegundos = Number(cfgLegendaDuracaoSegundos.value || 0);
+
+      if (minMinutos < 1) {
+        mostrarMsg(msgConfigPlayer, "O intervalo mínimo deve ser pelo menos 1 minuto.", "erro");
+        return;
+      }
+
+      if (maxMinutos < minMinutos) {
+        mostrarMsg(msgConfigPlayer, "O intervalo máximo não pode ser menor que o mínimo.", "erro");
+        return;
+      }
+
+      if (duracaoSegundos < 1) {
+        mostrarMsg(msgConfigPlayer, "A duração da legenda deve ser pelo menos 1 segundo.", "erro");
+        return;
+      }
+
+      btnSalvarConfigPlayer.disabled = true;
+      btnSalvarConfigPlayer.textContent = "Salvando...";
+
+      try {
+        const { error } = await supabaseClient
+          .from("config_filmes")
+          .upsert([{
+            admin_id: 0,
+            nome_site: "FF FILMES ONLINE",
+            legendas_player: legendas || null,
+            legenda_min_minutos: minMinutos,
+            legenda_max_minutos: maxMinutos,
+            legenda_duracao_segundos: duracaoSegundos
+          }], { onConflict: "admin_id" });
+
+        if (error) throw error;
+
+        mostrarMsg(msgConfigPlayer, "Configuração do player salva com sucesso.", "ok");
+      } catch (error) {
+        mostrarMsg(msgConfigPlayer, error.message || "Erro ao salvar configuração do player.", "erro");
+      } finally {
+        btnSalvarConfigPlayer.disabled = false;
+        btnSalvarConfigPlayer.textContent = "Salvar player";
+      }
+    }
+
+    btnSalvarConfigPlayer.addEventListener("click", salvarConfigPlayer);
 
     async function salvarAdmin() {
       limparMsg(msgAdmin);
@@ -627,9 +785,7 @@
               tipo: "admin"
             }]);
 
-          if (insertError) {
-            throw insertError;
-          }
+          if (insertError) throw insertError;
 
           await supabaseAuthIsolado.auth.signOut();
 
@@ -905,13 +1061,74 @@
       }
     }
 
+    function formatarTempoRelativo(dataIso) {
+      if (!dataIso) return "sem atualização";
+      const diffMs = Date.now() - new Date(dataIso).getTime();
+      const diffSeg = Math.max(0, Math.floor(diffMs / 1000));
+
+      if (diffSeg < 60) return `${diffSeg}s atrás`;
+      const min = Math.floor(diffSeg / 60);
+      if (min < 60) return `${min}min atrás`;
+      const hr = Math.floor(min / 60);
+      return `${hr}h atrás`;
+    }
+
+    async function carregarAssistindoAgora() {
+      listaAssistindo.innerHTML = '<div style="color:#94a3b8">Carregando quem está assistindo...</div>';
+
+      try {
+        const limiteAtivo = new Date(Date.now() - 90 * 1000).toISOString();
+
+        const { data, error } = await supabaseClient
+          .from("filmes_views")
+          .select("*")
+          .gte("last_ping", limiteAtivo)
+          .order("last_ping", { ascending: false });
+
+        if (error) throw error;
+
+        if (!data || !data.length) {
+          listaAssistindo.innerHTML = '<div style="color:#94a3b8">Ninguém assistindo agora.</div>';
+          return;
+        }
+
+        listaAssistindo.innerHTML = data.map(item => `
+          <div class="item">
+            <div class="info">
+              <h3>${item.cliente_nome || item.cliente_email || "Usuário"}</h3>
+              <div class="meta">Filme: ${item.filme_titulo || "Não informado"}</div>
+              <div class="meta">E-mail: ${item.cliente_email || "-"}</div>
+              <div class="meta">Cliente ID: ${item.cliente_id || "-"}</div>
+              <div class="meta">Iniciou: ${item.started_at ? new Date(item.started_at).toLocaleString("pt-BR") : "-"}</div>
+              <div class="meta">Última atividade: ${formatarTempoRelativo(item.last_ping)}</div>
+              <div class="status assistindo">Assistindo agora</div>
+            </div>
+          </div>
+        `).join("");
+
+      } catch (error) {
+        listaAssistindo.innerHTML = `<div style="color:#fca5a5">${error.message || "Erro ao carregar quem está assistindo."}</div>`;
+      }
+    }
+
+    function iniciarAutoRefreshAssistindo() {
+      if (intervaloAssistindo) clearInterval(intervaloAssistindo);
+      intervaloAssistindo = setInterval(() => {
+        carregarAssistindoAgora();
+      }, 30000);
+    }
+
     async function logout() {
+      if (intervaloAssistindo) clearInterval(intervaloAssistindo);
       await supabaseClient.auth.signOut();
       window.location.href = "index.html";
     }
 
     async function init() {
       await protegerPainelMaster();
+      await carregarConfigPlayer();
+      await carregarAssistindoAgora();
+      iniciarAutoRefreshAssistindo();
       await carregarAdmins();
       await carregarFilmes();
     }
