@@ -191,6 +191,20 @@ body::before{
   color:#d5deea;
   font-size:13px;
   line-height:1.45;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+
+.banner-empty{
+  grid-column:1/-1;
+  padding:20px;
+  border-radius:22px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+  color:#dbe5f3;
+  text-align:center;
 }
 
 .login-wrap{
@@ -409,7 +423,7 @@ button:hover{
       Lista com conteúdos do <span class="yt">YouTube</span> em uma área bonita, organizada e fácil de usar.
     </p>
 
-    <div class="banner-grid">
+    <div class="banner-grid" id="bannerGrid">
       <div class="banner-card">
         <img src="https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=900&q=80" alt="Cinema">
         <div class="banner-info">
@@ -487,7 +501,6 @@ async function carregarConfigTemaPadrao(){
 
   let adminId = null;
 
-  // 👉 SE ESTIVER LOGADO
   if(userData?.user){
     const { data: cliente } = await supabaseClient
       .from("admin_clientes")
@@ -502,7 +515,6 @@ async function carregarConfigTemaPadrao(){
 
   let config = null;
 
-  // 👉 VISITANTE
   if(!adminId){
     const { data } = await supabaseClient
       .from("config_filmes")
@@ -512,7 +524,6 @@ async function carregarConfigTemaPadrao(){
 
     config = data;
   } else {
-    // 👉 COM ADMIN
     const { data } = await supabaseClient
       .from("config_filmes")
       .select("*")
@@ -542,6 +553,124 @@ function aplicarTema(config){
   document.getElementById("logoTopo").textContent = "FFCINE";
 }
 
+// 🔥 EMBARALHAR
+function embaralharArray(lista){
+  const arr = [...lista];
+  for(let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// 🔥 PEGAR CAPA/TEXTO DE FORMA FLEXÍVEL
+function normalizarFilme(f){
+  return {
+    titulo:
+      f.titulo ||
+      f.nome ||
+      f.title ||
+      "Filme em destaque",
+
+    descricao:
+      f.descricao ||
+      f.sinopse ||
+      f.resumo ||
+      f.texto ||
+      "Confira esse filme disponível na plataforma.",
+
+    imagem:
+      f.thumb ||
+      f.thumbnail ||
+      f.capa ||
+      f.imagem ||
+      f.poster ||
+      f.banner ||
+      "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=900&q=80"
+  };
+}
+
+// 🔥 FALLBACK
+function renderBannersFallback(){
+  const grid = document.getElementById("bannerGrid");
+
+  grid.innerHTML = `
+    <div class="banner-card">
+      <img src="https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=900&q=80" alt="Cinema">
+      <div class="banner-info">
+        <div class="banner-tag">EM DESTAQUE</div>
+        <strong>Noite de Cinema</strong>
+        <span>Um visual mais profissional para sua área de filmes.</span>
+      </div>
+    </div>
+
+    <div class="banner-card">
+      <img src="https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=900&q=80" alt="Filmes">
+      <div class="banner-info">
+        <div class="banner-tag">CATÁLOGO</div>
+        <strong>Filmes Online</strong>
+        <span>Acesso organizado para sua lista e conteúdos disponíveis.</span>
+      </div>
+    </div>
+
+    <div class="banner-card">
+      <img src="https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=900&q=80" alt="Sala de cinema">
+      <div class="banner-info">
+        <div class="banner-tag">EXPERIÊNCIA</div>
+        <strong>Visual de Cinema</strong>
+        <span>Layout bonito para deixar seu login mais premium.</span>
+      </div>
+    </div>
+  `;
+}
+
+// 🔥 BANNERS ALEATÓRIOS DO CATÁLOGO
+async function carregarBannersAleatorios(){
+  const grid = document.getElementById("bannerGrid");
+
+  try{
+    const { data, error } = await supabaseClient
+      .from("filmes")
+      .select("*")
+      .limit(40);
+
+    if(error || !data || !data.length){
+      renderBannersFallback();
+      return;
+    }
+
+    const filtrados = data.filter(f => {
+      const imagem = f.thumb || f.thumbnail || f.capa || f.imagem || f.poster || f.banner;
+      return !!imagem;
+    });
+
+    if(!filtrados.length){
+      renderBannersFallback();
+      return;
+    }
+
+    const escolhidos = embaralharArray(filtrados).slice(0, 3);
+    const tags = ["SUGESTÃO", "EM ALTA", "RECOMENDADO"];
+
+    grid.innerHTML = escolhidos.map((filme, index) => {
+      const item = normalizarFilme(filme);
+
+      return `
+        <div class="banner-card">
+          <img src="${item.imagem}" alt="${item.titulo}">
+          <div class="banner-info">
+            <div class="banner-tag">${tags[index] || "DESTAQUE"}</div>
+            <strong>${item.titulo}</strong>
+            <span>${item.descricao}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }catch(e){
+    renderBannersFallback();
+  }
+}
+
 // 🔥 LOGIN
 document.getElementById("formLogin").addEventListener("submit", async(e)=>{
   e.preventDefault();
@@ -564,6 +693,7 @@ document.getElementById("formLogin").addEventListener("submit", async(e)=>{
 
 // 🔥 CHAMA SEMPRE
 carregarConfigTemaPadrao();
+carregarBannersAleatorios();
 </script>
 
 </body>
