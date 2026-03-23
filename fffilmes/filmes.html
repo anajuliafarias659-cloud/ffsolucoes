@@ -306,11 +306,13 @@
       flex:0 0 auto;
       scroll-snap-align:start;
       box-shadow:0 10px 24px rgba(0,0,0,.26);
+      position:relative;
     }
 
     .movie:hover{
       transform:translateY(-6px) scale(1.02);
-      border-color:color-mix(in srgb, var(--primary) 36%, transparent);
+      border-color:rgba(229,9,20,.35);
+      box-shadow:0 16px 30px rgba(0,0,0,.34);
     }
 
     .movie img{
@@ -332,7 +334,29 @@
     .movie-cat{
       color:var(--muted);
       font-size:12px;
+      padding:0 12px 8px;
+    }
+
+    .movie-acoes{
+      display:flex;
+      gap:8px;
       padding:0 12px 12px;
+    }
+
+    .btn-card{
+      flex:1;
+      border:none;
+      border-radius:10px;
+      padding:9px 10px;
+      font-size:12px;
+      font-weight:800;
+      cursor:pointer;
+      color:#fff;
+      background:rgba(255,255,255,.08);
+    }
+
+    .btn-card.ativo{
+      background:linear-gradient(135deg,var(--primary),var(--secondary));
     }
 
     .vazio{
@@ -390,6 +414,7 @@
 
     .btn-voltar{background:#334155}
     .btn-fechar{background:linear-gradient(135deg,var(--primary),var(--secondary))}
+    .btn-proximo{background:#2563eb}
 
     .player-titulo{
       font-size:16px;
@@ -481,7 +506,7 @@
       .player-acoes{
         width:100%;
         display:grid;
-        grid-template-columns:1fr 1fr;
+        grid-template-columns:1fr 1fr 1fr;
       }
       .btn-overlay{width:100%}
       .player-titulo{
@@ -493,6 +518,9 @@
         bottom:30px;
         font-size:14px;
         max-width:92%;
+      }
+      .movie-acoes{
+        flex-direction:column;
       }
     }
   </style>
@@ -534,6 +562,9 @@
         </div>
       </section>
 
+      <div id="secaoFavoritos"></div>
+      <div id="secaoMinhaLista"></div>
+
       <div id="menuCategorias" class="categorias-topo"></div>
       <div id="catalogoNetflix"></div>
     </div>
@@ -544,6 +575,7 @@
       <div id="overlayTitulo" class="player-titulo">Assistindo</div>
       <div class="player-acoes">
         <button class="btn-overlay btn-voltar" onclick="fecharPlayer()">Voltar</button>
+        <button class="btn-overlay btn-proximo" onclick="abrirProximoFilme()">Próximo</button>
         <button class="btn-overlay btn-fechar" onclick="fecharPlayer()">Fechar</button>
       </div>
     </div>
@@ -584,6 +616,14 @@
     let legendaMaxMinutos = 2;
     let legendaDuracaoSegundos = 6;
     let timerLegenda = null;
+
+    let favoritosIds = [];
+    let listaIds = [];
+    let filmeAtualIndex = -1;
+
+    function getUserIdLocal() {
+      return localStorage.getItem("cliente_user_id_filmes") || null;
+    }
 
     function aplicarTema(config) {
       if (!config) return;
@@ -712,11 +752,17 @@
       }
     }
 
-    async function abrirPlayer(videoId, titulo = "") {
+    function getFilmeIndexById(filmeId) {
+      return filmesCache.findIndex(f => String(f.id) === String(filmeId));
+    }
+
+    async function abrirPlayer(videoId, titulo = "", filmeId = null) {
       const overlay = document.getElementById("playerOverlay");
       const overlayPlayer = document.getElementById("overlayPlayer");
       const overlayTitulo = document.getElementById("overlayTitulo");
       const playerArea = document.getElementById("playerArea");
+
+      filmeAtualIndex = getFilmeIndexById(filmeId);
 
       overlayTitulo.textContent = titulo || "Assistindo";
       overlayPlayer.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
@@ -730,6 +776,21 @@
           await playerArea.requestFullscreen();
         }
       } catch (e) {}
+    }
+
+    async function abrirProximoFilme() {
+      if (!filmesCache.length) return;
+
+      if (filmeAtualIndex < 0) {
+        filmeAtualIndex = 0;
+      } else {
+        filmeAtualIndex = (filmeAtualIndex + 1) % filmesCache.length;
+      }
+
+      const proximo = filmesCache[filmeAtualIndex];
+      if (!proximo) return;
+
+      await abrirPlayer(proximo.video_id, proximo.titulo, proximo.id);
     }
 
     async function fecharPlayer() {
@@ -758,6 +819,66 @@
         .toLowerCase();
     }
 
+    async function carregarListaUsuario() {
+      const userId = getUserIdLocal();
+      if (!userId) {
+        favoritosIds = [];
+        listaIds = [];
+        return;
+      }
+
+      const { data, error } = await supabaseClient
+        .from("filmes_lista")
+        .select("filme_id,tipo")
+        .eq("user_id", userId);
+
+      if (error || !data) {
+        favoritosIds = [];
+        listaIds = [];
+        return;
+      }
+
+      favoritosIds = data.filter(i => i.tipo === "favorito").map(i => Number(i.filme_id));
+      listaIds = data.filter(i => i.tipo === "lista").map(i => Number(i.filme_id));
+    }
+
+    async function toggleListaFilme(filmeId, tipo) {
+      const userId = getUserIdLocal();
+      if (!userId || !clienteAtual?.admin_id) return;
+
+      const filmeIdNum = Number(filmeId);
+      const idsAtuais = tipo === "favorito" ? favoritosIds : listaIds;
+      const jaExiste = idsAtuais.includes(filmeIdNum);
+
+      if (jaExiste) {
+        const { error } = await supabaseClient
+          .from("filmes_lista")
+          .delete()
+          .eq("user_id", userId)
+          .eq("filme_id", filmeIdNum)
+          .eq("tipo", tipo);
+
+        if (error) return;
+      } else {
+        const { error } = await supabaseClient
+          .from("filmes_lista")
+          .insert([{
+            user_id: userId,
+            admin_id: Number(clienteAtual.admin_id),
+            filme_id: filmeIdNum,
+            tipo: tipo
+          }]);
+
+        if (error && !String(error.message || "").toLowerCase().includes("duplicate")) {
+          return;
+        }
+      }
+
+      await carregarListaUsuario();
+      renderCatalogoNetflix();
+      renderSecoesUsuario();
+    }
+
     function renderMenuCategorias() {
       const menu = document.getElementById("menuCategorias");
       const categorias = obterCategorias(filmesCache);
@@ -781,6 +902,58 @@
       if (cat !== "Todos" && destino) {
         destino.scrollIntoView({ behavior: "smooth", block: "start" });
       }
+    }
+
+    function cardFilmeHTML(filme) {
+      const favorito = favoritosIds.includes(Number(filme.id));
+      const naLista = listaIds.includes(Number(filme.id));
+
+      return `
+        <div class="movie">
+          <div onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}', ${filme.id || 'null'})">
+            <img src="${filme.thumb || ''}" alt="${filme.titulo || ''}">
+            <div class="movie-title">${filme.titulo || ''}</div>
+            <div class="movie-cat">${normalizarCategoria(filme.categoria)}</div>
+          </div>
+          <div class="movie-acoes">
+            <button class="btn-card ${favorito ? 'ativo' : ''}" onclick="event.stopPropagation(); toggleListaFilme(${filme.id}, 'favorito')">
+              ${favorito ? '★ Favorito' : '☆ Favorito'}
+            </button>
+            <button class="btn-card ${naLista ? 'ativo' : ''}" onclick="event.stopPropagation(); toggleListaFilme(${filme.id}, 'lista')">
+              ${naLista ? '✓ Minha Lista' : '+ Minha Lista'}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSecaoPersonalizada(containerId, titulo, filmes) {
+      const el = document.getElementById(containerId);
+
+      if (!filmes.length) {
+        el.innerHTML = '';
+        return;
+      }
+
+      el.innerHTML = `
+        <section class="secao-categoria">
+          <div class="secao-topo">
+            <h2 class="secao-titulo">${titulo}</h2>
+            <div class="secao-sub">${filmes.length} filme(s)</div>
+          </div>
+          <div class="linha-scroll">
+            ${filmes.map(cardFilmeHTML).join("")}
+          </div>
+        </section>
+      `;
+    }
+
+    function renderSecoesUsuario() {
+      const filmesFavoritos = filmesCache.filter(f => favoritosIds.includes(Number(f.id)));
+      const filmesMinhaLista = filmesCache.filter(f => listaIds.includes(Number(f.id)));
+
+      renderSecaoPersonalizada("secaoFavoritos", "Meus Favoritos", filmesFavoritos);
+      renderSecaoPersonalizada("secaoMinhaLista", "Minha Lista", filmesMinhaLista);
     }
 
     function renderCatalogoNetflix() {
@@ -809,13 +982,7 @@
           </div>
 
           <div class="linha-scroll">
-            ${grupo.filmes.map(filme => `
-              <div class="movie" onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}')">
-                <img src="${filme.thumb || ''}" alt="${filme.titulo || ''}">
-                <div class="movie-title">${filme.titulo || ''}</div>
-                <div class="movie-cat">${normalizarCategoria(filme.categoria)}</div>
-              </div>
-            `).join("")}
+            ${grupo.filmes.map(cardFilmeHTML).join("")}
           </div>
         </section>
       `).join("");
@@ -844,7 +1011,8 @@
       btnAssistirDestaque.style.display = "inline-block";
       btnAssistirDestaque.onclick = () => abrirPlayer(
         filmeDestaque.video_id,
-        filmeDestaque.titulo
+        filmeDestaque.titulo,
+        filmeDestaque.id || null
       );
 
       btnCategoriaDestaque.style.display = "inline-block";
@@ -1023,6 +1191,7 @@
           renderHero();
           renderMenuCategorias();
           renderCatalogoNetflix();
+          renderSecoesUsuario();
           return;
         }
 
@@ -1030,6 +1199,7 @@
         renderHero();
         renderMenuCategorias();
         renderCatalogoNetflix();
+        renderSecoesUsuario();
 
       } catch (error) {
         catalogo.innerHTML = `<div class="vazio" style="color:#fca5a5">${error.message || "Erro ao carregar filmes."}</div>`;
@@ -1086,6 +1256,7 @@
 
       await mostrarUsuario();
       await carregarConfigTema();
+      await carregarListaUsuario();
       await carregarFilmes();
 
       if (tipoUsuarioAtual === "cliente" && cliente.id) {
