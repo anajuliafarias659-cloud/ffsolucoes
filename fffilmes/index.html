@@ -481,54 +481,14 @@ const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 async function carregarConfigTemaPadrao(){
-  const { data: userData } = await supabaseClient.auth.getUser();
+  const { data } = await supabaseClient
+    .from("config_filmes")
+    .select("*")
+    .limit(1)
+    .maybeSingle();
 
-  let adminId = null;
-
-  if(userData?.user){
-    const { data: cliente } = await supabaseClient
-      .from("admin_clientes")
-      .select("admin_id")
-      .eq("user_id", userData.user.id)
-      .maybeSingle();
-
-    if(cliente?.admin_id){
-      adminId = cliente.admin_id;
-    } else {
-      const { data: adminFilme } = await supabaseClient
-        .from("admin_filmes")
-        .select("id")
-        .eq("user_id", userData.user.id)
-        .maybeSingle();
-
-      if(adminFilme?.id){
-        adminId = adminFilme.id;
-      }
-    }
-  }
-
-  let config = null;
-
-  if(!adminId){
-    const { data } = await supabaseClient
-      .from("config_filmes")
-      .select("*")
-      .limit(1)
-      .maybeSingle();
-
-    config = data;
-  } else {
-    const { data } = await supabaseClient
-      .from("config_filmes")
-      .select("*")
-      .eq("admin_id", adminId)
-      .maybeSingle();
-
-    config = data;
-  }
-
-  if(config){
-    aplicarTema(config);
+  if(data){
+    aplicarTema(data);
   }
 }
 
@@ -557,14 +517,15 @@ function embaralharArray(lista){
 
 function normalizarFilme(f){
   return {
-    titulo: f.titulo || f.nome || f.title || "Filme em destaque",
-    descricao: f.descricao || f.sinopse || f.resumo || f.texto || "Confira esse filme disponível na plataforma.",
+    titulo: f.titulo || "Filme em destaque",
+    descricao: f.descricao || f.categoria || "Confira esse filme disponível na plataforma.",
     imagem: f.thumb || f.thumbnail || f.capa || f.imagem || f.poster || f.banner || ""
   };
 }
 
 function renderBannersFallback(){
   const grid = document.getElementById("bannerGrid");
+  if(!grid) return;
 
   grid.innerHTML = `
     <div class="banner-card">
@@ -596,72 +557,34 @@ function renderBannersFallback(){
   `;
 }
 
-async function descobrirAdminIdVisitante(){
-  const { data: userData } = await supabaseClient.auth.getUser();
-
-  if(!userData?.user){
-    return null;
-  }
-
-  const userId = userData.user.id;
-
-  const { data: cliente } = await supabaseClient
-    .from("admin_clientes")
-    .select("admin_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if(cliente?.admin_id){
-    return cliente.admin_id;
-  }
-
-  const { data: adminFilme } = await supabaseClient
-    .from("admin_filmes")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if(adminFilme?.id){
-    return adminFilme.id;
-  }
-
-  return null;
-}
-
 async function carregarBannersAleatorios(){
   const grid = document.getElementById("bannerGrid");
+  if(!grid) return;
 
   try{
-    const adminId = await descobrirAdminIdVisitante();
-
-    let query = supabaseClient
+    const { data, error } = await supabaseClient
       .from("filmes")
-      .select("*")
+      .select("id,titulo,descricao,categoria,thumb,ativo")
       .eq("ativo", true)
+      .order("id", { ascending: false })
       .limit(60);
-
-    if(adminId){
-      query = query.eq("user_id", adminId);
-    }
-
-    const { data, error } = await query;
 
     if(error || !data || !data.length){
       renderBannersFallback();
       return;
     }
 
-    const filtrados = data.filter(f => {
+    const filmesComImagem = data.filter(f => {
       const item = normalizarFilme(f);
       return !!item.imagem;
     });
 
-    if(!filtrados.length){
+    if(!filmesComImagem.length){
       renderBannersFallback();
       return;
     }
 
-    const escolhidos = embaralharArray(filtrados).slice(0, 3);
+    const escolhidos = embaralharArray(filmesComImagem).slice(0, 3);
     const tags = ["SUGESTÃO", "EM ALTA", "RECOMENDADO"];
 
     grid.innerHTML = escolhidos.map((filme, index) => {
