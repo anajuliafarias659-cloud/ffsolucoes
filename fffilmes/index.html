@@ -197,16 +197,6 @@ body::before{
   overflow:hidden;
 }
 
-.banner-empty{
-  grid-column:1/-1;
-  padding:20px;
-  border-radius:22px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
-  color:#dbe5f3;
-  text-align:center;
-}
-
 .login-wrap{
   display:flex;
   justify-content:center;
@@ -338,11 +328,6 @@ button:hover{
   color:var(--muted);
   font-size:13px;
   line-height:1.5;
-}
-
-.highlight{
-  color:var(--primary);
-  font-weight:800;
 }
 
 @media(max-width:980px){
@@ -495,7 +480,6 @@ const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// 🔥 CARREGA APENAS CORES E FUNDO
 async function carregarConfigTemaPadrao(){
   const { data: userData } = await supabaseClient.auth.getUser();
 
@@ -506,10 +490,20 @@ async function carregarConfigTemaPadrao(){
       .from("admin_clientes")
       .select("admin_id")
       .eq("user_id", userData.user.id)
-      .single();
+      .maybeSingle();
 
-    if(cliente){
+    if(cliente?.admin_id){
       adminId = cliente.admin_id;
+    } else {
+      const { data: adminFilme } = await supabaseClient
+        .from("admin_filmes")
+        .select("id")
+        .eq("user_id", userData.user.id)
+        .maybeSingle();
+
+      if(adminFilme?.id){
+        adminId = adminFilme.id;
+      }
     }
   }
 
@@ -520,7 +514,7 @@ async function carregarConfigTemaPadrao(){
       .from("config_filmes")
       .select("*")
       .limit(1)
-      .single();
+      .maybeSingle();
 
     config = data;
   } else {
@@ -528,7 +522,7 @@ async function carregarConfigTemaPadrao(){
       .from("config_filmes")
       .select("*")
       .eq("admin_id", adminId)
-      .single();
+      .maybeSingle();
 
     config = data;
   }
@@ -538,7 +532,6 @@ async function carregarConfigTemaPadrao(){
   }
 }
 
-// 🔥 APLICA TEMA SEM PEGAR NOME DO SITE
 function aplicarTema(config){
   if(!config) return;
 
@@ -553,7 +546,6 @@ function aplicarTema(config){
   document.getElementById("logoTopo").textContent = "FFCINE";
 }
 
-// 🔥 EMBARALHAR
 function embaralharArray(lista){
   const arr = [...lista];
   for(let i = arr.length - 1; i > 0; i--){
@@ -563,34 +555,14 @@ function embaralharArray(lista){
   return arr;
 }
 
-// 🔥 PEGAR CAPA/TEXTO DE FORMA FLEXÍVEL
 function normalizarFilme(f){
   return {
-    titulo:
-      f.titulo ||
-      f.nome ||
-      f.title ||
-      "Filme em destaque",
-
-    descricao:
-      f.descricao ||
-      f.sinopse ||
-      f.resumo ||
-      f.texto ||
-      "Confira esse filme disponível na plataforma.",
-
-    imagem:
-      f.thumb ||
-      f.thumbnail ||
-      f.capa ||
-      f.imagem ||
-      f.poster ||
-      f.banner ||
-      "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=900&q=80"
+    titulo: f.titulo || f.nome || f.title || "Filme em destaque",
+    descricao: f.descricao || f.sinopse || f.resumo || f.texto || "Confira esse filme disponível na plataforma.",
+    imagem: f.thumb || f.thumbnail || f.capa || f.imagem || f.poster || f.banner || ""
   };
 }
 
-// 🔥 FALLBACK
 function renderBannersFallback(){
   const grid = document.getElementById("bannerGrid");
 
@@ -624,15 +596,55 @@ function renderBannersFallback(){
   `;
 }
 
-// 🔥 BANNERS ALEATÓRIOS DO CATÁLOGO
+async function descobrirAdminIdVisitante(){
+  const { data: userData } = await supabaseClient.auth.getUser();
+
+  if(!userData?.user){
+    return null;
+  }
+
+  const userId = userData.user.id;
+
+  const { data: cliente } = await supabaseClient
+    .from("admin_clientes")
+    .select("admin_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if(cliente?.admin_id){
+    return cliente.admin_id;
+  }
+
+  const { data: adminFilme } = await supabaseClient
+    .from("admin_filmes")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if(adminFilme?.id){
+    return adminFilme.id;
+  }
+
+  return null;
+}
+
 async function carregarBannersAleatorios(){
   const grid = document.getElementById("bannerGrid");
 
   try{
-    const { data, error } = await supabaseClient
+    const adminId = await descobrirAdminIdVisitante();
+
+    let query = supabaseClient
       .from("filmes")
       .select("*")
-      .limit(40);
+      .eq("ativo", true)
+      .limit(60);
+
+    if(adminId){
+      query = query.eq("user_id", adminId);
+    }
+
+    const { data, error } = await query;
 
     if(error || !data || !data.length){
       renderBannersFallback();
@@ -640,8 +652,8 @@ async function carregarBannersAleatorios(){
     }
 
     const filtrados = data.filter(f => {
-      const imagem = f.thumb || f.thumbnail || f.capa || f.imagem || f.poster || f.banner;
-      return !!imagem;
+      const item = normalizarFilme(f);
+      return !!item.imagem;
     });
 
     if(!filtrados.length){
@@ -671,7 +683,6 @@ async function carregarBannersAleatorios(){
   }
 }
 
-// 🔥 LOGIN
 document.getElementById("formLogin").addEventListener("submit", async(e)=>{
   e.preventDefault();
 
@@ -684,14 +695,13 @@ document.getElementById("formLogin").addEventListener("submit", async(e)=>{
   });
 
   if(error){
-    alert("Erro no login");
+    alert(error.message || "Erro no login");
     return;
   }
 
   location.href = "filmes.html";
 });
 
-// 🔥 CHAMA SEMPRE
 carregarConfigTemaPadrao();
 carregarBannersAleatorios();
 </script>
