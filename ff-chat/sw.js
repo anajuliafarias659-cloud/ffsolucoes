@@ -1,6 +1,6 @@
 const CACHE_NAME = "ff-chat-familia-v1";
 const URLS_TO_CACHE = [
-  "/ff-chat",
+  "/ff-chat.index",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
