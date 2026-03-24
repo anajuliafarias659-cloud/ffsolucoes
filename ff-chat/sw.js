@@ -1,10 +1,10 @@
 const CACHE_NAME = "ff-chat-familia-v1";
 const URLS_TO_CACHE = [
   "/ff-chat.index",
-  "/manifest.webmanifest",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/icon-512-maskable.png"
+  "/ff-cha/manifest.webmanifest",
+  "/ff-cha/icons/icon-192.png",
+  "/ff-cha/icons/icon-512.png",
+  "/ff-cha/icons/icon-512-maskable.png"
 ];
 
 self.addEventListener("install", (event) => {
