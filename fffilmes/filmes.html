@@ -6,6 +6,7 @@
   <title>FF Filmes</title>
   <meta name="theme-color" content="#141414">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
 
   <style>
     *{
@@ -437,7 +438,7 @@
       background:#000;
     }
 
-    .player-area iframe{
+    .player-area #overlayPlayer{
       position:absolute;
       inset:0;
       width:100%;
@@ -585,7 +586,7 @@
       </div>
     </div>
     <div id="playerArea" class="player-area">
-      <iframe id="overlayPlayer" src="" allow="autoplay; fullscreen" allowfullscreen></iframe>
+      <div id="overlayPlayer"></div>
       <div id="legendaFlutuante" class="legenda-flutuante"></div>
     </div>
   </div>
@@ -627,8 +628,73 @@
     let recentesIds = [];
     let filmeAtualIndex = -1;
 
+    let ytPlayer = null;
+    let ytApiPronta = false;
+    let filmeAtualPlayer = null;
+    let timerSalvarProgresso = null;
+    let ultimoTempoSalvo = 0;
+
     function getUserIdLocal() {
       return localStorage.getItem("cliente_user_id_filmes") || null;
+    }
+
+    function getProgressKey(filmeId) {
+      const userId = getUserIdLocal() || "anon";
+      return `ff_filmes_progress_${userId}_${filmeId}`;
+    }
+
+    function salvarProgressoLocal(filmeId, tempoSegundos) {
+      if (!filmeId) return;
+      const tempo = Math.floor(Number(tempoSegundos || 0));
+      if (tempo < 3) return;
+
+      try {
+        localStorage.setItem(getProgressKey(filmeId), String(tempo));
+      } catch (e) {}
+    }
+
+    function obterProgressoLocal(filmeId) {
+      if (!filmeId) return 0;
+      try {
+        const valor = Number(localStorage.getItem(getProgressKey(filmeId)) || 0);
+        return Number.isFinite(valor) ? valor : 0;
+      } catch (e) {
+        return 0;
+      }
+    }
+
+    function limparProgressoLocal(filmeId) {
+      if (!filmeId) return;
+      try {
+        localStorage.removeItem(getProgressKey(filmeId));
+      } catch (e) {}
+    }
+
+    function pararTimerSalvarProgresso() {
+      if (timerSalvarProgresso) {
+        clearInterval(timerSalvarProgresso);
+        timerSalvarProgresso = null;
+      }
+    }
+
+    function salvarProgressoAtual(forcar = false) {
+      if (!ytPlayer || !filmeAtualPlayer?.id) return;
+      if (typeof ytPlayer.getCurrentTime !== "function") return;
+
+      try {
+        const tempo = Math.floor(ytPlayer.getCurrentTime() || 0);
+        if (forcar || Math.abs(tempo - ultimoTempoSalvo) >= 5) {
+          ultimoTempoSalvo = tempo;
+          salvarProgressoLocal(filmeAtualPlayer.id, tempo);
+        }
+      } catch (e) {}
+    }
+
+    function iniciarTimerSalvarProgresso() {
+      pararTimerSalvarProgresso();
+      timerSalvarProgresso = setInterval(() => {
+        salvarProgressoAtual(false);
+      }, 5000);
     }
 
     function aplicarTema(config) {
@@ -782,16 +848,99 @@
       renderSecoesUsuario();
     }
 
+    function onYouTubePlayerReady(event) {
+      if (!filmeAtualPlayer) return;
+
+      const inicio = Math.max(0, Math.floor(obterProgressoLocal(filmeAtualPlayer.id) || 0));
+
+      if (inicio > 0) {
+        try {
+          event.target.seekTo(inicio, true);
+        } catch (e) {}
+      }
+
+      try {
+        event.target.playVideo();
+      } catch (e) {}
+    }
+
+    function onYouTubePlayerStateChange(event) {
+      if (!filmeAtualPlayer) return;
+
+      if (event.data === YT.PlayerState.PLAYING) {
+        iniciarTimerSalvarProgresso();
+      }
+
+      if (event.data === YT.PlayerState.PAUSED) {
+        salvarProgressoAtual(true);
+        pararTimerSalvarProgresso();
+      }
+
+      if (event.data === YT.PlayerState.BUFFERING) {
+        salvarProgressoAtual(true);
+      }
+
+      if (event.data === YT.PlayerState.ENDED) {
+        pararTimerSalvarProgresso();
+        limparProgressoLocal(filmeAtualPlayer.id);
+        ultimoTempoSalvo = 0;
+      }
+    }
+
+    function garantirPlayerYoutube(videoId) {
+      if (!ytApiPronta || !window.YT || !window.YT.Player) return false;
+
+      if (!ytPlayer) {
+        ytPlayer = new YT.Player("overlayPlayer", {
+          width: "100%",
+          height: "100%",
+          videoId: videoId,
+          playerVars: {
+            autoplay: 1,
+            rel: 0,
+            playsinline: 1
+          },
+          events: {
+            onReady: onYouTubePlayerReady,
+            onStateChange: onYouTubePlayerStateChange
+          }
+        });
+      } else {
+        try {
+          ytPlayer.loadVideoById({
+            videoId: videoId,
+            startSeconds: Math.max(0, Math.floor(obterProgressoLocal(filmeAtualPlayer?.id) || 0))
+          });
+        } catch (e) {
+          try {
+            ytPlayer.loadVideoById(videoId);
+          } catch (err) {}
+        }
+      }
+
+      return true;
+    }
+
+    window.onYouTubeIframeAPIReady = function () {
+      ytApiPronta = true;
+    };
+
     async function abrirPlayer(videoId, titulo = "", filmeId = null) {
       const overlay = document.getElementById("playerOverlay");
-      const overlayPlayer = document.getElementById("overlayPlayer");
       const overlayTitulo = document.getElementById("overlayTitulo");
       const playerArea = document.getElementById("playerArea");
 
+      salvarProgressoAtual(true);
+
       filmeAtualIndex = getFilmeIndexById(filmeId);
+      filmeAtualPlayer = filmesCache.find(f => String(f.id) === String(filmeId)) || {
+        id: filmeId,
+        video_id: videoId,
+        titulo: titulo
+      };
+      ultimoTempoSalvo = 0;
 
       overlayTitulo.textContent = titulo || "Assistindo";
-      overlayPlayer.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
       overlay.classList.add("show");
       document.body.style.overflow = "hidden";
 
@@ -802,6 +951,14 @@
         await registrarHistorico(filmeObj);
       }
 
+      const playerCriado = garantirPlayerYoutube(videoId);
+
+      if (!playerCriado) {
+        setTimeout(() => {
+          garantirPlayerYoutube(videoId);
+        }, 400);
+      }
+
       try {
         if (playerArea.requestFullscreen) {
           await playerArea.requestFullscreen();
@@ -810,6 +967,8 @@
     }
 
     async function abrirProximoFilme() {
+      salvarProgressoAtual(true);
+
       if (!filmesCache.length) return;
 
       if (filmeAtualIndex < 0) {
@@ -825,12 +984,19 @@
     }
 
     async function fecharPlayer() {
+      salvarProgressoAtual(true);
+      pararTimerSalvarProgresso();
+
       const overlay = document.getElementById("playerOverlay");
-      const overlayPlayer = document.getElementById("overlayPlayer");
 
       pararLegendasAleatorias();
 
-      overlayPlayer.src = "";
+      try {
+        if (ytPlayer && typeof ytPlayer.stopVideo === "function") {
+          ytPlayer.stopVideo();
+        }
+      } catch (e) {}
+
       overlay.classList.remove("show");
       document.body.style.overflow = "";
 
@@ -968,6 +1134,7 @@
     function cardFilmeHTML(filme) {
       const favorito = favoritosIds.includes(Number(filme.id));
       const naLista = listaIds.includes(Number(filme.id));
+      const progresso = obterProgressoLocal(filme.id);
 
       return `
         <div class="movie">
@@ -980,7 +1147,7 @@
           </div>
           <div onclick="abrirPlayer('${escaparTexto(filme.video_id)}', '${escaparTexto(filme.titulo)}', ${filme.id || 'null'})">
             <div class="movie-title">${filme.titulo || ''}</div>
-            <div class="movie-cat">${normalizarCategoria(filme.categoria)}</div>
+            <div class="movie-cat">${normalizarCategoria(filme.categoria)}${progresso > 0 ? ` • continuar em ${Math.floor(progresso/60)}:${String(progresso%60).padStart(2,'0')}` : ''}</div>
           </div>
         </div>
       `;
@@ -1386,6 +1553,9 @@
     });
 
     async function logout() {
+      salvarProgressoAtual(true);
+      pararTimerSalvarProgresso();
+
       try {
         if (canalTempoReal) {
           supabaseClient.removeChannel(canalTempoReal);
@@ -1421,6 +1591,10 @@
       if (!usuarioDerrubado) {
         await validarClienteAtual();
       }
+    });
+
+    window.addEventListener("beforeunload", () => {
+      salvarProgressoAtual(true);
     });
 
     protegerPagina();
