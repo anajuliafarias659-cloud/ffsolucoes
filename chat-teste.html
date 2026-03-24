@@ -12,7 +12,6 @@
   --bg:#0b141a;
   --sidebar:#111b21;
   --header:#202c33;
-  --panel:#0b141a;
   --chatbg:#0e1a21;
   --mine:#005c4b;
   --other:#202c33;
@@ -136,9 +135,17 @@ button,input,select,textarea{font-family:inherit}
   text-overflow:ellipsis;
 }
 .user-mini .meta .num{color:var(--muted);font-size:12px}
-.top-actions{display:flex;gap:8px}
+.top-actions{display:flex;gap:8px;flex-wrap:wrap}
 .icon-btn{
   background:#111b21;
+  color:#fff;
+  border:none;
+  border-radius:10px;
+  padding:10px 12px;
+  cursor:pointer;
+}
+.ring-btn{
+  background:#ef4444;
   color:#fff;
   border:none;
   border-radius:10px;
@@ -198,6 +205,19 @@ button,input,select,textarea{font-family:inherit}
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
+}
+.badge{
+  min-width:20px;
+  height:20px;
+  padding:0 6px;
+  border-radius:999px;
+  background:var(--green);
+  color:#04110d;
+  font-size:11px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:800;
 }
 
 .chat-area{
@@ -290,6 +310,7 @@ button,input,select,textarea{font-family:inherit}
   padding:20px;
   color:var(--muted);
 }
+
 .admin-panel{
   position:fixed;
   inset:0;
@@ -361,7 +382,6 @@ button,input,select,textarea{font-family:inherit}
 }
 .edit-btn{background:var(--warn);color:#111}
 .delete-btn{background:var(--danger);color:#fff}
-.ok-btn{background:var(--green);color:#04110d}
 .close-btn{
   background:#ef4444;
   color:#fff;
@@ -446,6 +466,8 @@ button,input,select,textarea{font-family:inherit}
         </div>
       </div>
       <div class="top-actions">
+        <button id="btnPermissaoNotif" class="icon-btn">Notif</button>
+        <button id="btnPararToque" class="ring-btn hidden">Parar</button>
         <button id="openAdminBtn" class="icon-btn hidden">Admin</button>
         <button id="btnLogout" class="icon-btn logout-btn">Sair</button>
       </div>
@@ -562,6 +584,8 @@ const meNome = document.getElementById("meNome");
 const meNumero = document.getElementById("meNumero");
 const btnLogout = document.getElementById("btnLogout");
 const openAdminBtn = document.getElementById("openAdminBtn");
+const btnPermissaoNotif = document.getElementById("btnPermissaoNotif");
+const btnPararToque = document.getElementById("btnPararToque");
 
 const contactsList = document.getElementById("contactsList");
 const searchContato = document.getElementById("searchContato");
@@ -596,6 +620,12 @@ let contatoAtual = null;
 let contatosPermitidos = [];
 let autoRefreshTimer = null;
 let ultimoChatRenderKey = "";
+let lastMessageMap = {};
+let unreadCountMap = {};
+let ringingContactNumero = null;
+let ringInterval = null;
+let audioCtx = null;
+let userInteracted = false;
 
 function setStatus(el, text="", type=""){
   el.className = "status" + (type ? " " + type : "");
@@ -675,15 +705,185 @@ function stopAutoRefresh(){
     autoRefreshTimer = null;
   }
 }
-function startAutoRefresh(){
+function openAudioContext(){
+  try{
+    if(!audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if(audioCtx.state === "suspended"){
+      audioCtx.resume();
+    }
+  }catch(e){}
+}
+function markUserInteraction(){
+  userInteracted = true;
+  openAudioContext();
+}
+document.addEventListener("click", markUserInteraction, { passive:true });
+document.addEventListener("keydown", markUserInteraction, { passive:true });
+document.addEventListener("touchstart", markUserInteraction, { passive:true });
+
+function beep(freq=800, duration=0.12, type="sine", volume=0.05){
+  if(!userInteracted) return;
+  openAudioContext();
+  if(!audioCtx) return;
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.value = volume;
+
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  const now = audioCtx.currentTime;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+  osc.start(now);
+  osc.stop(now + duration + 0.02);
+}
+function playNewMessageSound(){
+  beep(900, 0.10, "sine", 0.05);
+  setTimeout(() => beep(1200, 0.08, "sine", 0.04), 90);
+}
+function playRingPatternOnce(){
+  beep(700, 0.18, "square", 0.06);
+  setTimeout(() => beep(880, 0.18, "square", 0.06), 220);
+  setTimeout(() => beep(700, 0.18, "square", 0.06), 480);
+}
+function stopRinging(){
+  if(ringInterval){
+    clearInterval(ringInterval);
+    ringInterval = null;
+  }
+  ringingContactNumero = null;
+  btnPararToque.classList.add("hidden");
+}
+function startRinging(numeroContato){
+  if(ringingContactNumero === numeroContato && ringInterval) return;
+  stopRinging();
+  ringingContactNumero = numeroContato;
+  btnPararToque.classList.remove("hidden");
+  playRingPatternOnce();
+  ringInterval = setInterval(() => {
+    if(contatoAtual && contatoAtual.numero === numeroContato){
+      stopRinging();
+      return;
+    }
+    playRingPatternOnce();
+    if(navigator.vibrate){
+      navigator.vibrate([200,120,200]);
+    }
+  }, 2200);
+}
+btnPararToque.onclick = stopRinging;
+
+async function pedirPermissaoNotificacao(){
+  if(!("Notification" in window)) return;
+  try{
+    const p = await Notification.requestPermission();
+    if(p === "granted"){
+      btnPermissaoNotif.textContent = "Notif OK";
+    }
+  }catch(e){}
+}
+function atualizarBotaoNotif(){
+  if(!("Notification" in window)){
+    btnPermissaoNotif.textContent = "SemNotif";
+    return;
+  }
+  if(Notification.permission === "granted"){
+    btnPermissaoNotif.textContent = "Notif OK";
+  }else if(Notification.permission === "denied"){
+    btnPermissaoNotif.textContent = "Notif OFF";
+  }else{
+    btnPermissaoNotif.textContent = "Notif";
+  }
+}
+btnPermissaoNotif.onclick = pedirPermissaoNotificacao;
+
+function showBrowserNotification(title, body){
+  if(!("Notification" in window)) return;
+  if(Notification.permission !== "granted") return;
+
+  try{
+    const n = new Notification(title, {
+      body,
+      tag: "ff-chat-familia",
+      renotify: true
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  }catch(e){}
+}
+
+function getContatoNomeByNumero(numero){
+  const c = contatosPermitidos.find(x => x.numero === numero);
+  return c ? c.nome : numero;
+}
+
+async function detectarNovasMensagens(){
+  if(!usuarioLogado || !contatosPermitidos.length) return;
+
+  for(const contato of contatosPermitidos){
+    const { data, error } = await supabase
+      .from("chat_mensagens")
+      .select("id,de_numero,para_numero,mensagem,created_at")
+      .or(`and(de_numero.eq.${usuarioLogado.numero},para_numero.eq.${contato.numero}),and(de_numero.eq.${contato.numero},para_numero.eq.${usuarioLogado.numero})`)
+      .order("created_at", { ascending:false })
+      .limit(1);
+
+    if(error || !data?.length) continue;
+
+    const ultima = data[0];
+    const lastKnownId = lastMessageMap[contato.numero];
+
+    if(!lastKnownId){
+      lastMessageMap[contato.numero] = ultima.id;
+      continue;
+    }
+
+    if(ultima.id !== lastKnownId){
+      lastMessageMap[contato.numero] = ultima.id;
+
+      const incoming = ultima.de_numero === contato.numero;
+      if(!incoming) continue;
+
+      const isOpenConversation = contatoAtual && contatoAtual.numero === contato.numero && !document.hidden;
+
+      if(isOpenConversation){
+        playNewMessageSound();
+      }else{
+        unreadCountMap[contato.numero] = (unreadCountMap[contato.numero] || 0) + 1;
+        playNewMessageSound();
+        startRinging(contato.numero);
+        showBrowserNotification(getContatoNomeByNumero(contato.numero), ultima.mensagem);
+        if(navigator.vibrate){
+          navigator.vibrate([180,120,180]);
+        }
+      }
+    }
+  }
+}
+
+async function startAutoRefresh(){
   stopAutoRefresh();
   autoRefreshTimer = setInterval(async () => {
     if(!usuarioLogado) return;
-    await carregarContatos(false);
+    await carregarContatos();
+    await detectarNovasMensagens();
     if(contatoAtual){
       await carregarMensagens(false);
     }
   }, AUTO_REFRESH_MS);
+}
+function zerarNaoLidas(numero){
+  unreadCountMap[numero] = 0;
 }
 
 tabUser.onclick = () => {
@@ -726,11 +926,15 @@ btnEntrarUser.onclick = async () => {
   }
 
   usuarioLogado = data;
+  lastMessageMap = {};
+  unreadCountMap = {};
   saveSession();
   setMeHeader();
   showApp();
-  await carregarContatos(true);
-  startAutoRefresh();
+  atualizarBotaoNotif();
+  await carregarContatos();
+  await detectarNovasMensagens();
+  await startAutoRefresh();
   closeChatMobile();
 };
 
@@ -748,10 +952,13 @@ btnEntrarAdmin.onclick = async () => {
 
 btnLogout.onclick = () => {
   stopAutoRefresh();
+  stopRinging();
   usuarioLogado = null;
   contatoAtual = null;
   contatosPermitidos = [];
   ultimoChatRenderKey = "";
+  lastMessageMap = {};
+  unreadCountMap = {};
   clearSession();
   showAuth();
 };
@@ -956,7 +1163,7 @@ window.editarUsuario = async function(id, nomeAtual, numeroAtual, senhaAtual){
   await carregarUsuariosAdmin();
   await carregarVinculos();
   if(usuarioLogado){
-    await carregarContatos(true);
+    await carregarContatos();
     if(contatoAtual) await carregarMensagens(true);
   }
 };
@@ -980,6 +1187,7 @@ window.apagarUsuario = async function(id, numero){
 
   if(usuarioLogado && usuarioLogado.id === id){
     stopAutoRefresh();
+    stopRinging();
     usuarioLogado = null;
     contatoAtual = null;
     clearSession();
@@ -996,7 +1204,7 @@ window.apagarUsuario = async function(id, numero){
     await carregarUsuariosAdmin();
     await carregarVinculos();
     if(usuarioLogado){
-      await carregarContatos(true);
+      await carregarContatos();
     }
   }
 };
@@ -1017,11 +1225,12 @@ window.removerVinculo = async function(id){
   await carregarVinculos();
 
   if(usuarioLogado){
-    await carregarContatos(true);
+    await carregarContatos();
     if(contatoAtual){
       const aindaExiste = contatosPermitidos.some(c => c.numero === contatoAtual.numero);
       if(!aindaExiste){
         contatoAtual = null;
+        stopRinging();
         chatHeader.classList.add("hidden");
         messagesBox.classList.add("hidden");
         chatInputArea.classList.add("hidden");
@@ -1031,7 +1240,7 @@ window.removerVinculo = async function(id){
   }
 };
 
-async function carregarContatos(reRender=true){
+async function carregarContatos(){
   if(!usuarioLogado) return;
 
   const { data: links, error } = await supabase
@@ -1077,11 +1286,7 @@ async function carregarContatos(reRender=true){
     }
   }
 
-  if(reRender){
-    await renderContatos(contatosPermitidos);
-  } else {
-    await renderContatos(contatosPermitidos);
-  }
+  await renderContatos(contatosPermitidos);
 }
 
 async function getUltimaMensagem(meuNumero, contatoNumero){
@@ -1135,6 +1340,7 @@ async function renderContatos(lista){
         </div>
         <div class="contact-last">${c.ultima ? escapeHtml(c.ultima.mensagem) : "Sem mensagens ainda"}</div>
       </div>
+      ${(unreadCountMap[c.numero] || 0) > 0 ? `<div class="badge">${unreadCountMap[c.numero]}</div>` : ``}
     </div>
   `).join("");
 
@@ -1149,6 +1355,8 @@ async function renderContatos(lista){
 
 async function abrirConversa(contato){
   contatoAtual = contato;
+  zerarNaoLidas(contato.numero);
+  stopRinging();
 
   chatHeader.classList.remove("hidden");
   messagesBox.classList.remove("hidden");
@@ -1254,7 +1462,17 @@ mobileBack.onclick = () => {
   closeChatMobile();
 };
 
+document.addEventListener("visibilitychange", async () => {
+  if(!document.hidden && contatoAtual){
+    zerarNaoLidas(contatoAtual.numero);
+    stopRinging();
+    await renderContatos(contatosPermitidos);
+  }
+});
+
 (async function init(){
+  atualizarBotaoNotif();
+
   const sess = loadSession();
   if(sess?.numero && sess?.senha){
     const { data } = await supabase
@@ -1269,8 +1487,9 @@ mobileBack.onclick = () => {
       usuarioLogado = data;
       setMeHeader();
       showApp();
-      await carregarContatos(true);
-      startAutoRefresh();
+      await carregarContatos();
+      await detectarNovasMensagens();
+      await startAutoRefresh();
       closeChatMobile();
     }
   }
