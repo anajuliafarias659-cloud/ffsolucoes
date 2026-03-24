@@ -16,6 +16,10 @@
       --text:#ffffff;
       --muted:#94a3b8;
       --line:rgba(255,255,255,.08);
+      --green:#22c55e;
+      --red:#ef4444;
+      --yellow:#f59e0b;
+      --blue:#2563eb;
     }
     body{
       margin:0;
@@ -190,6 +194,11 @@
       background:#1e293b;
       color:#fff;
     }
+    .btn-edit{background:#2563eb}
+    .btn-toggle{background:#f59e0b}
+    .btn-delete{background:#ef4444}
+    .btn-renew{background:#22c55e;color:#04150a}
+    .btn-renew-custom{background:#38bdf8;color:#062033}
     .lista{
       display:grid;
       grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
@@ -200,6 +209,10 @@
       border:1px solid rgba(255,255,255,.08);
       border-radius:16px;
       overflow:hidden;
+    }
+    .item.vencido{
+      border-color:rgba(239,68,68,.35);
+      box-shadow:0 0 0 1px rgba(239,68,68,.15) inset;
     }
     .item img{
       width:100%;
@@ -229,9 +242,12 @@
       gap:8px;
       margin-top:10px;
     }
-    .editar{background:#2563eb;color:#fff}
-    .excluir{background:#ef4444;color:#fff}
-    .toggle{background:#f59e0b;color:#fff}
+    .botoes-3{
+      display:grid;
+      grid-template-columns:1fr 1fr 1fr;
+      gap:8px;
+      margin-top:10px;
+    }
     .status{
       display:inline-block;
       padding:6px 10px;
@@ -249,6 +265,10 @@
     .status.assistindo{
       background:rgba(59,130,246,.15);
       color:#bfdbfe;
+    }
+    .status.vencido{
+      background:rgba(245,158,11,.15);
+      color:#fde68a;
     }
     .bloco-lista{
       display:grid;
@@ -272,11 +292,24 @@
       grid-template-columns:1fr 1fr;
       gap:12px;
     }
+    .badge-top{
+      display:inline-block;
+      padding:8px 12px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:700;
+      background:rgba(255,255,255,.08);
+      color:#fff;
+      border:1px solid rgba(255,255,255,.08);
+    }
     @media (max-width:980px){
       .grid{grid-template-columns:1fr}
     }
+    @media (max-width:700px){
+      .botoes-3{grid-template-columns:1fr 1fr}
+    }
     @media (max-width:560px){
-      .mini-grid,.acoes,.botoes{grid-template-columns:1fr}
+      .mini-grid,.acoes,.botoes,.botoes-3{grid-template-columns:1fr}
     }
   </style>
 </head>
@@ -315,7 +348,7 @@
             </div>
 
             <div class="campo">
-              <label for="cfgLegendaMaxMinutos">Intervalo máximo (minutos)</label>
+              <label for="cfgLegendaMaxMinMinutos">Intervalo máximo (minutos)</label>
               <input id="cfgLegendaMaxMinutos" type="number" min="1" value="15">
             </div>
           </div>
@@ -340,7 +373,7 @@
         <div class="card">
           <h2>Cadastrar admin</h2>
           <div class="sub">
-            O admin é criado no Auth e vinculado automaticamente na tabela do sistema.
+            O admin é criado no Auth e vinculado automaticamente na tabela do sistema. Agora com controle de prazo também.
           </div>
 
           <div class="campo">
@@ -373,9 +406,24 @@
             </select>
           </div>
 
+          <div class="mini-grid">
+            <div class="campo">
+              <label for="adminLimite">Limite de clientes</label>
+              <input id="adminLimite" type="number" min="1" value="20">
+            </div>
+
+            <div class="campo">
+              <label for="adminDiasAcesso">Dias de acesso</label>
+              <input id="adminDiasAcesso" type="number" min="1" value="35" placeholder="Ex: 35">
+            </div>
+          </div>
+
           <div class="campo">
-            <label for="adminLimite">Limite de clientes</label>
-            <input id="adminLimite" type="number" min="1" value="20">
+            <label for="adminExpiraEm">Expira em</label>
+            <input id="adminExpiraEm" type="datetime-local">
+            <div class="aviso">
+              Se preencher a data manual, ela terá prioridade. Se deixar vazio, o sistema calcula pela quantidade de dias.
+            </div>
           </div>
 
           <div class="check-linha">
@@ -437,10 +485,13 @@
         <div class="card">
           <div class="top-lista">
             <h2 style="margin:0">Quem está assistindo agora</h2>
-            <button class="btn-mini" onclick="carregarAssistindoAgora()">Atualizar agora</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <span class="badge-top" id="qtdAssistindoBadge">0 online</span>
+              <button class="btn-mini" onclick="carregarAssistindoAgora()">Atualizar agora</button>
+            </div>
           </div>
           <div class="sub">
-            Mostra quem está com o player aberto e enviando atualização recente.
+            Mostra quem está com o player aberto e enviando atualização recente na tabela <b>filmes_views</b>.
           </div>
           <div id="listaAssistindo" class="lista"></div>
         </div>
@@ -483,12 +534,15 @@
     let editFilmeId = null;
     let intervaloAssistindo = null;
     let superAdminId = null;
+    let adminsCache = [];
 
     const adminNome = document.getElementById("adminNome");
     const adminEmail = document.getElementById("adminEmail");
     const adminSenha = document.getElementById("adminSenha");
     const adminPlano = document.getElementById("adminPlano");
     const adminLimite = document.getElementById("adminLimite");
+    const adminDiasAcesso = document.getElementById("adminDiasAcesso");
+    const adminExpiraEm = document.getElementById("adminExpiraEm");
     const adminAtivo = document.getElementById("adminAtivo");
     const msgAdmin = document.getElementById("msgAdmin");
     const listaAdmins = document.getElementById("listaAdmins");
@@ -510,6 +564,7 @@
     const btnSalvarConfigPlayer = document.getElementById("btnSalvarConfigPlayer");
     const msgConfigPlayer = document.getElementById("msgConfigPlayer");
     const listaAssistindo = document.getElementById("listaAssistindo");
+    const qtdAssistindoBadge = document.getElementById("qtdAssistindoBadge");
 
     function mostrarMsg(el, texto, tipo) {
       el.className = "msg " + tipo;
@@ -549,12 +604,95 @@
       return "";
     }
 
+    function formatarDatetimeLocal(value) {
+      if (!value) return "";
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return "";
+      const ano = d.getFullYear();
+      const mes = String(d.getMonth() + 1).padStart(2, "0");
+      const dia = String(d.getDate()).padStart(2, "0");
+      const hora = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      return `${ano}-${mes}-${dia}T${hora}:${min}`;
+    }
+
+    function formatarDataBR(value) {
+      if (!value) return "-";
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return "-";
+      return d.toLocaleString("pt-BR");
+    }
+
+    function calcularPrazoAdmin() {
+      const diasRaw = String(adminDiasAcesso.value || "").trim();
+      const expiraManual = String(adminExpiraEm.value || "").trim();
+
+      let dias = null;
+      let expiraEm = null;
+
+      if (diasRaw) {
+        dias = Number(diasRaw);
+        if (!Number.isFinite(dias) || dias <= 0) {
+          throw new Error("Dias de acesso inválidos.");
+        }
+      }
+
+      if (expiraManual) {
+        const dataManual = new Date(expiraManual);
+        if (isNaN(dataManual.getTime())) {
+          throw new Error("Data de expiração inválida.");
+        }
+        expiraEm = dataManual.toISOString();
+      } else if (dias) {
+        const base = new Date();
+        base.setDate(base.getDate() + dias);
+        expiraEm = base.toISOString();
+      }
+
+      return { dias_acesso: dias, expira_em: expiraEm };
+    }
+
+    function adminEstaVencido(admin) {
+      if (!admin?.expira_em) return false;
+      const fim = new Date(admin.expira_em).getTime();
+      if (isNaN(fim)) return false;
+      return fim < Date.now();
+    }
+
+    function diasRestantesAdmin(admin) {
+      if (!admin?.expira_em) return null;
+      const diff = new Date(admin.expira_em).getTime() - Date.now();
+      return Math.ceil(diff / 86400000);
+    }
+
+    function statusAdmin(admin) {
+      if (admin.ativo === false) return { txt: "Bloqueado", cls: "inativo" };
+      if (adminEstaVencido(admin)) return { txt: "Vencido", cls: "vencido" };
+      return { txt: "Ativo", cls: "" };
+    }
+
+    async function marcarAdminsVencidos() {
+      const agoraIso = new Date().toISOString();
+      const { error } = await supabaseClient
+        .from("admin_filmes")
+        .update({ ativo: false })
+        .eq("tipo", "admin")
+        .eq("ativo", true)
+        .lt("expira_em", agoraIso);
+
+      if (error) {
+        console.warn("Não consegui bloquear admins vencidos:", error.message);
+      }
+    }
+
     function limparFormularioAdmin() {
       adminNome.value = "";
       adminEmail.value = "";
       adminSenha.value = "";
       adminPlano.value = "basico";
       adminLimite.value = 20;
+      adminDiasAcesso.value = 35;
+      adminExpiraEm.value = "";
       adminAtivo.checked = true;
       adminEmail.disabled = false;
       adminSenha.disabled = false;
@@ -645,7 +783,7 @@
         if (data) {
           cfgLegendasPlayer.value = data.legendas_player || "";
           cfgLegendaMinMinutos.value = data.legenda_min_minutos || 10;
-          cfgLegendaMaxMinutos.value = data.legenda_max_minutos || 15;
+          cfgLegendaMaxMinutos.value = data.legenda_max_min_minutos || data.legenda_max_minutos || 15;
           cfgLegendaDuracaoSegundos.value = data.legenda_duracao_segundos || 6;
         }
       } catch (error) {
@@ -760,6 +898,14 @@
         return;
       }
 
+      let prazo;
+      try {
+        prazo = calcularPrazoAdmin();
+      } catch (e) {
+        mostrarMsg(msgAdmin, e.message || "Erro no prazo do admin.", "erro");
+        return;
+      }
+
       btnSalvarAdmin.disabled = true;
       btnSalvarAdmin.textContent = editAdminId ? "Atualizando..." : "Criando...";
 
@@ -800,7 +946,9 @@
               plano: planoVal,
               limite_clientes: limiteVal,
               ativo: ativoVal,
-              tipo: "admin"
+              tipo: "admin",
+              dias_acesso: prazo.dias_acesso,
+              expira_em: prazo.expira_em
             }]);
 
           if (insertError) throw insertError;
@@ -808,6 +956,9 @@
           await supabaseAuthIsolado.auth.signOut();
 
           let msg = `Admin criado com sucesso.\nE-mail: ${emailVal}\nSenha: ${senhaVal}`;
+          if (prazo.expira_em) {
+            msg += `\nExpira em: ${formatarDataBR(prazo.expira_em)}`;
+          }
           if (precisaConfirmarEmail) {
             msg += "\n\nATENÇÃO: o Supabase está exigindo confirmação de e-mail. Esse admin só vai conseguir logar depois de confirmar o e-mail, ou se você desligar 'Confirm email' no Auth.";
           }
@@ -820,7 +971,9 @@
               nome: nomeVal,
               plano: planoVal,
               limite_clientes: limiteVal,
-              ativo: ativoVal
+              ativo: ativoVal,
+              dias_acesso: prazo.dias_acesso,
+              expira_em: prazo.expira_em
             })
             .eq("id", editAdminId);
 
@@ -830,6 +983,7 @@
         }
 
         limparFormularioAdmin();
+        await marcarAdminsVencidos();
         await carregarAdmins();
       } catch (error) {
         mostrarMsg(msgAdmin, error.message || "Erro ao salvar admin.", "erro");
@@ -852,28 +1006,45 @@
 
         if (error) throw error;
 
-        if (!data || !data.length) {
+        adminsCache = data || [];
+
+        if (!adminsCache.length) {
           listaAdmins.innerHTML = '<div style="color:#94a3b8">Nenhum admin cadastrado ainda.</div>';
           return;
         }
 
-        listaAdmins.innerHTML = data.map(admin => `
-          <div class="item">
-            <div class="info">
-              <h3>${admin.nome || ""}</h3>
-              <div class="meta">E-mail: ${admin.email || ""}</div>
-              <div class="meta">Plano: ${admin.plano || "basico"}</div>
-              <div class="meta">Limite clientes: ${admin.limite_clientes || 0}</div>
-              <div class="meta">User ID: ${admin.user_id || ""}</div>
-              <div class="meta">Tipo: ${admin.tipo || "admin"}</div>
-              <div class="status ${admin.ativo ? "" : "inativo"}">${admin.ativo ? "Ativo" : "Bloqueado"}</div>
-              <div class="botoes">
-                <button class="btn-mini editar" onclick="editarAdmin(${admin.id})">Editar</button>
-                <button class="btn-mini toggle" onclick="toggleAdmin(${admin.id}, ${admin.ativo})">${admin.ativo ? "Bloquear" : "Ativar"}</button>
+        listaAdmins.innerHTML = adminsCache.map(admin => {
+          const st = statusAdmin(admin);
+          const diasRest = diasRestantesAdmin(admin);
+
+          let prazoHtml = `<div class="meta">Expira em: ${formatarDataBR(admin.expira_em)}</div>`;
+          if (!admin.expira_em) prazoHtml = `<div class="meta">Expira em: sem prazo</div>`;
+          else if (adminEstaVencido(admin)) prazoHtml += `<div class="meta">Prazo vencido</div>`;
+          else if (diasRest !== null) prazoHtml += `<div class="meta">Dias restantes: ${diasRest}</div>`;
+
+          return `
+            <div class="item ${adminEstaVencido(admin) ? "vencido" : ""}">
+              <div class="info">
+                <h3>${admin.nome || ""}</h3>
+                <div class="meta">E-mail: ${admin.email || ""}</div>
+                <div class="meta">Plano: ${admin.plano || "basico"}</div>
+                <div class="meta">Limite clientes: ${admin.limite_clientes || 0}</div>
+                <div class="meta">User ID: ${admin.user_id || ""}</div>
+                <div class="meta">Tipo: ${admin.tipo || "admin"}</div>
+                <div class="meta">Dias cadastrados: ${admin.dias_acesso || "-"}</div>
+                ${prazoHtml}
+                <div class="status ${st.cls}">${st.txt}</div>
+
+                <div class="botoes-3">
+                  <button class="btn-mini btn-edit" onclick="editarAdmin(${admin.id})">Editar</button>
+                  <button class="btn-mini btn-toggle" onclick="toggleAdmin(${admin.id}, ${admin.ativo})">${admin.ativo ? "Bloquear" : "Ativar"}</button>
+                  <button class="btn-mini btn-renew" onclick="renovarAdmin(${admin.id}, 35)">+35 dias</button>
+                  <button class="btn-mini btn-renew-custom" onclick="renovarAdminCustom(${admin.id})">Renovar dias</button>
+                </div>
               </div>
             </div>
-          </div>
-        `).join("");
+          `;
+        }).join("");
       } catch (error) {
         listaAdmins.innerHTML = `<div style="color:#fca5a5">${error.message || "Erro ao carregar admins."}</div>`;
       }
@@ -896,6 +1067,8 @@
         adminSenha.value = "";
         adminPlano.value = data.plano || "basico";
         adminLimite.value = data.limite_clientes || 20;
+        adminDiasAcesso.value = data.dias_acesso || "";
+        adminExpiraEm.value = formatarDatetimeLocal(data.expira_em);
         adminAtivo.checked = !!data.ativo;
 
         adminEmail.disabled = true;
@@ -921,6 +1094,48 @@
       } catch (error) {
         mostrarMsg(msgAdmin, error.message || "Erro ao alterar status do admin.", "erro");
       }
+    }
+
+    async function renovarAdmin(id, dias) {
+      try {
+        const admin = adminsCache.find(a => Number(a.id) === Number(id));
+        if (!admin) throw new Error("Admin não encontrado.");
+
+        const base = admin.expira_em && !adminEstaVencido(admin)
+          ? new Date(admin.expira_em)
+          : new Date();
+
+        base.setDate(base.getDate() + Number(dias));
+
+        const { error } = await supabaseClient
+          .from("admin_filmes")
+          .update({
+            dias_acesso: Number(dias),
+            expira_em: base.toISOString(),
+            ativo: true
+          })
+          .eq("id", id);
+
+        if (error) throw error;
+
+        mostrarMsg(msgAdmin, `Admin renovado por mais ${dias} dias.`, "ok");
+        await carregarAdmins();
+      } catch (error) {
+        mostrarMsg(msgAdmin, error.message || "Erro ao renovar admin.", "erro");
+      }
+    }
+
+    async function renovarAdminCustom(id) {
+      const dias = prompt("Quantos dias deseja renovar esse admin?", "35");
+      if (dias === null) return;
+
+      const diasNum = Number(String(dias).trim());
+      if (!Number.isFinite(diasNum) || diasNum <= 0) {
+        mostrarMsg(msgAdmin, "Digite um número válido de dias.", "erro");
+        return;
+      }
+
+      await renovarAdmin(id, diasNum);
     }
 
     async function salvarFilme() {
@@ -1019,8 +1234,8 @@
               <div class="meta">Código: ${filme.video_id || ""}</div>
               <div class="status ${filme.ativo ? "" : "inativo"}">${filme.ativo ? "Ativo" : "Inativo"}</div>
               <div class="botoes">
-                <button class="btn-mini editar" onclick="editarFilme(${filme.id})">Editar</button>
-                <button class="btn-mini excluir" onclick="excluirFilme(${filme.id})">Excluir</button>
+                <button class="btn-mini btn-edit" onclick="editarFilme(${filme.id})">Editar</button>
+                <button class="btn-mini btn-delete" onclick="excluirFilme(${filme.id})">Excluir</button>
               </div>
             </div>
           </div>
@@ -1085,9 +1300,10 @@
 
     async function carregarAssistindoAgora() {
       listaAssistindo.innerHTML = '<div style="color:#94a3b8">Carregando quem está assistindo...</div>';
+      qtdAssistindoBadge.textContent = "carregando...";
 
       try {
-        const limiteAtivo = new Date(Date.now() - 90 * 1000).toISOString();
+        const limiteAtivo = new Date(Date.now() - 120 * 1000).toISOString();
 
         const { data, error } = await supabaseClient
           .from("filmes_views")
@@ -1097,25 +1313,36 @@
 
         if (error) throw error;
 
-        if (!data || !data.length) {
-          listaAssistindo.innerHTML = '<div style="color:#94a3b8">Ninguém assistindo agora.</div>';
+        const views = data || [];
+        qtdAssistindoBadge.textContent = `${views.length} online`;
+
+        if (!views.length) {
+          listaAssistindo.innerHTML = `
+            <div style="color:#94a3b8">
+              Ninguém assistindo agora.<br><br>
+              Se isso continuar vazio, o seu <b>filmes.html</b> provavelmente não está gravando ping na tabela <b>filmes_views</b>.
+            </div>
+          `;
           return;
         }
 
-        listaAssistindo.innerHTML = data.map(item => `
+        listaAssistindo.innerHTML = views.map(item => `
           <div class="item">
             <div class="info">
               <h3>${item.cliente_nome || item.cliente_email || "Usuário"}</h3>
               <div class="meta">Filme: ${item.filme_titulo || "Não informado"}</div>
               <div class="meta">E-mail: ${item.cliente_email || "-"}</div>
               <div class="meta">Cliente ID: ${item.cliente_id || "-"}</div>
+              <div class="meta">Admin ID: ${item.admin_id || "-"}</div>
               <div class="meta">Iniciou: ${item.started_at ? new Date(item.started_at).toLocaleString("pt-BR") : "-"}</div>
+              <div class="meta">Último ping: ${item.last_ping ? new Date(item.last_ping).toLocaleString("pt-BR") : "-"}</div>
               <div class="meta">Última atividade: ${formatarTempoRelativo(item.last_ping)}</div>
               <div class="status assistindo">Assistindo agora</div>
             </div>
           </div>
         `).join("");
       } catch (error) {
+        qtdAssistindoBadge.textContent = "erro";
         listaAssistindo.innerHTML = `<div style="color:#fca5a5">${error.message || "Erro ao carregar quem está assistindo."}</div>`;
       }
     }
@@ -1124,7 +1351,7 @@
       if (intervaloAssistindo) clearInterval(intervaloAssistindo);
       intervaloAssistindo = setInterval(() => {
         carregarAssistindoAgora();
-      }, 30000);
+      }, 20000);
     }
 
     async function logout() {
@@ -1136,6 +1363,7 @@
     async function init() {
       await protegerPainelMaster();
       await carregarConfigPlayer();
+      await marcarAdminsVencidos();
       await carregarAssistindoAgora();
       iniciarAutoRefreshAssistindo();
       await carregarAdmins();
