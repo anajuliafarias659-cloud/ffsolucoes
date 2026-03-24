@@ -1,55 +1,20 @@
-const CACHE_NAME = "ff-chat-familia-v1";
-const URLS_TO_CACHE = [
-  "/ff-chat.index",
-  "/ff-cha/manifest.webmanifest",
-  "/ff-cha/icons/icon-192.png",
-  "/ff-cha/icons/icon-512.png",
-  "/ff-cha/icons/icon-512-maskable.png"
+const CACHE_NAME = "ff-chat-v1";
+const ASSETS = [
+  "/ff-chat/",
+  "/ff-chat/index.html",
+  "/ff-chat/manifest.webmanifest",
+  "/ff-chat/icons/icon-192.png",
+  "/ff-chat/icons/icon-512.png"
 ];
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(URLS_TO_CACHE))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
   );
-  self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      )
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
-
+self.addEventListener("fetch", event => {
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) return cachedResponse;
-
-      return fetch(event.request)
-        .then((networkResponse) => {
-          if (!networkResponse || networkResponse.status !== 200) {
-            return networkResponse;
-          }
-
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-
-          return networkResponse;
-        })
-        .catch(() => caches.match("/chat-teste.html"));
-    })
+    caches.match(event.request).then(resp => resp || fetch(event.request))
   );
 });
