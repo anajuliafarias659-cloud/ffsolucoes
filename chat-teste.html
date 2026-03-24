@@ -30,7 +30,8 @@ body{
   min-height:100vh;
 }
 .hidden{display:none!important}
-button,input,select,textarea{font-family:inherit}
+button,input,select,textarea,audio{font-family:inherit}
+audio{width:240px;max-width:100%}
 .auth-screen{
   min-height:100vh;
   display:flex;
@@ -86,7 +87,6 @@ button,input,select,textarea{font-family:inherit}
   font-weight:800;
   margin-top:6px;
 }
-.btn.secondary{background:#202c33;color:#fff}
 .status{margin-top:12px;min-height:18px;font-size:13px;color:var(--muted)}
 .status.error{color:var(--danger)}
 .status.ok{color:var(--green2)}
@@ -275,6 +275,17 @@ button,input,select,textarea{font-family:inherit}
   color:#cbd5db;
   opacity:.8;
 }
+.msg-audio{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:220px;
+  padding-right:38px;
+}
+.msg-audio .audio-label{
+  font-size:12px;
+  opacity:.9;
+}
 .chat-input{
   background:var(--header);
   border-top:1px solid var(--line);
@@ -282,9 +293,11 @@ button,input,select,textarea{font-family:inherit}
   display:flex;
   gap:10px;
   align-items:center;
+  flex-wrap:wrap;
 }
 .chat-input input{
   flex:1;
+  min-width:180px;
   padding:13px 14px;
   border:none;
   outline:none;
@@ -300,6 +313,30 @@ button,input,select,textarea{font-family:inherit}
   font-weight:800;
   border-radius:10px;
   cursor:pointer;
+}
+.audio-btn{
+  padding:12px 14px;
+  border:none;
+  border-radius:10px;
+  cursor:pointer;
+  color:#fff;
+  background:#1f2937;
+  font-weight:700;
+}
+.audio-btn.recording{background:#ef4444}
+.audio-btn.stop{background:#f59e0b;color:#111}
+.audio-btn.send{background:#22c55e;color:#04110d}
+.audio-preview{
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 0 0;
+  flex-wrap:wrap;
+}
+.audio-preview .label{
+  color:var(--muted);
+  font-size:13px;
 }
 .empty-chat{
   flex:1;
@@ -501,7 +538,16 @@ button,input,select,textarea{font-family:inherit}
 
     <div id="chatInputArea" class="chat-input hidden">
       <input id="msgInput" placeholder="Digite uma mensagem">
+      <button id="btnGravarAudio" class="audio-btn">🎤 Gravar</button>
+      <button id="btnPararAudio" class="audio-btn stop hidden">Parar</button>
+      <button id="btnEnviarAudio" class="audio-btn send hidden">Enviar áudio</button>
       <button id="btnEnviarMsg" class="send-btn">Enviar</button>
+
+      <div id="audioPreview" class="audio-preview hidden">
+        <span class="label">Prévia do áudio:</span>
+        <audio id="audioPreviewPlayer" controls></audio>
+        <button id="btnCancelarAudio" class="audio-btn">Cancelar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -562,6 +608,7 @@ const supabase = createClient(
 
 const ADMIN_PASSWORD = "123456admin";
 const AUTO_REFRESH_MS = 5000;
+const AUDIO_BUCKET = "chat-audios";
 
 const authScreen = document.getElementById("authScreen");
 const appScreen = document.getElementById("appScreen");
@@ -602,6 +649,13 @@ const msgInput = document.getElementById("msgInput");
 const btnEnviarMsg = document.getElementById("btnEnviarMsg");
 const mobileBack = document.getElementById("mobileBack");
 
+const btnGravarAudio = document.getElementById("btnGravarAudio");
+const btnPararAudio = document.getElementById("btnPararAudio");
+const btnEnviarAudio = document.getElementById("btnEnviarAudio");
+const btnCancelarAudio = document.getElementById("btnCancelarAudio");
+const audioPreview = document.getElementById("audioPreview");
+const audioPreviewPlayer = document.getElementById("audioPreviewPlayer");
+
 const closeAdmin = document.getElementById("closeAdmin");
 const novoNome = document.getElementById("novoNome");
 const novoNumero = document.getElementById("novoNumero");
@@ -626,6 +680,12 @@ let ringingContactNumero = null;
 let ringInterval = null;
 let audioCtx = null;
 let userInteracted = false;
+
+let mediaRecorder = null;
+let mediaStream = null;
+let audioChunks = [];
+let audioBlob = null;
+let audioMimeType = "audio/webm";
 
 function setStatus(el, text="", type=""){
   el.className = "status" + (type ? " " + type : "");
@@ -827,13 +887,178 @@ function getContatoNomeByNumero(numero){
   return c ? c.nome : numero;
 }
 
+function getSupportedMimeType(){
+  const tipos = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4"
+  ];
+  for(const t of tipos){
+    if(window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return "";
+}
+
+async function iniciarGravacaoAudio(){
+  if(!navigator.mediaDevices?.getUserMedia){
+    alert("Seu navegador não suporta gravação de áudio.");
+    return;
+  }
+  if(!contatoAtual){
+    alert("Abra uma conversa antes de gravar.");
+    return;
+  }
+
+  try{
+    audioChunks = [];
+    audioBlob = null;
+    audioPreview.classList.add("hidden");
+    audioPreviewPlayer.src = "";
+
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    const mime = getSupportedMimeType();
+    audioMimeType = mime || "audio/webm";
+
+    mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream);
+
+    mediaRecorder.ondataavailable = (e) => {
+      if(e.data && e.data.size > 0){
+        audioChunks.push(e.data);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      audioBlob = new Blob(audioChunks, { type: audioMimeType });
+      const url = URL.createObjectURL(audioBlob);
+      audioPreviewPlayer.src = url;
+      audioPreview.classList.remove("hidden");
+      btnEnviarAudio.classList.remove("hidden");
+      btnPararAudio.classList.add("hidden");
+      btnGravarAudio.classList.remove("recording");
+      btnGravarAudio.textContent = "🎤 Gravar";
+
+      if(mediaStream){
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+      }
+    };
+
+    mediaRecorder.start();
+    btnGravarAudio.classList.add("recording");
+    btnGravarAudio.textContent = "Gravando...";
+    btnPararAudio.classList.remove("hidden");
+    btnEnviarAudio.classList.add("hidden");
+  }catch(err){
+    console.error(err);
+    alert("Não foi possível acessar o microfone.");
+  }
+}
+
+function pararGravacaoAudio(){
+  if(mediaRecorder && mediaRecorder.state !== "inactive"){
+    mediaRecorder.stop();
+  }
+}
+
+function cancelarAudio(){
+  audioBlob = null;
+  audioChunks = [];
+  audioPreviewPlayer.pause();
+  audioPreviewPlayer.src = "";
+  audioPreview.classList.add("hidden");
+  btnEnviarAudio.classList.add("hidden");
+  btnPararAudio.classList.add("hidden");
+  btnGravarAudio.classList.remove("recording");
+  btnGravarAudio.textContent = "🎤 Gravar";
+
+  if(mediaStream){
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+}
+
+function extByMime(type=""){
+  if(type.includes("ogg")) return "ogg";
+  if(type.includes("mp4")) return "m4a";
+  return "webm";
+}
+
+async function enviarAudio(){
+  if(!audioBlob || !usuarioLogado || !contatoAtual) return;
+
+  btnEnviarAudio.disabled = true;
+  btnEnviarAudio.textContent = "Enviando...";
+
+  try{
+    const ext = extByMime(audioBlob.type || audioMimeType);
+    const fileName = `${Date.now()}_${usuarioLogado.numero}_${contatoAtual.numero}.${ext}`;
+    const path = `${usuarioLogado.numero}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(AUDIO_BUCKET)
+      .upload(path, audioBlob, {
+        contentType: audioBlob.type || audioMimeType,
+        upsert: false
+      });
+
+    if(uploadError){
+      console.error(uploadError);
+      alert("Erro ao enviar áudio para o storage.");
+      btnEnviarAudio.disabled = false;
+      btnEnviarAudio.textContent = "Enviar áudio";
+      return;
+    }
+
+    const { data: publicData } = supabase.storage
+      .from(AUDIO_BUCKET)
+      .getPublicUrl(path);
+
+    const audioUrl = publicData?.publicUrl || "";
+
+    const { error: insertError } = await supabase
+      .from("chat_mensagens")
+      .insert({
+        de_numero: usuarioLogado.numero,
+        para_numero: contatoAtual.numero,
+        mensagem: "[áudio]",
+        tipo: "audio",
+        audio_url: audioUrl,
+        audio_path: path
+      });
+
+    if(insertError){
+      console.error(insertError);
+      alert("Erro ao registrar mensagem de áudio.");
+      btnEnviarAudio.disabled = false;
+      btnEnviarAudio.textContent = "Enviar áudio";
+      return;
+    }
+
+    cancelarAudio();
+    await carregarMensagens(true);
+    await renderContatos(contatosPermitidos);
+  }catch(err){
+    console.error(err);
+    alert("Erro ao enviar áudio.");
+  }
+
+  btnEnviarAudio.disabled = false;
+  btnEnviarAudio.textContent = "Enviar áudio";
+}
+
+btnGravarAudio.onclick = iniciarGravacaoAudio;
+btnPararAudio.onclick = pararGravacaoAudio;
+btnEnviarAudio.onclick = enviarAudio;
+btnCancelarAudio.onclick = cancelarAudio;
+
 async function detectarNovasMensagens(){
   if(!usuarioLogado || !contatosPermitidos.length) return;
 
   for(const contato of contatosPermitidos){
     const { data, error } = await supabase
       .from("chat_mensagens")
-      .select("id,de_numero,para_numero,mensagem,created_at")
+      .select("id,de_numero,para_numero,mensagem,created_at,tipo")
       .or(`and(de_numero.eq.${usuarioLogado.numero},para_numero.eq.${contato.numero}),and(de_numero.eq.${contato.numero},para_numero.eq.${usuarioLogado.numero})`)
       .order("created_at", { ascending:false })
       .limit(1);
@@ -855,6 +1080,7 @@ async function detectarNovasMensagens(){
       if(!incoming) continue;
 
       const isOpenConversation = contatoAtual && contatoAtual.numero === contato.numero && !document.hidden;
+      const corpoNotif = ultima.tipo === "audio" ? "🎤 Áudio recebido" : ultima.mensagem;
 
       if(isOpenConversation){
         playNewMessageSound();
@@ -862,7 +1088,7 @@ async function detectarNovasMensagens(){
         unreadCountMap[contato.numero] = (unreadCountMap[contato.numero] || 0) + 1;
         playNewMessageSound();
         startRinging(contato.numero);
-        showBrowserNotification(getContatoNomeByNumero(contato.numero), ultima.mensagem);
+        showBrowserNotification(getContatoNomeByNumero(contato.numero), corpoNotif);
         if(navigator.vibrate){
           navigator.vibrate([180,120,180]);
         }
@@ -953,6 +1179,7 @@ btnEntrarAdmin.onclick = async () => {
 btnLogout.onclick = () => {
   stopAutoRefresh();
   stopRinging();
+  cancelarAudio();
   usuarioLogado = null;
   contatoAtual = null;
   contatosPermitidos = [];
@@ -1188,6 +1415,7 @@ window.apagarUsuario = async function(id, numero){
   if(usuarioLogado && usuarioLogado.id === id){
     stopAutoRefresh();
     stopRinging();
+    cancelarAudio();
     usuarioLogado = null;
     contatoAtual = null;
     clearSession();
@@ -1338,7 +1566,11 @@ async function renderContatos(lista){
           <div class="contact-name">${escapeHtml(c.nome)}</div>
           <div class="contact-time">${c.ultima ? escapeHtml(timeOnly(c.ultima.created_at)) : ""}</div>
         </div>
-        <div class="contact-last">${c.ultima ? escapeHtml(c.ultima.mensagem) : "Sem mensagens ainda"}</div>
+        <div class="contact-last">${
+          c.ultima
+            ? escapeHtml(c.ultima.tipo === "audio" ? "🎤 Áudio" : c.ultima.mensagem)
+            : "Sem mensagens ainda"
+        }</div>
       </div>
       ${(unreadCountMap[c.numero] || 0) > 0 ? `<div class="badge">${unreadCountMap[c.numero]}</div>` : ``}
     </div>
@@ -1373,6 +1605,18 @@ async function abrirConversa(contato){
   msgInput.focus();
 }
 
+function renderMensagemConteudo(m){
+  if(m.tipo === "audio" && m.audio_url){
+    return `
+      <div class="msg-audio">
+        <div class="audio-label">🎤 Áudio</div>
+        <audio controls preload="none" src="${escapeHtml(m.audio_url)}"></audio>
+      </div>
+    `;
+  }
+  return escapeHtml(m.mensagem || "");
+}
+
 async function carregarMensagens(forceScroll=false){
   if(!usuarioLogado || !contatoAtual) return;
 
@@ -1390,7 +1634,7 @@ async function carregarMensagens(forceScroll=false){
     return;
   }
 
-  const renderKey = JSON.stringify((data || []).map(m => [m.id, m.created_at]));
+  const renderKey = JSON.stringify((data || []).map(m => [m.id, m.created_at, m.tipo, m.audio_url]));
   if(renderKey === ultimoChatRenderKey && !forceScroll) return;
   ultimoChatRenderKey = renderKey;
 
@@ -1408,7 +1652,7 @@ async function carregarMensagens(forceScroll=false){
     html += `
       <div class="msg-row ${isMe ? "me" : "other"}">
         <div class="msg ${isMe ? "me" : "other"}">
-          ${escapeHtml(m.mensagem)}
+          ${renderMensagemConteudo(m)}
           <div class="msg-time">${escapeHtml(timeOnly(m.created_at))}</div>
         </div>
       </div>
@@ -1437,7 +1681,8 @@ async function enviarMensagem(){
   const { error } = await supabase.from("chat_mensagens").insert({
     de_numero: usuarioLogado.numero,
     para_numero: contatoAtual.numero,
-    mensagem: texto
+    mensagem: texto,
+    tipo: "texto"
   });
 
   btnEnviarMsg.disabled = false;
