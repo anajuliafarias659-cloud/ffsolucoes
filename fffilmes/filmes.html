@@ -635,12 +635,14 @@
     let timerSalvarProgresso = null;
     let ultimoTempoSalvo = 0;
 
-    function getUserIdLocal() {
-      return localStorage.getItem("cliente_user_id_filmes") || null;
+    async function getUserIdAtual() {
+      const { data, error } = await supabaseClient.auth.getUser();
+      if (error || !data?.user) return null;
+      return data.user.id;
     }
 
     async function carregarProgressoUsuario() {
-      const userId = getUserIdLocal();
+      const userId = await getUserIdAtual();
       progressoFilmes = {};
 
       if (!userId) return;
@@ -650,9 +652,12 @@
         .select("filme_id,progresso_segundos,concluido")
         .eq("user_id", userId);
 
-      if (error || !data) return;
+      if (error) {
+        console.error("Erro carregando progresso:", error);
+        return;
+      }
 
-      data.forEach(item => {
+      (data || []).forEach(item => {
         if (!item.concluido) {
           progressoFilmes[Number(item.filme_id)] = Number(item.progresso_segundos || 0);
         }
@@ -664,7 +669,7 @@
     }
 
     async function salvarProgressoFilme(filmeId, tempoSegundos) {
-      const userId = getUserIdLocal();
+      const userId = await getUserIdAtual();
       if (!userId || !filmeId) return;
 
       const tempo = Math.floor(Number(tempoSegundos || 0));
@@ -672,7 +677,7 @@
 
       progressoFilmes[Number(filmeId)] = tempo;
 
-      await supabaseClient
+      const { error } = await supabaseClient
         .from("filmes_progresso")
         .upsert([{
           user_id: userId,
@@ -684,15 +689,19 @@
         }], {
           onConflict: "user_id,filme_id"
         });
+
+      if (error) {
+        console.error("Erro salvando progresso:", error);
+      }
     }
 
     async function limparProgressoFilme(filmeId) {
-      const userId = getUserIdLocal();
+      const userId = await getUserIdAtual();
       if (!userId || !filmeId) return;
 
       delete progressoFilmes[Number(filmeId)];
 
-      await supabaseClient
+      const { error } = await supabaseClient
         .from("filmes_progresso")
         .upsert([{
           user_id: userId,
@@ -704,6 +713,10 @@
         }], {
           onConflict: "user_id,filme_id"
         });
+
+      if (error) {
+        console.error("Erro limpando progresso:", error);
+      }
     }
 
     function pararTimerSalvarProgresso() {
@@ -723,7 +736,9 @@
           ultimoTempoSalvo = tempo;
           await salvarProgressoFilme(filmeAtualPlayer.id, tempo);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error("Erro ao salvar progresso atual:", e);
+      }
     }
 
     function iniciarTimerSalvarProgresso() {
@@ -865,7 +880,7 @@
     }
 
     async function registrarHistorico(filme) {
-      const userId = getUserIdLocal();
+      const userId = await getUserIdAtual();
       if (!userId || !filme || !clienteAtual?.admin_id) return;
 
       await supabaseClient
@@ -1053,7 +1068,7 @@
     }
 
     async function carregarListaUsuario() {
-      const userId = getUserIdLocal();
+      const userId = await getUserIdAtual();
       if (!userId) {
         favoritosIds = [];
         listaIds = [];
@@ -1076,7 +1091,7 @@
     }
 
     async function carregarRecentesUsuario() {
-      const userId = getUserIdLocal();
+      const userId = await getUserIdAtual();
       if (!userId) {
         recentesIds = [];
         return;
@@ -1106,7 +1121,7 @@
     }
 
     async function toggleListaFilme(filmeId, tipo) {
-      const userId = getUserIdLocal();
+      const userId = await getUserIdAtual();
       if (!userId || !clienteAtual?.admin_id) return;
 
       const filmeIdNum = Number(filmeId);
@@ -1331,13 +1346,6 @@
         adminAtual = null;
         tipoUsuarioAtual = "cliente";
 
-        localStorage.setItem("tipo_usuario_filmes", "cliente");
-        localStorage.setItem("cliente_id_filmes", String(cliente.id || ""));
-        localStorage.setItem("cliente_nome_filmes", cliente.nome || "");
-        localStorage.setItem("cliente_email_filmes", cliente.email || "");
-        localStorage.setItem("cliente_user_id_filmes", authUser.id || "");
-        localStorage.setItem("admin_id_filmes", String(cliente.admin_id || ""));
-
         return cliente;
       }
 
@@ -1362,10 +1370,6 @@
           ativo: true
         };
         tipoUsuarioAtual = "admin";
-
-        localStorage.setItem("tipo_usuario_filmes", "admin");
-        localStorage.setItem("admin_id_filmes", String(admin.id || ""));
-        localStorage.setItem("admin_email_filmes", admin.email || "");
 
         return clienteAtual;
       }
