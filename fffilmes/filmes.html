@@ -626,6 +626,7 @@
     let favoritosIds = [];
     let listaIds = [];
     let recentesIds = [];
+    let progressoFilmes = {};
     let filmeAtualIndex = -1;
 
     let ytPlayer = null;
@@ -638,36 +639,71 @@
       return localStorage.getItem("cliente_user_id_filmes") || null;
     }
 
-    function getProgressKey(filmeId) {
-      const userId = getUserIdLocal() || "anon";
-      return `ff_filmes_progress_${userId}_${filmeId}`;
+    async function carregarProgressoUsuario() {
+      const userId = getUserIdLocal();
+      progressoFilmes = {};
+
+      if (!userId) return;
+
+      const { data, error } = await supabaseClient
+        .from("filmes_progresso")
+        .select("filme_id,progresso_segundos,concluido")
+        .eq("user_id", userId);
+
+      if (error || !data) return;
+
+      data.forEach(item => {
+        if (!item.concluido) {
+          progressoFilmes[Number(item.filme_id)] = Number(item.progresso_segundos || 0);
+        }
+      });
     }
 
-    function salvarProgressoLocal(filmeId, tempoSegundos) {
-      if (!filmeId) return;
+    function obterProgressoFilme(filmeId) {
+      return Number(progressoFilmes[Number(filmeId)] || 0);
+    }
+
+    async function salvarProgressoFilme(filmeId, tempoSegundos) {
+      const userId = getUserIdLocal();
+      if (!userId || !filmeId) return;
+
       const tempo = Math.floor(Number(tempoSegundos || 0));
       if (tempo < 3) return;
 
-      try {
-        localStorage.setItem(getProgressKey(filmeId), String(tempo));
-      } catch (e) {}
+      progressoFilmes[Number(filmeId)] = tempo;
+
+      await supabaseClient
+        .from("filmes_progresso")
+        .upsert([{
+          user_id: userId,
+          admin_id: clienteAtual?.admin_id || null,
+          filme_id: Number(filmeId),
+          progresso_segundos: tempo,
+          atualizado_em: new Date().toISOString(),
+          concluido: false
+        }], {
+          onConflict: "user_id,filme_id"
+        });
     }
 
-    function obterProgressoLocal(filmeId) {
-      if (!filmeId) return 0;
-      try {
-        const valor = Number(localStorage.getItem(getProgressKey(filmeId)) || 0);
-        return Number.isFinite(valor) ? valor : 0;
-      } catch (e) {
-        return 0;
-      }
-    }
+    async function limparProgressoFilme(filmeId) {
+      const userId = getUserIdLocal();
+      if (!userId || !filmeId) return;
 
-    function limparProgressoLocal(filmeId) {
-      if (!filmeId) return;
-      try {
-        localStorage.removeItem(getProgressKey(filmeId));
-      } catch (e) {}
+      delete progressoFilmes[Number(filmeId)];
+
+      await supabaseClient
+        .from("filmes_progresso")
+        .upsert([{
+          user_id: userId,
+          admin_id: clienteAtual?.admin_id || null,
+          filme_id: Number(filmeId),
+          progresso_segundos: 0,
+          atualizado_em: new Date().toISOString(),
+          concluido: true
+        }], {
+          onConflict: "user_id,filme_id"
+        });
     }
 
     function pararTimerSalvarProgresso() {
@@ -677,7 +713,7 @@
       }
     }
 
-    function salvarProgressoAtual(forcar = false) {
+    async function salvarProgressoAtual(forcar = false) {
       if (!ytPlayer || !filmeAtualPlayer?.id) return;
       if (typeof ytPlayer.getCurrentTime !== "function") return;
 
@@ -685,15 +721,15 @@
         const tempo = Math.floor(ytPlayer.getCurrentTime() || 0);
         if (forcar || Math.abs(tempo - ultimoTempoSalvo) >= 5) {
           ultimoTempoSalvo = tempo;
-          salvarProgressoLocal(filmeAtualPlayer.id, tempo);
+          await salvarProgressoFilme(filmeAtualPlayer.id, tempo);
         }
       } catch (e) {}
     }
 
     function iniciarTimerSalvarProgresso() {
       pararTimerSalvarProgresso();
-      timerSalvarProgresso = setInterval(() => {
-        salvarProgressoAtual(false);
+      timerSalvarProgresso = setInterval(async () => {
+        await salvarProgressoAtual(false);
       }, 5000);
     }
 
@@ -851,7 +887,7 @@
     function onYouTubePlayerReady(event) {
       if (!filmeAtualPlayer) return;
 
-      const inicio = Math.max(0, Math.floor(obterProgressoLocal(filmeAtualPlayer.id) || 0));
+      const inicio = Math.max(0, Math.floor(obterProgressoFilme(filmeAtualPlayer.id) || 0));
 
       if (inicio > 0) {
         try {
@@ -864,7 +900,7 @@
       } catch (e) {}
     }
 
-    function onYouTubePlayerStateChange(event) {
+    async function onYouTubePlayerStateChange(event) {
       if (!filmeAtualPlayer) return;
 
       if (event.data === YT.PlayerState.PLAYING) {
@@ -872,17 +908,17 @@
       }
 
       if (event.data === YT.PlayerState.PAUSED) {
-        salvarProgressoAtual(true);
+        await salvarProgressoAtual(true);
         pararTimerSalvarProgresso();
       }
 
       if (event.data === YT.PlayerState.BUFFERING) {
-        salvarProgressoAtual(true);
+        await salvarProgressoAtual(true);
       }
 
       if (event.data === YT.PlayerState.ENDED) {
         pararTimerSalvarProgresso();
-        limparProgressoLocal(filmeAtualPlayer.id);
+        await limparProgressoFilme(filmeAtualPlayer.id);
         ultimoTempoSalvo = 0;
       }
     }
@@ -909,7 +945,7 @@
         try {
           ytPlayer.loadVideoById({
             videoId: videoId,
-            startSeconds: Math.max(0, Math.floor(obterProgressoLocal(filmeAtualPlayer?.id) || 0))
+            startSeconds: Math.max(0, Math.floor(obterProgressoFilme(filmeAtualPlayer?.id) || 0))
           });
         } catch (e) {
           try {
@@ -930,7 +966,7 @@
       const overlayTitulo = document.getElementById("overlayTitulo");
       const playerArea = document.getElementById("playerArea");
 
-      salvarProgressoAtual(true);
+      await salvarProgressoAtual(true);
 
       filmeAtualIndex = getFilmeIndexById(filmeId);
       filmeAtualPlayer = filmesCache.find(f => String(f.id) === String(filmeId)) || {
@@ -967,7 +1003,7 @@
     }
 
     async function abrirProximoFilme() {
-      salvarProgressoAtual(true);
+      await salvarProgressoAtual(true);
 
       if (!filmesCache.length) return;
 
@@ -984,7 +1020,7 @@
     }
 
     async function fecharPlayer() {
-      salvarProgressoAtual(true);
+      await salvarProgressoAtual(true);
       pararTimerSalvarProgresso();
 
       const overlay = document.getElementById("playerOverlay");
@@ -1134,7 +1170,7 @@
     function cardFilmeHTML(filme) {
       const favorito = favoritosIds.includes(Number(filme.id));
       const naLista = listaIds.includes(Number(filme.id));
-      const progresso = obterProgressoLocal(filme.id);
+      const progresso = obterProgressoFilme(filme.id);
 
       return `
         <div class="movie">
@@ -1489,6 +1525,7 @@
       await carregarConfigTema();
       await carregarListaUsuario();
       await carregarRecentesUsuario();
+      await carregarProgressoUsuario();
       await carregarFilmes();
 
       if (tipoUsuarioAtual === "cliente" && cliente.id) {
@@ -1553,7 +1590,7 @@
     });
 
     async function logout() {
-      salvarProgressoAtual(true);
+      await salvarProgressoAtual(true);
       pararTimerSalvarProgresso();
 
       try {
