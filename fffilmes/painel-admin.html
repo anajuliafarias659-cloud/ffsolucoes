@@ -88,6 +88,8 @@ button{
 .cancelar{background:var(--gray);color:#fff}
 .bloquear{background:var(--orange);color:#111}
 .desbloquear{background:var(--green);color:#000}
+.renovar{background:#22c55e;color:#000}
+.renovar-custom{background:#38bdf8;color:#062033}
 .lista{margin-top:14px}
 .item{
   background:#020617;
@@ -95,6 +97,10 @@ button{
   border-radius:14px;
   margin-top:10px;
   border:1px solid var(--line);
+}
+.item.vencido{
+  border-color:rgba(239,68,68,.45);
+  box-shadow:0 0 0 1px rgba(239,68,68,.18) inset;
 }
 .item-topo{
   display:flex;
@@ -152,6 +158,48 @@ button{
   flex:1;
   min-width:180px;
 }
+.badge-status{
+  display:inline-block;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+  margin-top:8px;
+}
+.badge-status.ativo{
+  background:rgba(34,197,94,.12);
+  color:#bbf7d0;
+  border:1px solid rgba(34,197,94,.22);
+}
+.badge-status.bloqueado{
+  background:rgba(245,158,11,.12);
+  color:#fde68a;
+  border:1px solid rgba(245,158,11,.22);
+}
+.badge-status.vencido{
+  background:rgba(239,68,68,.12);
+  color:#fecaca;
+  border:1px solid rgba(239,68,68,.22);
+}
+.info-prazo{
+  margin-top:8px;
+  font-size:13px;
+  color:#cbd5e1;
+  line-height:1.6;
+}
+.info-prazo strong{
+  color:#fff;
+}
+.aviso-prazo{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:rgba(56,189,248,.10);
+  border:1px solid rgba(56,189,248,.18);
+  color:#bae6fd;
+  font-size:13px;
+  line-height:1.5;
+}
 @media (max-width:640px){
   h2{font-size:22px}
 }
@@ -176,13 +224,21 @@ button{
       <div class="badge" id="limiteInfo">0 / 0</div>
     </div>
 
-    <p class="info">Crie, edite, remova, bloqueie e desbloqueie clientes.</p>
+    <p class="info">Crie, edite, remova, bloqueie, desbloqueie e controle prazo automático dos clientes.</p>
+
+    <div class="aviso-prazo">
+      Você pode cadastrar com <strong>35 dias</strong> ou qualquer prazo personalizado.
+      Se preencher <strong>Dias de acesso</strong>, o sistema calcula a data.
+      Se preencher <strong>Expira em</strong>, a data manual terá prioridade.
+    </div>
 
     <form onsubmit="event.preventDefault(); salvarOuEditarCliente();">
       <div class="grid">
         <input id="nomeCliente" placeholder="Nome do cliente">
         <input id="emailCliente" type="email" placeholder="E-mail do cliente">
         <input id="senhaCliente" type="password" placeholder="Senha do cliente">
+        <input id="diasAcessoCliente" type="number" min="1" step="1" placeholder="Dias de acesso (ex: 35)">
+        <input id="expiraEmCliente" type="datetime-local" placeholder="Expira em">
       </div>
 
       <div class="row-buttons">
@@ -246,6 +302,8 @@ function resetFormularioCliente(){
   document.getElementById("nomeCliente").value = "";
   document.getElementById("emailCliente").value = "";
   document.getElementById("senhaCliente").value = "";
+  document.getElementById("diasAcessoCliente").value = "35";
+  document.getElementById("expiraEmCliente").value = "";
 }
 
 function atualizarTextoBotao(){
@@ -259,12 +317,88 @@ function setCadastroLoading(loading, texto="Processando..."){
   btn.textContent = loading ? texto : (modoEdicao ? "Salvar Alterações" : "Cadastrar Cliente");
 }
 
+function formatarDataHoraLocal(value){
+  if(!value) return "";
+  const d = new Date(value);
+  if(isNaN(d.getTime())) return "";
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  const hora = String(d.getHours()).padStart(2, "0");
+  const minuto = String(d.getMinutes()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}T${hora}:${minuto}`;
+}
+
+function formatarDataBR(value){
+  if(!value) return "-";
+  const d = new Date(value);
+  if(isNaN(d.getTime())) return "-";
+  return d.toLocaleString("pt-BR");
+}
+
+function calcularDiasRestantes(expiraEm){
+  if(!expiraEm) return null;
+  const fim = new Date(expiraEm).getTime();
+  if(isNaN(fim)) return null;
+  const agora = Date.now();
+  const diff = fim - agora;
+  return Math.ceil(diff / 86400000);
+}
+
+function clienteEstaVencido(cliente){
+  if(!cliente?.expira_em) return false;
+  const fim = new Date(cliente.expira_em).getTime();
+  if(isNaN(fim)) return false;
+  return fim < Date.now();
+}
+
+function obterStatusCliente(cliente){
+  if(cliente?.ativo === false){
+    return { texto:"Bloqueado", classe:"bloqueado" };
+  }
+  if(clienteEstaVencido(cliente)){
+    return { texto:"Vencido", classe:"vencido" };
+  }
+  return { texto:"Ativo", classe:"ativo" };
+}
+
+function montarPrazoPayload(){
+  const diasRaw = document.getElementById("diasAcessoCliente").value.trim();
+  const expiraRaw = document.getElementById("expiraEmCliente").value.trim();
+
+  let dias_acesso = null;
+  let expira_em = null;
+
+  if(diasRaw){
+    dias_acesso = Number(diasRaw);
+    if(!Number.isFinite(dias_acesso) || dias_acesso <= 0){
+      throw new Error("Informe dias de acesso válidos.");
+    }
+  }
+
+  if(expiraRaw){
+    const dataManual = new Date(expiraRaw);
+    if(isNaN(dataManual.getTime())){
+      throw new Error("Data de expiração inválida.");
+    }
+    expira_em = dataManual.toISOString();
+  } else if(dias_acesso){
+    const agora = new Date();
+    agora.setDate(agora.getDate() + dias_acesso);
+    expira_em = agora.toISOString();
+  }
+
+  return { dias_acesso, expira_em };
+}
+
 function entrarModoEdicao(cliente){
   modoEdicao = true;
   clienteEditando = cliente;
   document.getElementById("nomeCliente").value = cliente.nome || "";
   document.getElementById("emailCliente").value = cliente.email || "";
   document.getElementById("senhaCliente").value = "";
+  document.getElementById("diasAcessoCliente").value = cliente.dias_acesso || "";
+  document.getElementById("expiraEmCliente").value = formatarDataHoraLocal(cliente.expira_em);
   atualizarTextoBotao();
   document.getElementById("btnCancelarEdicao").style.display = "inline-block";
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -343,6 +477,52 @@ async function chamarFunction(nomeFunction, body){
   return json;
 }
 
+async function salvarPrazoClienteDireto(clienteId, dadosPrazo){
+  const payload = {
+    dias_acesso: dadosPrazo.dias_acesso,
+    expira_em: dadosPrazo.expira_em
+  };
+
+  const { error } = await supabaseClient
+    .from("admin_clientes")
+    .update(payload)
+    .eq("id", clienteId)
+    .eq("admin_id", adminId);
+
+  if(error){
+    throw new Error("Cliente criado/editado, mas não consegui salvar o prazo: " + error.message);
+  }
+}
+
+async function buscarClientePorEmail(email){
+  const { data, error } = await supabaseClient
+    .from("admin_clientes")
+    .select("*")
+    .eq("admin_id", adminId)
+    .eq("email", email)
+    .order("id", { ascending:false })
+    .limit(1)
+    .maybeSingle();
+
+  if(error) throw error;
+  return data;
+}
+
+async function marcarVencidosComoBloqueados(){
+  const agoraIso = new Date().toISOString();
+
+  const { error } = await supabaseClient
+    .from("admin_clientes")
+    .update({ ativo:false })
+    .eq("admin_id", adminId)
+    .eq("ativo", true)
+    .lt("expira_em", agoraIso);
+
+  if(error){
+    console.warn("Não consegui marcar vencidos como bloqueados:", error.message);
+  }
+}
+
 async function init(){
   const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
@@ -381,6 +561,8 @@ async function init(){
   document.getElementById("planoInfo").textContent =
     `Plano: ${admin.plano || "sem plano"} | Tipo: ${admin.tipo || "admin"}`;
 
+  resetFormularioCliente();
+  await marcarVencidosComoBloqueados();
   await carregarClientes();
   await carregarTema();
 }
@@ -401,25 +583,45 @@ async function carregarClientes(){
   totalClientes = window.__clientesAdmin.length;
   document.getElementById("limiteInfo").textContent = `${totalClientes} / ${limite}`;
 
-  const html = window.__clientesAdmin.map(c => `
-    <div class="item">
-      <div class="item-topo">
-        <div>
-          <strong>${c.nome || "-"}</strong><br>
-          ${c.email || "-"}
-          <div class="small">Status: ${c.ativo === false ? "Bloqueado" : "Ativo"}</div>
-        </div>
+  const html = window.__clientesAdmin.map(c => {
+    const status = obterStatusCliente(c);
+    const diasRestantes = calcularDiasRestantes(c.expira_em);
+    const vencido = clienteEstaVencido(c);
 
-        <div class="item-acoes">
-          <button class="editar" onclick="prepararEdicao(${c.id})">Editar</button>
-          <button class="${c.ativo === false ? 'desbloquear' : 'bloquear'}" onclick="alternarStatusCliente(${c.id})">
-            ${c.ativo === false ? 'Desbloquear' : 'Bloquear'}
-          </button>
-          <button class="excluir" onclick="removerCliente(${c.id}, ${JSON.stringify(c.nome || "")})">Remover</button>
+    let prazoTexto = `<div class="info-prazo"><strong>Expira em:</strong> ${formatarDataBR(c.expira_em)}</div>`;
+    if(!c.expira_em){
+      prazoTexto = `<div class="info-prazo"><strong>Expira em:</strong> sem prazo definido</div>`;
+    } else if(vencido){
+      prazoTexto += `<div class="info-prazo"><strong>Situação:</strong> prazo vencido</div>`;
+    } else if(diasRestantes !== null){
+      prazoTexto += `<div class="info-prazo"><strong>Dias restantes:</strong> ${diasRestantes}</div>`;
+    }
+
+    return `
+      <div class="item ${vencido ? "vencido" : ""}">
+        <div class="item-topo">
+          <div>
+            <strong>${c.nome || "-"}</strong><br>
+            ${c.email || "-"}
+            <div class="badge-status ${status.classe}">${status.texto}</div>
+            <div class="small">Status manual: ${c.ativo === false ? "Bloqueado" : "Ativo"}</div>
+            <div class="small">Dias cadastrados: ${c.dias_acesso || "-"}</div>
+            ${prazoTexto}
+          </div>
+
+          <div class="item-acoes">
+            <button class="editar" onclick="prepararEdicao(${c.id})">Editar</button>
+            <button class="renovar" onclick="renovarCliente(${c.id}, 35)">+35 dias</button>
+            <button class="renovar-custom" onclick="renovarClienteCustom(${c.id})">Renovar dias</button>
+            <button class="${c.ativo === false ? 'desbloquear' : 'bloquear'}" onclick="alternarStatusCliente(${c.id})">
+              ${c.ativo === false ? 'Desbloquear' : 'Bloquear'}
+            </button>
+            <button class="excluir" onclick="removerCliente(${c.id}, ${JSON.stringify(c.nome || "")})">Remover</button>
+          </div>
         </div>
       </div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 
   document.getElementById("listaClientes").innerHTML =
     html || `<div class="item">Nenhum cliente cadastrado ainda.</div>`;
@@ -461,6 +663,14 @@ async function salvarCliente(){
     return;
   }
 
+  let dadosPrazo;
+  try{
+    dadosPrazo = montarPrazoPayload();
+  }catch(e){
+    mostrarMsg(e.message || "Erro no prazo.");
+    return;
+  }
+
   setCadastroLoading(true, "Cadastrando...");
 
   try{
@@ -471,8 +681,14 @@ async function salvarCliente(){
       senha
     });
 
+    const clienteCriado = await buscarClientePorEmail(email);
+    if(clienteCriado){
+      await salvarPrazoClienteDireto(clienteCriado.id, dadosPrazo);
+    }
+
     resetFormularioCliente();
-    mostrarMsg("Cliente cadastrado com login e senha com sucesso.", "ok");
+    mostrarMsg("Cliente cadastrado com login, senha e prazo automático com sucesso.", "ok");
+    await marcarVencidosComoBloqueados();
     await carregarClientes();
 
   }catch(e){
@@ -504,6 +720,14 @@ async function editarCliente(){
     return;
   }
 
+  let dadosPrazo;
+  try{
+    dadosPrazo = montarPrazoPayload();
+  }catch(e){
+    mostrarMsg(e.message || "Erro no prazo.");
+    return;
+  }
+
   setCadastroLoading(true, "Salvando...");
 
   try{
@@ -515,8 +739,11 @@ async function editarCliente(){
       senha
     });
 
+    await salvarPrazoClienteDireto(clienteEditando.id, dadosPrazo);
+
     cancelarEdicao();
     mostrarMsg("Cliente atualizado com sucesso.", "ok");
+    await marcarVencidosComoBloqueados();
     await carregarClientes();
 
   }catch(e){
@@ -555,6 +782,60 @@ async function alternarStatusCliente(clienteId){
   }catch(e){
     mostrarMsg(e.message || "Erro ao alterar status.");
   }
+}
+
+async function renovarCliente(clienteId, dias){
+  limparMsg();
+
+  const cliente = window.__clientesAdmin.find(c => Number(c.id) === Number(clienteId));
+  if(!cliente) return;
+
+  const confirmou = confirm(`Renovar "${cliente.nome}" por mais ${dias} dias?`);
+  if(!confirmou) return;
+
+  const base = cliente.expira_em && !clienteEstaVencido(cliente)
+    ? new Date(cliente.expira_em)
+    : new Date();
+
+  base.setDate(base.getDate() + Number(dias));
+
+  try{
+    const { error } = await supabaseClient
+      .from("admin_clientes")
+      .update({
+        dias_acesso: Number(dias),
+        expira_em: base.toISOString(),
+        ativo: true
+      })
+      .eq("id", cliente.id)
+      .eq("admin_id", adminId);
+
+    if(error) throw error;
+
+    mostrarMsg(`Cliente renovado por mais ${dias} dias.`, "ok");
+    await carregarClientes();
+
+  }catch(e){
+    mostrarMsg(e.message || "Erro ao renovar cliente.");
+  }
+}
+
+async function renovarClienteCustom(clienteId){
+  limparMsg();
+
+  const cliente = window.__clientesAdmin.find(c => Number(c.id) === Number(clienteId));
+  if(!cliente) return;
+
+  const dias = prompt(`Quantos dias deseja renovar para "${cliente.nome}"?`, "35");
+  if(dias === null) return;
+
+  const diasNum = Number(String(dias).trim());
+  if(!Number.isFinite(diasNum) || diasNum <= 0){
+    mostrarMsg("Informe um número de dias válido.");
+    return;
+  }
+
+  await renovarCliente(clienteId, diasNum);
 }
 
 async function removerCliente(clienteId, nomeCliente){
