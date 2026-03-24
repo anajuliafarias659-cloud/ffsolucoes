@@ -33,6 +33,9 @@
   --warn:#f59e0b;
   --blue:#53bdeb;
   --app-height:100vh;
+  --chat-header-height:68px;
+  --chat-input-height:86px;
+  --typing-height:28px;
 }
 html,body{
   width:100%;
@@ -322,7 +325,9 @@ img{display:block}
   font-weight:800;
 }
 
+/* DESKTOP */
 .chat-area{
+  position:relative;
   display:flex;
   flex-direction:column;
   background:var(--chatbg);
@@ -618,6 +623,7 @@ img{display:block}
   font-size:13px;
 }
 
+/* MOBILE FORTE */
 @media(max-width:900px){
   html,body{
     height:100%;
@@ -626,25 +632,20 @@ img{display:block}
 
   .app{
     grid-template-columns:1fr;
-    height:var(--app-height, 100vh);
+    height:var(--app-height);
   }
 
   .sidebar{
-    height:var(--app-height, 100vh);
+    height:var(--app-height);
   }
 
   .chat-area{
     position:fixed;
-    top:0;
-    left:0;
-    right:0;
-    height:var(--app-height, 100vh);
-    min-height:var(--app-height, 100vh);
+    inset:0;
     z-index:10;
-    display:flex;
-    flex-direction:column;
+    height:var(--app-height);
+    min-height:var(--app-height);
     overflow:hidden;
-    padding-bottom:env(safe-area-inset-bottom, 0px);
     background:var(--chatbg);
   }
 
@@ -653,29 +654,58 @@ img{display:block}
   }
 
   .chat-header{
-    flex-shrink:0;
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    height:var(--chat-header-height);
+    z-index:3;
+    margin:0;
+    display:flex;
+    align-items:center;
+    padding:12px 16px;
   }
 
   .typing-indicator{
-    flex-shrink:0;
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:var(--chat-input-height);
+    height:var(--typing-height);
+    min-height:var(--typing-height);
+    z-index:2;
+    background:transparent;
+    padding:6px 18px 0;
+    pointer-events:none;
   }
 
   .chat-messages{
-    flex:1;
-    min-height:0;
+    position:absolute;
+    top:var(--chat-header-height);
+    left:0;
+    right:0;
+    bottom:calc(var(--chat-input-height) + var(--typing-height));
     overflow-y:auto;
     overflow-x:hidden;
+    padding:14px;
     -webkit-overflow-scrolling:touch;
     overscroll-behavior:contain;
-    padding:18px;
-    padding-bottom:12px;
   }
 
   .chat-input{
-    flex-shrink:0;
-    position:relative;
-    z-index:2;
-    padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px));
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:0;
+    z-index:3;
+    min-height:var(--chat-input-height);
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    background:var(--header);
+    border-top:1px solid var(--line);
+  }
+
+  .chat-input input{
+    min-width:120px;
   }
 
   .mobile-back{
@@ -694,6 +724,14 @@ img{display:block}
 
   .msg{
     max-width:86%;
+  }
+
+  .audio-preview{
+    gap:8px;
+  }
+
+  .audio-preview audio{
+    width:100%;
   }
 }
 </style>
@@ -1059,14 +1097,22 @@ document.addEventListener("click", markUserInteraction, { passive:true });
 document.addEventListener("keydown", markUserInteraction, { passive:true });
 document.addEventListener("touchstart", markUserInteraction, { passive:true });
 
-function ajustarAlturaMobile(){
-  if(window.innerWidth > 900){
-    document.documentElement.style.setProperty("--app-height", `${window.innerHeight}px`);
-    return;
-  }
+function atualizarMedidasChat(){
+  requestAnimationFrame(() => {
+    const headerH = chatHeader && !chatHeader.classList.contains("hidden") ? chatHeader.offsetHeight : 68;
+    const inputH = chatInputArea && !chatInputArea.classList.contains("hidden") ? chatInputArea.offsetHeight : 86;
+    const typingH = typingIndicator && !typingIndicator.classList.contains("hidden") ? Math.max(typingIndicator.offsetHeight, 28) : 28;
 
+    document.documentElement.style.setProperty("--chat-header-height", `${headerH}px`);
+    document.documentElement.style.setProperty("--chat-input-height", `${inputH}px`);
+    document.documentElement.style.setProperty("--typing-height", `${typingH}px`);
+  });
+}
+
+function ajustarAlturaMobile(){
   const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   document.documentElement.style.setProperty("--app-height", `${vh}px`);
+  atualizarMedidasChat();
 
   if(contatoAtual && messagesBox){
     setTimeout(() => {
@@ -1248,6 +1294,7 @@ function atualizarStatusContatoTopo(){
   chatNome.textContent = contatoAtual.nome;
   chatNumero.innerHTML = status;
   chatAvatar.innerHTML = avatarHtml(contatoAtual);
+  atualizarMedidasChat();
 }
 
 async function verificarDigitando(){
@@ -1262,6 +1309,7 @@ async function verificarDigitando(){
   if(error || !data){
     typingIndicator.classList.add("hidden");
     typingIndicator.innerHTML = "";
+    atualizarMedidasChat();
     return;
   }
 
@@ -1280,6 +1328,8 @@ async function verificarDigitando(){
     typingIndicator.classList.add("hidden");
     typingIndicator.innerHTML = "";
   }
+
+  atualizarMedidasChat();
 }
 
 function getSupportedMimeType(){
@@ -1332,12 +1382,14 @@ async function iniciarGravacaoAudio(){
       audioPreviewPlayer.onloadedmetadata = () => {
         audioPreviewDurationSec = Math.round(audioPreviewPlayer.duration || 0);
         audioPreviewDuration.textContent = formatDuration(audioPreviewDurationSec);
+        atualizarMedidasChat();
       };
       audioPreview.classList.remove("hidden");
       btnEnviarAudio.classList.remove("hidden");
       btnPararAudio.classList.add("hidden");
       btnGravarAudio.classList.remove("recording");
       btnGravarAudio.textContent = "🎤 Gravar";
+      atualizarMedidasChat();
 
       if(mediaStream){
         mediaStream.getTracks().forEach(t => t.stop());
@@ -1350,6 +1402,7 @@ async function iniciarGravacaoAudio(){
     btnGravarAudio.textContent = "Gravando...";
     btnPararAudio.classList.remove("hidden");
     btnEnviarAudio.classList.add("hidden");
+    atualizarMedidasChat();
   }catch(err){
     console.error(err);
     alert("Não foi possível acessar o microfone.");
@@ -1374,6 +1427,7 @@ function cancelarAudio(){
   btnPararAudio.classList.add("hidden");
   btnGravarAudio.classList.remove("recording");
   btnGravarAudio.textContent = "🎤 Gravar";
+  atualizarMedidasChat();
 
   if(mediaStream){
     mediaStream.getTracks().forEach(t => t.stop());
@@ -1850,6 +1904,7 @@ window.apagarUsuario = async function(id, numero){
       typingIndicator.classList.add("hidden");
       chatInputArea.classList.add("hidden");
       emptyChat.classList.remove("hidden");
+      atualizarMedidasChat();
     }
     setStatus(adminStatus1, "Usuário apagado.", "ok");
     await carregarUsuariosAdmin();
@@ -1888,6 +1943,7 @@ window.removerVinculo = async function(id){
         typingIndicator.classList.add("hidden");
         chatInputArea.classList.add("hidden");
         emptyChat.classList.remove("hidden");
+        atualizarMedidasChat();
       }
     }
   }
@@ -2030,10 +2086,13 @@ async function abrirConversa(contato){
   ajustarAlturaMobile();
 
   setTimeout(() => {
+    atualizarMedidasChat();
     msgInput.focus();
-    ajustarAlturaMobile();
-    messagesBox.scrollTop = messagesBox.scrollHeight;
-  }, 100);
+    setTimeout(() => {
+      ajustarAlturaMobile();
+      messagesBox.scrollTop = messagesBox.scrollHeight;
+    }, 180);
+  }, 80);
 }
 
 function renderMensagemConteudo(m){
@@ -2112,6 +2171,8 @@ async function carregarMensagens(forceScroll=false){
       messagesBox.scrollTop = messagesBox.scrollHeight;
     });
   }
+
+  atualizarMedidasChat();
 }
 
 btnEnviarMsg.onclick = enviarMensagem;
@@ -2124,6 +2185,7 @@ msgInput.addEventListener("keydown", (e) => {
 msgInput.addEventListener("focus", () => {
   setTimeout(() => {
     ajustarAlturaMobile();
+    atualizarMedidasChat();
     messagesBox.scrollTop = messagesBox.scrollHeight;
   }, 250);
 });
@@ -2169,6 +2231,7 @@ async function enviarMensagem(){
   await limparStatusDigitando();
   await carregarMensagens(true);
   await renderContatos(contatosPermitidos);
+  atualizarMedidasChat();
   ajustarAlturaMobile();
   msgInput.focus();
 }
