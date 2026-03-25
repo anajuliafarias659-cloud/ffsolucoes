@@ -61,11 +61,15 @@ body{
 }
 
 @media(max-width:900px){
-  .grid{ grid-template-columns:repeat(3,1fr); }
+  .grid{
+    grid-template-columns:repeat(3,1fr);
+  }
 }
 
 @media(max-width:650px){
-  .grid{ grid-template-columns:repeat(2,1fr); }
+  .grid{
+    grid-template-columns:repeat(2,1fr);
+  }
 }
 
 .card{
@@ -91,6 +95,40 @@ body{
   background:#1e293b;
 }
 
+.link-card{
+  grid-column:1/-1;
+  text-align:left;
+  cursor:default;
+  align-items:flex-start;
+}
+
+.link-box{
+  margin-top:10px;
+  background:#111827;
+  border:1px solid rgba(255,255,255,.08);
+  padding:10px;
+  border-radius:10px;
+  font-size:12px;
+  color:#cbd5e1;
+  word-break:break-all;
+  width:100%;
+}
+
+.botao-link{
+  margin-top:10px;
+  background:#22c55e;
+  border:none;
+  color:#fff;
+  padding:12px;
+  border-radius:10px;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.botao-link:hover{
+  background:#16a34a;
+}
+
 .badge{
   position:absolute;
   top:10px;
@@ -106,6 +144,21 @@ body{
   display:none;
   align-items:center;
   justify-content:center;
+  box-shadow:0 4px 10px rgba(0,0,0,.3);
+}
+
+.icone{
+  font-size:28px;
+}
+
+.titulo-card{
+  font-weight:bold;
+  font-size:16px;
+}
+
+.sub{
+  font-size:12px;
+  opacity:.7;
 }
 
 @keyframes piscar{
@@ -136,19 +189,66 @@ body{
 
   <div class="grid">
 
-    <div class="card" onclick="irPara('admins.html')">👥 Administradores</div>
-    <div class="card" onclick="irPara('https://www.ffsolucoes.com.br/produtos.html')">📦 Produtos</div>
-    <div class="card" onclick="irPara('https://www.ffsolucoes.com.br/categorias.html')">📂 Categorias</div>
-    <div class="card" onclick="irPara('vendas.html')">🛒 Vendas</div>
-
-    <div class="card" id="cardPedidos" onclick="irPara('https://www.ffsolucoes.com.br/pedidos-online.html')">
-      🛒 Vendas Online
-      <span class="badge" id="badgePedidos">0</span>
+    <div class="card" onclick="irPara('admins.html')">
+      <div>👥</div>
+      <div>Administradores</div>
     </div>
 
-    <div class="card" onclick="irPara('fiados.html')">📋 Fiados</div>
-    <div class="card" onclick="irPara('relatorios.html')">📊 Relatórios</div>
-    <div class="card" onclick="irPara('https://www.ffsolucoes.com.br/config-site.html')">⚙️ Configurar Site</div>
+    <div class="card" onclick="irPara('https://www.ffsolucoes.com.br/produtos.html')">
+      <div>📦</div>
+      <div>Produtos</div>
+    </div>
+
+    <div class="card" onclick="irPara('https://www.ffsolucoes.com.br/categorias.html')">
+      <div class="icone">📂</div>
+      <div class="titulo-card">Categorias</div>
+      <div class="sub">Organize seu mercado</div>
+    </div>
+    
+    <div class="card" onclick="irPara('vendas.html')">
+      <div>🛒</div>
+      <div>Vendas</div>
+    </div>
+
+    <div class="card" id="cardPedidos" onclick="irPara('https://www.ffsolucoes.com.br/pedidos-online.html')">
+      <span class="badge" id="badgePedidos">0</span>
+      <div class="icone">🛒</div>
+      <div class="titulo-card">Vendas Online</div>
+      <div class="sub">Pedidos da vitrine</div>
+    </div>
+
+    <div class="card" onclick="irPara('fiados.html')">
+      <div>📋</div>
+      <div>Fiados</div>
+    </div>
+
+    <div class="card" onclick="irPara('relatorios.html')">
+      <div>📊</div>
+      <div>Relatórios</div>
+    </div>
+
+    <div class="card" onclick="alternarPublico()">
+      <div>🔁</div>
+      <div id="modoPublico">Modo: Catálogo</div>
+    </div>
+
+    <div class="card" onclick="irPara('https://www.ffsolucoes.com.br/config-site.html')">
+      <div>⚙️</div>
+      <div>Configurar Site</div>
+    </div>
+
+    <div class="card link-card">
+      <div><b>🌍 Página Pública</b></div>
+      <div style="opacity:.7; margin-top:6px;">
+        Esse é o link público da sua loja para compartilhar com seus clientes.
+      </div>
+
+      <div class="link-box" id="linkPublico">Carregando link...</div>
+
+      <button class="botao-link" onclick="compartilharPagina()">
+        🔗 Copiar link da loja
+      </button>
+    </div>
 
   </div>
 </div>
@@ -157,14 +257,17 @@ body{
 import { supabase } from "../js/supabase.js";
 
 let app_id = null;
+let modoPublico = "catalogo";
 let intervaloPedidos = null;
 
 async function verificarSessao(){
-  const { data:{ session } } = await supabase.auth.getSession();
-  if(!session){
+  const { data:{ session }, error } = await supabase.auth.getSession();
+
+  if(error || !session){
     window.location.href = "/auth/login.html";
     return null;
   }
+
   return session.user.id;
 }
 
@@ -172,32 +275,70 @@ async function carregarUsuario(){
   const userId = await verificarSessao();
   if(!userId) return;
 
-  const { data: usuario } = await supabase
+  const { data: usuario, error } = await supabase
     .from("usuarios")
-    .select("nome, app_id")
+    .select("nome, email, app_id")
     .eq("id", userId)
     .single();
 
+  if(error || !usuario){
+    alert("Não foi possível carregar os dados do usuário.");
+    console.error("Erro ao carregar usuário:", error);
+    return;
+  }
+
   app_id = usuario.app_id;
 
-  document.getElementById("nome").innerText = usuario.nome || "";
+  document.getElementById("nome").innerText = usuario.nome || usuario.email || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
 
+  const urlPublica = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(usuario.app_id)}`;
+  document.getElementById("linkPublico").innerText = urlPublica;
+
+  await carregarModoPublico();
   await verificarPedidos();
   iniciarAtualizacaoPedidos();
+}
+
+async function carregarModoPublico(){
+  if(!app_id) return;
+
+  const { data, error } = await supabase
+    .from("config_site")
+    .select("modo_publico")
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!error && data && data.modo_publico){
+    modoPublico = data.modo_publico;
+  }
+
+  atualizarTextoModo();
+}
+
+function atualizarTextoModo(){
+  const el = document.getElementById("modoPublico");
+  el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
 }
 
 async function verificarPedidos(){
   if(!app_id) return;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("pedidos")
     .select("id")
     .eq("app_id", app_id)
     .eq("status", "novo");
 
+  if(error){
+    console.error("Erro ao buscar pedidos:", error);
+    return;
+  }
+
   const badge = document.getElementById("badgePedidos");
   const card = document.getElementById("cardPedidos");
+
+  if(!badge || !card) return;
 
   if(data && data.length > 0){
     badge.style.display = "flex";
@@ -205,6 +346,7 @@ async function verificarPedidos(){
     card.classList.add("piscar");
   }else{
     badge.style.display = "none";
+    badge.innerText = "0";
     card.classList.remove("piscar");
   }
 }
@@ -219,7 +361,75 @@ function iniciarAtualizacaoPedidos(){
   }, 5000);
 }
 
+window.alternarPublico = async function(){
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  const modoAnterior = modoPublico;
+  modoPublico = modoPublico === "catalogo" ? "vendas" : "catalogo";
+  atualizarTextoModo();
+
+  const { error } = await supabase
+    .from("config_site")
+    .upsert({
+      app_id,
+      modo_publico: modoPublico
+    }, { onConflict: "app_id" });
+
+  if(error){
+    modoPublico = modoAnterior;
+    atualizarTextoModo();
+    alert("Erro ao salvar modo público.");
+    console.error(error);
+  }else{
+    alert("Modo público alterado para: " + (modoPublico === "vendas" ? "Vendas" : "Catálogo"));
+  }
+};
+
+window.abrirSite = function(){
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  const url = `${location.origin}/public/mercado/?app_id=${encodeURIComponent(app_id)}`;
+  window.open(url, "_blank");
+};
+
+window.compartilharPagina = async function(){
+  if(!app_id){
+    alert("Negócio não identificado.");
+    return;
+  }
+
+  const url = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(app_id)}`;
+
+  try{
+    await navigator.clipboard.writeText(url);
+    alert("🔗 Link da loja copiado com sucesso!\n\n" + url);
+  }catch{
+    prompt("Copie o link da loja:", url);
+  }
+};
+
 window.irPara = function(pagina){
+  if(!pagina){
+    alert("Página inválida.");
+    return;
+  }
+
+  if(pagina.startsWith("http://") || pagina.startsWith("https://")){
+    if(app_id){
+      const separador = pagina.includes("?") ? "&" : "?";
+      window.location.href = `${pagina}${separador}app_id=${encodeURIComponent(app_id)}`;
+    }else{
+      window.location.href = pagina;
+    }
+    return;
+  }
+
   window.location.href = pagina;
 };
 
@@ -227,6 +437,7 @@ window.logout = async function(){
   if(intervaloPedidos){
     clearInterval(intervaloPedidos);
   }
+
   await supabase.auth.signOut();
   window.location.href = "/auth/login.html";
 };
