@@ -455,6 +455,89 @@ img{display:block}
   color:#cbd5db;
   opacity:.9;
 }
+.msg-photo{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-width:180px;
+  max-width:280px;
+}
+.msg-photo img{
+  width:100%;
+  max-width:280px;
+  max-height:360px;
+  object-fit:cover;
+  border-radius:12px;
+  cursor:pointer;
+  background:#0b141a;
+}
+.msg-photo .caption{
+  font-size:14px;
+  color:var(--text);
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.photo-preview{
+  width:100%;
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:8px 0 0;
+  flex-wrap:wrap;
+}
+.photo-preview .label{
+  color:var(--muted);
+  font-size:13px;
+}
+.photo-preview img{
+  width:110px;
+  height:110px;
+  object-fit:cover;
+  border-radius:12px;
+  border:1px solid var(--line);
+}
+.photo-preview .photo-actions{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  flex:1;
+  min-width:180px;
+}
+.photo-caption-input{
+  width:100%;
+  padding:10px 12px;
+  border:none;
+  outline:none;
+  border-radius:10px;
+  background:#2a3942;
+  color:#fff;
+}
+.photo-open-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.92);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  z-index:1200;
+}
+.photo-open-overlay img{
+  max-width:95vw;
+  max-height:85vh;
+  border-radius:14px;
+}
+.photo-open-overlay button{
+  position:absolute;
+  top:14px;
+  right:14px;
+  background:#111b21;
+  color:#fff;
+  border:none;
+  border-radius:10px;
+  padding:10px 14px;
+  cursor:pointer;
+}
 
 .chat-input{
   background:var(--header);
@@ -851,10 +934,24 @@ img{display:block}
 
     <div id="chatInputArea" class="chat-input hidden">
       <input id="msgInput" placeholder="Digite uma mensagem">
+      <button id="btnEnviarFoto" class="audio-btn">📷 Foto</button>
+      <input id="fileMensagemFoto" type="file" accept="image/*" class="hidden">
       <button id="btnGravarAudio" class="audio-btn">🎤 Gravar</button>
       <button id="btnPararAudio" class="audio-btn stop hidden">Parar</button>
       <button id="btnEnviarAudio" class="audio-btn send hidden">Enviar áudio</button>
       <button id="btnEnviarMsg" class="send-btn">Enviar</button>
+
+      <div id="photoPreview" class="photo-preview hidden">
+        <span class="label">Prévia da foto:</span>
+        <img id="photoPreviewImg" alt="prévia da foto">
+        <div class="photo-actions">
+          <input id="photoCaptionInput" class="photo-caption-input" placeholder="Legenda da foto (opcional)">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="btnEnviarFotoConfirmar" class="audio-btn send">Enviar foto</button>
+            <button id="btnCancelarFoto" class="audio-btn">Cancelar</button>
+          </div>
+        </div>
+      </div>
 
       <div id="audioPreview" class="audio-preview hidden">
         <span class="label">Prévia do áudio:</span>
@@ -971,6 +1068,13 @@ const chatNumero = document.getElementById("chatNumero");
 const msgInput = document.getElementById("msgInput");
 const btnEnviarMsg = document.getElementById("btnEnviarMsg");
 const mobileBack = document.getElementById("mobileBack");
+const btnEnviarFoto = document.getElementById("btnEnviarFoto");
+const fileMensagemFoto = document.getElementById("fileMensagemFoto");
+const photoPreview = document.getElementById("photoPreview");
+const photoPreviewImg = document.getElementById("photoPreviewImg");
+const photoCaptionInput = document.getElementById("photoCaptionInput");
+const btnEnviarFotoConfirmar = document.getElementById("btnEnviarFotoConfirmar");
+const btnCancelarFoto = document.getElementById("btnCancelarFoto");
 
 const btnGravarAudio = document.getElementById("btnGravarAudio");
 const btnPararAudio = document.getElementById("btnPararAudio");
@@ -1010,6 +1114,8 @@ let audioChunks = [];
 let audioBlob = null;
 let audioMimeType = "audio/webm";
 let audioPreviewDurationSec = 0;
+let fotoMensagemFile = null;
+let fotoMensagemPreviewUrl = "";
 let typingTimer = null;
 let typingSentAt = 0;
 let onlineHeartbeatTimer = null;
@@ -1479,6 +1585,99 @@ function extByMime(type=""){
   return "webm";
 }
 
+function resetPhotoPreview(){
+  fotoMensagemFile = null;
+  if(fotoMensagemPreviewUrl){
+    URL.revokeObjectURL(fotoMensagemPreviewUrl);
+  }
+  fotoMensagemPreviewUrl = "";
+  photoPreviewImg.removeAttribute("src");
+  photoCaptionInput.value = "";
+  photoPreview.classList.add("hidden");
+  if(fileMensagemFoto) fileMensagemFoto.value = "";
+  atualizarMedidasChat();
+}
+
+function abrirPreviewFoto(file){
+  if(!file) return;
+  if(!String(file.type || "").startsWith("image/")){
+    alert("Escolha uma imagem válida.");
+    return;
+  }
+
+  if(fotoMensagemPreviewUrl){
+    URL.revokeObjectURL(fotoMensagemPreviewUrl);
+  }
+
+  fotoMensagemFile = file;
+  fotoMensagemPreviewUrl = URL.createObjectURL(file);
+  photoPreviewImg.src = fotoMensagemPreviewUrl;
+  photoPreview.classList.remove("hidden");
+  atualizarMedidasChat();
+}
+
+async function enviarFotoMensagem(){
+  if(!fotoMensagemFile || !usuarioLogado || !contatoAtual) return;
+
+  btnEnviarFotoConfirmar.disabled = true;
+  btnEnviarFotoConfirmar.textContent = "Enviando foto...";
+
+  try{
+    const ext = (fotoMensagemFile.name.split(".").pop() || "jpg").toLowerCase();
+    const fileName = `${Date.now()}_${usuarioLogado.numero}_${contatoAtual.numero}.${ext}`;
+    const path = `mensagens/${usuarioLogado.numero}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(FOTO_BUCKET)
+      .upload(path, fotoMensagemFile, {
+        contentType: fotoMensagemFile.type || "image/jpeg",
+        upsert: false
+      });
+
+    if(uploadError){
+      console.error(uploadError);
+      alert("Erro ao enviar foto para o storage.");
+      return;
+    }
+
+    const { data: publicData } = supabase.storage
+      .from(FOTO_BUCKET)
+      .getPublicUrl(path);
+
+    const fotoUrl = publicData?.publicUrl || "";
+    const legenda = photoCaptionInput.value.trim();
+
+    const { error: insertError } = await supabase
+      .from("chat_mensagens")
+      .insert({
+        de_numero: usuarioLogado.numero,
+        para_numero: contatoAtual.numero,
+        mensagem: legenda || "[foto]",
+        tipo: "foto",
+        foto_url: fotoUrl,
+        foto_path: path,
+        lido: false
+      });
+
+    if(insertError){
+      console.error(insertError);
+      alert("Erro ao registrar mensagem com foto.\n\nSe precisar, crie no Supabase as colunas foto_url e foto_path na tabela chat_mensagens.");
+      return;
+    }
+
+    resetPhotoPreview();
+    await carregarMensagens(true);
+    await renderContatos(contatosPermitidos);
+    ajustarAlturaMobile();
+  }catch(err){
+    console.error(err);
+    alert("Erro ao enviar foto.");
+  }finally{
+    btnEnviarFotoConfirmar.disabled = false;
+    btnEnviarFotoConfirmar.textContent = "Enviar foto";
+  }
+}
+
 async function enviarAudio(){
   if(!audioBlob || !usuarioLogado || !contatoAtual) return;
 
@@ -1548,6 +1747,19 @@ btnGravarAudio.onclick = iniciarGravacaoAudio;
 btnPararAudio.onclick = pararGravacaoAudio;
 btnEnviarAudio.onclick = enviarAudio;
 btnCancelarAudio.onclick = cancelarAudio;
+btnEnviarFoto.onclick = () => {
+  if(!contatoAtual){
+    alert("Abra uma conversa antes de enviar foto.");
+    return;
+  }
+  fileMensagemFoto.click();
+};
+fileMensagemFoto.addEventListener("change", () => {
+  const file = fileMensagemFoto.files?.[0];
+  if(file) abrirPreviewFoto(file);
+});
+btnCancelarFoto.onclick = resetPhotoPreview;
+btnEnviarFotoConfirmar.onclick = enviarFotoMensagem;
 
 async function detectarNovasMensagens(){
   if(!usuarioLogado || !contatosPermitidos.length) return;
@@ -1577,7 +1789,11 @@ async function detectarNovasMensagens(){
       if(!incoming) continue;
 
       const isOpenConversation = contatoAtual && contatoAtual.numero === contato.numero && !document.hidden;
-      const corpoNotif = ultima.tipo === "audio" ? "🎤 Áudio recebido" : ultima.mensagem;
+      const corpoNotif = ultima.tipo === "audio"
+        ? "🎤 Áudio recebido"
+        : ultima.tipo === "foto"
+          ? "📷 Foto recebida"
+          : ultima.mensagem;
 
       if(isOpenConversation){
         playNewMessageSound();
@@ -1686,6 +1902,7 @@ btnLogout.onclick = async () => {
   stopHeartbeatOnline();
   stopRinging();
   cancelarAudio();
+  resetPhotoPreview();
   await limparStatusDigitando();
   if(usuarioLogado){
     await atualizarPresenca(false);
@@ -2087,7 +2304,13 @@ async function renderContatos(lista){
         </div>
         <div class="contact-last">${
           c.ultima
-            ? escapeHtml(c.ultima.tipo === "audio" ? "🎤 Áudio" : c.ultima.mensagem)
+            ? escapeHtml(
+                c.ultima.tipo === "audio"
+                  ? "🎤 Áudio"
+                  : c.ultima.tipo === "foto"
+                    ? "📷 Foto"
+                    : c.ultima.mensagem
+              )
             : "Sem mensagens ainda"
         }</div>
       </div>
@@ -2147,6 +2370,20 @@ function renderMensagemConteudo(m){
       </div>
     `;
   }
+
+  if(m.tipo === "foto" && m.foto_url){
+    const legenda = m.mensagem && m.mensagem !== "[foto]"
+      ? `<div class="caption">${escapeHtml(m.mensagem)}</div>`
+      : "";
+
+    return `
+      <div class="msg-photo">
+        <img src="${escapeHtml(m.foto_url)}" alt="foto enviada" onclick="window.abrirFotoChat('${escapeHtml(m.foto_url)}')">
+        ${legenda}
+      </div>
+    `;
+  }
+
   return escapeHtml(m.mensagem || "");
 }
 
@@ -2174,7 +2411,7 @@ async function carregarMensagens(forceScroll=false){
     return;
   }
 
-  const renderKey = JSON.stringify((data || []).map(m => [m.id, m.created_at, m.tipo, m.audio_url, m.lido, m.audio_duracao]));
+  const renderKey = JSON.stringify((data || []).map(m => [m.id, m.created_at, m.tipo, m.audio_url, m.foto_url, m.lido, m.audio_duracao]));
   if(renderKey === ultimoChatRenderKey && !forceScroll) return;
   ultimoChatRenderKey = renderKey;
 
@@ -2282,6 +2519,21 @@ async function enviarMensagem(){
   ajustarAlturaMobile();
   msgInput.focus();
 }
+
+window.abrirFotoChat = function(url){
+  const overlay = document.createElement("div");
+  overlay.className = "photo-open-overlay";
+  overlay.innerHTML = `
+    <button type="button">Fechar</button>
+    <img src="${escapeHtml(url)}" alt="foto ampliada">
+  `;
+
+  const fechar = () => overlay.remove();
+  overlay.addEventListener("click", (e) => {
+    if(e.target === overlay || e.target.tagName === "BUTTON") fechar();
+  });
+  document.body.appendChild(overlay);
+};
 
 searchContato.addEventListener("input", async () => {
   await renderContatos(contatosPermitidos);
