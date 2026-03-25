@@ -501,6 +501,8 @@ button{
   </div>
 </div>
 
+<audio id="somNovoPedido" preload="auto" src="/sons/novo-pedido.mp3"></audio>
+
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
@@ -512,6 +514,9 @@ const supabase = createClient(
 let app_id = null;
 let pedidosCache = [];
 let pausadoAutoRefresh = false;
+let idsAtivosAnteriores = new Set();
+let primeiraCargaPedidos = true;
+let audioLiberado = false;
 
 const listaPedidos = document.getElementById("listaPedidos");
 const listaHistorico = document.getElementById("listaHistorico");
@@ -519,6 +524,43 @@ const filtroHistorico = document.getElementById("filtroHistorico");
 const modalDetalhe = document.getElementById("modalDetalhe");
 const conteudoDetalhe = document.getElementById("conteudoDetalhe");
 const modalTitulo = document.getElementById("modalTitulo");
+const somNovoPedido = document.getElementById("somNovoPedido");
+
+function liberarAudio(){
+  if(audioLiberado || !somNovoPedido) return;
+
+  somNovoPedido.volume = 1;
+  somNovoPedido.muted = true;
+
+  somNovoPedido.play()
+    .then(() => {
+      somNovoPedido.pause();
+      somNovoPedido.currentTime = 0;
+      somNovoPedido.muted = false;
+      audioLiberado = true;
+      console.log("Áudio liberado");
+    })
+    .catch((err) => {
+      console.warn("Áudio ainda bloqueado:", err);
+    });
+}
+
+function tocarSomNovoPedido(){
+  if(!somNovoPedido) return;
+
+  somNovoPedido.pause();
+  somNovoPedido.currentTime = 0;
+
+  const promessa = somNovoPedido.play();
+  if(promessa){
+    promessa.catch((err) => {
+      console.warn("Erro ao tocar som:", err);
+    });
+  }
+}
+
+document.addEventListener("click", liberarAudio, { passive:true });
+document.addEventListener("touchstart", liberarAudio, { passive:true });
 
 function formatarReal(valor){
   return Number(valor || 0).toLocaleString("pt-BR", {
@@ -1292,6 +1334,34 @@ async function carregarPedidos(){
   }));
 
   renderizarPedidos();
+
+  const idsAtivosAtuais = new Set(
+    pedidosCache
+      .filter(p => {
+        const s = statusEfetivo(p);
+        return !["historico", "cancelado"].includes(s);
+      })
+      .map(p => String(p.id))
+  );
+
+  if(!primeiraCargaPedidos){
+    let entrouPedidoNovo = false;
+
+    for(const id of idsAtivosAtuais){
+      if(!idsAtivosAnteriores.has(id)){
+        entrouPedidoNovo = true;
+        break;
+      }
+    }
+
+    if(entrouPedidoNovo){
+      console.log("NOVO PEDIDO DETECTADO");
+      tocarSomNovoPedido();
+    }
+  }
+
+  idsAtivosAnteriores = idsAtivosAtuais;
+  primeiraCargaPedidos = false;
 }
 
 window.marcarPago = async function(id){
