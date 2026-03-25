@@ -1,4 +1,4 @@
-const CACHE_NAME = "ff-chat-v1";
+const CACHE_NAME = "ff-chat-v2";
 const ASSETS = [
   "/ff-chat/",
   "/ff-chat/index.html",
