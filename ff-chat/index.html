@@ -909,6 +909,32 @@ img{display:block}
     width:100%;
   }
 }
+
+.msg-actions{
+  display:flex;
+  justify-content:flex-end;
+  margin-top:8px;
+}
+
+.msg-delete-btn{
+  border:none;
+  background:rgba(255,255,255,.14);
+  color:#fff;
+  padding:6px 10px;
+  border-radius:10px;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.msg-delete-btn:hover{
+  background:rgba(255,255,255,.22);
+}
+
+.msg-delete-btn:disabled{
+  opacity:.6;
+  cursor:not-allowed;
+}
+
 </style>
 </head>
 <body>
@@ -1176,6 +1202,7 @@ let contatosPermitidos = [];
 let autoRefreshTimer = null;
 let ultimoChatRenderKey = "";
 let lastMessageMap = {};
+let apagandoMensagemId = null;
 let unreadCountMap = {};
 let ringingContactNumero = null;
 let ringInterval = null;
@@ -2433,6 +2460,97 @@ async function abrirConversa(contato){
   }, 500);
 }
 
+function extrairStoragePath(url, bucket){
+  if(!url || !bucket) return null;
+
+  try{
+    const u = new URL(url);
+    const marker = `/storage/v1/object/public/${bucket}/`;
+    const idx = u.pathname.indexOf(marker);
+    if(idx === -1) return null;
+    return decodeURIComponent(u.pathname.slice(idx + marker.length));
+  }catch(e){
+    return null;
+  }
+}
+
+function renderMensagemAcoes(m, isMe){
+  if(!isMe) return "";
+
+  const disabled = apagandoMensagemId === m.id ? "disabled" : "";
+  const label = apagandoMensagemId === m.id ? "Apagando..." : "Apagar";
+
+  return `
+    <div class="msg-actions">
+      <button class="msg-delete-btn" data-apagar-msg="${m.id}" ${disabled}>${label}</button>
+    </div>
+  `;
+}
+
+async function apagarArquivoMensagem(m){
+  const arquivos = [
+    { bucket: FOTO_BUCKET, url: m.foto_url },
+    { bucket: AUDIO_BUCKET, url: m.audio_url }
+  ];
+
+  for(const item of arquivos){
+    if(!item.url) continue;
+    const path = extrairStoragePath(item.url, item.bucket);
+    if(!path) continue;
+    try{
+      await supabase.storage.from(item.bucket).remove([path]);
+    }catch(err){
+      console.warn(`Não consegui apagar arquivo do bucket ${item.bucket}:`, err);
+    }
+  }
+}
+
+window.apagarMensagem = async function(idMensagem){
+  if(!usuarioLogado || !idMensagem) return;
+  if(apagandoMensagemId) return;
+
+  const ok = confirm("Apagar esta mensagem?");
+  if(!ok) return;
+
+  apagandoMensagemId = idMensagem;
+  try{
+    const { data: msg, error: erroBusca } = await supabase
+      .from("chat_mensagens")
+      .select("id, de_numero, tipo, foto_url, audio_url")
+      .eq("id", idMensagem)
+      .single();
+
+    if(erroBusca || !msg){
+      console.error(erroBusca);
+      alert("Não foi possível localizar a mensagem.");
+      return;
+    }
+
+    if(msg.de_numero !== usuarioLogado.numero){
+      alert("Você só pode apagar suas próprias mensagens.");
+      return;
+    }
+
+    await apagarArquivoMensagem(msg);
+
+    const { error } = await supabase
+      .from("chat_mensagens")
+      .delete()
+      .eq("id", idMensagem);
+
+    if(error){
+      console.error(error);
+      alert("Erro ao apagar mensagem.");
+      return;
+    }
+
+    await carregarMensagens(true);
+    await renderContatos(contatosPermitidos);
+  } finally {
+    apagandoMensagemId = null;
+  }
+}
+
 function renderMensagemConteudo(m){
   if(m.tipo === "audio" && m.audio_url){
     return `
@@ -2508,9 +2626,10 @@ async function carregarMensagens(forceScroll=false){
 
     html += `
       <div class="msg-row ${isMe ? "me" : "other"}">
-        <div class="msg ${isMe ? "me" : "other"}">
+        <div class="msg ${isMe ? "me" : "other"}" data-msg-id="${m.id}">
           ${renderMensagemConteudo(m)}
           <div class="msg-time">${escapeHtml(timeOnly(m.created_at))}${statusIcon}</div>
+          ${renderMensagemAcoes(m, isMe)}
         </div>
       </div>
     `;
@@ -2526,6 +2645,14 @@ async function carregarMensagens(forceScroll=false){
 
   atualizarMedidasChat();
 }
+
+messagesBox.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-apagar-msg]");
+  if(!btn) return;
+  const id = Number(btn.getAttribute("data-apagar-msg"));
+  if(!id) return;
+  await window.apagarMensagem(id);
+});
 
 btnEnviarMsg.onclick = enviarMensagem;
 msgInput.addEventListener("keydown", (e) => {
