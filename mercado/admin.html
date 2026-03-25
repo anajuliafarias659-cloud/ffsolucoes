@@ -277,7 +277,6 @@ function liberarAudio(){
     }
 
     audioLiberado = true;
-    console.log("Áudio liberado");
   }catch(error){
     console.warn("Não foi possível liberar áudio:", error);
   }
@@ -304,7 +303,6 @@ function tocarSomNovoPedido(){
 
     osc1.connect(gain1);
     gain1.connect(audioCtx.destination);
-
     osc1.start(agora);
     osc1.stop(agora + 0.20);
 
@@ -320,7 +318,6 @@ function tocarSomNovoPedido(){
 
     osc2.connect(gain2);
     gain2.connect(audioCtx.destination);
-
     osc2.start(agora + 0.22);
     osc2.stop(agora + 0.40);
   }catch(error){
@@ -371,17 +368,35 @@ async function carregarUsuario(){
 async function carregarModoPublico(){
   if(!app_id) return;
 
-  const { data, error } = await supabase
-    .from("config_site")
-    .select("modo_publico")
-    .eq("app_id", app_id)
-    .maybeSingle();
+  try{
+    const { data, error } = await supabase
+      .from("config_site")
+      .select("*")
+      .eq("app_id", app_id)
+      .limit(1)
+      .maybeSingle();
 
-  if(!error && data && data.modo_publico){
-    modoPublico = data.modo_publico;
+    if(error){
+      console.warn("Config site não carregada:", error);
+      atualizarTextoModo();
+      return;
+    }
+
+    if(data){
+      if(data.modo_publico){
+        modoPublico = data.modo_publico;
+      }else if(data.modoPublico){
+        modoPublico = data.modoPublico;
+      }else if(data.modo){
+        modoPublico = data.modo;
+      }
+    }
+
+    atualizarTextoModo();
+  }catch(error){
+    console.warn("Erro ao carregar modo público:", error);
+    atualizarTextoModo();
   }
-
-  atualizarTextoModo();
 }
 
 function atualizarTextoModo(){
@@ -447,20 +462,41 @@ window.alternarPublico = async function(){
   modoPublico = modoPublico === "catalogo" ? "vendas" : "catalogo";
   atualizarTextoModo();
 
-  const { error } = await supabase
-    .from("config_site")
-    .upsert({
-      app_id,
+  try{
+    const payload = {
+      app_id: app_id,
       modo_publico: modoPublico
-    }, { onConflict: "app_id" });
+    };
 
-  if(error){
+    const { error } = await supabase
+      .from("config_site")
+      .upsert(payload, { onConflict: "app_id" });
+
+    if(error){
+      console.warn("Erro ao salvar em modo_publico, tentando fallback:", error);
+
+      const { error: errorFallback } = await supabase
+        .from("config_site")
+        .upsert({
+          app_id: app_id,
+          modo: modoPublico
+        }, { onConflict: "app_id" });
+
+      if(errorFallback){
+        modoPublico = modoAnterior;
+        atualizarTextoModo();
+        alert("Erro ao salvar modo público.");
+        console.error(errorFallback);
+        return;
+      }
+    }
+
+    alert("Modo público alterado para: " + (modoPublico === "vendas" ? "Vendas" : "Catálogo"));
+  }catch(error){
     modoPublico = modoAnterior;
     atualizarTextoModo();
     alert("Erro ao salvar modo público.");
     console.error(error);
-  }else{
-    alert("Modo público alterado para: " + (modoPublico === "vendas" ? "Vendas" : "Catálogo"));
   }
 };
 
