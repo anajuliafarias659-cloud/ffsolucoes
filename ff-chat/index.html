@@ -535,6 +535,105 @@ img{display:block}
   white-space:pre-wrap;
   word-break:break-word;
 }
+
+.reply-preview{
+  width:100%;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:rgba(6,26,44,.92);
+  border:1px solid rgba(0,247,255,.14);
+  box-shadow:0 0 10px rgba(0,180,255,.05);
+}
+.reply-preview.hidden{display:none}
+.reply-preview-main{
+  min-width:0;
+  flex:1;
+}
+.reply-preview-title{
+  font-size:12px;
+  color:#88f8ff;
+  font-weight:800;
+  margin-bottom:4px;
+}
+.reply-preview-text{
+  color:#d6edf1;
+  font-size:13px;
+  line-height:1.35;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.reply-preview-close{
+  border:none;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  border-radius:10px;
+  padding:8px 10px;
+  cursor:pointer;
+  font-weight:800;
+}
+.msg-reply{
+  margin-bottom:8px;
+  padding:8px 10px;
+  border-left:3px solid #00d9ff;
+  border-radius:8px;
+  background:rgba(0,0,0,.16);
+}
+.msg-reply-name{
+  font-size:12px;
+  font-weight:800;
+  color:#9defff;
+  margin-bottom:4px;
+}
+.msg-reply-text{
+  font-size:12px;
+  color:#d7e8ec;
+  opacity:.95;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.msg.selected-action{
+  outline:2px solid rgba(0,217,255,.55);
+}
+.msg-action-menu{
+  position:fixed;
+  z-index:1300;
+  min-width:150px;
+  background:linear-gradient(180deg, rgba(6,24,40,.98), rgba(3,14,26,.98));
+  border:1px solid rgba(0,247,255,.18);
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+  border-radius:14px;
+  padding:8px;
+}
+.msg-action-menu.hidden{display:none}
+.msg-action-menu button{
+  width:100%;
+  text-align:left;
+  border:none;
+  background:transparent;
+  color:#eefcff;
+  padding:10px 12px;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:700;
+  font-size:13px;
+  transition:background .18s ease, color .18s ease;
+}
+.msg-action-menu button:hover{
+  background:rgba(255,255,255,.06);
+}
+.msg-action-menu button.danger{
+  color:#ff9aa9;
+}
+.msg-action-menu button.danger:hover{
+  background:rgba(239,68,68,.10);
+  color:#ffd7de;
+}
+
 .photo-preview{
   width:100%;
   display:flex;
@@ -909,32 +1008,6 @@ img{display:block}
     width:100%;
   }
 }
-
-.msg-actions{
-  display:flex;
-  justify-content:flex-end;
-  margin-top:8px;
-}
-
-.msg-delete-btn{
-  border:none;
-  background:rgba(255,255,255,.14);
-  color:#fff;
-  padding:6px 10px;
-  border-radius:10px;
-  font-size:12px;
-  cursor:pointer;
-}
-
-.msg-delete-btn:hover{
-  background:rgba(255,255,255,.22);
-}
-
-.msg-delete-btn:disabled{
-  opacity:.6;
-  cursor:not-allowed;
-}
-
 </style>
 </head>
 <body>
@@ -1032,6 +1105,14 @@ img{display:block}
     <div id="typingIndicator" class="typing-indicator hidden"></div>
 
     <div id="chatInputArea" class="chat-input hidden">
+      <div id="replyPreview" class="reply-preview hidden">
+        <div class="reply-preview-main">
+          <div class="reply-preview-title" id="replyPreviewTitle">Respondendo</div>
+          <div class="reply-preview-text" id="replyPreviewText"></div>
+        </div>
+        <button id="btnCancelarReply" class="reply-preview-close" type="button">✕</button>
+      </div>
+
       <input id="msgInput" placeholder="Digite uma mensagem">
       <button id="btnEnviarFoto" class="audio-btn">📷 Foto</button>
       <input id="fileMensagemFoto" type="file" accept="image/*" class="hidden">
@@ -1061,6 +1142,8 @@ img{display:block}
     </div>
   </div>
 </div>
+
+<div id="messageActionMenu" class="msg-action-menu hidden"></div>
 
 <div id="adminPanel" class="admin-panel hidden">
   <div class="admin-card">
@@ -1165,6 +1248,10 @@ const chatAvatar = document.getElementById("chatAvatar");
 const chatNome = document.getElementById("chatNome");
 const chatNumero = document.getElementById("chatNumero");
 const msgInput = document.getElementById("msgInput");
+const replyPreview = document.getElementById("replyPreview");
+const replyPreviewTitle = document.getElementById("replyPreviewTitle");
+const replyPreviewText = document.getElementById("replyPreviewText");
+const btnCancelarReply = document.getElementById("btnCancelarReply");
 const btnEnviarMsg = document.getElementById("btnEnviarMsg");
 const mobileBack = document.getElementById("mobileBack");
 const btnEnviarFoto = document.getElementById("btnEnviarFoto");
@@ -1182,6 +1269,7 @@ const btnCancelarAudio = document.getElementById("btnCancelarAudio");
 const audioPreview = document.getElementById("audioPreview");
 const audioPreviewPlayer = document.getElementById("audioPreviewPlayer");
 const audioPreviewDuration = document.getElementById("audioPreviewDuration");
+const messageActionMenu = document.getElementById("messageActionMenu");
 
 const closeAdmin = document.getElementById("closeAdmin");
 const novoNome = document.getElementById("novoNome");
@@ -1202,7 +1290,9 @@ let contatosPermitidos = [];
 let autoRefreshTimer = null;
 let ultimoChatRenderKey = "";
 let lastMessageMap = {};
-let apagandoMensagemId = null;
+let replyToMessage = null;
+let longPressTimer = null;
+let selectedMessageElement = null;
 let unreadCountMap = {};
 let ringingContactNumero = null;
 let ringInterval = null;
@@ -1756,6 +1846,7 @@ async function enviarFotoMensagem(){
         tipo: "foto",
         foto_url: fotoUrl,
         foto_path: path,
+        reply_to_id: replyToMessage?.id || null,
         lido: false
       });
 
@@ -1766,6 +1857,7 @@ async function enviarFotoMensagem(){
     }
 
     resetPhotoPreview();
+    cancelarResposta();
     await carregarMensagens(true);
     await renderContatos(contatosPermitidos);
     ajustarAlturaMobile();
@@ -1820,6 +1912,7 @@ async function enviarAudio(){
         audio_url: audioUrl,
         audio_path: path,
         audio_duracao: audioPreviewDurationSec || 0,
+        reply_to_id: replyToMessage?.id || null,
         lido: false
       });
 
@@ -1832,6 +1925,7 @@ async function enviarAudio(){
     }
 
     cancelarAudio();
+    cancelarResposta();
     await carregarMensagens(true);
     await renderContatos(contatosPermitidos);
   }catch(err){
@@ -2460,96 +2554,127 @@ async function abrirConversa(contato){
   }, 500);
 }
 
-function extrairStoragePath(url, bucket){
-  if(!url || !bucket) return null;
 
-  try{
-    const u = new URL(url);
-    const marker = `/storage/v1/object/public/${bucket}/`;
-    const idx = u.pathname.indexOf(marker);
-    if(idx === -1) return null;
-    return decodeURIComponent(u.pathname.slice(idx + marker.length));
-  }catch(e){
-    return null;
-  }
+function resumoMensagem(m){
+  if(!m) return "";
+  if(m.tipo === "foto") return m.mensagem && m.mensagem !== "[foto]" ? `📷 ${m.mensagem}` : "📷 Foto";
+  if(m.tipo === "audio") return "🎤 Áudio";
+  return m.mensagem || "";
 }
 
-function renderMensagemAcoes(m, isMe){
-  if(!isMe) return "";
+function iniciarResposta(mensagem){
+  if(!mensagem) return;
+  replyToMessage = mensagem;
+  replyPreviewTitle.textContent = `Respondendo a ${mensagem.de_numero === usuarioLogado?.numero ? "você" : (contatoAtual?.nome || mensagem.de_numero)}`;
+  replyPreviewText.textContent = resumoMensagem(mensagem);
+  replyPreview.classList.remove("hidden");
+  closeMessageMenu();
+  atualizarMedidasChat();
+  setTimeout(() => msgInput.focus(), 30);
+}
 
-  const disabled = apagandoMensagemId === m.id ? "disabled" : "";
-  const label = apagandoMensagemId === m.id ? "Apagando..." : "Apagar";
+function cancelarResposta(){
+  replyToMessage = null;
+  replyPreview.classList.add("hidden");
+  replyPreviewText.textContent = "";
+  closeMessageMenu();
+  atualizarMedidasChat();
+}
 
+function renderBlocoResposta(mensagemOriginal){
+  if(!mensagemOriginal) return "";
+  const nome = mensagemOriginal.de_numero === usuarioLogado?.numero ? "Você" : escapeHtml(contatoAtual?.nome || mensagemOriginal.de_numero || "Contato");
   return `
-    <div class="msg-actions">
-      <button class="msg-delete-btn" data-apagar-msg="${m.id}" ${disabled}>${label}</button>
+    <div class="msg-reply">
+      <div class="msg-reply-name">${nome}</div>
+      <div class="msg-reply-text">${escapeHtml(resumoMensagem(mensagemOriginal))}</div>
     </div>
   `;
 }
 
-async function apagarArquivoMensagem(m){
-  const arquivos = [
-    { bucket: FOTO_BUCKET, url: m.foto_url },
-    { bucket: AUDIO_BUCKET, url: m.audio_url }
-  ];
-
-  for(const item of arquivos){
-    if(!item.url) continue;
-    const path = extrairStoragePath(item.url, item.bucket);
-    if(!path) continue;
-    try{
-      await supabase.storage.from(item.bucket).remove([path]);
-    }catch(err){
-      console.warn(`Não consegui apagar arquivo do bucket ${item.bucket}:`, err);
-    }
+function closeMessageMenu(){
+  messageActionMenu.classList.add("hidden");
+  messageActionMenu.innerHTML = "";
+  if(selectedMessageElement){
+    selectedMessageElement.classList.remove("selected-action");
+    selectedMessageElement = null;
   }
 }
 
-window.apagarMensagem = async function(idMensagem){
+function openMessageMenu(x, y, msg, element){
+  if(!msg || !element) return;
+  closeMessageMenu();
+
+  selectedMessageElement = element;
+  selectedMessageElement.classList.add("selected-action");
+
+  const isMine = msg.de_numero === usuarioLogado?.numero;
+  let html = `<button type="button" data-action="reply">Responder</button>`;
+  if(isMine){
+    html += `<button type="button" class="danger" data-action="delete">Apagar</button>`;
+  }
+
+  messageActionMenu.innerHTML = html;
+  messageActionMenu.dataset.messageId = String(msg.id);
+  messageActionMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - 170))}px`;
+  messageActionMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - 120))}px`;
+  messageActionMenu.classList.remove("hidden");
+}
+
+async function apagarMensagem(idMensagem){
   if(!usuarioLogado || !idMensagem) return;
-  if(apagandoMensagemId) return;
 
   const ok = confirm("Apagar esta mensagem?");
   if(!ok) return;
 
-  apagandoMensagemId = idMensagem;
-  try{
-    const { data: msg, error: erroBusca } = await supabase
-      .from("chat_mensagens")
-      .select("id, de_numero, tipo, foto_url, audio_url")
-      .eq("id", idMensagem)
-      .single();
+  const { data: msg, error: erroBusca } = await supabase
+    .from("chat_mensagens")
+    .select("id,de_numero,foto_url,foto_path,audio_url,audio_path")
+    .eq("id", idMensagem)
+    .single();
 
-    if(erroBusca || !msg){
-      console.error(erroBusca);
-      alert("Não foi possível localizar a mensagem.");
-      return;
-    }
-
-    if(msg.de_numero !== usuarioLogado.numero){
-      alert("Você só pode apagar suas próprias mensagens.");
-      return;
-    }
-
-    await apagarArquivoMensagem(msg);
-
-    const { error } = await supabase
-      .from("chat_mensagens")
-      .delete()
-      .eq("id", idMensagem);
-
-    if(error){
-      console.error(error);
-      alert("Erro ao apagar mensagem.");
-      return;
-    }
-
-    await carregarMensagens(true);
-    await renderContatos(contatosPermitidos);
-  } finally {
-    apagandoMensagemId = null;
+  if(erroBusca || !msg){
+    console.error(erroBusca);
+    alert("Não foi possível localizar a mensagem.");
+    return;
   }
+
+  if(msg.de_numero !== usuarioLogado.numero){
+    alert("Você só pode apagar suas próprias mensagens.");
+    return;
+  }
+
+  try{
+    if(msg.foto_path){
+      await supabase.storage.from(FOTO_BUCKET).remove([msg.foto_path]);
+    }
+    if(msg.audio_path){
+      await supabase.storage.from(AUDIO_BUCKET).remove([msg.audio_path]);
+    }
+  }catch(e){
+    console.warn("Não consegui apagar arquivo do storage.", e);
+  }
+
+  const { error } = await supabase
+    .from("chat_mensagens")
+    .delete()
+    .eq("id", idMensagem);
+
+  if(error){
+    console.error(error);
+    alert("Erro ao apagar mensagem.");
+    return;
+  }
+
+  if(replyToMessage && Number(replyToMessage.id) === Number(idMensagem)){
+    cancelarResposta();
+  }
+
+  closeMessageMenu();
+  await carregarMensagens(true);
+  await renderContatos(contatosPermitidos);
 }
+
 
 function renderMensagemConteudo(m){
   if(m.tipo === "audio" && m.audio_url){
@@ -2608,8 +2733,10 @@ async function carregarMensagens(forceScroll=false){
 
   let html = "";
   let ultimaData = "";
+  const mensagens = data || [];
+  const msgMap = new Map(mensagens.map(item => [String(item.id), item]));
 
-  for(const m of (data || [])){
+  for(const m of mensagens){
     const dataAtual = dateLabel(m.created_at);
     if(dataAtual !== ultimaData){
       html += `<div class="day-sep"><span>${escapeHtml(dataAtual)}</span></div>`;
@@ -2624,18 +2751,56 @@ async function carregarMensagens(forceScroll=false){
         : `<span class="msg-status">✔</span>`;
     }
 
+    const replyHtml = m.reply_to_id ? renderBlocoResposta(msgMap.get(String(m.reply_to_id))) : "";
+
     html += `
-      <div class="msg-row ${isMe ? "me" : "other"}">
+      <div class="msg-row ${isMe ? "me" : "other"}" data-msg-id="${m.id}">
         <div class="msg ${isMe ? "me" : "other"}" data-msg-id="${m.id}">
+          ${replyHtml}
           ${renderMensagemConteudo(m)}
           <div class="msg-time">${escapeHtml(timeOnly(m.created_at))}${statusIcon}</div>
-          ${renderMensagemAcoes(m, isMe)}
         </div>
       </div>
     `;
   }
 
   messagesBox.innerHTML = html || `<div style="color:var(--muted);text-align:center;padding-top:30px;">Nenhuma mensagem ainda.</div>`;
+
+  const getMensagemPorId = (id) => mensagens.find(item => String(item.id) === String(id));
+
+  messagesBox.querySelectorAll(".msg").forEach((el) => {
+    const id = el.dataset.msgId;
+    const mensagem = getMensagemPorId(id);
+    if(!mensagem) return;
+
+    el.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      openMessageMenu(ev.clientX, ev.clientY, mensagem, el);
+    });
+
+    el.addEventListener("pointerdown", (ev) => {
+      if(ev.pointerType !== "touch") return;
+      clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(() => {
+        openMessageMenu(ev.clientX || 24, ev.clientY || (window.innerHeight - 160), mensagem, el);
+      }, 520);
+    }, { passive:true });
+
+    const stopLongPress = () => {
+      clearTimeout(longPressTimer);
+    };
+
+    el.addEventListener("pointerup", stopLongPress, { passive:true });
+    el.addEventListener("pointercancel", stopLongPress, { passive:true });
+    el.addEventListener("pointermove", stopLongPress, { passive:true });
+  });
+
+  messagesBox.querySelectorAll(".msg-action-delete").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      apagarMensagem(btn.dataset.id);
+    });
+  });
 
   if(forceScroll){
     requestAnimationFrame(() => {
@@ -2645,14 +2810,6 @@ async function carregarMensagens(forceScroll=false){
 
   atualizarMedidasChat();
 }
-
-messagesBox.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-apagar-msg]");
-  if(!btn) return;
-  const id = Number(btn.getAttribute("data-apagar-msg"));
-  if(!id) return;
-  await window.apagarMensagem(id);
-});
 
 btnEnviarMsg.onclick = enviarMensagem;
 msgInput.addEventListener("keydown", (e) => {
@@ -2672,6 +2829,48 @@ msgInput.addEventListener("focus", () => {
     ajustarAlturaMobile();
   }, 350);
 });
+btnCancelarReply.onclick = cancelarResposta;
+
+document.addEventListener("click", (e) => {
+  if(!messageActionMenu.classList.contains("hidden")){
+    if(!messageActionMenu.contains(e.target)){
+      closeMessageMenu();
+    }
+  }
+});
+
+window.addEventListener("scroll", closeMessageMenu, { passive:true });
+window.addEventListener("resize", closeMessageMenu);
+
+messageActionMenu.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if(!btn) return;
+
+  const msgId = messageActionMenu.dataset.messageId;
+  if(!msgId) return;
+
+  const { data: mensagem, error } = await supabase
+    .from("chat_mensagens")
+    .select("*")
+    .eq("id", msgId)
+    .single();
+
+  if(error || !mensagem){
+    console.error(error);
+    closeMessageMenu();
+    return;
+  }
+
+  if(btn.dataset.action === "reply"){
+    iniciarResposta(mensagem);
+    return;
+  }
+
+  if(btn.dataset.action === "delete"){
+    await apagarMensagem(msgId);
+  }
+});
+
 msgInput.addEventListener("input", async () => {
   if(!msgInput.value.trim()){
     clearTimeout(typingTimer);
@@ -2699,6 +2898,7 @@ async function enviarMensagem(){
     para_numero: contatoAtual.numero,
     mensagem: texto,
     tipo: "texto",
+    reply_to_id: replyToMessage?.id || null,
     lido: false
   });
 
@@ -2711,6 +2911,7 @@ async function enviarMensagem(){
   }
 
   msgInput.value = "";
+  cancelarResposta();
   await limparStatusDigitando();
   await carregarMensagens(true);
   await renderContatos(contatosPermitidos);
