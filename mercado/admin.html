@@ -141,7 +141,7 @@ body{
   color:#fff;
   font-size:12px;
   font-weight:bold;
-  display:flex;
+  display:none;
   align-items:center;
   justify-content:center;
   box-shadow:0 4px 10px rgba(0,0,0,.3);
@@ -248,6 +248,7 @@ import { supabase } from "../js/supabase.js";
 
 let app_id = null;
 let modoPublico = "catalogo";
+let intervaloPedidos = null;
 
 async function verificarSessao(){
   const { data:{ session }, error } = await supabase.auth.getSession();
@@ -285,6 +286,8 @@ async function carregarUsuario(){
   document.getElementById("linkPublico").innerText = urlPublica;
 
   await carregarModoPublico();
+  await atualizarPedidosOnline();
+  iniciarAtualizacaoPedidos();
 }
 
 async function carregarModoPublico(){
@@ -306,6 +309,43 @@ async function carregarModoPublico(){
 function atualizarTextoModo(){
   const el = document.getElementById("modoPublico");
   el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
+}
+
+async function atualizarPedidosOnline(){
+  if(!app_id) return;
+
+  const badge = document.getElementById("badgePedidos");
+  if(!badge) return;
+
+  const { count, error } = await supabase
+    .from("pedidos_online")
+    .select("*", { count: "exact", head: true })
+    .eq("app_id", app_id)
+    .eq("status", "novo");
+
+  if(error){
+    console.error("Erro ao buscar pedidos online:", error);
+    return;
+  }
+
+  const total = count || 0;
+  badge.innerText = total;
+
+  if(total > 0){
+    badge.style.display = "flex";
+  }else{
+    badge.style.display = "none";
+  }
+}
+
+function iniciarAtualizacaoPedidos(){
+  if(intervaloPedidos){
+    clearInterval(intervaloPedidos);
+  }
+
+  intervaloPedidos = setInterval(async () => {
+    await atualizarPedidosOnline();
+  }, 5000);
 }
 
 window.alternarPublico = async function(){
@@ -381,6 +421,10 @@ window.irPara = function(pagina){
 };
 
 window.logout = async function(){
+  if(intervaloPedidos){
+    clearInterval(intervaloPedidos);
+  }
+
   await supabase.auth.signOut();
   window.location.href = "/auth/login.html";
 };
