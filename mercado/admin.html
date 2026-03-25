@@ -227,11 +227,6 @@ body{
       <div>Relatórios</div>
     </div>
 
-    <div class="card" onclick="alternarPublico()">
-      <div>🔁</div>
-      <div id="modoPublico">Modo: Catálogo</div>
-    </div>
-
     <div class="card" onclick="irPara('https://www.ffsolucoes.com.br/config-site.html')">
       <div>⚙️</div>
       <div>Configurar Site</div>
@@ -253,11 +248,83 @@ body{
   </div>
 </div>
 
+<audio id="somNovoPedido" preload="auto">
+  <source src="../sons/novo-pedido.mp3" type="audio/mpeg">
+</audio>
+
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
 let app_id = null;
-let modoPublico = "catalogo";
+let intervaloPedidos = null;
+let primeiraCarga = true;
+let idsAnteriores = new Set();
+let audioLiberado = false;
+
+const audio = document.getElementById("somNovoPedido");
+
+function liberarAudio(){
+  if(audioLiberado || !audio) return;
+
+  audio.volume = 1;
+  audio.muted = true;
+
+  audio.play()
+    .then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.muted = false;
+      audioLiberado = true;
+      console.log("Áudio liberado com sucesso");
+    })
+    .catch((err) => {
+      console.warn("Áudio ainda bloqueado:", err);
+    });
+}
+
+document.addEventListener("click", liberarAudio, { passive:true });
+document.addEventListener("touchstart", liberarAudio, { passive:true });
+
+async function pedirPermissaoNotificacao(){
+  if(!("Notification" in window)) return;
+
+  try{
+    if(Notification.permission === "default"){
+      await Notification.requestPermission();
+    }
+  }catch(error){
+    console.warn("Erro permissão notificação:", error);
+  }
+}
+
+function tocarSom(){
+  if(!audioLiberado || !audio) return;
+
+  try{
+    audio.pause();
+    audio.currentTime = 0;
+
+    const promessa = audio.play();
+    if(promessa){
+      promessa.catch(err => console.warn("Erro ao tocar áudio:", err));
+    }
+  }catch(error){
+    console.warn("Falha no áudio:", error);
+  }
+}
+
+function mostrarNotificacao(qtd){
+  if(!("Notification" in window)) return;
+  if(Notification.permission !== "granted") return;
+
+  try{
+    new Notification("Novo pedido recebido", {
+      body: qtd > 1 ? `${qtd} novos pedidos chegaram.` : "1 novo pedido chegou."
+    });
+  }catch(error){
+    console.warn("Erro ao mostrar notificação:", error);
+  }
+}
 
 async function verificarSessao(){
   const { data:{ session }, error } = await supabase.auth.getSession();
@@ -276,7 +343,7 @@ async function carregarUsuario(){
 
   const { data: usuario, error } = await supabase
     .from("usuarios")
-    .select("nome, app_id")
+    .select("nome, email, app_id")
     .eq("id", userId)
     .single();
 
@@ -288,37 +355,15 @@ async function carregarUsuario(){
 
   app_id = usuario.app_id;
 
-  document.getElementById("nome").innerText = usuario.nome || "";
+  document.getElementById("nome").innerText = usuario.nome || usuario.email || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
 
-  const urlPublica = `${location.origin}/public/vitrine/?app_id=${usuario.app_id}`;
+  const urlPublica = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(usuario.app_id)}`;
   document.getElementById("linkPublico").innerText = urlPublica;
 
-  await carregarModoPublico();
-
-  verificarPedidos();
-  setInterval(verificarPedidos, 5000);
-}
-
-async function carregarModoPublico(){
-  if(!app_id) return;
-
-  const { data, error } = await supabase
-    .from("config_site")
-    .select("modo_publico")
-    .eq("app_id", app_id)
-    .maybeSingle();
-
-  if(!error && data && data.modo_publico){
-    modoPublico = data.modo_publico;
-  }
-
-  atualizarTextoModo();
-}
-
-function atualizarTextoModo(){
-  const el = document.getElementById("modoPublico");
-  el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
+  await pedirPermissaoNotificacao();
+  await verificarPedidos();
+  intervaloPedidos = setInterval(verificarPedidos, 5000);
 }
 
 async function verificarPedidos(){
@@ -330,57 +375,45 @@ async function verificarPedidos(){
     .eq("app_id", app_id)
     .eq("status", "novo");
 
-  if(error) return;
+  if(error){
+    console.error("Erro ao buscar pedidos:", error);
+    return;
+  }
 
+  const pedidos = data || [];
+  const idsAtuais = new Set(pedidos.map(item => String(item.id)));
   const badge = document.getElementById("badgePedidos");
   const card = document.getElementById("cardPedidos");
 
-  if(data && data.length > 0){
-    badge.style.display = "inline-block";
-    badge.innerText = data.length;
+  if(pedidos.length > 0){
+    badge.style.display = "flex";
+    badge.innerText = pedidos.length;
     card.classList.add("piscar");
   }else{
     badge.style.display = "none";
+    badge.innerText = "0";
     card.classList.remove("piscar");
   }
+
+  if(!primeiraCarga){
+    let novos = 0;
+
+    for(const id of idsAtuais){
+      if(!idsAnteriores.has(id)){
+        novos++;
+      }
+    }
+
+    if(novos > 0){
+      console.log("Novos pedidos detectados:", novos);
+      tocarSom();
+      mostrarNotificacao(novos);
+    }
+  }
+
+  idsAnteriores = idsAtuais;
+  primeiraCarga = false;
 }
-
-window.alternarPublico = async function(){
-  if(!app_id){
-    alert("Negócio não identificado.");
-    return;
-  }
-
-  const modoAnterior = modoPublico;
-  modoPublico = modoPublico === "catalogo" ? "vendas" : "catalogo";
-  atualizarTextoModo();
-
-  const { error } = await supabase
-    .from("config_site")
-    .upsert({
-      app_id,
-      modo_publico: modoPublico
-    }, { onConflict: "app_id" });
-
-  if(error){
-    modoPublico = modoAnterior;
-    atualizarTextoModo();
-    alert("Erro ao salvar modo público.");
-    console.error(error);
-  }else{
-    alert("Modo público alterado para: " + (modoPublico === "vendas" ? "Vendas" : "Catálogo"));
-  }
-};
-
-window.abrirSite = function(){
-  if(!app_id){
-    alert("Negócio não identificado.");
-    return;
-  }
-
-  const url = `${location.origin}/public/mercado/?app_id=${app_id}`;
-  window.open(url, "_blank");
-};
 
 window.compartilharPagina = async function(){
   if(!app_id){
@@ -388,7 +421,7 @@ window.compartilharPagina = async function(){
     return;
   }
 
-  const url = `${location.origin}/public/vitrine/?app_id=${app_id}`;
+  const url = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(app_id)}`;
 
   try{
     await navigator.clipboard.writeText(url);
@@ -418,6 +451,10 @@ window.irPara = function(pagina){
 };
 
 window.logout = async function(){
+  if(intervaloPedidos){
+    clearInterval(intervaloPedidos);
+  }
+
   await supabase.auth.signOut();
   window.location.href = "/auth/login.html";
 };
