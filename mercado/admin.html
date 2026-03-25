@@ -259,6 +259,74 @@ import { supabase } from "../js/supabase.js";
 let app_id = null;
 let modoPublico = "catalogo";
 let intervaloPedidos = null;
+let ultimoTotalPedidos = 0;
+let audioLiberado = false;
+let audioCtx = null;
+
+function liberarAudio(){
+  if(audioLiberado) return;
+
+  try{
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if(!AudioContextClass) return;
+
+    audioCtx = new AudioContextClass();
+
+    if(audioCtx.state === "suspended"){
+      audioCtx.resume();
+    }
+
+    audioLiberado = true;
+    console.log("Áudio liberado");
+  }catch(error){
+    console.warn("Não foi possível liberar áudio:", error);
+  }
+}
+
+document.addEventListener("click", liberarAudio, { passive:true });
+document.addEventListener("touchstart", liberarAudio, { passive:true });
+
+function tocarSomNovoPedido(){
+  if(!audioLiberado || !audioCtx) return;
+
+  try{
+    const agora = audioCtx.currentTime;
+
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(880, agora);
+
+    gain1.gain.setValueAtTime(0.0001, agora);
+    gain1.gain.exponentialRampToValueAtTime(0.25, agora + 0.01);
+    gain1.gain.exponentialRampToValueAtTime(0.0001, agora + 0.20);
+
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+
+    osc1.start(agora);
+    osc1.stop(agora + 0.20);
+
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(1174, agora + 0.22);
+
+    gain2.gain.setValueAtTime(0.0001, agora + 0.22);
+    gain2.gain.exponentialRampToValueAtTime(0.20, agora + 0.23);
+    gain2.gain.exponentialRampToValueAtTime(0.0001, agora + 0.40);
+
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+
+    osc2.start(agora + 0.22);
+    osc2.stop(agora + 0.40);
+  }catch(error){
+    console.warn("Erro ao tocar som:", error);
+  }
+}
 
 async function verificarSessao(){
   const { data:{ session }, error } = await supabase.auth.getSession();
@@ -296,7 +364,7 @@ async function carregarUsuario(){
   document.getElementById("linkPublico").innerText = urlPublica;
 
   await carregarModoPublico();
-  await verificarPedidos();
+  await verificarPedidos(true);
   iniciarAtualizacaoPedidos();
 }
 
@@ -321,7 +389,7 @@ function atualizarTextoModo(){
   el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
 }
 
-async function verificarPedidos(){
+async function verificarPedidos(primeiraCarga = false){
   if(!app_id) return;
 
   const { data, error } = await supabase
@@ -340,15 +408,23 @@ async function verificarPedidos(){
 
   if(!badge || !card) return;
 
-  if(data && data.length > 0){
+  const total = data ? data.length : 0;
+
+  if(total > 0){
     badge.style.display = "flex";
-    badge.innerText = data.length;
+    badge.innerText = total;
     card.classList.add("piscar");
   }else{
     badge.style.display = "none";
     badge.innerText = "0";
     card.classList.remove("piscar");
   }
+
+  if(!primeiraCarga && total > ultimoTotalPedidos){
+    tocarSomNovoPedido();
+  }
+
+  ultimoTotalPedidos = total;
 }
 
 function iniciarAtualizacaoPedidos(){
@@ -357,7 +433,7 @@ function iniciarAtualizacaoPedidos(){
   }
 
   intervaloPedidos = setInterval(() => {
-    verificarPedidos();
+    verificarPedidos(false);
   }, 5000);
 }
 
