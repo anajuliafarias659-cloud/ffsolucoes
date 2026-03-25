@@ -141,7 +141,7 @@ body{
   color:#fff;
   font-size:12px;
   font-weight:bold;
-  display:flex;
+  display:none;
   align-items:center;
   justify-content:center;
   box-shadow:0 4px 10px rgba(0,0,0,.3);
@@ -266,6 +266,16 @@ let intervaloPedidos = null;
 
 const somNovoPedido = document.getElementById("somNovoPedido");
 
+async function prepararAlertas(){
+  if("Notification" in window && Notification.permission === "default"){
+    try{
+      await Notification.requestPermission();
+    }catch(error){
+      console.warn("Permissão de notificação não liberada:", error);
+    }
+  }
+}
+
 document.addEventListener("click", () => {
   if(!somNovoPedido) return;
 
@@ -309,10 +319,11 @@ async function carregarUsuario(){
   document.getElementById("nome").innerText = usuario.nome || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
 
-  const urlPublica = `${location.origin}/public/vitrine/?app_id=${usuario.app_id}`;
+  const urlPublica = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(usuario.app_id)}`;
   document.getElementById("linkPublico").innerText = urlPublica;
 
   await carregarModoPublico();
+  await prepararAlertas();
   await verificarPedidos();
 
   if(intervaloPedidos){
@@ -331,7 +342,13 @@ async function carregarModoPublico(){
     .eq("app_id", app_id)
     .maybeSingle();
 
-  if(!error && data && data.modo_publico){
+  if(error){
+    console.warn("Erro ao carregar modo público:", error);
+    atualizarTextoModo();
+    return;
+  }
+
+  if(data && data.modo_publico){
     modoPublico = data.modo_publico;
   }
 
@@ -340,7 +357,9 @@ async function carregarModoPublico(){
 
 function atualizarTextoModo(){
   const el = document.getElementById("modoPublico");
-  el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
+  if(el){
+    el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
+  }
 }
 
 async function verificarPedidos(){
@@ -386,6 +405,13 @@ async function verificarPedidos(){
     }
   }
 
+  console.log("Pedidos monitorados:", pedidosNovos.map(p => ({
+    id: p.id,
+    status: p.status,
+    pagamento_status: p.pagamento_status,
+    mp_status: p.mp_status
+  })));
+
   if(!primeiraVerificacaoPedidos){
     let chegouNovoPedido = false;
 
@@ -407,14 +433,10 @@ async function verificarPedidos(){
         });
       }
 
-      if("Notification" in window){
-        if(Notification.permission === "granted"){
-          new Notification("Novo pedido!", {
-            body: "Chegou pedido novo."
-          });
-        }else if(Notification.permission !== "denied"){
-          Notification.requestPermission();
-        }
+      if("Notification" in window && Notification.permission === "granted"){
+        new Notification("Novo pedido!", {
+          body: "Chegou pedido novo."
+        });
       }
     }
   }
@@ -456,7 +478,7 @@ window.abrirSite = function(){
     return;
   }
 
-  const url = `${location.origin}/public/mercado/?app_id=${app_id}`;
+  const url = `${location.origin}/public/mercado/?app_id=${encodeURIComponent(app_id)}`;
   window.open(url, "_blank");
 };
 
@@ -466,7 +488,7 @@ window.compartilharPagina = async function(){
     return;
   }
 
-  const url = `${location.origin}/public/vitrine/?app_id=${app_id}`;
+  const url = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(app_id)}`;
 
   try{
     await navigator.clipboard.writeText(url);
