@@ -258,72 +258,6 @@ import { supabase } from "../js/supabase.js";
 
 let app_id = null;
 let modoPublico = "catalogo";
-let intervaloPedidos = null;
-let ultimoTotalPedidos = 0;
-let audioLiberado = false;
-let audioCtx = null;
-
-function liberarAudio(){
-  if(audioLiberado) return;
-
-  try{
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if(!AudioContextClass) return;
-
-    audioCtx = new AudioContextClass();
-
-    if(audioCtx.state === "suspended"){
-      audioCtx.resume();
-    }
-
-    audioLiberado = true;
-  }catch(error){
-    console.warn("Não foi possível liberar áudio:", error);
-  }
-}
-
-document.addEventListener("click", liberarAudio, { passive:true });
-document.addEventListener("touchstart", liberarAudio, { passive:true });
-
-function tocarSomNovoPedido(){
-  if(!audioLiberado || !audioCtx) return;
-
-  try{
-    const agora = audioCtx.currentTime;
-
-    const osc1 = audioCtx.createOscillator();
-    const gain1 = audioCtx.createGain();
-
-    osc1.type = "sine";
-    osc1.frequency.setValueAtTime(880, agora);
-
-    gain1.gain.setValueAtTime(0.0001, agora);
-    gain1.gain.exponentialRampToValueAtTime(0.25, agora + 0.01);
-    gain1.gain.exponentialRampToValueAtTime(0.0001, agora + 0.20);
-
-    osc1.connect(gain1);
-    gain1.connect(audioCtx.destination);
-    osc1.start(agora);
-    osc1.stop(agora + 0.20);
-
-    const osc2 = audioCtx.createOscillator();
-    const gain2 = audioCtx.createGain();
-
-    osc2.type = "sine";
-    osc2.frequency.setValueAtTime(1174, agora + 0.22);
-
-    gain2.gain.setValueAtTime(0.0001, agora + 0.22);
-    gain2.gain.exponentialRampToValueAtTime(0.20, agora + 0.23);
-    gain2.gain.exponentialRampToValueAtTime(0.0001, agora + 0.40);
-
-    osc2.connect(gain2);
-    gain2.connect(audioCtx.destination);
-    osc2.start(agora + 0.22);
-    osc2.stop(agora + 0.40);
-  }catch(error){
-    console.warn("Erro ao tocar som:", error);
-  }
-}
 
 async function verificarSessao(){
   const { data:{ session }, error } = await supabase.auth.getSession();
@@ -342,7 +276,7 @@ async function carregarUsuario(){
 
   const { data: usuario, error } = await supabase
     .from("usuarios")
-    .select("nome, email, app_id")
+    .select("nome, app_id")
     .eq("id", userId)
     .single();
 
@@ -354,49 +288,32 @@ async function carregarUsuario(){
 
   app_id = usuario.app_id;
 
-  document.getElementById("nome").innerText = usuario.nome || usuario.email || "";
+  document.getElementById("nome").innerText = usuario.nome || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
 
-  const urlPublica = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(usuario.app_id)}`;
+  const urlPublica = `${location.origin}/public/vitrine/?app_id=${usuario.app_id}`;
   document.getElementById("linkPublico").innerText = urlPublica;
 
   await carregarModoPublico();
-  await verificarPedidos(true);
-  iniciarAtualizacaoPedidos();
+
+  verificarPedidos();
+  setInterval(verificarPedidos, 5000);
 }
 
 async function carregarModoPublico(){
   if(!app_id) return;
 
-  try{
-    const { data, error } = await supabase
-      .from("config_site")
-      .select("*")
-      .eq("app_id", app_id)
-      .limit(1)
-      .maybeSingle();
+  const { data, error } = await supabase
+    .from("config_site")
+    .select("modo_publico")
+    .eq("app_id", app_id)
+    .maybeSingle();
 
-    if(error){
-      console.warn("Config site não carregada:", error);
-      atualizarTextoModo();
-      return;
-    }
-
-    if(data){
-      if(data.modo_publico){
-        modoPublico = data.modo_publico;
-      }else if(data.modoPublico){
-        modoPublico = data.modoPublico;
-      }else if(data.modo){
-        modoPublico = data.modo;
-      }
-    }
-
-    atualizarTextoModo();
-  }catch(error){
-    console.warn("Erro ao carregar modo público:", error);
-    atualizarTextoModo();
+  if(!error && data && data.modo_publico){
+    modoPublico = data.modo_publico;
   }
+
+  atualizarTextoModo();
 }
 
 function atualizarTextoModo(){
@@ -404,7 +321,7 @@ function atualizarTextoModo(){
   el.innerText = modoPublico === "vendas" ? "Modo: Vendas" : "Modo: Catálogo";
 }
 
-async function verificarPedidos(primeiraCarga = false){
+async function verificarPedidos(){
   if(!app_id) return;
 
   const { data, error } = await supabase
@@ -413,43 +330,19 @@ async function verificarPedidos(primeiraCarga = false){
     .eq("app_id", app_id)
     .eq("status", "novo");
 
-  if(error){
-    console.error("Erro ao buscar pedidos:", error);
-    return;
-  }
+  if(error) return;
 
   const badge = document.getElementById("badgePedidos");
   const card = document.getElementById("cardPedidos");
 
-  if(!badge || !card) return;
-
-  const total = data ? data.length : 0;
-
-  if(total > 0){
-    badge.style.display = "flex";
-    badge.innerText = total;
+  if(data && data.length > 0){
+    badge.style.display = "inline-block";
+    badge.innerText = data.length;
     card.classList.add("piscar");
   }else{
     badge.style.display = "none";
-    badge.innerText = "0";
     card.classList.remove("piscar");
   }
-
-  if(!primeiraCarga && total > ultimoTotalPedidos){
-    tocarSomNovoPedido();
-  }
-
-  ultimoTotalPedidos = total;
-}
-
-function iniciarAtualizacaoPedidos(){
-  if(intervaloPedidos){
-    clearInterval(intervaloPedidos);
-  }
-
-  intervaloPedidos = setInterval(() => {
-    verificarPedidos(false);
-  }, 5000);
 }
 
 window.alternarPublico = async function(){
@@ -462,41 +355,20 @@ window.alternarPublico = async function(){
   modoPublico = modoPublico === "catalogo" ? "vendas" : "catalogo";
   atualizarTextoModo();
 
-  try{
-    const payload = {
-      app_id: app_id,
+  const { error } = await supabase
+    .from("config_site")
+    .upsert({
+      app_id,
       modo_publico: modoPublico
-    };
+    }, { onConflict: "app_id" });
 
-    const { error } = await supabase
-      .from("config_site")
-      .upsert(payload, { onConflict: "app_id" });
-
-    if(error){
-      console.warn("Erro ao salvar em modo_publico, tentando fallback:", error);
-
-      const { error: errorFallback } = await supabase
-        .from("config_site")
-        .upsert({
-          app_id: app_id,
-          modo: modoPublico
-        }, { onConflict: "app_id" });
-
-      if(errorFallback){
-        modoPublico = modoAnterior;
-        atualizarTextoModo();
-        alert("Erro ao salvar modo público.");
-        console.error(errorFallback);
-        return;
-      }
-    }
-
-    alert("Modo público alterado para: " + (modoPublico === "vendas" ? "Vendas" : "Catálogo"));
-  }catch(error){
+  if(error){
     modoPublico = modoAnterior;
     atualizarTextoModo();
     alert("Erro ao salvar modo público.");
     console.error(error);
+  }else{
+    alert("Modo público alterado para: " + (modoPublico === "vendas" ? "Vendas" : "Catálogo"));
   }
 };
 
@@ -506,7 +378,7 @@ window.abrirSite = function(){
     return;
   }
 
-  const url = `${location.origin}/public/mercado/?app_id=${encodeURIComponent(app_id)}`;
+  const url = `${location.origin}/public/mercado/?app_id=${app_id}`;
   window.open(url, "_blank");
 };
 
@@ -516,7 +388,7 @@ window.compartilharPagina = async function(){
     return;
   }
 
-  const url = `${location.origin}/public/vitrine/?app_id=${encodeURIComponent(app_id)}`;
+  const url = `${location.origin}/public/vitrine/?app_id=${app_id}`;
 
   try{
     await navigator.clipboard.writeText(url);
@@ -546,10 +418,6 @@ window.irPara = function(pagina){
 };
 
 window.logout = async function(){
-  if(intervaloPedidos){
-    clearInterval(intervaloPedidos);
-  }
-
   await supabase.auth.signOut();
   window.location.href = "/auth/login.html";
 };
