@@ -11,158 +11,294 @@
 body{margin:0;background:#020617;color:#fff;font-family:Arial}
 .container{max-width:900px;margin:auto;padding:20px}
 .card{background:#0f172a;padding:15px;border-radius:15px;margin-bottom:15px}
-input,select{width:100%;padding:10px;margin:5px 0;border-radius:10px;border:none}
-button{padding:10px;border:none;border-radius:10px;color:#fff;cursor:pointer}
+input,select{width:100%;padding:10px;margin:5px 0;border-radius:10px;border:none;outline:none}
+button{padding:10px;border:none;border-radius:10px;color:#fff;cursor:pointer;margin-top:5px}
 .verde{background:#22c55e}
 .vermelho{background:#ef4444}
 .azul{background:#3b82f6}
-.item{border-bottom:1px solid #222;padding:10px 0}
+.item{border-bottom:1px solid #223;padding:12px 0}
+.hidden{display:none}
+.info{font-size:14px;color:#cbd5e1}
+h2,h3{margin-top:0}
 </style>
 </head>
 
 <body>
 
 <div class="container">
+  <h2>💰 Financeiro PRO</h2>
 
-<h2>💰 Financeiro PRO</h2>
+  <div class="card">
+    <input id="email" type="email" placeholder="E-mail">
+    <input id="senha" type="password" placeholder="Senha">
+    <button class="azul" onclick="login()">Entrar</button>
+    <button class="verde" onclick="cadastro()">Cadastrar</button>
+    <button class="vermelho hidden" id="btnSair" onclick="sair()">Sair</button>
+    <div id="msg" class="info"></div>
+  </div>
 
-<div class="card">
-<input id="email" placeholder="email">
-<input id="senha" type="password" placeholder="senha">
-<button class="azul" onclick="login()">Entrar</button>
-<button class="verde" onclick="cadastro()">Cadastrar</button>
-</div>
+  <div id="app" class="hidden">
+    <div class="card">
+      <h3>➕ Nova Dívida</h3>
+      <input id="descDivida" placeholder="Descrição">
+      <input id="valorDivida" type="number" step="0.01" placeholder="Valor total">
+      <input id="categoriaDivida" placeholder="Categoria">
+      <input id="vencimento" type="date">
+      <button class="vermelho" onclick="criarDivida()">Criar dívida</button>
+    </div>
 
-<div id="app" style="display:none">
-
-<div class="card">
-<h3>➕ Nova Dívida</h3>
-<input id="descDivida" placeholder="Descrição">
-<input id="valorDivida" type="number" placeholder="Valor total">
-<input id="vencimento" type="date">
-<button class="vermelho" onclick="criarDivida()">Criar dívida</button>
-</div>
-
-<div class="card">
-<h3>💳 Dívidas</h3>
-<div id="listaDividas"></div>
-</div>
-
-</div>
-
+    <div class="card">
+      <h3>💳 Dívidas</h3>
+      <div id="listaDividas"></div>
+    </div>
+  </div>
 </div>
 
 <script>
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
-const supabase = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let user;
+let user = null;
+
+function msg(texto){
+  document.getElementById("msg").textContent = texto || "";
+}
 
 async function cadastro(){
-  await supabase.auth.signUp({
-    email: email.value,
-    password: senha.value
+  msg("");
+
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value.trim();
+
+  if(!email || !senha){
+    msg("Preencha e-mail e senha.");
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.signUp({
+    email,
+    password: senha
   });
-  alert("Conta criada");
+
+  if(error){
+    msg(error.message);
+    return;
+  }
+
+  msg("Conta criada com sucesso. Agora pode entrar.");
 }
 
 async function login(){
-  await supabase.auth.signInWithPassword({
-    email: email.value,
-    password: senha.value
+  msg("");
+
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value.trim();
+
+  if(!email || !senha){
+    msg("Preencha e-mail e senha.");
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email,
+    password: senha
   });
-  iniciar();
+
+  if(error){
+    msg(error.message);
+    return;
+  }
+
+  await iniciar();
+  msg("Login realizado com sucesso.");
+}
+
+async function sair(){
+  await supabaseClient.auth.signOut();
+  user = null;
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("btnSair").classList.add("hidden");
+  msg("Saiu da conta.");
 }
 
 async function iniciar(){
-  const { data } = await supabase.auth.getUser();
+  const { data, error } = await supabaseClient.auth.getUser();
+
+  if(error || !data?.user){
+    return;
+  }
+
   user = data.user;
-
-  if(!user) return;
-
-  document.getElementById("app").style.display="block";
-  carregarDividas();
+  document.getElementById("app").classList.remove("hidden");
+  document.getElementById("btnSair").classList.remove("hidden");
+  await carregarDividas();
 }
 
 async function criarDivida(){
-  await supabase.from("financeiro_dividas").insert([{
-    user_id: user.id,
-    descricao: descDivida.value,
-    valor_total: valorDivida.value,
-    vencimento: vencimento.value
-  }]);
+  if(!user){
+    msg("Faça login primeiro.");
+    return;
+  }
 
-  carregarDividas();
+  const descricao = document.getElementById("descDivida").value.trim();
+  const valor_total = parseFloat(document.getElementById("valorDivida").value);
+  const categoria = document.getElementById("categoriaDivida").value.trim();
+  const vencimento = document.getElementById("vencimento").value || null;
+
+  if(!descricao){
+    msg("Digite a descrição da dívida.");
+    return;
+  }
+
+  if(!valor_total || valor_total <= 0){
+    msg("Digite um valor válido.");
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("financeiro_dividas")
+    .insert([{
+      user_id: user.id,
+      descricao,
+      valor_total,
+      valor_pago: 0,
+      categoria,
+      vencimento,
+      status: "pendente"
+    }]);
+
+  if(error){
+    msg(error.message);
+    return;
+  }
+
+  document.getElementById("descDivida").value = "";
+  document.getElementById("valorDivida").value = "";
+  document.getElementById("categoriaDivida").value = "";
+  document.getElementById("vencimento").value = "";
+
+  msg("Dívida criada com sucesso.");
+  await carregarDividas();
 }
 
 async function carregarDividas(){
-  const { data } = await supabase
-  .from("financeiro_dividas")
-  .select("*")
-  .eq("user_id", user.id);
+  if(!user) return;
 
-  let html = "";
+  const { data, error } = await supabaseClient
+    .from("financeiro_dividas")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("id", { ascending: false });
+
+  if(error){
+    msg(error.message);
+    return;
+  }
+
+  const lista = document.getElementById("listaDividas");
+  lista.innerHTML = "";
+
+  if(!data || !data.length){
+    lista.innerHTML = "<div class='info'>Nenhuma dívida cadastrada.</div>";
+    return;
+  }
 
   data.forEach(d => {
+    const restante = Number(d.valor_total || 0) - Number(d.valor_pago || 0);
 
-    let restante = d.valor_total - d.valor_pago;
-
-    html += `
-    <div class="item">
-      <b>${d.descricao}</b><br>
-      Total: R$ ${d.valor_total}<br>
-      Pago: R$ ${d.valor_pago}<br>
-      Restante: R$ ${restante}<br>
-      Status: ${d.status}<br>
-
-      <input id="pagar_${d.id}" type="number" placeholder="valor pagamento">
-
-      <button class="verde" onclick="pagar(${d.id}, ${d.valor_total}, ${d.valor_pago})">
-        Pagar
-      </button>
-    </div>
+    const div = document.createElement("div");
+    div.className = "item";
+    div.innerHTML = `
+      <b>${escapeHtml(d.descricao || "")}</b><br>
+      <span class="info">Categoria: ${escapeHtml(d.categoria || "Sem categoria")}</span><br>
+      <span class="info">Vencimento: ${d.vencimento || "-"}</span><br>
+      <span>Total: R$ ${Number(d.valor_total || 0).toFixed(2)}</span><br>
+      <span>Pago: R$ ${Number(d.valor_pago || 0).toFixed(2)}</span><br>
+      <span>Restante: R$ ${restante.toFixed(2)}</span><br>
+      <span>Status: ${d.status}</span><br><br>
+      <input id="pagar_${d.id}" type="number" step="0.01" placeholder="Valor do pagamento">
+      <button class="verde" onclick="pagar(${d.id}, ${Number(d.valor_total || 0)}, ${Number(d.valor_pago || 0)}, '${escapeJs(d.descricao || "")}', '${escapeJs(d.categoria || "")}')">Pagar</button>
     `;
-  });
 
-  listaDividas.innerHTML = html;
+    lista.appendChild(div);
+  });
 }
 
-async function pagar(id, total, pago){
+async function pagar(id, total, pagoAtual, descricao, categoria){
+  if(!user){
+    msg("Faça login primeiro.");
+    return;
+  }
 
-  let valor = Number(document.getElementById("pagar_"+id).value);
+  const campo = document.getElementById("pagar_" + id);
+  const valor = parseFloat(campo.value);
 
-  let novoPago = pago + valor;
-  let restante = total - novoPago;
+  if(!valor || valor <= 0){
+    msg("Digite um valor de pagamento válido.");
+    return;
+  }
+
+  const restanteAntes = total - pagoAtual;
+
+  if(valor > restanteAntes){
+    msg("O valor não pode ser maior que o restante da dívida.");
+    return;
+  }
+
+  const novoPago = pagoAtual + valor;
+  const restante = total - novoPago;
 
   let status = "pendente";
-
   if(novoPago > 0 && restante > 0) status = "parcial";
-  if(restante <= 0) status = "pago";
+  if(restante === 0) status = "pago";
 
-  await supabase
-  .from("financeiro_dividas")
-  .update({
-    valor_pago: novoPago,
-    status
-  })
-  .eq("id", id);
+  const { error: erroDivida } = await supabaseClient
+    .from("financeiro_dividas")
+    .update({
+      valor_pago: novoPago,
+      status
+    })
+    .eq("id", id)
+    .eq("user_id", user.id);
 
-  // cria saída automática
-  await supabase.from("financeiro_movimentos").insert([{
-    user_id: user.id,
-    tipo:"saida",
-    descricao:"Pagamento dívida",
-    valor: valor
-  }]);
+  if(erroDivida){
+    msg(erroDivida.message);
+    return;
+  }
 
-  carregarDividas();
+  const { error: erroMov } = await supabaseClient
+    .from("financeiro_movimentos")
+    .insert([{
+      user_id: user.id,
+      tipo: "saida",
+      descricao: "Pagamento dívida: " + descricao,
+      valor: valor,
+      categoria: categoria || "Dívidas",
+      data_movimento: new Date().toISOString().slice(0,10)
+    }]);
+
+  if(erroMov){
+    msg(erroMov.message);
+    return;
+  }
+
+  msg("Pagamento registrado com sucesso.");
+  await carregarDividas();
+}
+
+function escapeHtml(text){
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function escapeJs(text){
+  return String(text).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 iniciar();
-
 </script>
 
 </body>
