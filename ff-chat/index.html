@@ -1095,6 +1095,7 @@ const AUTO_REFRESH_MS = 5000;
 const AUDIO_BUCKET = "chat-audios";
 const FOTO_BUCKET = "chat-fotos";
 const STATUS_BUCKET = "chat-status";
+const PUSH_FUNCTION_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/send-chat-push";
 
 const authScreen = document.getElementById("authScreen");
 const appScreen = document.getElementById("appScreen");
@@ -1416,7 +1417,41 @@ function getContatoNomeByNumero(numero){
   return c ? c.nome : numero;
 }
 
-const WEB_PUSH_PUBLIC_KEY = "COLE_SUA_CHAVE_PUBLICA_VAPID_AQUI";
+async function chamarPushMensagem({ para_numero, titulo, mensagem, tipo = "texto" }){
+  try{
+    const resp = await fetch(PUSH_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
+        "Authorization": "Bearer sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+      },
+      body: JSON.stringify({
+        para_numero,
+        titulo,
+        mensagem,
+        tipo,
+        de_numero: usuarioLogado?.numero || null,
+        de_nome: usuarioLogado?.nome || "Contato"
+      })
+    });
+
+    const texto = await resp.text();
+
+    if(!resp.ok){
+      console.error("Erro ao chamar send-chat-push:", resp.status, texto);
+      return false;
+    }
+
+    console.log("Push enviado com sucesso:", texto);
+    return true;
+  }catch(err){
+    console.error("Falha ao chamar send-chat-push:", err);
+    return false;
+  }
+}
+
+const WEB_PUSH_PUBLIC_KEY = "BDRjMroXZjoK_pPJHXgUa-m1_palpY2119sZhR7CvZr30fgVZXtbzNb0tGfPqiaBibs_6u8EHYfr4V--uNdwzhM";
 let swRegistration = null;
 let swRefreshing = false;
 
@@ -1619,7 +1654,7 @@ async function atualizarBotaoNotif(){
     const sub = reg ? await reg.pushManager.getSubscription() : null;
     btnPermissaoNotif.textContent = sub ? "Push ON" : "Ativar Push";
   }catch(e){
-    btnPermissaoNotif.textContent = "Ativar Push";
+    btnPermissaoNotif.textContent = "Erro Push";
   }
 }
 btnPermissaoNotif.onclick = pedirPermissaoNotificacao;
@@ -1921,9 +1956,18 @@ async function enviarFotoMensagem(){
 
     if(insertError){
       console.error(insertError);
-      alert("Erro ao registrar mensagem com foto.\n\nSe precisar, crie no Supabase as colunas foto_url e foto_path na tabela chat_mensagens.");
+      alert("Erro ao registrar mensagem com foto.
+
+Se precisar, crie no Supabase as colunas foto_url e foto_path na tabela chat_mensagens.");
       return;
     }
+
+    await chamarPushMensagem({
+      para_numero: contatoAtual.numero,
+      titulo: usuarioLogado.nome || "Nova mensagem",
+      mensagem: legenda || "📷 Foto recebida",
+      tipo: "foto"
+    });
 
     resetPhotoPreview();
     await carregarMensagens(true);
@@ -1937,6 +1981,7 @@ async function enviarFotoMensagem(){
     btnEnviarFotoConfirmar.textContent = "Enviar foto";
   }
 }
+
 
 async function enviarAudio(){
   if(!audioBlob || !usuarioLogado || !contatoAtual) return;
@@ -1991,6 +2036,13 @@ async function enviarAudio(){
       return;
     }
 
+    await chamarPushMensagem({
+      para_numero: contatoAtual.numero,
+      titulo: usuarioLogado.nome || "Nova mensagem",
+      mensagem: "🎤 Áudio recebido",
+      tipo: "audio"
+    });
+
     cancelarAudio();
     await carregarMensagens(true);
     await renderContatos(contatosPermitidos);
@@ -2002,6 +2054,7 @@ async function enviarAudio(){
   btnEnviarAudio.disabled = false;
   btnEnviarAudio.textContent = "Enviar áudio";
 }
+
 
 btnGravarAudio.onclick = iniciarGravacaoAudio;
 btnPararAudio.onclick = pararGravacaoAudio;
@@ -2772,6 +2825,13 @@ async function enviarMensagem(){
     return;
   }
 
+  await chamarPushMensagem({
+    para_numero: contatoAtual.numero,
+    titulo: usuarioLogado.nome || "Nova mensagem",
+    mensagem: texto,
+    tipo: "texto"
+  });
+
   msgInput.value = "";
   await limparStatusDigitando();
   await carregarMensagens(true);
@@ -2781,6 +2841,7 @@ async function enviarMensagem(){
   ajustarAlturaMobile();
   msgInput.focus();
 }
+
 
 window.abrirFotoChat = function(url){
   const overlay = document.createElement("div");
@@ -3095,23 +3156,6 @@ async function abrirViewerStatus(numero, lista, userMap){
     }
   }
 })();
-</script>
-
-<script>
-window.registrarPwaFFChat = registrarServiceWorker;
-
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", async () => {
-    try {
-      if(window.registrarPwaFFChat){
-        await window.registrarPwaFFChat();
-      }
-      console.log("PWA ativo com sucesso");
-    } catch (e) {
-      console.error("Erro ao registrar service worker:", e);
-    }
-  });
-}
 </script>
 
 </body>
