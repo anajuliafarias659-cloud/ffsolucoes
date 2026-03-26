@@ -1416,26 +1416,210 @@ function getContatoNomeByNumero(numero){
   return c ? c.nome : numero;
 }
 
-async function pedirPermissaoNotificacao(){
-  if(!("Notification" in window)) return;
-  try{
-    const p = await Notification.requestPermission();
-    if(p === "granted"){
-      btnPermissaoNotif.textContent = "Notif OK";
-    }
-  }catch(e){}
+const WEB_PUSH_PUBLIC_KEY = "COLE_SUA_CHAVE_PUBLICA_VAPID_AQUI";
+let swRegistration = null;
+let swRefreshing = false;
+
+function urlBase64ToUint8Array(base64String){
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for(let i = 0; i < rawData.length; ++i){
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
 }
-function atualizarBotaoNotif(){
-  if(!("Notification" in window)){
-    btnPermissaoNotif.textContent = "SemNotif";
+
+async function registrarServiceWorker(){
+  if(!("serviceWorker" in navigator)) return null;
+  if(swRegistration) return swRegistration;
+
+  try{
+    swRegistration = await navigator.serviceWorker.register("/ff-chat/sw.js");
+    await swRegistration.update();
+
+    swRegistration.addEventListener("updatefound", () => {
+      const newWorker = swRegistration.installing;
+      if(!newWorker) return;
+
+      newWorker.addEventListener("statechange", () => {
+        if(newWorker.state === "installed" && navigator.serviceWorker.controller){
+          newWorker.postMessage({ type: "SKIP_WAITING" });
+        }
+      });
+    });
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if(swRefreshing) return;
+      swRefreshing = true;
+      window.location.reload();
+    });
+
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if(event.data?.type === "PUSH_NOTIFICATION_CLICK"){
+        const numero = event.data?.numero;
+        if(numero){
+          const contato = contatosPermitidos.find(c => c.numero === numero);
+          if(contato){
+            abrirConversa(contato);
+          }
+        }
+      }
+    });
+
+    return swRegistration;
+  }catch(e){
+    console.error("Erro ao registrar service worker:", e);
+    return null;
+  }
+}
+
+async function salvarPushSubscriptionNoBanco(subscription){
+  if(!usuarioLogado || !subscription?.endpoint) return;
+
+  const { error } = await supabase
+    .from("push_subscriptions")
+    .upsert({
+      user_id: String(usuarioLogado.id),
+      numero: usuarioLogado.numero,
+      endpoint: subscription.endpoint,
+      subscription: subscription.toJSON ? subscription.toJSON() : subscription,
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: "endpoint"
+    });
+
+  if(error){
+    console.error("Erro ao salvar push subscription:", error);
+    throw error;
+  }
+}
+
+async function removerPushSubscriptionDoBanco(endpoint){
+  if(!endpoint) return;
+  const { error } = await supabase
+    .from("push_subscriptions")
+    .delete()
+    .eq("endpoint", endpoint);
+
+  if(error){
+    console.error("Erro ao remover push subscription:", error);
+  }
+}
+
+async function sincronizarPushAtual(){
+  if(!usuarioLogado) return;
+  if(!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  if(Notification.permission !== "granted") return;
+  if(!WEB_PUSH_PUBLIC_KEY || WEB_PUSH_PUBLIC_KEY.includes("COLE_SUA_CHAVE_PUBLICA_VAPID_AQUI")) return;
+
+  const reg = await registrarServiceWorker();
+  if(!reg) return;
+
+  const atual = await reg.pushManager.getSubscription();
+  if(atual){
+    await salvarPushSubscriptionNoBanco(atual);
+  }
+}
+
+async function ativarPushCompleto(){
+  if(!usuarioLogado){
+    alert("Entre no chat antes de ativar as notificações.");
     return;
   }
+
+  if(!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)){
+    alert("Seu navegador não suporta push notification.");
+    return;
+  }
+
+  if(!WEB_PUSH_PUBLIC_KEY || WEB_PUSH_PUBLIC_KEY.includes("COLE_SUA_CHAVE_PUBLICA_VAPID_AQUI")){
+    alert("Cole sua chave pública VAPID no código antes de ativar o push.");
+    return;
+  }
+
+  const permissao = await Notification.requestPermission();
+  if(permissao !== "granted"){
+    await atualizarBotaoNotif();
+    return;
+  }
+
+  const reg = await registrarServiceWorker();
+  if(!reg) return;
+
+  let sub = await reg.pushManager.getSubscription();
+  if(!sub){
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY)
+    });
+  }
+
+  await salvarPushSubscriptionNoBanco(sub);
+  await atualizarBotaoNotif();
+  alert("Push em segundo plano ativado.");
+}
+
+async function desativarPushCompleto(){
+  if(!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+
+  const reg = await registrarServiceWorker();
+  if(!reg) return;
+
+  const sub = await reg.pushManager.getSubscription();
+  if(sub){
+    const endpoint = sub.endpoint;
+    try{
+      await sub.unsubscribe();
+    }catch(e){
+      console.warn("Não consegui cancelar a inscrição push:", e);
+    }
+    await removerPushSubscriptionDoBanco(endpoint);
+  }
+
+  await atualizarBotaoNotif();
+}
+
+async function pedirPermissaoNotificacao(){
   if(Notification.permission === "granted"){
-    btnPermissaoNotif.textContent = "Notif OK";
-  }else if(Notification.permission === "denied"){
-    btnPermissaoNotif.textContent = "Notif OFF";
-  }else{
-    btnPermissaoNotif.textContent = "Notif";
+    const desligar = confirm("O push já está ativo. Deseja desligar neste aparelho?");
+    if(desligar){
+      await desativarPushCompleto();
+    }
+    return;
+  }
+
+  try{
+    await ativarPushCompleto();
+  }catch(e){
+    console.error(e);
+    alert("Erro ao ativar push.");
+  }
+}
+
+async function atualizarBotaoNotif(){
+  if(!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)){
+    btnPermissaoNotif.textContent = "SemPush";
+    return;
+  }
+
+  if(Notification.permission === "denied"){
+    btnPermissaoNotif.textContent = "Push OFF";
+    return;
+  }
+
+  if(!WEB_PUSH_PUBLIC_KEY || WEB_PUSH_PUBLIC_KEY.includes("COLE_SUA_CHAVE_PUBLICA_VAPID_AQUI")){
+    btnPermissaoNotif.textContent = "Push KEY";
+    return;
+  }
+
+  try{
+    const reg = await registrarServiceWorker();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    btnPermissaoNotif.textContent = sub ? "Push ON" : "Ativar Push";
+  }catch(e){
+    btnPermissaoNotif.textContent = "Ativar Push";
   }
 }
 btnPermissaoNotif.onclick = pedirPermissaoNotificacao;
@@ -1950,9 +2134,11 @@ btnEntrarUser.onclick = async () => {
   await atualizarPresenca(true);
   startHeartbeatOnline();
   showApp();
-  atualizarBotaoNotif();
+  await atualizarBotaoNotif();
+  await registrarServiceWorker();
   await carregarContatos();
   await renderStatus();
+  await sincronizarPushAtual();
   await detectarNovasMensagens();
   await startAutoRefresh();
   fixKeyboardViewport();
@@ -2895,8 +3081,11 @@ async function abrirViewerStatus(numero, lista, userMap){
       await atualizarPresenca(true);
       startHeartbeatOnline();
       showApp();
+      await atualizarBotaoNotif();
+      await registrarServiceWorker();
       await carregarContatos();
       await renderStatus();
+      await sincronizarPushAtual();
       await detectarNovasMensagens();
       await startAutoRefresh();
       fixKeyboardViewport();
@@ -2909,10 +3098,14 @@ async function abrirViewerStatus(numero, lista, userMap){
 </script>
 
 <script>
+window.registrarPwaFFChat = registrarServiceWorker;
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
-      await navigator.serviceWorker.register("/ff-chat/sw.js");
+      if(window.registrarPwaFFChat){
+        await window.registrarPwaFFChat();
+      }
       console.log("PWA ativo com sucesso");
     } catch (e) {
       console.error("Erro ao registrar service worker:", e);
