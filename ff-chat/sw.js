@@ -3,26 +3,7 @@ self.addEventListener("install", event => {
 });
 
 self.addEventListener("activate", event => {
-  event.waitUntil(
-    (async () => {
-      await self.clients.claim();
-
-      const clientsList = await self.clients.matchAll({
-        type: "window",
-        includeUncontrolled: true
-      });
-
-      for (const client of clientsList) {
-        client.postMessage({ type: "SW_UPDATED" });
-      }
-    })()
-  );
-});
-
-self.addEventListener("message", event => {
-  if (event.data && event.data.type === "SKIP_WAITING") {
-    self.skipWaiting();
-  }
+  event.waitUntil(self.clients.claim());
 });
 
 self.addEventListener("push", event => {
@@ -31,7 +12,8 @@ self.addEventListener("push", event => {
     body: "Você recebeu uma nova mensagem",
     icon: "/ff-chat/icons/icon-192.png",
     badge: "/ff-chat/icons/icon-192.png",
-    url: "/ff-chat/"
+    url: "/ff-chat/",
+    numero: ""
   };
 
   try {
@@ -47,7 +29,8 @@ self.addEventListener("push", event => {
       icon: data.icon,
       badge: data.badge,
       data: {
-        url: data.url || "/ff-chat/"
+        url: data.url || "/ff-chat/",
+        numero: data.numero || ""
       },
       vibrate: [200, 100, 200],
       tag: data.tag || "ff-chat-msg",
@@ -69,7 +52,6 @@ self.addEventListener("notificationclick", event => {
           return client.focus();
         }
       }
-
       if (clients.openWindow) {
         return clients.openWindow(urlToOpen);
       }
