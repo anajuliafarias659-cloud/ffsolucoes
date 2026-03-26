@@ -1200,16 +1200,10 @@ const supabase = createClient(
 );
 
 const ADMIN_PASSWORD = "123456admin";
-const AUTO_REFRESH_MS = 15000;
+const AUTO_REFRESH_MS = 5000;
 const AUDIO_BUCKET = "chat-audios";
 const FOTO_BUCKET = "chat-fotos";
 const STATUS_BUCKET = "chat-status";
-
-const WEB_PUSH_PUBLIC_KEY = "BDRjMroXZjoK_pPJHXgUa-m1_palpY2119sZhR7CvZr30fgVZXtbzNb0tGfPqiaBibs_6u8EHYfr4V--uNdwzhM";
-const PUSH_FUNCTION_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/send-chat-push";
-
-let swRegistration = null;
-let swRefreshing = false;
 
 const authScreen = document.getElementById("authScreen");
 const appScreen = document.getElementById("appScreen");
@@ -1539,261 +1533,44 @@ function getContatoNomeByNumero(numero){
   return c ? c.nome : numero;
 }
 
-function urlBase64ToUint8Array(base64String){
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for(let i = 0; i < rawData.length; ++i){
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-async function registrarServiceWorker(){
-  if(!("serviceWorker" in navigator)) return null;
-  if(swRegistration) return swRegistration;
-
-  try{
-    swRegistration = await navigator.serviceWorker.register("/ff-chat/sw.js");
-    await navigator.serviceWorker.ready;
-    await swRegistration.update();
-
-    swRegistration.addEventListener("updatefound", () => {
-      const newWorker = swRegistration.installing;
-      if(!newWorker) return;
-
-      newWorker.addEventListener("statechange", () => {
-        if(newWorker.state === "installed" && navigator.serviceWorker.controller){
-          newWorker.postMessage({ type: "SKIP_WAITING" });
-        }
-      });
-    });
-
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if(swRefreshing) return;
-      swRefreshing = true;
-      window.location.reload();
-    });
-
-    navigator.serviceWorker.addEventListener("message", (event) => {
-      if(event.data?.type === "PUSH_NOTIFICATION_CLICK"){
-        const numero = event.data?.numero;
-        if(numero){
-          const contato = contatosPermitidos.find(c => c.numero === numero);
-          if(contato){
-            abrirConversa(contato);
-          }
-        }else{
-          window.focus();
-        }
-      }
-    });
-
-    return swRegistration;
-  }catch(e){
-    console.error("Erro ao registrar service worker:", e);
-    return null;
-  }
-}
-
-async function salvarPushSubscriptionNoBanco(subscription){
-  if(!usuarioLogado || !subscription?.endpoint) return;
-
-  const payload = subscription.toJSON ? subscription.toJSON() : subscription;
-
-  const { error } = await supabase
-    .from("push_subscriptions")
-    .upsert({
-      user_id: String(usuarioLogado.id),
-      numero: usuarioLogado.numero,
-      endpoint: subscription.endpoint,
-      subscription: payload,
-      updated_at: new Date().toISOString()
-    }, {
-      onConflict: "endpoint"
-    });
-
-  if(error){
-    console.error("Erro ao salvar push subscription:", error);
-    throw error;
-  }
-}
-
-async function removerPushSubscriptionDoBanco(endpoint){
-  if(!endpoint) return;
-
-  const { error } = await supabase
-    .from("push_subscriptions")
-    .delete()
-    .eq("endpoint", endpoint);
-
-  if(error){
-    console.error("Erro ao remover push subscription:", error);
-  }
-}
-
-async function sincronizarPushAtual(){
-  if(!usuarioLogado) return;
-  if(!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-  if(Notification.permission !== "granted") return;
-
-  const reg = await registrarServiceWorker();
-  if(!reg) return;
-
-  let sub = await reg.pushManager.getSubscription();
-
-  if(!sub){
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY)
-    });
-  }
-
-  await salvarPushSubscriptionNoBanco(sub);
-}
-
-async function ativarPushCompleto(){
-  if(!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)){
-    alert("Este aparelho não suporta push.");
-    return;
-  }
-
-  const permissao = await Notification.requestPermission();
-  if(permissao !== "granted"){
-    await atualizarBotaoNotif();
-    return;
-  }
-
-  const reg = await registrarServiceWorker();
-  if(!reg) return;
-
-  let sub = await reg.pushManager.getSubscription();
-  if(!sub){
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY)
-    });
-  }
-
-  await salvarPushSubscriptionNoBanco(sub);
-  await atualizarBotaoNotif();
-  alert("Push em segundo plano ativado.");
-}
-
-async function desativarPushCompleto(){
-  if(!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-
-  const reg = await registrarServiceWorker();
-  if(!reg) return;
-
-  const sub = await reg.pushManager.getSubscription();
-  if(sub){
-    const endpoint = sub.endpoint;
-    try{
-      await sub.unsubscribe();
-    }catch(e){
-      console.warn("Não consegui cancelar a inscrição push:", e);
-    }
-    await removerPushSubscriptionDoBanco(endpoint);
-  }
-
-  await atualizarBotaoNotif();
-}
-
 async function pedirPermissaoNotificacao(){
-  if(Notification.permission === "granted"){
-    const desligar = confirm("O push já está ativo. Deseja desligar neste aparelho?");
-    if(desligar){
-      await desativarPushCompleto();
+  if(!("Notification" in window)) return;
+  try{
+    const p = await Notification.requestPermission();
+    if(p === "granted"){
+      btnPermissaoNotif.textContent = "Notif OK";
     }
+  }catch(e){}
+}
+function atualizarBotaoNotif(){
+  if(!("Notification" in window)){
+    btnPermissaoNotif.textContent = "SemNotif";
     return;
   }
-
-  try{
-    await ativarPushCompleto();
-  }catch(e){
-    console.error(e);
-    alert("Erro ao ativar push.");
+  if(Notification.permission === "granted"){
+    btnPermissaoNotif.textContent = "Notif OK";
+  }else if(Notification.permission === "denied"){
+    btnPermissaoNotif.textContent = "Notif OFF";
+  }else{
+    btnPermissaoNotif.textContent = "Notif";
   }
 }
-
-async function atualizarBotaoNotif(){
-  if(!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)){
-    btnPermissaoNotif.textContent = "SemPush";
-    return;
-  }
-
-  if(Notification.permission === "denied"){
-    btnPermissaoNotif.textContent = "Push OFF";
-    return;
-  }
-
-  try{
-    const reg = await registrarServiceWorker();
-    const sub = reg ? await reg.pushManager.getSubscription() : null;
-    btnPermissaoNotif.textContent = sub ? "Push ON" : "Ativar Push";
-  }catch(e){
-    btnPermissaoNotif.textContent = "Ativar Push";
-  }
-}
-
 btnPermissaoNotif.onclick = pedirPermissaoNotificacao;
 
 function showBrowserNotification(title, body){
   if(!("Notification" in window)) return;
   if(Notification.permission !== "granted") return;
-  if(document.hidden) return;
-
   try{
     const n = new Notification(title, {
       body,
       tag: "ff-chat-familia",
       renotify: true
     });
-
     n.onclick = () => {
       window.focus();
       n.close();
     };
-  }catch(e){
-    console.error("Erro na notificação local:", e);
-  }
-}
-
-async function dispararPushServidor(destinoNumero, mensagemObj){
-  if(!destinoNumero || !mensagemObj) return;
-
-  try{
-    const corpo =
-      mensagemObj.tipo === "audio"
-        ? "🎤 Áudio recebido"
-        : mensagemObj.tipo === "foto"
-          ? "📷 Foto recebida"
-          : (mensagemObj.mensagem || "Nova mensagem");
-
-    const response = await fetch(PUSH_FUNCTION_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        to_numero: destinoNumero,
-        title: usuarioLogado?.nome || "Nova mensagem",
-        body: corpo,
-        url: `/ff-chat/?contato=${encodeURIComponent(usuarioLogado?.numero || "")}`,
-        tag: `chat-${usuarioLogado?.numero || "msg"}`,
-        numero: usuarioLogado?.numero || ""
-      })
-    });
-
-    if(!response.ok){
-      const txt = await response.text().catch(() => "");
-      console.error("Falha ao enviar push:", response.status, txt);
-    }
-  }catch(err){
-    console.error("Erro chamando send-chat-push:", err);
-  }
+  }catch(e){}
 }
 
 async function atualizarPresenca(forceOnline=true){
@@ -2079,25 +1856,9 @@ async function enviarFotoMensagem(){
       return;
     }
 
-    await dispararPushServidor(contatoAtual.numero, {
-      tipo: "foto",
-      mensagem: legenda || "[foto]"
-    });
-
     resetPhotoPreview();
     cancelarResposta();
     await carregarMensagens(true);
-
-  const { data: ultimaMsgAberta } = await supabase
-    .from("chat_mensagens")
-    .select("id")
-    .or(`and(de_numero.eq.${usuarioLogado.numero},para_numero.eq.${contato.numero}),and(de_numero.eq.${contato.numero},para_numero.eq.${usuarioLogado.numero})`)
-    .order("created_at", { ascending:false })
-    .limit(1);
-
-  if(ultimaMsgAberta?.length){
-    lastMessageMap[contato.numero] = ultimaMsgAberta[0].id;
-  }
     await renderContatos(contatosPermitidos);
     ajustarAlturaMobile();
   }catch(err){
@@ -2163,11 +1924,6 @@ async function enviarAudio(){
       return;
     }
 
-    await dispararPushServidor(contatoAtual.numero, {
-      tipo: "audio",
-      mensagem: "[áudio]"
-    });
-
     cancelarAudio();
     cancelarResposta();
     await carregarMensagens(true);
@@ -2199,34 +1955,34 @@ fileMensagemFoto.addEventListener("change", () => {
 btnCancelarFoto.onclick = resetPhotoPreview;
 btnEnviarFotoConfirmar.onclick = enviarFotoMensagem;
 
-async function atualizarSomenteConversaAtual(){
-  if(!usuarioLogado || !contatoAtual) return;
+async function detectarNovasMensagens(){
+  if(!usuarioLogado || !contatosPermitidos.length) return;
 
-  const { data, error } = await supabase
-    .from("chat_mensagens")
-    .select("id,de_numero,para_numero,mensagem,created_at,tipo")
-    .or(`and(de_numero.eq.${usuarioLogado.numero},para_numero.eq.${contatoAtual.numero}),and(de_numero.eq.${contatoAtual.numero},para_numero.eq.${usuarioLogado.numero})`)
-    .order("created_at", { ascending:false })
-    .limit(1);
+  for(const contato of contatosPermitidos){
+    const { data, error } = await supabase
+      .from("chat_mensagens")
+      .select("id,de_numero,para_numero,mensagem,created_at,tipo")
+      .or(`and(de_numero.eq.${usuarioLogado.numero},para_numero.eq.${contato.numero}),and(de_numero.eq.${contato.numero},para_numero.eq.${usuarioLogado.numero})`)
+      .order("created_at", { ascending:false })
+      .limit(1);
 
-  if(error || !data?.length) return;
+    if(error || !data?.length) continue;
 
-  const ultima = data[0];
-  const chave = contatoAtual.numero;
-  const lastKnownId = lastMessageMap[chave];
+    const ultima = data[0];
+    const lastKnownId = lastMessageMap[contato.numero];
 
-  if(!lastKnownId){
-    lastMessageMap[chave] = ultima.id;
-    return;
-  }
+    if(!lastKnownId){
+      lastMessageMap[contato.numero] = ultima.id;
+      continue;
+    }
 
-  if(ultima.id !== lastKnownId){
-    lastMessageMap[chave] = ultima.id;
+    if(ultima.id !== lastKnownId){
+      lastMessageMap[contato.numero] = ultima.id;
 
-    const incoming = ultima.de_numero === contatoAtual.numero;
-    if(incoming){
-      const isOpenConversation = !document.hidden;
+      const incoming = ultima.de_numero === contato.numero;
+      if(!incoming) continue;
 
+      const isOpenConversation = contatoAtual && contatoAtual.numero === contato.numero && !document.hidden;
       const corpoNotif = ultima.tipo === "audio"
         ? "🎤 Áudio recebido"
         : ultima.tipo === "foto"
@@ -2236,19 +1992,15 @@ async function atualizarSomenteConversaAtual(){
       if(isOpenConversation){
         playNewMessageSound();
       }else{
-        unreadCountMap[chave] = (unreadCountMap[chave] || 0) + 1;
+        unreadCountMap[contato.numero] = (unreadCountMap[contato.numero] || 0) + 1;
         playNewMessageSound();
-        startRinging(chave);
-        showBrowserNotification(getContatoNomeByNumero(chave), corpoNotif);
-
+        startRinging(contato.numero);
+        showBrowserNotification(getContatoNomeByNumero(contato.numero), corpoNotif);
         if(navigator.vibrate){
           navigator.vibrate([180,120,180]);
         }
       }
     }
-
-    await carregarMensagens(false);
-    await carregarContatos();
   }
 }
 
@@ -2256,13 +2008,12 @@ async function startAutoRefresh(){
   stopAutoRefresh();
   autoRefreshTimer = setInterval(async () => {
     if(!usuarioLogado) return;
-
+    await carregarContatos();
+    await renderStatus();
+    await detectarNovasMensagens();
     if(contatoAtual){
-      await atualizarSomenteConversaAtual();
+      await carregarMensagens(false);
       await verificarDigitando();
-    }else{
-      await carregarContatos();
-      await renderStatus();
     }
   }, AUTO_REFRESH_MS);
 }
@@ -2317,12 +2068,10 @@ btnEntrarUser.onclick = async () => {
   await atualizarPresenca(true);
   startHeartbeatOnline();
   showApp();
-  await atualizarBotaoNotif();
-  await registrarServiceWorker();
+  atualizarBotaoNotif();
   await carregarContatos();
   await renderStatus();
-  await sincronizarPushAtual();
-  if(contatoAtual) await atualizarSomenteConversaAtual();
+  await detectarNovasMensagens();
   await startAutoRefresh();
   fixKeyboardViewport();
   atualizarMedidasChat();
@@ -3450,8 +3199,7 @@ async function abrirViewerStatus(numero, lista, userMap){
 }
 
 (async function init(){
-  await atualizarBotaoNotif();
-  await registrarServiceWorker();
+  atualizarBotaoNotif();
   fixKeyboardViewport();
   atualizarMedidasChat();
   ajustarAlturaMobile();
@@ -3474,8 +3222,7 @@ async function abrirViewerStatus(numero, lista, userMap){
       showApp();
       await carregarContatos();
       await renderStatus();
-      await sincronizarPushAtual();
-      if(contatoAtual) await atualizarSomenteConversaAtual();
+      await detectarNovasMensagens();
       await startAutoRefresh();
       fixKeyboardViewport();
       atualizarMedidasChat();
@@ -3486,7 +3233,7 @@ async function abrirViewerStatus(numero, lista, userMap){
 })();
 </script>
 
-<script type="module">
+<script>
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
