@@ -1092,6 +1092,7 @@ img{display:block}
         <div class="name" id="chatNome">Contato</div>
         <div class="sub" id="chatNumero">55002</div>
       </div>
+      <button id="btnChamarContato" class="ring-btn hidden" type="button">📞 Chamar</button>
     </div>
 
     <div id="emptyChat" class="empty-chat">
@@ -1247,6 +1248,7 @@ const chatInputArea = document.getElementById("chatInputArea");
 const chatAvatar = document.getElementById("chatAvatar");
 const chatNome = document.getElementById("chatNome");
 const chatNumero = document.getElementById("chatNumero");
+const btnChamarContato = document.getElementById("btnChamarContato");
 const msgInput = document.getElementById("msgInput");
 const replyPreview = document.getElementById("replyPreview");
 const replyPreviewTitle = document.getElementById("replyPreviewTitle");
@@ -1983,21 +1985,40 @@ async function detectarNovasMensagens(){
       if(!incoming) continue;
 
       const isOpenConversation = contatoAtual && contatoAtual.numero === contato.numero && !document.hidden;
-      const corpoNotif = ultima.tipo === "audio"
-        ? "🎤 Áudio recebido"
-        : ultima.tipo === "foto"
-          ? "📷 Foto recebida"
-          : ultima.mensagem;
+      const isCallPulse = ultima.tipo === "chamada";
+      const corpoNotif = isCallPulse
+        ? "📞 Está te chamando"
+        : ultima.tipo === "audio"
+          ? "🎤 Áudio recebido"
+          : ultima.tipo === "foto"
+            ? "📷 Foto recebida"
+            : ultima.mensagem;
 
       if(isOpenConversation){
-        playNewMessageSound();
+        if(isCallPulse){
+          startRinging(contato.numero);
+          showBrowserNotification(getContatoNomeByNumero(contato.numero), corpoNotif);
+          if(navigator.vibrate){
+            navigator.vibrate([300,120,300,120,300]);
+          }
+        }else{
+          playNewMessageSound();
+        }
       }else{
         unreadCountMap[contato.numero] = (unreadCountMap[contato.numero] || 0) + 1;
-        playNewMessageSound();
-        startRinging(contato.numero);
-        showBrowserNotification(getContatoNomeByNumero(contato.numero), corpoNotif);
-        if(navigator.vibrate){
-          navigator.vibrate([180,120,180]);
+        if(isCallPulse){
+          startRinging(contato.numero);
+          showBrowserNotification(getContatoNomeByNumero(contato.numero), corpoNotif);
+          if(navigator.vibrate){
+            navigator.vibrate([300,120,300,120,300]);
+          }
+        }else{
+          playNewMessageSound();
+          startRinging(contato.numero);
+          showBrowserNotification(getContatoNomeByNumero(contato.numero), corpoNotif);
+          if(navigator.vibrate){
+            navigator.vibrate([180,120,180]);
+          }
         }
       }
     }
@@ -2351,6 +2372,7 @@ window.apagarUsuario = async function(id, numero){
     if(contatoAtual && contatoAtual.numero === numero){
       contatoAtual = null;
       chatHeader.classList.add("hidden");
+      btnChamarContato.classList.add("hidden");
       messagesBox.classList.add("hidden");
       typingIndicator.classList.add("hidden");
       chatInputArea.classList.add("hidden");
@@ -2390,6 +2412,7 @@ window.removerVinculo = async function(id){
         contatoAtual = null;
         stopRinging();
         chatHeader.classList.add("hidden");
+        btnChamarContato.classList.add("hidden");
         messagesBox.classList.add("hidden");
         typingIndicator.classList.add("hidden");
         chatInputArea.classList.add("hidden");
@@ -2503,7 +2526,9 @@ async function renderContatos(lista){
                   ? "🎤 Áudio"
                   : c.ultima.tipo === "foto"
                     ? "📷 Foto"
-                    : c.ultima.mensagem
+                    : c.ultima.tipo === "chamada"
+                      ? "📞 Chamada"
+                      : c.ultima.mensagem
               )
             : "Sem mensagens ainda"
         }</div>
@@ -2533,6 +2558,7 @@ async function abrirConversa(contato){
   messagesBox.classList.remove("hidden");
   chatInputArea.classList.remove("hidden");
   emptyChat.classList.add("hidden");
+  btnChamarContato.classList.remove("hidden");
 
   atualizarStatusContatoTopo();
 
@@ -2557,6 +2583,7 @@ async function abrirConversa(contato){
 
 function resumoMensagem(m){
   if(!m) return "";
+  if(m.tipo === "chamada") return "📞 Chamada";
   if(m.tipo === "foto") return m.mensagem && m.mensagem !== "[foto]" ? `📷 ${m.mensagem}` : "📷 Foto";
   if(m.tipo === "audio") return "🎤 Áudio";
   return m.mensagem || "";
@@ -2677,6 +2704,15 @@ async function apagarMensagem(idMensagem){
 
 
 function renderMensagemConteudo(m){
+  if(m.tipo === "chamada"){
+    return `
+      <div class="msg-call">
+        <div><b>📞 Chamada</b></div>
+        <div style="font-size:13px;opacity:.9;margin-top:4px;">Toque enviado pelo chat</div>
+      </div>
+    `;
+  }
+
   if(m.tipo === "audio" && m.audio_url){
     return `
       <div class="msg-audio">
@@ -2886,6 +2922,34 @@ msgInput.addEventListener("input", async () => {
   }, 2500);
 });
 
+async function enviarPulseChamada(){
+  if(!usuarioLogado || !contatoAtual) return;
+
+  btnChamarContato.disabled = true;
+  btnChamarContato.textContent = "Chamando...";
+
+  const { error } = await supabase.from("chat_mensagens").insert({
+    de_numero: usuarioLogado.numero,
+    para_numero: contatoAtual.numero,
+    mensagem: "📞 Chamada recebida",
+    tipo: "chamada",
+    lido: false
+  });
+
+  btnChamarContato.disabled = false;
+  btnChamarContato.textContent = "📞 Chamar";
+
+  if(error){
+    console.error(error);
+    alert("Erro ao enviar chamada.");
+    return;
+  }
+
+  startRinging(contatoAtual.numero);
+  await carregarMensagens(true);
+  await renderContatos(contatosPermitidos);
+}
+
 async function enviarMensagem(){
   const texto = msgInput.value.trim();
   if(!texto || !usuarioLogado || !contatoAtual) return;
@@ -2942,6 +3006,10 @@ searchContato.addEventListener("input", async () => {
 
 mobileBack.onclick = () => {
   closeChatMobile();
+};
+
+btnChamarContato.onclick = async () => {
+  await enviarPulseChamada();
 };
 
 document.addEventListener("visibilitychange", async () => {
