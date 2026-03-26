@@ -1749,28 +1749,56 @@ window.addEventListener("beforeunload", () => {
 (async function init(){
   atualizarBotaoNotif();
 
-  const sess = loadSession();
+  let sess = loadSession();
 
-  if(sess?.numero){
-    usuarioLogado = {
-      numero: sess.numero,
-      senha: sess.senha,
-      nome: "FFFILMES"
+  // força o usuário fixo quando vier do chat do filme
+  if (origemSistema === "fffilmes") {
+    sess = {
+      numero: FFFILMES_FIXO_NUMERO,
+      senha: FFFILMES_FIXO_SENHA
     };
 
-    setMeHeader();
-    showApp();
-
-    try{
-      await carregarContatos();
-      await detectarNovasMensagens();
-      await startAutoRefresh();
-    }catch(e){
-      console.warn("Rodando sem banco completo:", e);
-    }
-
-    closeChatMobile();
+    localStorage.setItem("ff_chat_familia_user", JSON.stringify(sess));
   }
+
+  if (!sess?.numero || !sess?.senha) {
+    setStatus(authStatus, "Sessão do chat não encontrada.", "error");
+    showAuth();
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("chat_usuarios")
+    .select("*")
+    .eq("numero", sess.numero)
+    .eq("senha", sess.senha)
+    .eq("ativo", true)
+    .maybeSingle();
+
+  if (error) {
+    console.error(error);
+    setStatus(authStatus, "Erro ao validar usuário do chat.", "error");
+    showAuth();
+    return;
+  }
+
+  if (!data) {
+    setStatus(authStatus, "Usuário fixo não encontrado ou inativo no banco.", "error");
+    showAuth();
+    return;
+  }
+
+  usuarioLogado = data;
+  lastMessageMap = {};
+  unreadCountMap = {};
+
+  setMeHeader();
+  showApp();
+
+  await carregarContatos();
+  await detectarNovasMensagens();
+  await startAutoRefresh();
+  closeChatMobile();
 })();
 </script>
 </body>
