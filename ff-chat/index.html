@@ -1206,6 +1206,7 @@ const AUTO_REFRESH_MS = 5000;
 const AUDIO_BUCKET = "chat-audios";
 const FOTO_BUCKET = "chat-fotos";
 const STATUS_BUCKET = "chat-status";
+const CHAT_VERSION = "2026-03-28-01";
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBgar59yF1k6XmfG0iNOXvWCWKIa9dHcdI",
@@ -1596,7 +1597,27 @@ async function registrarServiceWorker(){
   if(ffFirebaseSWReg) return ffFirebaseSWReg;
 
   try{
-    ffFirebaseSWReg = await navigator.serviceWorker.register("/ff-chat/sw.js", { scope: "/ff-chat/" });
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for(const reg of regs){
+      const activeUrl = reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || "";
+      if(reg.scope.includes("/ff-chat/") && !activeUrl.endsWith("/ff-chat/sw.js")){
+        try{
+          await reg.unregister();
+          console.log("SW antigo removido:", activeUrl || reg.scope);
+        }catch(swErr){
+          console.warn("Não consegui remover SW antigo:", swErr);
+        }
+      }
+    }
+
+    ffFirebaseSWReg = await navigator.serviceWorker.register(`/ff-chat/sw.js?v=${CHAT_VERSION}`, {
+      scope: "/ff-chat/",
+      updateViaCache: "none"
+    });
+
+    try{
+      await ffFirebaseSWReg.update();
+    }catch(_){}
 
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if(swRefreshing) return;
@@ -1646,19 +1667,23 @@ async function sincronizarTokenFcmAtual(){
   if(!("Notification" in window)) return;
   if(Notification.permission !== "granted") return;
 
-  await iniciarFirebaseNotificacoes();
+  try{
+    await iniciarFirebaseNotificacoes();
 
-  if(!ffFirebaseSWReg){
-    ffFirebaseSWReg = await navigator.serviceWorker.ready;
-  }
+    if(!ffFirebaseSWReg){
+      ffFirebaseSWReg = await navigator.serviceWorker.ready;
+    }
 
-  const token = await getToken(ffMessaging, {
-    vapidKey: FIREBASE_VAPID_KEY,
-    serviceWorkerRegistration: ffFirebaseSWReg
-  });
+    const token = await getToken(ffMessaging, {
+      vapidKey: FIREBASE_VAPID_KEY,
+      serviceWorkerRegistration: ffFirebaseSWReg
+    });
 
-  if(token){
-    await salvarTokenFcmNoBanco(token);
+    if(token){
+      await salvarTokenFcmNoBanco(token);
+    }
+  }catch(e){
+    console.warn("Push ignorado nesta carga:", e?.message || e);
   }
 }
 
@@ -2181,17 +2206,32 @@ async function detectarNovasMensagens(){
   }
 }
 
-async function startAutoRefresh(){
-  stopAutoRefresh();
-  autoRefreshTimer = setInterval(async () => {
-    if(!usuarioLogado) return;
+let refreshingNow = false;
+
+async function forceRefreshAll(forceChat=false){
+  if(!usuarioLogado || refreshingNow) return;
+  refreshingNow = true;
+  try{
     await carregarContatos();
     await renderStatus();
     await detectarNovasMensagens();
     if(contatoAtual){
-      await carregarMensagens(false);
+      await carregarMensagens(!!forceChat);
       await verificarDigitando();
     }
+  }catch(e){
+    console.error("Erro no refresh do chat:", e);
+  }finally{
+    refreshingNow = false;
+  }
+}
+
+async function startAutoRefresh(){
+  stopAutoRefresh();
+  await forceRefreshAll(true);
+  autoRefreshTimer = setInterval(async () => {
+    if(document.hidden) return;
+    await forceRefreshAll(false);
   }, AUTO_REFRESH_MS);
 }
 function zerarNaoLidas(numero){
@@ -3132,16 +3172,33 @@ document.addEventListener("visibilitychange", async () => {
       await atualizarPresenca(true);
       fixKeyboardViewport();
       ajustarAlturaMobile();
+      await forceRefreshAll(true);
     }
 
     if(!document.hidden && contatoAtual){
       zerarNaoLidas(contatoAtual.numero);
       stopRinging();
       await renderContatos(contatosPermitidos);
+      await carregarMensagens(true);
     }
   }catch(e){
     console.error("Erro ao atualizar presença:", e);
   }
+});
+
+window.addEventListener("focus", async () => {
+  if(!usuarioLogado) return;
+  await forceRefreshAll(true);
+});
+
+window.addEventListener("pageshow", async () => {
+  if(!usuarioLogado) return;
+  await forceRefreshAll(true);
+});
+
+window.addEventListener("online", async () => {
+  if(!usuarioLogado) return;
+  await forceRefreshAll(true);
 });
 
 window.addEventListener("resize", () => {
@@ -3419,7 +3476,19 @@ window.registrarPwaFFChat = window.registrarPwaFFChat || null;
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
-      await navigator.serviceWorker.register("/ff-chat/sw.js", { scope: "/ff-chat/" });
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const reg of regs) {
+        const activeUrl = reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || "";
+        if (reg.scope.includes("/ff-chat/") && !activeUrl.endsWith("/ff-chat/sw.js")) {
+          await reg.unregister();
+        }
+      }
+
+      const reg = await navigator.serviceWorker.register("/ff-chat/sw.js?v=2026-03-28-01", {
+        scope: "/ff-chat/",
+        updateViaCache: "none"
+      });
+      try { await reg.update(); } catch (_) {}
       console.log("PWA ativo com sucesso");
     } catch (e) {
       console.error("Erro ao registrar service worker:", e);
