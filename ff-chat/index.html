@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1532,26 +1534,39 @@ function getContatoNomeByNumero(numero){
   return c ? c.nome : numero;
 }
 
-async function pedirPermissaoNotificacao(){
-  if(!("Notification" in window)) return;
-  try{
+async function pedirPermissaoNotificacao() {
+  try {
+    await iniciarFirebaseNotificacoes();
+
     const p = await Notification.requestPermission();
-    if(p === "granted"){
-      btnPermissaoNotif.textContent = "Notif OK";
+    atualizarBotaoNotif();
+
+    if (p !== "granted") return;
+
+    if (!ffFirebaseSWReg) {
+      ffFirebaseSWReg = await navigator.serviceWorker.ready;
     }
-  }catch(e){}
-}
-function atualizarBotaoNotif(){
-  if(!("Notification" in window)){
-    btnPermissaoNotif.textContent = "SemNotif";
-    return;
-  }
-  if(Notification.permission === "granted"){
-    btnPermissaoNotif.textContent = "Notif OK";
-  }else if(Notification.permission === "denied"){
-    btnPermissaoNotif.textContent = "Notif OFF";
-  }else{
-    btnPermissaoNotif.textContent = "Notif";
+
+    const token = await getToken(ffMessaging, {
+      vapidKey: FIREBASE_VAPID_KEY,
+      serviceWorkerRegistration: ffFirebaseSWReg
+    });
+
+    console.log("TOKEN FCM:", token);
+
+    if (!token) return;
+
+    await supabase
+      .from("chat_push_tokens")
+      .upsert({
+        usuario_numero: String(usuarioLogado.numero),
+        token_fcm: token,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "usuario_numero" });
+
+    console.log("TOKEN SALVO NO BANCO");
+  } catch (e) {
+    console.error("ERRO NOTIF:", e);
   }
 }
 btnPermissaoNotif.onclick = pedirPermissaoNotificacao;
