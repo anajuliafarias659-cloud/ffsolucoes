@@ -1,5 +1,4 @@
 
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1194,6 +1193,8 @@ img{display:block}
 
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
 const supabase = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
@@ -1205,6 +1206,17 @@ const AUTO_REFRESH_MS = 5000;
 const AUDIO_BUCKET = "chat-audios";
 const FOTO_BUCKET = "chat-fotos";
 const STATUS_BUCKET = "chat-status";
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBgar59yF1k6XmfG0iNOXvWCWKIa9dHcdI",
+  authDomain: "servicospc-b3382.firebaseapp.com",
+  projectId: "servicospc-b3382",
+  storageBucket: "servicospc-b3382.firebasestorage.app",
+  messagingSenderId: "35103134828",
+  appId: "1:35103134828:web:a57b932f6bd698b8e3b449",
+  measurementId: "G-FNFPRJW3HB"
+};
+const FIREBASE_VAPID_KEY = "BGGaSefMVvIze-rvIDW_9J96zk7Bn1LCPprhSAI-6tssEL1NtWlztodtfPHZ7hgc-wQ-IIFECn4_Ya0kPSdgx0w";
 
 const authScreen = document.getElementById("authScreen");
 const appScreen = document.getElementById("appScreen");
@@ -1310,6 +1322,10 @@ let fotoMensagemPreviewUrl = "";
 let typingTimer = null;
 let typingSentAt = 0;
 let onlineHeartbeatTimer = null;
+let ffFirebaseApp = null;
+let ffMessaging = null;
+let ffFirebaseSWReg = null;
+let swRefreshing = false;
 
 function setStatus(el, text="", type=""){
   el.className = "status" + (type ? " " + type : "");
@@ -1534,12 +1550,129 @@ function getContatoNomeByNumero(numero){
   return c ? c.nome : numero;
 }
 
-async function pedirPermissaoNotificacao() {
+async function iniciarFirebaseNotificacoes(){
+  if(ffMessaging) return ffMessaging;
+
+  const supported = await isSupported().catch(() => false);
+  if(!supported){
+    throw new Error("FCM não suportado neste navegador/aparelho.");
+  }
+
+  if(!ffFirebaseApp){
+    ffFirebaseApp = initializeApp(FIREBASE_CONFIG);
+  }
+
+  ffMessaging = getMessaging(ffFirebaseApp);
+
+  if(!ffFirebaseSWReg){
+    ffFirebaseSWReg = await registrarServiceWorker();
+  }
+
+  onMessage(ffMessaging, (payload) => {
+    try{
+      const data = payload?.data || {};
+      const titulo = payload?.notification?.title || data.title || "Nova mensagem";
+      const corpo = payload?.notification?.body || data.body || "Você recebeu uma nova mensagem";
+      const tipo = data.tipo || "mensagem";
+      const numero = data.numero || data.from_numero || "";
+
+      if(tipo === "chamada"){
+        startRinging(numero);
+      }else{
+        playNewMessageSound();
+      }
+
+      showBrowserNotification(titulo, corpo);
+    }catch(e){
+      console.error("Erro no onMessage do Firebase:", e);
+    }
+  });
+
+  return ffMessaging;
+}
+
+async function registrarServiceWorker(){
+  if(!("serviceWorker" in navigator)) return null;
+  if(ffFirebaseSWReg) return ffFirebaseSWReg;
+
+  try{
+    ffFirebaseSWReg = await navigator.serviceWorker.register("/ff-chat/sw.js", { scope: "/ff-chat/" });
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if(swRefreshing) return;
+      swRefreshing = true;
+      window.location.reload();
+    });
+
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if(event.data?.type === "PUSH_NOTIFICATION_CLICK") {
+        const numero = event.data?.numero;
+        window.focus();
+        if(numero){
+          const contato = contatosPermitidos.find(c => c.numero === numero);
+          if(contato){
+            abrirConversa(contato);
+          }
+        }
+      }
+    });
+
+    return ffFirebaseSWReg;
+  }catch(e){
+    console.error("Erro ao registrar service worker:", e);
+    return null;
+  }
+}
+
+async function salvarTokenFcmNoBanco(token){
+  if(!usuarioLogado || !token) return;
+
+  const { error } = await supabase
+    .from("chat_push_tokens")
+    .upsert({
+      usuario_numero: String(usuarioLogado.numero),
+      token_fcm: token,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "usuario_numero" });
+
+  if(error){
+    console.error("Erro ao salvar token FCM:", error);
+    throw error;
+  }
+}
+
+async function sincronizarTokenFcmAtual(){
+  if(!usuarioLogado) return;
+  if(!("Notification" in window)) return;
+  if(Notification.permission !== "granted") return;
+
+  await iniciarFirebaseNotificacoes();
+
+  if(!ffFirebaseSWReg){
+    ffFirebaseSWReg = await navigator.serviceWorker.ready;
+  }
+
+  const token = await getToken(ffMessaging, {
+    vapidKey: FIREBASE_VAPID_KEY,
+    serviceWorkerRegistration: ffFirebaseSWReg
+  });
+
+  if(token){
+    await salvarTokenFcmNoBanco(token);
+  }
+}
+
+async function pedirPermissaoNotificacao(){
+  if(!usuarioLogado){
+    alert("Entre no chat antes de ativar notificações.");
+    return;
+  }
+
   try {
     await iniciarFirebaseNotificacoes();
 
     const p = await Notification.requestPermission();
-    atualizarBotaoNotif();
+    await atualizarBotaoNotif();
 
     if (p !== "granted") return;
 
@@ -1552,21 +1685,51 @@ async function pedirPermissaoNotificacao() {
       serviceWorkerRegistration: ffFirebaseSWReg
     });
 
-    console.log("TOKEN FCM:", token);
+    if (!token) {
+      alert("Não consegui gerar o token de notificação neste aparelho.");
+      return;
+    }
 
-    if (!token) return;
-
-    await supabase
-      .from("chat_push_tokens")
-      .upsert({
-        usuario_numero: String(usuarioLogado.numero),
-        token_fcm: token,
-        updated_at: new Date().toISOString()
-      }, { onConflict: "usuario_numero" });
-
-    console.log("TOKEN SALVO NO BANCO");
+    await salvarTokenFcmNoBanco(token);
+    await atualizarBotaoNotif();
+    alert("Notificações em segundo plano ativadas.");
   } catch (e) {
     console.error("ERRO NOTIF:", e);
+    alert("Erro ao ativar notificações em segundo plano.");
+  }
+}
+
+async function atualizarBotaoNotif(){
+  if(!("Notification" in window) || !("serviceWorker" in navigator)){
+    btnPermissaoNotif.textContent = "SemPush";
+    return;
+  }
+
+  if(Notification.permission === "denied"){
+    btnPermissaoNotif.textContent = "Push OFF";
+    return;
+  }
+
+  if(Notification.permission !== "granted"){
+    btnPermissaoNotif.textContent = "Ativar Push";
+    return;
+  }
+
+  try{
+    await iniciarFirebaseNotificacoes();
+    if(!ffFirebaseSWReg){
+      ffFirebaseSWReg = await navigator.serviceWorker.ready;
+    }
+
+    const token = await getToken(ffMessaging, {
+      vapidKey: FIREBASE_VAPID_KEY,
+      serviceWorkerRegistration: ffFirebaseSWReg
+    });
+
+    btnPermissaoNotif.textContent = token ? "Push ON" : "Ativar Push";
+  }catch(e){
+    console.error("Erro ao atualizar botão notif:", e);
+    btnPermissaoNotif.textContent = "Ativar Push";
   }
 }
 btnPermissaoNotif.onclick = pedirPermissaoNotificacao;
@@ -3234,8 +3397,11 @@ async function abrirViewerStatus(numero, lista, userMap){
       await atualizarPresenca(true);
       startHeartbeatOnline();
       showApp();
+      await atualizarBotaoNotif();
+      await registrarServiceWorker();
       await carregarContatos();
       await renderStatus();
+      await sincronizarTokenFcmAtual();
       await detectarNovasMensagens();
       await startAutoRefresh();
       fixKeyboardViewport();
@@ -3248,20 +3414,15 @@ async function abrirViewerStatus(numero, lista, userMap){
 </script>
 
 <script>
+window.registrarPwaFFChat = window.registrarPwaFFChat || null;
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
-      await navigator.serviceWorker.register("/ff-chat/sw.js");
+      await navigator.serviceWorker.register("/ff-chat/sw.js", { scope: "/ff-chat/" });
       console.log("PWA ativo com sucesso");
     } catch (e) {
-      console.error("Erro ao registrar service worker PWA:", e);
-    }
-
-    try {
-      await navigator.serviceWorker.register("/ff-chat/firebase-messaging-sw.js");
-      console.log("Firebase SW ativo com sucesso");
-    } catch (e) {
-      console.error("Erro ao registrar Firebase SW:", e);
+      console.error("Erro ao registrar service worker:", e);
     }
   });
 }
