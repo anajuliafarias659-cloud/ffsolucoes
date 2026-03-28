@@ -2,7 +2,7 @@ importScripts("https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js
 importScripts("https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js");
 
 firebase.initializeApp({
-  apiKey: "SUA_API_KEY",
+  apiKey: "AIzaSyBgar59yF1k6XmfG0iNOXvWCWKIa9dHcdI",
   authDomain: "servicospc-b3382.firebaseapp.com",
   projectId: "servicospc-b3382",
   storageBucket: "servicospc-b3382.firebasestorage.app",
