@@ -1,9 +1,4 @@
-const CACHE_NAME = "ff-chat-cache-v11";
-const FALLBACK_HTML = [
-  "/ff-chat/familia.html",
-  "/ff-chat/index.html"
-];
-
+const CACHE_NAME = "ff-chat-cache-v12";
 const STATIC_ASSETS = [
   "/ff-chat/manifest.webmanifest",
   "/ff-chat/icons/icon-192.png",
@@ -33,23 +28,13 @@ self.addEventListener("fetch", (event) => {
 
   if (req.method !== "GET") return;
 
-  // HTML: sempre tenta rede primeiro
+  // HTML sempre na rede primeiro
   if (req.mode === "navigate" || req.destination === "document") {
-    event.respondWith((async () => {
-      try {
-        return await fetch(req, { cache: "no-store" });
-      } catch {
-        for (const fallback of FALLBACK_HTML) {
-          const cached = await caches.match(fallback);
-          if (cached) return cached;
-        }
-        return Response.error();
-      }
-    })());
+    event.respondWith(fetch(req, { cache: "no-store" }));
     return;
   }
 
-  // JS / CSS / HTML: sem cache para não travar atualização
+  // JS/CSS sem cache
   if (
     req.destination === "script" ||
     req.destination === "style" ||
@@ -61,7 +46,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Imagens e arquivos estáticos
+  // Só imagens/manifest no cache
   event.respondWith((async () => {
     const cached = await caches.match(req);
     if (cached) return cached;
@@ -70,31 +55,5 @@ self.addEventListener("fetch", (event) => {
     const cache = await caches.open(CACHE_NAME);
     cache.put(req, res.clone());
     return res;
-  })());
-});
-
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-
-  const urlDestino = "/ff-chat/";
-
-  event.waitUntil((async () => {
-    const clientList = await clients.matchAll({
-      type: "window",
-      includeUncontrolled: true
-    });
-
-    for (const client of clientList) {
-      try {
-        if ("focus" in client) {
-          await client.navigate(urlDestino);
-          return client.focus();
-        }
-      } catch (_) {}
-    }
-
-    if (clients.openWindow) {
-      return clients.openWindow(urlDestino);
-    }
   })());
 });
