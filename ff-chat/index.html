@@ -2156,6 +2156,43 @@ async function detectarNovasMensagens(){
     if(ultima.id !== lastKnownId){
       lastMessageMap[contato.numero] = ultima.id;
 
+      async function detectarNovasMensagens(){
+  if(!usuarioLogado){
+    console.log("detectarNovasMensagens: sem usuarioLogado");
+    return;
+  }
+
+  if(!contatosPermitidos.length){
+    console.log("detectarNovasMensagens: sem contatosPermitidos");
+    return;
+  }
+
+  for(const contato of contatosPermitidos){
+    const { data, error } = await supabase
+      .from("chat_mensagens")
+      .select("id,de_numero,para_numero,mensagem,created_at,tipo")
+      .or(`and(de_numero.eq.${usuarioLogado.numero},para_numero.eq.${contato.numero}),and(de_numero.eq.${contato.numero},para_numero.eq.${usuarioLogado.numero})`)
+      .order("created_at", { ascending:false })
+      .limit(1);
+
+    if(error){
+      console.error("ERRO detectarNovasMensagens", contato.numero, error);
+      continue;
+    }
+
+    if(!data?.length) continue;
+
+    const ultima = data[0];
+    const lastKnownId = lastMessageMap[contato.numero];
+
+    if(!lastKnownId){
+      lastMessageMap[contato.numero] = ultima.id;
+      continue;
+    }
+
+    if(ultima.id !== lastKnownId){
+      lastMessageMap[contato.numero] = ultima.id;
+
       const incoming = ultima.de_numero === contato.numero;
       if(!incoming) continue;
 
@@ -3065,25 +3102,55 @@ msgInput.addEventListener("input", async () => {
 
 async function enviarMensagem(){
   const texto = msgInput.value.trim();
-  if(!texto || !usuarioLogado || !contatoAtual) return;
+
+  console.log("DEBUG enviarMensagem", {
+    texto,
+    usuarioLogado,
+    contatoAtual
+  });
+
+  if(!texto){
+    alert("Digite uma mensagem.");
+    return;
+  }
+
+  if(!usuarioLogado){
+    alert("Usuário não está logado.");
+    return;
+  }
+
+  if(!contatoAtual){
+    alert("Abra uma conversa antes de enviar.");
+    return;
+  }
 
   btnEnviarMsg.disabled = true;
   btnEnviarMsg.textContent = "Enviando...";
 
-  const { error } = await supabase.from("chat_mensagens").insert({
+  const payload = {
     de_numero: usuarioLogado.numero,
     para_numero: contatoAtual.numero,
     mensagem: texto,
     tipo: "texto",
     reply_to_id: replyToMessage?.id || null,
     lido: false
-  });
+  };
+
+  console.log("PAYLOAD CHAT", payload);
+
+  const { data, error } = await supabase
+    .from("chat_mensagens")
+    .insert(payload)
+    .select();
 
   btnEnviarMsg.disabled = false;
   btnEnviarMsg.textContent = "Enviar";
 
+  console.log("RESULTADO INSERT", { data, error });
+
   if(error){
-    console.error(error);
+    alert("Erro ao enviar mensagem: " + error.message);
+    console.error("ERRO INSERT chat_mensagens", error);
     return;
   }
 
