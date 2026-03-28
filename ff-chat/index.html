@@ -1202,212 +1202,111 @@ import {
   isSupported
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js";
 
-/* =========================
-   CONFIG FIREBASE
-========================= */
+/* CONFIG REAL */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBgar59yF1k6XmfG0iNOXvWCWKIa9dHcdI",
   authDomain: "servicospc-b3382.firebaseapp.com",
   projectId: "servicospc-b3382",
-
-  /* PREENCHA NO FIREBASE */
-  messagingSenderId: "SEU_MESSAGING_SENDER_ID",
-  appId: "SEU_APP_ID"
+  storageBucket: "servicospc-b3382.firebasestorage.app",
+  messagingSenderId: "35103134828",
+  appId: "1:35103134828:web:a57b932f6bd698b8e3b449"
 };
 
 const FIREBASE_VAPID_KEY = "BGGaSefMVvIze-rvIDW_9J96zk7Bn1LCPprhSAI-6tssEL1NtWlztodtfPHZ7hgc-wQ-IIFECn4_Ya0kPSdgx0w";
 
-/* =========================
-   VARIÁVEIS
-========================= */
 let ffFirebaseApp = null;
 let ffMessaging = null;
-let ffNotifToken = null;
 let ffSwReg = null;
 
-/* =========================
-   SERVICE WORKER
-========================= */
-async function registrarServiceWorkerFirebase() {
-  if (!("serviceWorker" in navigator)) return null;
-
+/* SW */
+async function registrarSW() {
   try {
     const reg = await navigator.serviceWorker.register("/ff-chat/firebase-messaging-sw.js");
     await navigator.serviceWorker.ready;
-    console.log("SW Firebase OK");
     return reg;
   } catch (e) {
-    console.error("Erro SW:", e);
+    console.error(e);
     return null;
   }
 }
 
-/* =========================
-   BOTÃO
-========================= */
+/* BOTÃO */
 function atualizarBotaoNotif() {
   const btn = document.getElementById("btnPermissaoNotif");
   if (!btn) return;
 
-  if (!("Notification" in window)) {
-    btn.textContent = "SemNotif";
-    btn.disabled = true;
-    return;
-  }
-
-  btn.disabled = false;
-
   if (Notification.permission === "granted") {
     btn.textContent = "Notif OK";
   } else if (Notification.permission === "denied") {
-    btn.textContent = "Notif OFF";
+    btn.textContent = "Bloqueado";
   } else {
     btn.textContent = "Notif";
   }
 }
 
-/* =========================
-   SALVAR TOKEN
-========================= */
-async function salvarTokenFirebaseNoSupabase(token) {
+/* SALVAR TOKEN */
+async function salvarToken(token) {
   if (!window.supabase || !window.usuarioLogado?.numero) return;
 
-  try {
-    await window.supabase
-      .from("chat_push_tokens")
-      .upsert({
-        usuario_numero: String(window.usuarioLogado.numero),
-        token_fcm: token,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: "usuario_numero"
-      });
-
-    console.log("Token salvo");
-  } catch (e) {
-    console.error("Erro salvar token:", e);
-  }
+  await window.supabase
+    .from("chat_push_tokens")
+    .upsert({
+      usuario_numero: String(window.usuarioLogado.numero),
+      token_fcm: token
+    }, { onConflict: "usuario_numero" });
 }
 
-/* =========================
-   NOTIFICAÇÃO LOCAL
-========================= */
-function showBrowserNotification(title, body, data = {}) {
-  if (!("Notification" in window)) return;
-  if (Notification.permission !== "granted") return;
-
-  const n = new Notification(title, {
-    body,
-    tag: "ff-chat",
-    renotify: true,
-    data
-  });
-
-  n.onclick = () => {
-    window.focus();
-    n.close();
-  };
-}
-
-/* =========================
-   FOREGROUND
-========================= */
-function registrarListenerForeground() {
-  if (!ffMessaging) return;
-
+/* FOREGROUND */
+function ouvirMensagem() {
   onMessage(ffMessaging, (payload) => {
-    console.log("Push recebida:", payload);
+    const title = payload?.notification?.title || "Nova mensagem";
+    const body = payload?.notification?.body || "Mensagem nova";
 
-    const titulo =
-      payload?.notification?.title ||
-      payload?.data?.title ||
-      "Nova mensagem";
-
-    const body =
-      payload?.notification?.body ||
-      payload?.data?.body ||
-      "Mensagem nova";
-
-    showBrowserNotification(titulo, body, payload?.data || {});
+    if (Notification.permission === "granted") {
+      new Notification(title, { body });
+    }
   });
 }
 
-/* =========================
-   INICIAR
-========================= */
-async function iniciarFirebaseNotificacoes() {
-  try {
-    const supported = await isSupported();
-    if (!supported) return atualizarBotaoNotif();
+/* INICIAR */
+async function iniciarFirebase() {
+  if (!(await isSupported())) return;
 
-    if (!FIREBASE_CONFIG.messagingSenderId || !FIREBASE_CONFIG.appId) {
-      console.warn("Faltando config Firebase");
-      return atualizarBotaoNotif();
-    }
+  ffSwReg = await registrarSW();
+  if (!ffSwReg) return;
 
-    ffSwReg = await registrarServiceWorkerFirebase();
-    if (!ffSwReg) return atualizarBotaoNotif();
+  ffFirebaseApp = initializeApp(FIREBASE_CONFIG);
+  ffMessaging = getMessaging(ffFirebaseApp);
 
-    if (!ffFirebaseApp) {
-      ffFirebaseApp = initializeApp(FIREBASE_CONFIG);
-    }
-
-    if (!ffMessaging) {
-      ffMessaging = getMessaging(ffFirebaseApp);
-      registrarListenerForeground();
-    }
-
-    atualizarBotaoNotif();
-  } catch (e) {
-    console.error("Erro iniciar Firebase:", e);
-  }
+  ouvirMensagem();
+  atualizarBotaoNotif();
 }
 
-/* =========================
-   ATIVAR NOTIFICAÇÃO
-========================= */
-async function ativarNotificacoesFirebase() {
-  try {
-    await iniciarFirebaseNotificacoes();
+/* ATIVAR */
+async function ativarNotif() {
+  await iniciarFirebase();
 
-    const permission = await Notification.requestPermission();
-    atualizarBotaoNotif();
+  const perm = await Notification.requestPermission();
+  atualizarBotaoNotif();
 
-    if (permission !== "granted") return;
+  if (perm !== "granted") return;
 
-    if (!ffSwReg) {
-      ffSwReg = await navigator.serviceWorker.ready;
-    }
+  const token = await getToken(ffMessaging, {
+    vapidKey: FIREBASE_VAPID_KEY,
+    serviceWorkerRegistration: ffSwReg
+  });
 
-    ffNotifToken = await getToken(ffMessaging, {
-      vapidKey: FIREBASE_VAPID_KEY,
-      serviceWorkerRegistration: ffSwReg
-    });
+  console.log("TOKEN:", token);
 
-    if (!ffNotifToken) {
-      console.warn("Token não gerado");
-      return;
-    }
-
-    console.log("TOKEN:", ffNotifToken);
-
-    await salvarTokenFirebaseNoSupabase(ffNotifToken);
-
-  } catch (e) {
-    console.error("Erro ativar notif:", e);
-  }
+  if (token) await salvarToken(token);
 }
 
-/* =========================
-   EVENTOS
-========================= */
+/* LOAD */
 window.addEventListener("load", async () => {
-  await iniciarFirebaseNotificacoes();
+  await iniciarFirebase();
 
   const btn = document.getElementById("btnPermissaoNotif");
-  if (btn) {
-    btn.addEventListener("click", ativarNotificacoesFirebase);
-  }
+  if (btn) btn.onclick = ativarNotif;
 });
 </script>
 
