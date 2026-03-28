@@ -1,10 +1,13 @@
 importScripts("https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js");
 
-const CACHE_NAME = "ff-chat-cache-v2";
+const CACHE_NAME = "ff-chat-cache-v3";
+const APP_URL = "/ff-chat/";
+const INDEX_URL = "/ff-chat/index.html";
+
 const urlsToCache = [
-  "/ff-chat/",
-  "/ff-chat/index.html",
+  APP_URL,
+  INDEX_URL,
   "/ff-chat/manifest.webmanifest",
   "/ff-chat/icons/icon-192.png",
   "/ff-chat/icons/icon-512.png"
@@ -18,16 +21,15 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((key) => key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
-      )
-    )
-  );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter((key) => key !== CACHE_NAME)
+        .map((key) => caches.delete(key))
+    );
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener("fetch", (event) => {
@@ -35,54 +37,54 @@ self.addEventListener("fetch", (event) => {
 
   if (req.method !== "GET") return;
 
+  const url = new URL(req.url);
+
+  // HTML do app: tenta rede primeiro, cai pro cache se estiver offline
   if (req.mode === "navigate" || req.destination === "document") {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/ff-chat/index.html", copy));
-          return res;
-        })
-        .catch(() => caches.match("/ff-chat/index.html"))
-    );
+    event.respondWith((async () => {
+      try {
+        const res = await fetch(req, { cache: "no-store" });
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(INDEX_URL, res.clone());
+        return res;
+      } catch {
+        return (await caches.match(INDEX_URL)) || Response.error();
+      }
+    })());
     return;
   }
 
+  // NÃO cachear JS/CSS do chat para evitar versão velha
   if (
     req.destination === "script" ||
     req.destination === "style" ||
-    req.url.endsWith(".js") ||
-    req.url.endsWith(".css")
+    url.pathname.endsWith(".js") ||
+    url.pathname.endsWith(".css")
   ) {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          return res;
-        })
-        .catch(() => caches.match(req))
-    );
+    event.respondWith(fetch(req, { cache: "no-store" }));
     return;
   }
 
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      return cached || fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-        return res;
-      });
-    })
-  );
+  // Imagens e manifest: cache-first
+  event.respondWith((async () => {
+    const cached = await caches.match(req);
+    if (cached) return cached;
+
+    const res = await fetch(req);
+    const cache = await caches.open(CACHE_NAME);
+    cache.put(req, res.clone());
+    return res;
+  })());
 });
 
 firebase.initializeApp({
-  apiKey: "SUA_API_KEY",
+  apiKey: "AIzaSyBgar59yF1k6XmfG0iNOXvWCWKIa9dHcdI",
   authDomain: "servicospc-b3382.firebaseapp.com",
   projectId: "servicospc-b3382",
-  messagingSenderId: "SEU_SENDER_ID",
-  appId: "SEU_APP_ID"
+  storageBucket: "servicospc-b3382.firebasestorage.app",
+  messagingSenderId: "35103134828",
+  appId: "1:35103134828:web:a57b932f6bd698b8e3b449",
+  measurementId: "G-FNFPRJW3HB"
 });
 
 const messaging = firebase.messaging();
@@ -90,35 +92,52 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log("[ff-chat/sw.js] background message:", payload);
 
-  const titulo = payload?.notification?.title || "Nova mensagem";
+  const data = payload?.data || {};
+  const notification = payload?.notification || {};
+
+  const isCall = data.tipo === "chamada";
+
+  const titulo = notification.title || data.title || "Nova mensagem";
   const opcoes = {
-    body: payload?.notification?.body || "Você recebeu uma nova mensagem",
-    icon: payload?.notification?.icon || "/ff-chat/icons/icon-192.png",
-    badge: "/ff-chat/icons/icon-192.png",
-    data: payload?.data || {},
-    vibrate: [200, 100, 200],
-    tag: "ff-chat-msg"
+    body: notification.body || data.body || "Você recebeu uma nova mensagem",
+    icon: notification.icon || data.icon || "/ff-chat/icons/icon-192.png",
+    badge: data.badge || "/ff-chat/icons/icon-192.png",
+    data: {
+      url: data.url || APP_URL,
+      numero: data.numero || "",
+      tipo: data.tipo || "mensagem"
+    },
+    vibrate: isCall ? [300, 120, 300, 120, 300, 120, 300] : [200, 100, 200],
+    tag: data.tag || (isCall ? "ff-chat-call" : "ff-chat-msg"),
+    renotify: true,
+    requireInteraction: !!isCall
   };
 
-  self.registration.showNotification(titulo, opcoes);
+  return self.registration.showNotification(titulo, opcoes);
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
-  const urlDestino = "/ff-chat/";
+  const urlDestino = event.notification?.data?.url || APP_URL;
 
-  event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
+  event.waitUntil((async () => {
+    const clientList = await clients.matchAll({
+      type: "window",
+      includeUncontrolled: true
+    });
+
+    for (const client of clientList) {
+      try {
         if ("focus" in client) {
-          client.navigate(urlDestino);
+          await client.navigate(urlDestino);
           return client.focus();
         }
-      }
-      if (clients.openWindow) {
-        return clients.openWindow(urlDestino);
-      }
-    })
-  );
+      } catch (_) {}
+    }
+
+    if (clients.openWindow) {
+      return clients.openWindow(urlDestino);
+    }
+  })());
 });
