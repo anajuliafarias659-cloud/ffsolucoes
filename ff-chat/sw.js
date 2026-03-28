@@ -1,7 +1,7 @@
 importScripts("https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js");
 
-const CACHE_NAME = "ff-chat-cache-v1";
+const CACHE_NAME = "ff-chat-cache-v2";
 const urlsToCache = [
   "/ff-chat/",
   "/ff-chat/index.html",
@@ -21,11 +21,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
+        keys
+          .filter((key) => key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
       )
     )
   );
@@ -33,9 +31,48 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  const req = event.request;
+
+  if (req.method !== "GET") return;
+
+  if (req.mode === "navigate" || req.destination === "document") {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put("/ff-chat/index.html", copy));
+          return res;
+        })
+        .catch(() => caches.match("/ff-chat/index.html"))
+    );
+    return;
+  }
+
+  if (
+    req.destination === "script" ||
+    req.destination === "style" ||
+    req.url.endsWith(".js") ||
+    req.url.endsWith(".css")
+  ) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request);
+    caches.match(req).then((cached) => {
+      return cached || fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        return res;
+      });
     })
   );
 });
@@ -51,7 +88,7 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  console.log("[firebase-messaging-sw.js] background message:", payload);
+  console.log("[ff-chat/sw.js] background message:", payload);
 
   const titulo = payload?.notification?.title || "Nova mensagem";
   const opcoes = {
