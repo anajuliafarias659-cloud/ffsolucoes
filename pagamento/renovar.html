@@ -5,8 +5,6 @@
 <title>Renovar Plano</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <style>
 body{
   margin:0;
@@ -17,14 +15,14 @@ body{
   background:#020617;
   font-family:Arial;
   color:#fff;
-  text-align:center;
 }
 
 .box{
   background:#0f172a;
   padding:30px;
   border-radius:20px;
-  width:360px;
+  width:350px;
+  text-align:center;
 }
 
 button{
@@ -33,28 +31,28 @@ button{
   margin-top:10px;
   border:none;
   border-radius:10px;
-  cursor:pointer;
   font-weight:bold;
+  cursor:pointer;
 }
 
-.btn-pix{background:#22c55e;color:#fff;}
 .btn-card{background:#2563eb;color:#fff;}
+.btn-pix{background:#22c55e;color:#fff;}
+.btn-codigo{background:#f59e0b;color:#000;}
 
-.pix-area{
-  margin-top:15px;
+input{
+  width:100%;
+  padding:10px;
+  margin-top:10px;
+  border-radius:10px;
+  border:none;
+}
+
+.pix-box{
+  margin-top:20px;
   display:none;
 }
 
-.success{
-  display:none;
-  margin-top:15px;
-  background:#052e16;
-  border:1px solid rgba(34,197,94,.4);
-  padding:15px;
-  border-radius:12px;
-}
-
-small{color:#94a3b8}
+small{color:#94a3b8;}
 </style>
 </head>
 
@@ -64,126 +62,45 @@ small{color:#94a3b8}
 
   <h2>⚠️ Plano Expirado</h2>
 
-  <button class="btn-card" onclick="gerarPagamentoCartao()">Renovar com Cartão</button>
-  <button class="btn-pix" onclick="gerarPagamentoPix()">Renovar com PIX</button>
+  <button class="btn-card" onclick="gerarCartao()">Renovar com Cartão</button>
+  <button class="btn-pix" onclick="gerarPix()">Renovar com PIX</button>
 
-  <div id="pixArea" class="pix-area">
-    <img id="qrImg" style="width:200px;border-radius:10px">
-    <textarea id="qrCode" style="width:100%;margin-top:10px;border-radius:10px;height:80px"></textarea>
-
-    <small>Aguardando pagamento... o sistema confirma automaticamente</small>
+  <div class="pix-box" id="pixBox">
+    <img id="qrImg" width="200">
+    <textarea id="pixCode" style="width:100%;height:80px;margin-top:10px;"></textarea>
+    <button onclick="copiarPix()">Copiar código PIX</button>
+    <button onclick="verificarPix()">Já paguei, verificar pagamento</button>
+    <small>Liberação automática também acontece pelo webhook</small>
   </div>
 
-  <div id="sucessoPix" class="success">
-    <b style="color:#4ade80">✅ Pagamento confirmado</b>
-    <p>Seu plano foi renovado com sucesso.</p>
+  <input id="codigo" placeholder="Digite seu código">
+  <button class="btn-codigo" onclick="ativarCodigo()">Ativar Código</button>
 
-    <button onclick="entrar()">Entrar no sistema</button>
-  </div>
+  <small id="status"></small>
 
 </div>
 
-<script>
-
-const supabase = window.supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "SUA_PUBLIC_KEY_AQUI"
-);
+<script type="module">
+import { supabase } from "../js/supabase.js";
 
 let ultimoPixPaymentId = null;
 let ultimoPixAppId = null;
-let intervaloPix = null;
 
-async function gerarPagamentoPix(){
+/* STATUS */
+function setStatus(msg){
+  document.getElementById("status").textContent = msg || "";
+}
+
+/* CARTÃO (mantém seu fluxo) */
+async function gerarCartao(){
+
+  setStatus("Gerando pagamento...");
 
   const { data:{ session } } = await supabase.auth.getSession();
-
-  const { data:usuario } = await supabase
-    .from("usuarios")
-    .select("app_id")
-    .eq("id",session.user.id)
-    .single();
-
-  const resp = await fetch(
-    "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-renovacao",
-    {
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json",
-        "Authorization":`Bearer ${session.access_token}`
-      },
-      body: JSON.stringify({
-        appId: String(usuario.app_id)
-      })
-    }
-  );
-
-  const data = await resp.json();
-
-  console.log("RETORNO PIX:", data);
-
-  ultimoPixPaymentId = data.payment_id;
-  ultimoPixAppId = usuario.app_id;
-
-  document.getElementById("pixArea").style.display = "block";
-  document.getElementById("qrImg").src = "data:image/png;base64," + data.qr_code_base64;
-  document.getElementById("qrCode").value = data.qr_code;
-
-  iniciarVerificacao();
-}
-
-function iniciarVerificacao(){
-
-  if(intervaloPix) clearInterval(intervaloPix);
-
-  intervaloPix = setInterval(async ()=>{
-
-    try{
-
-      const { data:{ session } } = await supabase.auth.getSession();
-
-      const resp = await fetch(
-        "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/verificar-pix-renovacao",
-        {
-          method:"POST",
-          headers:{
-            "Content-Type":"application/json",
-            "Authorization":`Bearer ${session.access_token}`
-          },
-          body: JSON.stringify({
-            payment_id: String(ultimoPixPaymentId),
-            appId: String(ultimoPixAppId)
-          })
-        }
-      );
-
-      const data = await resp.json();
-
-      console.log("VERIFICANDO:", data);
-
-      if(data?.status === "approved" || data?.pago === true){
-
-        clearInterval(intervaloPix);
-
-        document.getElementById("pixArea").style.display = "none";
-        document.getElementById("sucessoPix").style.display = "block";
-
-      }
-
-    }catch(e){
-      console.error(e);
-    }
-
-  }, 4000);
-}
-
-function entrar(){
-  location.href = "/";
-}
-
-async function gerarPagamentoCartao(){
-
-  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session?.user){
+    alert("Faça login");
+    return;
+  }
 
   const { data:usuario } = await supabase
     .from("usuarios")
@@ -199,19 +116,153 @@ async function gerarPagamentoCartao(){
         "Content-Type":"application/json",
         "Authorization":`Bearer ${session.access_token}`
       },
-      body: JSON.stringify({
-        appId: usuario.app_id
-      })
+      body:JSON.stringify({ appId:usuario.app_id })
     }
   );
 
   const data = await resp.json();
 
   if(data.init_point){
-    location.href = data.init_point;
+    window.location.href = data.init_point;
+  }else{
+    alert("Erro cartão");
+  }
+}
+
+/* PIX */
+async function gerarPix(){
+
+  setStatus("Gerando PIX...");
+
+  const { data:{ session } } = await supabase.auth.getSession();
+  if(!session?.user){
+    alert("Faça login");
+    return;
   }
 
+  const { data:usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id",session.user.id)
+    .single();
+
+  const resp = await fetch(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-renovacao",
+    {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":`Bearer ${session.access_token}`
+      },
+      body:JSON.stringify({ appId:usuario.app_id })
+    }
+  );
+
+  const data = await resp.json();
+
+  console.log("RETORNO PIX:", data);
+
+  if(data.error){
+    alert(data.error);
+    return;
+  }
+
+  ultimoPixPaymentId = data.payment_id;
+  ultimoPixAppId = usuario.app_id;
+
+  document.getElementById("pixBox").style.display="block";
+  document.getElementById("qrImg").src = "data:image/png;base64," + data.qr_code_base64;
+  document.getElementById("pixCode").value = data.qr_code;
+
+  setStatus("PIX gerado ✔");
 }
+
+/* COPIAR */
+function copiarPix(){
+  const txt = document.getElementById("pixCode");
+  txt.select();
+  document.execCommand("copy");
+  alert("Copiado!");
+}
+
+/* VERIFICAR PIX */
+async function verificarPix(){
+
+  if(!ultimoPixPaymentId || !ultimoPixAppId){
+    alert("Gere o PIX primeiro");
+    return;
+  }
+
+  setStatus("Verificando pagamento...");
+
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  const resp = await fetch(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/verificar-pix-renovacao",
+    {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":`Bearer ${session.access_token}`
+      },
+      body:JSON.stringify({
+        payment_id: ultimoPixPaymentId,
+        appId: ultimoPixAppId
+      })
+    }
+  );
+
+  const data = await resp.json();
+
+  console.log("RETORNO VERIFICAR:", data);
+
+  if(data.pago){
+    setStatus("");
+    alert("Pagamento confirmado! 🎉");
+    location.reload();
+  }else{
+    setStatus("Ainda não caiu...");
+  }
+}
+
+/* ATIVAR CODIGO */
+async function ativarCodigo(){
+
+  const codigo = document.getElementById("codigo").value;
+
+  if(!codigo){
+    alert("Digite código");
+    return;
+  }
+
+  setStatus("Validando...");
+
+  const { data:cod } = await supabase
+    .from("codigos_renovacao")
+    .select("*")
+    .eq("codigo",codigo)
+    .eq("usado",false)
+    .single();
+
+  if(!cod){
+    alert("Código inválido");
+    return;
+  }
+
+  await supabase
+    .from("codigos_renovacao")
+    .update({ usado:true })
+    .eq("id",cod.id);
+
+  alert("Plano ativado!");
+  location.reload();
+}
+
+window.gerarPix = gerarPix;
+window.verificarPix = verificarPix;
+window.copiarPix = copiarPix;
+window.gerarCartao = gerarCartao;
+window.ativarCodigo = ativarCodigo;
 
 </script>
 
