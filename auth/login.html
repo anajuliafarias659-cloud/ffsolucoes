@@ -129,7 +129,7 @@ function mostrarAvisoPlano(dias, basePath, destinoPainel, expirado = false){
 
   const texto = expirado
     ? "Seu acesso pode ser bloqueado. Renove agora para continuar usando o sistema."
-    : "Para evitar bloqueio, renove agora. Após o pagamento você recebe um código para ativar.";
+    : "Para evitar bloqueio, renove agora. Após o pagamento você recebe a liberação do acesso.";
 
   box.innerHTML = `
     <div class="aviso-titulo" style="color:${corTitulo}">
@@ -157,6 +157,50 @@ function mostrarAvisoPlano(dias, basePath, destinoPainel, expirado = false){
       };
     }
   }
+}
+
+function normalizarDataExpiracao(origem){
+  const valor =
+    origem?.data_expiracao ||
+    origem?.expira_em ||
+    origem?.vencimento ||
+    origem?.vencimento_em ||
+    origem?.trial_fim_em ||
+    origem?.demo_expira_em ||
+    origem?.plano_expira_em ||
+    null;
+
+  return valor || null;
+}
+
+function montarDestinoPainel(basePath, usuarioSistema, appLegado){
+  const sistemaUsuario = String(usuarioSistema?.sistema || "").trim();
+  const sistemaApp = String(appLegado?.tipo || appLegado?.sistema || "").trim();
+
+  const sistemaFinal = sistemaUsuario || sistemaApp;
+
+  if(sistemaFinal){
+    return `${basePath}/${sistemaFinal}/admin.html`;
+  }
+
+  return `${basePath}/admin.html`;
+}
+
+async function buscarAppLegado(appId){
+  if(!appId) return null;
+
+  const { data, error } = await supabase
+    .from("apps")
+    .select("*")
+    .eq("id", appId)
+    .maybeSingle();
+
+  if(error){
+    console.warn("Falha ao buscar apps legado:", error);
+    return null;
+  }
+
+  return data || null;
 }
 
 async function login(){
@@ -187,45 +231,54 @@ async function login(){
 
     const userId = data.user.id;
 
+    // FONTE PRINCIPAL: USUARIOS
     const { data: usuarioSistema, error: uErr } = await supabase
       .from("usuarios")
-      .select("app_id")
+      .select("*")
       .eq("id", userId)
       .single();
 
-    if(uErr || !usuarioSistema?.app_id){
-      alert("Usuário não vinculado ao sistema.");
+    if(uErr || !usuarioSistema){
+      alert("Usuário não encontrado no sistema.");
       return;
     }
 
-    const { data: app, error: aErr } = await supabase
-      .from("apps")
-      .select("*")
-      .eq("id", usuarioSistema.app_id)
-      .single();
-
-    if(aErr || !app){
-      alert("Aplicação não encontrada.");
-      return;
-    }
+    // FONTE SECUNDÁRIA/LEGADO: APPS
+    const appLegado = await buscarAppLegado(usuarioSistema.app_id);
 
     const basePath = getBasePath();
-    const destinoPainel = basePath + "/" + app.tipo + "/admin.html";
+    const destinoPainel = montarDestinoPainel(basePath, usuarioSistema, appLegado);
 
+    // PRIORIDADE DE VENCIMENTO:
+    // 1) usuarios
+    // 2) apps legado (fallback)
     const dataExpiracao =
-      app.data_expiracao ||
-      app.expira_em ||
-      app.vencimento ||
-      app.vencimento_em ||
-      app.trial_fim_em ||
-      app.demo_expira_em ||
-      app.plano_expira_em ||
-      null;
+      normalizarDataExpiracao(usuarioSistema) ||
+      normalizarDataExpiracao(appLegado);
+
+    // PRIORIDADE DE ATIVO:
+    // 1) usuarios.ativo
+    // 2) apps.ativo
+    const ativo =
+      typeof usuarioSistema?.ativo === "boolean"
+        ? usuarioSistema.ativo
+        : (typeof appLegado?.ativo === "boolean" ? appLegado.ativo : true);
+
+    console.log("LOGIN USUARIO:", usuarioSistema);
+    console.log("LOGIN APP LEGADO:", appLegado);
+    console.log("DATA EXPIRAÇÃO FINAL:", dataExpiracao);
+    console.log("ATIVO FINAL:", ativo);
+    console.log("DESTINO PAINEL:", destinoPainel);
 
     const hoje = new Date();
     const expiracao = dataExpiracao ? new Date(dataExpiracao) : null;
 
-    if(!expiracao || isNaN(expiracao.getTime()) || app.ativo === false){
+    if(ativo === false){
+      mostrarAvisoPlano(0, basePath, destinoPainel, true);
+      return;
+    }
+
+    if(!expiracao || isNaN(expiracao.getTime())){
       mostrarAvisoPlano(0, basePath, destinoPainel, true);
       return;
     }
