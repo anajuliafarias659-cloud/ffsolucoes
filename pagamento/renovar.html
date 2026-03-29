@@ -222,10 +222,10 @@ async function gerarPagamentoCartao(){
       }
     );
 
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
+    console.log("RETORNO CARTÃO:", data);
 
     if(!resp.ok){
-      console.error(data);
       setStatus("");
       alert(data?.error || "Erro ao gerar pagamento.");
       return;
@@ -263,27 +263,32 @@ async function gerarPagamentoPix(){
           "Content-Type":"application/json",
           "Authorization": `Bearer ${dados.session.access_token}`
         },
-        body: JSON.stringify({ appId: dados.appId })
+        body: JSON.stringify({
+          appId: dados.appId
+        })
       }
     );
 
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
+    console.log("RETORNO GERAR PIX:", data);
 
     if(!resp.ok){
-      console.error(data);
       setStatus("");
       alert(data?.error || "Erro ao gerar PIX.");
       return;
     }
 
-    if(!data?.qr_code && !data?.qr_code_base64){
+    ultimoPixPaymentId = data?.payment_id || null;
+    ultimoPixAppId = dados.appId || null;
+
+    console.log("ultimoPixPaymentId:", ultimoPixPaymentId);
+    console.log("ultimoPixAppId:", ultimoPixAppId);
+
+    if(!ultimoPixPaymentId || !ultimoPixAppId){
       setStatus("");
-      alert("PIX gerado, mas não retornou o código.");
+      alert("PIX gerado, mas payment_id ou appId não foram salvos.");
       return;
     }
-
-    ultimoPixPaymentId = data?.payment_id || null;
-    ultimoPixAppId = dados.appId;
 
     pixArea.style.display = "block";
 
@@ -296,7 +301,6 @@ async function gerarPagamentoPix(){
     }
 
     pixCopiaCola.value = data?.qr_code || "";
-
     setStatus("PIX gerado com sucesso.");
   }catch(e){
     console.error(e);
@@ -324,8 +328,11 @@ async function copiarPix(){
 
 async function verificarPagamentoPix(){
   try{
-    if(!ultimoPixPaymentId){
-      alert("Nenhum pagamento PIX gerado ainda.");
+    console.log("VERIFICAR -> payment_id:", ultimoPixPaymentId);
+    console.log("VERIFICAR -> appId:", ultimoPixAppId);
+
+    if(!ultimoPixPaymentId || !ultimoPixAppId){
+      alert("Gere o PIX primeiro antes de verificar.");
       return;
     }
 
@@ -348,16 +355,16 @@ async function verificarPagamentoPix(){
           "Authorization": `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
-          payment_id: ultimoPixPaymentId,
-          appId: ultimoPixAppId
+          payment_id: String(ultimoPixPaymentId),
+          appId: Number(ultimoPixAppId)
         })
       }
     );
 
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
+    console.log("RETORNO VERIFICAR PIX:", data);
 
     if(!resp.ok){
-      console.error(data);
       setStatus("");
       alert(data?.error || "Erro ao verificar PIX.");
       return;
@@ -371,7 +378,7 @@ async function verificarPagamentoPix(){
     }
 
     setStatus("");
-    alert("Pagamento ainda não aprovado. Aguarde alguns segundos e tente novamente.");
+    alert("Pagamento ainda não aprovado. Status atual: " + (data?.status || "desconhecido"));
   }catch(e){
     console.error(e);
     setStatus("");
