@@ -8,35 +8,115 @@
 <style>
 body{
   margin:0;
-  height:100vh;
+  min-height:100vh;
   display:flex;
   justify-content:center;
   align-items:center;
   background:#020617;
-  font-family:Arial;
+  font-family:Arial,sans-serif;
   color:#fff;
   text-align:center;
+  padding:20px;
+  box-sizing:border-box;
 }
 
 .box{
   background:#0f172a;
-  padding:40px;
+  padding:30px 20px;
   border-radius:20px;
-  width:350px;
+  width:100%;
+  max-width:380px;
+  box-sizing:border-box;
+  box-shadow:0 20px 50px rgba(0,0,0,.35);
 }
 
-input,button{
+h2{
+  margin:0 0 10px;
+  font-size:24px;
+}
+
+p{
+  color:#94a3b8;
+}
+
+input,button,textarea{
   width:100%;
   padding:12px;
   margin-top:12px;
   border:none;
   border-radius:10px;
+  box-sizing:border-box;
+  font-size:15px;
 }
 
-.btn-pagar{background:#2563eb;color:#fff;font-weight:bold; cursor:pointer;}
-.btn-codigo{background:#22c55e;color:#fff;font-weight:bold; cursor:pointer;}
+textarea{
+  resize:none;
+  min-height:90px;
+  background:#1e293b;
+  color:#fff;
+}
 
-small{color:#94a3b8; display:block; margin-top:10px}
+button{
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btn-pagar{
+  background:#2563eb;
+  color:#fff;
+}
+
+.btn-pix{
+  background:#22c55e;
+  color:#fff;
+}
+
+.btn-codigo{
+  background:#f59e0b;
+  color:#fff;
+}
+
+.btn-sec{
+  background:#334155;
+  color:#fff;
+}
+
+small{
+  color:#94a3b8;
+  display:block;
+  margin-top:10px;
+  line-height:1.5;
+}
+
+.pix-box{
+  display:none;
+  margin-top:18px;
+  padding:15px;
+  background:#111827;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.08);
+}
+
+.pix-box img{
+  width:220px;
+  max-width:100%;
+  border-radius:12px;
+  background:#fff;
+  padding:10px;
+  box-sizing:border-box;
+  margin:10px auto 0;
+  display:block;
+}
+
+.linha{
+  margin:18px 0;
+  height:1px;
+  background:rgba(255,255,255,.08);
+}
+
+.hidden{
+  display:none !important;
+}
 </style>
 </head>
 
@@ -44,10 +124,30 @@ small{color:#94a3b8; display:block; margin-top:10px}
 
 <div class="box">
   <h2>⚠️ Plano Expirado</h2>
+  <p>Escolha uma forma para renovar seu plano</p>
 
-  <button class="btn-pagar" onclick="gerarPagamento()">Renovar Plano</button>
+  <button class="btn-pagar" onclick="gerarPagamentoCartao()">Renovar com Cartão</button>
+  <button class="btn-pix" onclick="gerarPagamentoPix()">Renovar com PIX</button>
 
-  <p style="margin-top:20px">ou</p>
+  <div id="pixArea" class="pix-box">
+    <h3 style="margin:0 0 10px;">Pagamento via PIX</h3>
+
+    <div id="pixImagemWrap" class="hidden">
+      <img id="pixQrImg" alt="QR Code PIX">
+    </div>
+
+    <textarea id="pixCopiaCola" readonly placeholder="O código PIX aparecerá aqui"></textarea>
+
+    <button class="btn-sec" onclick="copiarPix()">Copiar código PIX</button>
+    <button class="btn-sec" onclick="verificarPagamentoPix()">Já paguei, verificar pagamento</button>
+
+    <small>
+      Após pagar, o sistema pode liberar automaticamente pelo webhook.<br>
+      Se quiser, também pode clicar em “Já paguei”.
+    </small>
+  </div>
+
+  <div class="linha"></div>
 
   <input id="codigo" placeholder="Digite seu código">
   <button class="btn-codigo" onclick="ativarCodigo()">Ativar Código</button>
@@ -59,14 +159,177 @@ small{color:#94a3b8; display:block; margin-top:10px}
 import { supabase } from "../js/supabase.js";
 
 const statusEl = document.getElementById("status");
-function setStatus(msg){ statusEl.textContent = msg || ""; }
+const pixArea = document.getElementById("pixArea");
+const pixQrImg = document.getElementById("pixQrImg");
+const pixImagemWrap = document.getElementById("pixImagemWrap");
+const pixCopiaCola = document.getElementById("pixCopiaCola");
 
-/* GERAR PAGAMENTO */
-async function gerarPagamento(){
+let ultimoPixPaymentId = null;
+let ultimoPixAppId = null;
 
+function setStatus(msg){
+  statusEl.textContent = msg || "";
+}
+
+async function buscarSessaoEApp(){
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  if(!session?.user){
+    alert("Você precisa fazer login.");
+    location.href="/auth/login.html";
+    return null;
+  }
+
+  const user = session.user;
+
+  const { data:usuario, error:erroUsuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", user.id)
+    .single();
+
+  if(erroUsuario || !usuario?.app_id){
+    alert("App não encontrado.");
+    return null;
+  }
+
+  return {
+    session,
+    user,
+    appId: usuario.app_id
+  };
+}
+
+/* =========================
+   CARTÃO
+========================= */
+async function gerarPagamentoCartao(){
   try{
+    setStatus("Gerando pagamento no cartão...");
 
-    setStatus("Gerando pagamento...");
+    const dados = await buscarSessaoEApp();
+    if(!dados) return;
+
+    const resp = await fetch(
+      "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento",
+      {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "Authorization": `Bearer ${dados.session.access_token}`
+        },
+        body: JSON.stringify({ appId: dados.appId })
+      }
+    );
+
+    const data = await resp.json();
+
+    if(!resp.ok){
+      console.error(data);
+      setStatus("");
+      alert(data?.error || "Erro ao gerar pagamento.");
+      return;
+    }
+
+    if(data?.init_point){
+      window.location.href = data.init_point;
+      return;
+    }
+
+    setStatus("");
+    alert("Erro ao gerar pagamento.");
+  }catch(e){
+    console.error(e);
+    setStatus("");
+    alert("Erro ao gerar pagamento.");
+  }
+}
+
+/* =========================
+   PIX
+========================= */
+async function gerarPagamentoPix(){
+  try{
+    setStatus("Gerando PIX...");
+
+    const dados = await buscarSessaoEApp();
+    if(!dados) return;
+
+    const resp = await fetch(
+      "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-renovacao",
+      {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "Authorization": `Bearer ${dados.session.access_token}`
+        },
+        body: JSON.stringify({ appId: dados.appId })
+      }
+    );
+
+    const data = await resp.json();
+
+    if(!resp.ok){
+      console.error(data);
+      setStatus("");
+      alert(data?.error || "Erro ao gerar PIX.");
+      return;
+    }
+
+    if(!data?.qr_code && !data?.qr_code_base64){
+      setStatus("");
+      alert("PIX gerado, mas não retornou o código.");
+      return;
+    }
+
+    ultimoPixPaymentId = data?.payment_id || null;
+    ultimoPixAppId = dados.appId;
+
+    pixArea.style.display = "block";
+
+    if(data?.qr_code_base64){
+      pixQrImg.src = `data:image/png;base64,${data.qr_code_base64}`;
+      pixImagemWrap.classList.remove("hidden");
+    }else{
+      pixImagemWrap.classList.add("hidden");
+      pixQrImg.removeAttribute("src");
+    }
+
+    pixCopiaCola.value = data?.qr_code || "";
+
+    setStatus("PIX gerado com sucesso.");
+  }catch(e){
+    console.error(e);
+    setStatus("");
+    alert("Erro ao gerar PIX.");
+  }
+}
+
+async function copiarPix(){
+  try{
+    const codigo = pixCopiaCola.value.trim();
+
+    if(!codigo){
+      alert("Nenhum código PIX disponível.");
+      return;
+    }
+
+    await navigator.clipboard.writeText(codigo);
+    alert("Código PIX copiado.");
+  }catch(e){
+    console.error(e);
+    alert("Não foi possível copiar.");
+  }
+}
+
+async function verificarPagamentoPix(){
+  try{
+    if(!ultimoPixPaymentId){
+      alert("Nenhum pagamento PIX gerado ainda.");
+      return;
+    }
+
+    setStatus("Verificando pagamento PIX...");
 
     const { data:{ session } } = await supabase.auth.getSession();
 
@@ -76,50 +339,51 @@ async function gerarPagamento(){
       return;
     }
 
-    const user = session.user;
-
-    const { data:usuario } = await supabase
-      .from("usuarios")
-      .select("app_id")
-      .eq("id",user.id)
-      .single();
-
-    if(!usuario?.app_id){
-      alert("App não encontrado.");
-      return;
-    }
-
     const resp = await fetch(
-      "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento",
+      "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/verificar-pix-renovacao",
       {
         method:"POST",
         headers:{
           "Content-Type":"application/json",
-          "Authorization":`Bearer ${session.access_token}`
+          "Authorization": `Bearer ${session.access_token}`
         },
-        body:JSON.stringify({ appId:usuario.app_id })
+        body: JSON.stringify({
+          payment_id: ultimoPixPaymentId,
+          appId: ultimoPixAppId
+        })
       }
     );
 
     const data = await resp.json();
 
-    if(data?.init_point){
-      window.location.href = data.init_point;
-    }else{
-      alert("Erro ao gerar pagamento.");
+    if(!resp.ok){
+      console.error(data);
+      setStatus("");
+      alert(data?.error || "Erro ao verificar PIX.");
+      return;
     }
 
+    if(data?.status === "approved" || data?.pago === true){
+      setStatus("");
+      alert("Pagamento confirmado! Plano renovado com sucesso.");
+      location.href = "/";
+      return;
+    }
+
+    setStatus("");
+    alert("Pagamento ainda não aprovado. Aguarde alguns segundos e tente novamente.");
   }catch(e){
     console.error(e);
-    alert("Erro ao gerar pagamento.");
+    setStatus("");
+    alert("Erro ao verificar PIX.");
   }
 }
 
-/* ATIVAR CODIGO */
+/* =========================
+   CÓDIGO
+========================= */
 async function ativarCodigo(){
-
   try{
-
     const codigo = document.getElementById("codigo").value.trim();
 
     if(!codigo){
@@ -132,8 +396,8 @@ async function ativarCodigo(){
     const { data:cod, error } = await supabase
       .from("codigos_renovacao")
       .select("*")
-      .eq("codigo",codigo)
-      .eq("usado",false)
+      .eq("codigo", codigo)
+      .eq("usado", false)
       .single();
 
     if(error || !cod){
@@ -142,12 +406,10 @@ async function ativarCodigo(){
       return;
     }
 
-    /* BUSCAR DATA ATUAL DO APP */
-
     const { data:app } = await supabase
       .from("apps")
       .select("data_expiracao")
-      .eq("id",cod.app_id)
+      .eq("id", cod.app_id)
       .single();
 
     const agora = new Date();
@@ -156,60 +418,44 @@ async function ativarCodigo(){
       ? new Date(app.data_expiracao)
       : null;
 
-    /* DEFINIR BASE */
-
-    const base = (atual && atual > agora)
-      ? atual
-      : agora;
-
-    /* SOMAR DIAS DO CODIGO */
+    const base = (atual && atual > agora) ? atual : agora;
 
     const novaExp = new Date(
       base.getTime() + (Number(cod.dias) * 86400000)
     ).toISOString();
 
-    /* MARCAR CODIGO USADO */
-
     await supabase
       .from("codigos_renovacao")
       .update({
-        usado:true,
-        usado_em:new Date().toISOString()
+        usado: true,
+        usado_em: new Date().toISOString()
       })
-      .eq("id",cod.id);
-
-    /* ATUALIZAR APP */
+      .eq("id", cod.id);
 
     await supabase
       .from("apps")
       .update({
-        ativo:true,
-        plano:"pago",
-        data_expiracao:novaExp
+        ativo: true,
+        plano: "pago",
+        data_expiracao: novaExp
       })
-      .eq("id",cod.app_id);
+      .eq("id", cod.app_id);
 
     setStatus("");
-
     alert("Plano renovado com sucesso!");
-
     location.href="/";
-
   }catch(e){
-
     setStatus("");
-
     console.error(e);
-
     alert("Erro ao ativar código.");
-
   }
-
 }
 
-window.gerarPagamento = gerarPagamento;
+window.gerarPagamentoCartao = gerarPagamentoCartao;
+window.gerarPagamentoPix = gerarPagamentoPix;
+window.copiarPix = copiarPix;
+window.verificarPagamentoPix = verificarPagamentoPix;
 window.ativarCodigo = ativarCodigo;
-
 </script>
 
 </body>
