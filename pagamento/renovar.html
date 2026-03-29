@@ -1,379 +1,219 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Renovar Plano</title>
+<meta charset="UTF-8">
+<title>Renovar Plano</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{
-      background:#020617;
-      color:#fff;
-      font-family:Arial,Helvetica,sans-serif;
-      min-height:100vh;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:20px;
-    }
-    .box{
-      width:100%;
-      max-width:360px;
-      background:#0f172a;
-      border-radius:22px;
-      padding:26px 20px;
-      box-shadow:0 15px 50px rgba(0,0,0,.45);
-    }
-    h1{
-      font-size:20px;
-      text-align:center;
-      margin-bottom:10px;
-    }
-    p{
-      text-align:center;
-      color:#94a3b8;
-      margin-bottom:20px;
-      font-size:14px;
-    }
-    .btn{
-      width:100%;
-      border:none;
-      border-radius:12px;
-      padding:14px 16px;
-      font-size:16px;
-      font-weight:700;
-      cursor:pointer;
-      margin-bottom:12px;
-    }
-    .btn-cartao{background:#2563eb;color:#fff}
-    .btn-pix{background:#22c55e;color:#fff}
-    .btn-sec{background:#334155;color:#fff}
-    .btn:disabled{opacity:.6;cursor:not-allowed}
-    .status{
-      margin-top:14px;
-      background:#071226;
-      border-radius:12px;
-      padding:12px;
-      font-size:14px;
-      color:#cbd5e1;
-      word-break:break-word;
-      display:none;
-    }
-    .qrbox{
-      margin-top:14px;
-      background:#fff;
-      border-radius:12px;
-      padding:10px;
-      text-align:center;
-      display:none;
-    }
-    .qrbox img{
-      max-width:100%;
-      border-radius:10px;
-    }
-    .pixcode{
-      margin-top:10px;
-      font-size:12px;
-      color:#111827;
-      word-break:break-all;
-    }
-  </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{
+  margin:0;
+  height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:#020617;
+  font-family:Arial;
+  color:#fff;
+  text-align:center;
+}
+
+.box{
+  background:#0f172a;
+  padding:30px;
+  border-radius:20px;
+  width:360px;
+}
+
+button{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border:none;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btn-pix{background:#22c55e;color:#fff;}
+.btn-card{background:#2563eb;color:#fff;}
+
+.pix-area{
+  margin-top:15px;
+  display:none;
+}
+
+.success{
+  display:none;
+  margin-top:15px;
+  background:#052e16;
+  border:1px solid rgba(34,197,94,.4);
+  padding:15px;
+  border-radius:12px;
+}
+
+small{color:#94a3b8}
+</style>
 </head>
+
 <body>
-  <div class="box">
-    <h1>⚠ Plano Expirado</h1>
-    <p>Renove seu acesso para continuar usando o sistema</p>
 
-    <button class="btn btn-cartao" id="btnCartao">Renovar com Cartão</button>
-    <button class="btn btn-pix" id="btnPix">Renovar com PIX</button>
-    <button class="btn btn-sec" id="btnVerificar">Verificar Pagamento</button>
+<div class="box">
 
-    <div class="status" id="statusBox"></div>
+  <h2>⚠️ Plano Expirado</h2>
 
-    <div class="qrbox" id="qrBox">
-      <img id="qrImg" alt="QR Code PIX" />
-      <div class="pixcode" id="pixCode"></div>
-    </div>
+  <button class="btn-card" onclick="gerarPagamentoCartao()">Renovar com Cartão</button>
+  <button class="btn-pix" onclick="gerarPagamentoPix()">Renovar com PIX</button>
+
+  <div id="pixArea" class="pix-area">
+    <img id="qrImg" style="width:200px;border-radius:10px">
+    <textarea id="qrCode" style="width:100%;margin-top:10px;border-radius:10px;height:80px"></textarea>
+
+    <small>Aguardando pagamento... o sistema confirma automaticamente</small>
   </div>
 
-  <script type="module">
-    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+  <div id="sucessoPix" class="success">
+    <b style="color:#4ade80">✅ Pagamento confirmado</b>
+    <p>Seu plano foi renovado com sucesso.</p>
 
-    const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-    const SUPABASE_ANON_KEY = "SUA_CHAVE_PUBLICA_AQUI";
+    <button onclick="entrar()">Entrar no sistema</button>
+  </div>
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</div>
 
-    const statusBox = document.getElementById("statusBox");
-    const qrBox = document.getElementById("qrBox");
-    const qrImg = document.getElementById("qrImg");
-    const pixCode = document.getElementById("pixCode");
-    const btnPix = document.getElementById("btnPix");
-    const btnCartao = document.getElementById("btnCartao");
-    const btnVerificar = document.getElementById("btnVerificar");
+<script>
 
-    let ultimoPagamentoId = localStorage.getItem("renovacao_pagamento_id") || "";
+const supabase = window.supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "SUA_PUBLIC_KEY_AQUI"
+);
 
-    function mostrarStatus(msg, erro = false){
-      statusBox.style.display = "block";
-      statusBox.style.color = erro ? "#fecaca" : "#cbd5e1";
-      statusBox.innerHTML = msg;
+let ultimoPixPaymentId = null;
+let ultimoPixAppId = null;
+let intervaloPix = null;
+
+async function gerarPagamentoPix(){
+
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  const { data:usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id",session.user.id)
+    .single();
+
+  const resp = await fetch(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-renovacao",
+    {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":`Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({
+        appId: String(usuario.app_id)
+      })
     }
+  );
 
-    function travarBotoes(travar){
-      btnPix.disabled = travar;
-      btnCartao.disabled = travar;
-      btnVerificar.disabled = travar;
-    }
+  const data = await resp.json();
 
-    async function pegarUsuarioLogado() {
-      const { data, error } = await supabase.auth.getUser();
-      if (error || !data?.user) return null;
-      return data.user;
-    }
+  console.log("RETORNO PIX:", data);
 
-    async function buscarDadosUsuario(userId) {
-      const { data, error } = await supabase
-        .from("usuarios")
-        .select("id, user_id, email, nome, plano_expira_em, status, renovacao_status")
-        .eq("user_id", userId)
-        .single();
+  ultimoPixPaymentId = data.payment_id;
+  ultimoPixAppId = usuario.app_id;
 
-      if (error) {
-        console.error("Erro buscando usuario:", error);
-        return null;
-      }
+  document.getElementById("pixArea").style.display = "block";
+  document.getElementById("qrImg").src = "data:image/png;base64," + data.qr_code_base64;
+  document.getElementById("qrCode").value = data.qr_code;
 
-      return data;
-    }
+  iniciarVerificacao();
+}
 
-    async function gerarPagamentoPix() {
-      try {
-        travarBotoes(true);
-        mostrarStatus("Gerando PIX...");
+function iniciarVerificacao(){
 
-        const user = await pegarUsuarioLogado();
-        if (!user) {
-          mostrarStatus("Usuário não está logado.", true);
-          travarBotoes(false);
-          return;
-        }
+  if(intervaloPix) clearInterval(intervaloPix);
 
-        const usuario = await buscarDadosUsuario(user.id);
-        if (!usuario) {
-          mostrarStatus("Registro não encontrado na tabela usuarios.", true);
-          travarBotoes(false);
-          return;
-        }
+  intervaloPix = setInterval(async ()=>{
 
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
+    try{
 
-        const resp = await fetch(`${SUPABASE_URL}/functions/v1/criar-pix-renovacao`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
+      const { data:{ session } } = await supabase.auth.getSession();
+
+      const resp = await fetch(
+        "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/verificar-pix-renovacao",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json",
+            "Authorization":`Bearer ${session.access_token}`
           },
           body: JSON.stringify({
-            user_id: user.id,
-            email: usuario.email || user.email || "",
-            nome: usuario.nome || user.user_metadata?.name || "Cliente",
-            valor: 29.90
+            payment_id: String(ultimoPixPaymentId),
+            appId: String(ultimoPixAppId)
           })
-        });
-
-        const json = await resp.json();
-        console.log("PIX:", json);
-
-        if (!resp.ok) {
-          throw new Error(json?.error || "Erro ao gerar PIX");
         }
+      );
 
-        ultimoPagamentoId = json.pagamento_id || "";
-        if (ultimoPagamentoId) {
-          localStorage.setItem("renovacao_pagamento_id", ultimoPagamentoId);
-        }
+      const data = await resp.json();
 
-        if (json.qr_code_base64) {
-          qrImg.src = `data:image/png;base64,${json.qr_code_base64}`;
-          qrBox.style.display = "block";
-        }
+      console.log("VERIFICANDO:", data);
 
-        if (json.qr_code) {
-          pixCode.textContent = json.qr_code;
-        }
+      if(data?.status === "approved" || data?.pago === true){
 
-        mostrarStatus("PIX gerado. Faça o pagamento e depois clique em verificar pagamento.");
-      } catch (e) {
-        console.error(e);
-        mostrarStatus(e.message || "Erro ao gerar PIX.", true);
-      } finally {
-        travarBotoes(false);
+        clearInterval(intervaloPix);
+
+        document.getElementById("pixArea").style.display = "none";
+        document.getElementById("sucessoPix").style.display = "block";
+
       }
+
+    }catch(e){
+      console.error(e);
     }
 
-    async function gerarPagamentoCartao() {
-      try {
-        travarBotoes(true);
-        mostrarStatus("Criando pagamento com cartão...");
+  }, 4000);
+}
 
-        const user = await pegarUsuarioLogado();
-        if (!user) {
-          mostrarStatus("Usuário não está logado.", true);
-          travarBotoes(false);
-          return;
-        }
+function entrar(){
+  location.href = "/";
+}
 
-        const usuario = await buscarDadosUsuario(user.id);
-        if (!usuario) {
-          mostrarStatus("Registro não encontrado na tabela usuarios.", true);
-          travarBotoes(false);
-          return;
-        }
+async function gerarPagamentoCartao(){
 
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
+  const { data:{ session } } = await supabase.auth.getSession();
 
-        const resp = await fetch(`${SUPABASE_URL}/functions/v1/criar-pagamento-renovacao`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            user_id: user.id,
-            email: usuario.email || user.email || "",
-            nome: usuario.nome || user.user_metadata?.name || "Cliente",
-            valor: 29.90
-          })
-        });
+  const { data:usuario } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id",session.user.id)
+    .single();
 
-        const json = await resp.json();
-        console.log("CARTAO:", json);
-
-        if (!resp.ok) {
-          throw new Error(json?.error || "Erro ao gerar pagamento");
-        }
-
-        ultimoPagamentoId = json.pagamento_id || "";
-        if (ultimoPagamentoId) {
-          localStorage.setItem("renovacao_pagamento_id", ultimoPagamentoId);
-        }
-
-        if (json.init_point) {
-          window.location.href = json.init_point;
-          return;
-        }
-
-        mostrarStatus("Pagamento criado, mas não veio link de checkout.", true);
-      } catch (e) {
-        console.error(e);
-        mostrarStatus(e.message || "Erro ao gerar pagamento com cartão.", true);
-      } finally {
-        travarBotoes(false);
-      }
+  const resp = await fetch(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento",
+    {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":`Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({
+        appId: usuario.app_id
+      })
     }
+  );
 
-    async function verificarPagamento() {
-      try {
-        travarBotoes(true);
-        mostrarStatus("Verificando pagamento...");
+  const data = await resp.json();
 
-        const user = await pegarUsuarioLogado();
-        if (!user) {
-          mostrarStatus("Usuário não está logado.", true);
-          travarBotoes(false);
-          return;
-        }
+  if(data.init_point){
+    location.href = data.init_point;
+  }
 
-        const usuario = await buscarDadosUsuario(user.id);
-        if (!usuario) {
-          mostrarStatus("Usuário não encontrado na tabela usuarios.", true);
-          travarBotoes(false);
-          return;
-        }
+}
 
-        if (usuario.status === "ativo" || usuario.renovacao_status === "pago") {
-          mostrarStatus("Pagamento já confirmado. Liberando acesso...");
+</script>
 
-          setTimeout(() => {
-            window.location.href = "index.html";
-          }, 1200);
-          return;
-        }
-
-        if (!ultimoPagamentoId) {
-          mostrarStatus("Nenhum pagamento recente encontrado para verificar.", true);
-          travarBotoes(false);
-          return;
-        }
-
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
-
-        const resp = await fetch(`${SUPABASE_URL}/functions/v1/verificar-renovacao`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            pagamento_id: ultimoPagamentoId,
-            user_id: user.id
-          })
-        });
-
-        const json = await resp.json();
-        console.log("VERIFICAR:", json);
-
-        if (!resp.ok) {
-          throw new Error(json?.error || "Erro ao verificar pagamento");
-        }
-
-        if (json.status === "approved" || json.status === "pago") {
-          mostrarStatus("Pagamento aprovado. Redirecionando...");
-          setTimeout(() => {
-            window.location.href = "index.html";
-          }, 1200);
-        } else {
-          mostrarStatus("Pagamento ainda não confirmado. Aguarde alguns segundos e verifique novamente.");
-        }
-      } catch (e) {
-        console.error(e);
-        mostrarStatus(e.message || "Erro ao verificar pagamento.", true);
-      } finally {
-        travarBotoes(false);
-      }
-    }
-
-    btnPix.addEventListener("click", gerarPagamentoPix);
-    btnCartao.addEventListener("click", gerarPagamentoCartao);
-    btnVerificar.addEventListener("click", verificarPagamento);
-
-    (async () => {
-      const user = await pegarUsuarioLogado();
-      if (!user) {
-        mostrarStatus("Faça login para renovar o plano.", true);
-        return;
-      }
-
-      const usuario = await buscarDadosUsuario(user.id);
-      if (!usuario) {
-        mostrarStatus("Seu cadastro não foi encontrado na tabela usuarios.", true);
-        return;
-      }
-
-      if (usuario.status === "ativo" || usuario.renovacao_status === "pago") {
-        mostrarStatus("Seu plano já está ativo. Redirecionando...");
-        setTimeout(() => {
-          window.location.href = "index.html";
-        }, 1000);
-      } else {
-        mostrarStatus("Seu plano está expirado. Escolha PIX ou cartão para renovar.");
-      }
-    })();
-  </script>
 </body>
 </html>
