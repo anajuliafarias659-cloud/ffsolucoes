@@ -39,6 +39,7 @@ input,select,textarea,button{
 input,select,textarea{background:#020617;color:#fff}
 textarea{resize:vertical;min-height:80px}
 button{background:#22c55e;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.6;cursor:not-allowed}
 .excluir{background:#e53935}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
 .produto{background:#020617;padding:12px;border-radius:14px;text-align:center;font-size:13px}
@@ -188,7 +189,7 @@ small{opacity:.7}
     <small>Marque os produtos que serão sugeridos no carrinho junto com este item.</small>
     <div id="listaComplementares"></div>
 
-    <input id="camera" type="file" accept="image/*" hidden>
+    <input id="camera" type="file" accept="image/*" capture="environment" hidden>
     <button type="button" onclick="tirarFoto()">📷 Adicionar foto (até 3)</button>
     <div id="preview"></div>
 
@@ -202,223 +203,613 @@ small{opacity:.7}
 
 </div>
 
-<script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-
-const sb = createClient(
+<script>
+const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let admin = JSON.parse(localStorage.getItem("admin"));
+let admin = null;
 let fotosTemp = [];
 let fotosExistentes = [];
 let variacoes = [];
+const LIMITE = 3;
+let editando = false;
+let produtoEditandoId = null;
+let complementaresSelecionados = [];
 let salvandoAgora = false;
 
+/* ===== ELEMENTOS ===== */
 const nome = document.getElementById("nome");
 const preco = document.getElementById("preco");
 const estoque = document.getElementById("estoque");
+const peso = document.getElementById("peso");
 const descricao = document.getElementById("descricao");
 const categoria = document.getElementById("categoria");
+const camera = document.getElementById("camera");
+const preview = document.getElementById("preview");
+const lista = document.getElementById("lista");
 const btnSalvar = document.getElementById("btnSalvar");
-const inputFotos = document.getElementById("fotos");
+const listaVariacoes = document.getElementById("listaVariacoes");
 
-if (!admin || !admin.app_id) {
-  alert("Admin não encontrado. Faça login novamente.");
+const tipoVariacaoInput = document.getElementById("tipoVariacaoInput");
+const valorVariacaoInput = document.getElementById("valorVariacaoInput");
+const estoqueVariacaoInput = document.getElementById("estoqueVariacaoInput");
+const precoVariacaoInput = document.getElementById("precoVariacaoInput");
+
+/* ===== FORMATAR REAL ===== */
+function formatarReal(valor){
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
 }
 
-inputFotos.addEventListener("change", async (e) => {
-  const arquivos = Array.from(e.target.files || []);
-  if (!arquivos.length) return;
+function moedaParaNumero(valor){
+  return Number(
+    String(valor || "")
+      .replace(/\s/g,"")
+      .replace("R$","")
+      .replace(/\./g,"")
+      .replace(",",".")
+  ) || 0;
+}
 
-  try {
-    fotosTemp = [];
+/* ===== MÁSCARA DE MOEDA ===== */
+document.addEventListener("DOMContentLoaded", function(){
+  function aplicarMascaraMoeda(input){
+    input.addEventListener("input", function(e){
+      let valor = e.target.value.replace(/\D/g, "");
 
-    for (const arquivo of arquivos) {
-      const imagemTratada = await prepararImagem(arquivo);
-      fotosTemp.push(imagemTratada);
-    }
+      if(valor === ""){
+        e.target.value = "";
+        return;
+      }
 
-    console.log("Fotos prontas:", fotosTemp);
-  } catch (err) {
-    console.error("Erro ao preparar imagens:", err);
-    alert("Erro ao processar foto da câmera.");
+      valor = (Number(valor) / 100).toFixed(2);
+
+      e.target.value = Number(valor).toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL"
+      });
+    });
   }
+
+  aplicarMascaraMoeda(preco);
+  aplicarMascaraMoeda(precoVariacaoInput);
 });
 
-function moedaParaNumero(v) {
-  return Number(String(v).replace(/[^\d]/g, "")) / 100;
+/* ===== SESSÃO ===== */
+async function verificarSessao(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){
+    window.location.href = "/auth/login.html";
+    return null;
+  }
+  return session.user.id;
 }
 
-function nomeSeguroArquivo(nome = "") {
-  return nome
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w.-]/g, "_");
-}
+async function carregarAdmin(){
+  const userId = await verificarSessao();
+  if(!userId) return;
 
-async function prepararImagem(file) {
-  if (!file.type.startsWith("image/")) {
-    return file;
+  const { data: usuario, error } = await sb
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  if(error || !usuario){
+    alert("Não foi possível carregar o admin.");
+    return;
   }
 
-  // Alguns celulares geram imagem muito pesada.
-  // Vamos converter para jpeg comprimido para evitar falha no upload.
+  admin = usuario;
+}
+
+/* ===== CATEGORIAS ===== */
+async function carregarCategorias(){
+  const { data, error } = await sb
+    .from("categorias")
+    .select("*")
+    .eq("app_id", admin.app_id)
+    .order("nome");
+
+  if(error){
+    categoria.innerHTML = "<option value=''>Erro ao carregar categorias</option>";
+    return;
+  }
+
+  if(!data || data.length === 0){
+    categoria.innerHTML = "<option value=''>Nenhuma categoria cadastrada</option>";
+    return;
+  }
+
+  categoria.innerHTML = `<option value="">Selecione a categoria</option>` + data.map(c =>
+    `<option value="${c.nome}">${c.nome}</option>`
+  ).join("");
+}
+
+/* ===== COMPLEMENTARES ===== */
+async function carregarComplementares(){
+  const { data, error } = await sb
+    .from("produtos")
+    .select("id,nome")
+    .eq("app_id", admin.app_id)
+    .order("nome");
+
+  if(error){
+    document.getElementById("listaComplementares").innerHTML = "<small>Erro ao carregar complementares.</small>";
+    return;
+  }
+
+  const listaProdutos = data || [];
+  const filtrados = listaProdutos.filter(p => String(p.id) !== String(produtoEditandoId));
+
+  const html = filtrados.map(p => `
+    <div class="item-comp">
+      <input
+        type="checkbox"
+        id="comp_${p.id}"
+        value="${p.id}"
+        ${complementaresSelecionados.includes(String(p.id)) ? "checked" : ""}
+      >
+      <label for="comp_${p.id}">${p.nome}</label>
+    </div>
+  `).join("");
+
+  document.getElementById("listaComplementares").innerHTML =
+    html || "<small>Nenhum outro produto cadastrado ainda.</small>";
+}
+
+function lerComplementaresSelecionados(){
+  const checks = document.querySelectorAll('#listaComplementares input[type="checkbox"]:checked');
+  return [...checks].map(c => String(c.value));
+}
+
+/* ===== FOTO ===== */
+function tirarFoto(){
+  if(fotosTemp.length + fotosExistentes.length >= LIMITE){
+    alert("Máximo de 3 fotos por produto");
+    return;
+  }
+
+  camera.value = "";
+  camera.click();
+}
+
+camera.onchange = async ()=>{
+  const file = camera.files[0];
+  if(!file) return;
+
+  if(fotosTemp.length + fotosExistentes.length >= LIMITE){
+    alert("Máximo de 3 fotos por produto");
+    camera.value = "";
+    return;
+  }
+
+  try{
+    const fotoTratada = await prepararImagemCelular(file);
+    fotosTemp.push(fotoTratada);
+    atualizarPreview();
+  }catch(err){
+    console.error(err);
+    alert("Erro ao processar foto da câmera");
+  }
+
+  camera.value = "";
+};
+
+async function prepararImagemCelular(file){
+  if(!file || !String(file.type || "").startsWith("image/")){
+    return file;
+  }
   return await comprimirImagem(file, 1600, 0.82);
 }
 
-async function comprimirImagem(file, maxLado = 1600, qualidade = 0.82) {
+async function comprimirImagem(file, maxLado = 1600, qualidade = 0.82){
   return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
     const img = new Image();
-    const reader = new FileReader();
 
-    reader.onload = () => {
+    leitor.onload = () => {
       img.onload = () => {
-        let { width, height } = img;
+        let largura = img.width;
+        let altura = img.height;
 
-        if (width > height) {
-          if (width > maxLado) {
-            height = Math.round((height * maxLado) / width);
-            width = maxLado;
+        if(largura > altura){
+          if(largura > maxLado){
+            altura = Math.round((altura * maxLado) / largura);
+            largura = maxLado;
           }
-        } else {
-          if (height > maxLado) {
-            width = Math.round((width * maxLado) / height);
-            height = maxLado;
+        }else{
+          if(altura > maxLado){
+            largura = Math.round((largura * maxLado) / altura);
+            altura = maxLado;
           }
         }
 
         const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = largura;
+        canvas.height = altura;
 
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
+        ctx.drawImage(img, 0, 0, largura, altura);
 
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              reject(new Error("Não foi possível converter a imagem."));
-              return;
-            }
+        canvas.toBlob((blob) => {
+          if(!blob){
+            reject(new Error("Falha ao converter imagem"));
+            return;
+          }
 
-            const novoArquivo = new File(
-              [blob],
-              trocarExtensaoParaJpg(file.name || "foto.jpg"),
-              { type: "image/jpeg" }
-            );
+          const nomeBase = (file.name || "foto").replace(/\.[^.]+$/, "");
+          const novoArquivo = new File(
+            [blob],
+            `${nomeBase}.jpg`,
+            { type: "image/jpeg" }
+          );
 
-            resolve(novoArquivo);
-          },
-          "image/jpeg",
-          qualidade
-        );
+          resolve(novoArquivo);
+        }, "image/jpeg", qualidade);
       };
 
-      img.onerror = () => reject(new Error("Erro ao ler imagem."));
-      img.src = reader.result;
+      img.onerror = () => reject(new Error("Erro ao abrir imagem"));
+      img.src = leitor.result;
     };
 
-    reader.onerror = () => reject(new Error("Erro no FileReader."));
-    reader.readAsDataURL(file);
+    leitor.onerror = () => reject(new Error("Erro ao ler arquivo"));
+    leitor.readAsDataURL(file);
   });
 }
 
-function trocarExtensaoParaJpg(nome) {
-  const base = nome.replace(/\.[^.]+$/, "");
-  return `${base}.jpg`;
+function atualizarPreview(){
+  preview.innerHTML = "";
+
+  fotosExistentes.forEach((url,i)=>{
+    preview.innerHTML += `
+      <div class="preview-item">
+        <img src="${url}">
+        <button type="button" onclick="removerExistente(${i})">×</button>
+      </div>`;
+  });
+
+  fotosTemp.forEach((f,i)=>{
+    preview.innerHTML += `
+      <div class="preview-item">
+        <img src="${URL.createObjectURL(f)}">
+        <button type="button" onclick="removerTemp(${i})">×</button>
+      </div>`;
+  });
 }
 
-async function salvar() {
-  if (salvandoAgora) return;
+function removerExistente(i){
+  fotosExistentes.splice(i,1);
+  atualizarPreview();
+}
 
-  if (!nome.value.trim() || !preco.value.trim()) {
-    alert("Nome e preço obrigatórios");
+function removerTemp(i){
+  fotosTemp.splice(i,1);
+  atualizarPreview();
+}
+
+/* ===== VARIAÇÕES UNIVERSAIS ===== */
+function adicionarVariacao(){
+  const tipo = tipoVariacaoInput.value.trim();
+  const valor = valorVariacaoInput.value.trim();
+  const estoqueVar = estoqueVariacaoInput.value;
+  const precoVarTexto = precoVariacaoInput.value.trim();
+  const precoVar = precoVarTexto ? moedaParaNumero(precoVarTexto) : null;
+
+  if(!tipo || !valor || estoqueVar === "" || Number(estoqueVar) < 0){
+    alert("Informe tipo, valor e estoque da variação");
     return;
   }
 
-  if (!admin || !admin.app_id) {
-    alert("Sessão inválida. Faça login novamente.");
+  variacoes.push({
+    tipo,
+    valor,
+    estoque: Number(estoqueVar),
+    preco: precoVar
+  });
+
+  tipoVariacaoInput.value = "";
+  valorVariacaoInput.value = "";
+  estoqueVariacaoInput.value = "";
+  precoVariacaoInput.value = "";
+  atualizarVariacoes();
+}
+
+function atualizarVariacoes(){
+  listaVariacoes.innerHTML = variacoes.map((v,i)=>`
+    <div class="variacao-box">
+      <span>
+        <b>${v.tipo}:</b> ${v.valor}
+        - ${v.estoque} unidades
+        - ${v.preco !== null && v.preco !== undefined ? formatarReal(v.preco) : "usa preço padrão"}
+      </span>
+      <button type="button" onclick="removerVariacao(${i})">x</button>
+    </div>
+  `).join("");
+}
+
+function removerVariacao(i){
+  variacoes.splice(i,1);
+  atualizarVariacoes();
+}
+
+/* ===== STORAGE ===== */
+function extrairCaminhoStorage(url){
+  const marcador = "/storage/v1/object/public/produtos/";
+  const idx = String(url || "").indexOf(marcador);
+  if(idx === -1) return null;
+  return decodeURIComponent(String(url).slice(idx + marcador.length));
+}
+
+/* ===== SALVAR ===== */
+async function salvar(){
+  if(salvandoAgora) return;
+
+  if(!nome.value.trim() || !preco.value.trim()){
+    alert("Nome e preço obrigatórios");
     return;
   }
 
   salvandoAgora = true;
   btnSalvar.disabled = true;
   const textoOriginal = btnSalvar.innerText;
-  btnSalvar.innerText = "Salvando...";
+  btnSalvar.innerText = editando ? "Salvando alterações..." : "Cadastrando produto...";
 
-  try {
+  try{
     let imagens = [...fotosExistentes];
 
-    for (const foto of fotosTemp) {
-      const ext = "jpg";
-      const nomeArquivo = `${admin.app_id}/${crypto.randomUUID()}_${nomeSeguroArquivo(foto.name)}.${ext}`.replace(/\.jpg\.jpg$/i, ".jpg");
+    for(const foto of fotosTemp){
+      const path = `${admin.app_id}/${crypto.randomUUID()}.jpg`;
 
-      const { error: erroUpload } = await sb.storage
+      const { error: uploadError } = await sb.storage
         .from("produtos")
-        .upload(nomeArquivo, foto, {
+        .upload(path, foto, {
           upsert: false,
           contentType: "image/jpeg"
         });
 
-      if (erroUpload) {
-        console.error("Erro no upload:", erroUpload);
-        alert("Erro ao enviar imagem: " + (erroUpload.message || "falha no upload"));
+      if(uploadError){
+        console.error(uploadError);
+        alert("Erro ao enviar imagem: " + (uploadError.message || "falha no upload"));
         return;
       }
 
-      const { data } = sb.storage.from("produtos").getPublicUrl(nomeArquivo);
-      imagens.push(data.publicUrl);
+      imagens.push(
+        sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
+      );
     }
+
+    const idsComplementares = lerComplementaresSelecionados();
+
+    const variacoesTratadas = (variacoes || []).map(v => ({
+      tipo: String(v.tipo || "").trim(),
+      valor: String(v.valor || "").trim(),
+      estoque: Number(v.estoque || 0),
+      preco: v.preco === null || v.preco === undefined || v.preco === "" ? null : Number(v.preco || 0)
+    }));
 
     const payload = {
       nome: nome.value.trim(),
       preco: moedaParaNumero(preco.value),
       estoque: Number(estoque.value || 0),
+      peso: Number(peso.value || 0),
       descricao: descricao.value.trim(),
       categoria: categoria.value || "",
+      variacoes: JSON.stringify(variacoesTratadas),
       imagens: JSON.stringify(imagens),
-      variacoes: JSON.stringify(variacoes)
+      produtos_complementares: JSON.stringify(idsComplementares)
     };
 
-    const { error } = await sb
-      .from("produtos")
-      .insert({
+    let error;
+
+    if(editando){
+      ({ error } = await sb
+        .from("produtos")
+        .update(payload)
+        .eq("id", produtoEditandoId));
+    }else{
+      ({ error } = await sb.from("produtos").insert({
         ...payload,
         app_id: admin.app_id,
         ativo: true
-      });
+      }));
+    }
 
-    if (error) {
-      console.error("Erro ao salvar produto:", error);
-      alert("Erro ao salvar: " + error.message);
+    if(error){
+      console.error(error);
+      alert("Erro ao salvar produto: " + (error.message || "falha ao salvar"));
       return;
     }
 
-    alert("✅ Produto cadastrado com sucesso");
     limpar();
-  } catch (err) {
-    console.error("Erro inesperado:", err);
+    await carregar();
+    await carregarComplementares();
+    alert("✅ Produto salvo");
+  }catch(err){
+    console.error(err);
     alert("Erro inesperado ao salvar produto");
-  } finally {
+  }finally{
     salvandoAgora = false;
     btnSalvar.disabled = false;
     btnSalvar.innerText = textoOriginal;
   }
 }
 
-function limpar() {
+/* ===== EDITAR ===== */
+function editar(p){
+  editando = true;
+  produtoEditandoId = p.id;
+
+  nome.value = p.nome || "";
+  preco.value = formatarReal(p.preco || 0);
+  estoque.value = p.estoque ?? "";
+  peso.value = p.peso ?? "";
+  descricao.value = p.descricao || "";
+  categoria.value = p.categoria || "";
+
+  try { fotosExistentes = JSON.parse(p.imagens || "[]"); }
+  catch { fotosExistentes = []; }
+
+  try { variacoes = JSON.parse(p.variacoes || "[]"); }
+  catch { variacoes = []; }
+
+  try {
+    const comps = JSON.parse(p.produtos_complementares || "[]");
+    complementaresSelecionados = Array.isArray(comps) ? comps.map(String) : [];
+  } catch {
+    complementaresSelecionados = [];
+  }
+
+  fotosTemp = [];
+  atualizarPreview();
+  atualizarVariacoes();
+  carregarComplementares();
+
+  btnSalvar.innerText = "💾 Salvar alterações";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* ===== LISTAR ===== */
+async function carregar(){
+  const { data, error } = await sb
+    .from("produtos")
+    .select("*")
+    .eq("app_id", admin.app_id)
+    .order("nome");
+
+  if(error){
+    lista.innerHTML = "<small>Erro ao carregar produtos.</small>";
+    return;
+  }
+
+  lista.innerHTML = (data || []).map(p=>{
+    let imgs = [];
+    let vars = [];
+
+    try { imgs = JSON.parse(p.imagens || "[]"); } catch {}
+    try { vars = JSON.parse(p.variacoes || "[]"); } catch {}
+
+    const resumoVariacoes = Array.isArray(vars) && vars.length
+      ? vars.slice(0,2).map(v => {
+          const precoVar = v.preco !== null && v.preco !== undefined && v.preco !== ""
+            ? ` - ${formatarReal(v.preco)}`
+            : "";
+          return `${v.tipo}: ${v.valor}${precoVar}`;
+        }).join(" | ")
+      : "Sem variações";
+
+    return `
+      <div class="produto">
+        ${imgs[0] ? `<img src="${imgs[0]}">` : `<div class="sem-foto">Sem foto</div>`}
+        <b>${p.nome || ""}</b>
+        <div class="preco">${formatarReal(p.preco)}</div>
+        <small>Categoria: ${p.categoria || "Sem categoria"}</small><br>
+        <small>Estoque geral: ${p.estoque ?? 0}</small><br>
+        <small>${resumoVariacoes}</small><br>
+        <small>${p.descricao || ""}</small><br><br>
+        <button type="button" onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
+        <button type="button" class="excluir" onclick="excluir('${p.id}')">Excluir</button>
+      </div>
+    `;
+  }).join("");
+}
+
+/* ===== EXCLUIR ===== */
+async function excluir(id){
+  if(!confirm("Excluir produto?")) return;
+
+  try{
+    const { data: produto, error: erroBusca } = await sb
+      .from("produtos")
+      .select("imagens")
+      .eq("id", id)
+      .single();
+
+    if(erroBusca){
+      console.error(erroBusca);
+      alert("Erro ao localizar produto para exclusão");
+      return;
+    }
+
+    let imagens = [];
+    try { imagens = JSON.parse(produto?.imagens || "[]"); }
+    catch { imagens = []; }
+
+    const caminhos = imagens
+      .map(extrairCaminhoStorage)
+      .filter(Boolean);
+
+    if(caminhos.length){
+      const { error: erroStorage } = await sb
+        .storage
+        .from("produtos")
+        .remove(caminhos);
+
+      if(erroStorage){
+        console.warn("Erro ao apagar imagens do storage:", erroStorage);
+      }
+    }
+
+    const { error } = await sb
+      .from("produtos")
+      .delete()
+      .eq("id", id);
+
+    if(error){
+      console.error(error);
+      alert("Erro ao excluir produto");
+      return;
+    }
+
+    if(String(produtoEditandoId) === String(id)){
+      limpar();
+    }
+
+    await carregar();
+    await carregarComplementares();
+    alert("Produto excluído");
+  }catch(err){
+    console.error(err);
+    alert("Erro ao excluir produto");
+  }
+}
+
+/* ===== LIMPAR ===== */
+function limpar(){
+  editando = false;
+  produtoEditandoId = null;
   nome.value = "";
   preco.value = "";
   estoque.value = "";
+  peso.value = "";
   descricao.value = "";
   categoria.value = "";
+  variacoes = [];
   fotosTemp = [];
-  inputFotos.value = "";
+  fotosExistentes = [];
+  complementaresSelecionados = [];
+  tipoVariacaoInput.value = "";
+  valorVariacaoInput.value = "";
+  estoqueVariacaoInput.value = "";
+  precoVariacaoInput.value = "";
+  preview.innerHTML = "";
+  listaVariacoes.innerHTML = "";
+  btnSalvar.innerText = "Cadastrar Produto";
+  carregarComplementares();
 }
 
-btnSalvar.addEventListener("click", salvar);
+/* ===== INIT ===== */
+carregarAdmin().then(async ()=>{
+  if(admin){
+    await carregarCategorias();
+    await carregar();
+    await carregarComplementares();
+  }
+});
 </script>
 
 </body>
