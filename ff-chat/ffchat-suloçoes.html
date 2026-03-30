@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FF Soluções Chat</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{width:100%;height:100%}
+
+    body{
+      font-family:Arial,Helvetica,sans-serif;
+      background:#020617;
+      color:#fff;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+
+    .topo{
+      background:linear-gradient(135deg,#00b4ff,#0ea5e9);
+      padding:16px;
+      flex-shrink:0;
+      box-shadow:0 4px 20px rgba(0,0,0,.18);
+    }
+
+    .topo strong{
+      display:block;
+      font-size:17px;
+      font-weight:900;
+      letter-spacing:.2px;
+    }
+
+    .topo small{
+      display:block;
+      margin-top:5px;
+      font-size:12px;
+      opacity:.96;
+    }
+
+    .status{
+      padding:10px 12px;
+      font-size:12px;
+      color:#cbd5e1;
+      background:#081126;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      min-height:38px;
+      flex-shrink:0;
+    }
+
+    .mensagens{
+      flex:1;
+      overflow:auto;
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      background:linear-gradient(180deg,#081126,#020817);
+    }
+
+    .msg{
+      max-width:84%;
+      padding:12px 14px;
+      border-radius:16px;
+      line-height:1.45;
+      font-size:14px;
+      word-break:break-word;
+      box-shadow:0 8px 20px rgba(0,0,0,.18);
+    }
+
+    .msg.visitante{
+      align-self:flex-end;
+      background:linear-gradient(135deg,#00b4ff,#0ea5e9);
+      color:#fff;
+    }
+
+    .msg.admin{
+      align-self:flex-start;
+      background:#0f172a;
+      border:1px solid rgba(255,255,255,.08);
+      color:#fff;
+    }
+
+    .meta{
+      margin-top:6px;
+      font-size:11px;
+      opacity:.82;
+    }
+
+    .vazio{
+      text-align:center;
+      color:#94a3b8;
+      padding:24px 14px;
+      font-size:14px;
+      line-height:1.5;
+    }
+
+    .rodape{
+      padding:12px;
+      background:#0b1327;
+      border-top:1px solid rgba(255,255,255,.08);
+      display:flex;
+      gap:10px;
+      flex-shrink:0;
+    }
+
+    .rodape textarea{
+      flex:1;
+      min-height:52px;
+      max-height:120px;
+      resize:vertical;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:#020617;
+      color:#fff;
+      padding:12px;
+      outline:none;
+      font-size:14px;
+      font-family:Arial,Helvetica,sans-serif;
+    }
+
+    .rodape textarea::placeholder{
+      color:#94a3b8;
+    }
+
+    .rodape button{
+      border:none;
+      min-width:110px;
+      padding:12px 14px;
+      border-radius:14px;
+      background:linear-gradient(135deg,#00b4ff,#0ea5e9);
+      color:#fff;
+      font-weight:900;
+      cursor:pointer;
+    }
+
+    .rodape button:disabled{
+      opacity:.7;
+      cursor:not-allowed;
+    }
+
+    @media (max-width:600px){
+      .msg{max-width:90%}
+      .rodape{
+        padding:10px;
+        gap:8px;
+      }
+      .rodape button{
+        min-width:92px;
+        padding:12px 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topo">
+    <strong>💬 FF Soluções</strong>
+    <small id="nomeTopo">Conectando...</small>
+  </div>
+
+  <div class="status" id="statusChat">Preparando chat...</div>
+
+  <div class="mensagens" id="mensagens">
+    <div class="vazio">Envie sua mensagem para iniciar o atendimento.</div>
+  </div>
+
+  <form class="rodape" id="formChat">
+    <textarea id="textoMensagem" placeholder="Digite sua mensagem..."></textarea>
+    <button type="submit">Enviar</button>
+  </form>
+
+  <script>
+    const CHAT_SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+    const CHAT_SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+
+    const supabaseChat = window.supabase.createClient(
+      CHAT_SUPABASE_URL,
+      CHAT_SUPABASE_KEY
+    );
+
+    // MESMAS CHAVES DA TELA FF SOLUÇÕES
+    const CHAT_USER_KEY = "ff_chat_user";
+    const CHAT_CONTEXT_KEY = "ff_chat_contexto";
+    const NOME_KEY = "ff_chat_nome_cliente";
+
+    const nomeTopo = document.getElementById("nomeTopo");
+    const statusChat = document.getElementById("statusChat");
+    const mensagensEl = document.getElementById("mensagens");
+    const formChat = document.getElementById("formChat");
+    const textoMensagem = document.getElementById("textoMensagem");
+
+    let chatUser = null;
+    let chatContexto = null;
+    let pollingMensagens = null;
+    let ultimaMensagemId = null;
+
+    function getChatUser(){
+      try{
+        return JSON.parse(localStorage.getItem(CHAT_USER_KEY) || "null");
+      }catch{
+        return null;
+      }
+    }
+
+    function getChatContexto(){
+      try{
+        return JSON.parse(localStorage.getItem(CHAT_CONTEXT_KEY) || "{}");
+      }catch{
+        return {};
+      }
+    }
+
+    function escapeHtml(texto){
+      return String(texto || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function formatarData(dataIso){
+      if(!dataIso) return "";
+      return new Date(dataIso).toLocaleString("pt-BR");
+    }
+
+    function setStatus(texto){
+      statusChat.textContent = texto || "";
+    }
+
+    function validarSessao(){
+      const params = new URLSearchParams(location.search);
+      const autoLogin = params.get("auto_login") === "1";
+
+      chatUser = getChatUser();
+      chatContexto = getChatContexto();
+
+      if(!autoLogin || !chatUser || !chatUser.numero || !chatContexto || !chatContexto.chat_room_id){
+        nomeTopo.textContent = "Não conectado";
+        setStatus("Sessão do chat não encontrada.");
+        formChat.style.display = "none";
+        mensagensEl.innerHTML = '<div class="vazio">Sessão inválida. Feche e abra o chat novamente.</div>';
+        return false;
+      }
+
+      nomeTopo.textContent = "Atendendo: " + (chatUser.nome || chatContexto.cliente_nome || localStorage.getItem(NOME_KEY) || "Cliente");
+      setStatus("Chat iniciado com sucesso.");
+      return true;
+    }
+
+    function renderizarMensagens(lista){
+      mensagensEl.innerHTML = "";
+
+      if(!lista.length){
+        mensagensEl.innerHTML = '<div class="vazio">Envie sua mensagem para iniciar o atendimento.</div>';
+        return;
+      }
+
+      for(const msg of lista){
+        const ehVisitante = msg.remetente === "visitante";
+        const nomeExibicao = ehVisitante
+          ? (msg.nome_cliente || chatContexto.cliente_nome || "Você")
+          : (msg.nome_admin || "Suporte");
+
+        const div = document.createElement("div");
+        div.className = "msg " + (ehVisitante ? "visitante" : "admin");
+        div.innerHTML = `
+          <div>${escapeHtml(msg.mensagem)}</div>
+          <div class="meta">
+            ${escapeHtml(nomeExibicao)} • ${escapeHtml(formatarData(msg.created_at))}
+          </div>
+        `;
+        mensagensEl.appendChild(div);
+      }
+
+      mensagensEl.scrollTop = mensagensEl.scrollHeight;
+      ultimaMensagemId = lista[lista.length - 1]?.id || null;
+    }
+
+    async function carregarMensagens(){
+      if(!chatContexto?.chat_room_id) return;
+
+      const { data, error } = await supabaseChat
+        .from("chat_mensagens")
+        .select("*")
+        .eq("chat_room_id", chatContexto.chat_room_id)
+        .order("created_at", { ascending: true });
+
+      if(error){
+        console.error("Erro ao carregar mensagens:", error);
+        setStatus("Erro ao carregar mensagens.");
+        return;
+      }
+
+      const lista = Array.isArray(data) ? data : [];
+      renderizarMensagens(lista);
+    }
+
+    async function enviarMensagem(texto){
+      const payload = {
+        app_id: chatContexto.app_id || null,
+        sistema_id: chatContexto.sistema_id || "ffsolucoes",
+        sistema_nome: chatContexto.sistema_nome || "FF Soluções",
+        origem: chatContexto.origem || "ffsolucoes",
+        chat_room_id: chatContexto.chat_room_id,
+        nome_cliente: chatContexto.cliente_nome || chatUser.nome || localStorage.getItem(NOME_KEY) || "Cliente",
+        remetente: "visitante",
+        remetente_id: chatUser.numero || null,
+        mensagem: texto,
+        lida: false
+      };
+
+      const { error } = await supabaseChat
+        .from("chat_mensagens")
+        .insert(payload);
+
+      if(error) throw error;
+    }
+
+    formChat.addEventListener("submit", async function(e){
+      e.preventDefault();
+
+      const texto = (textoMensagem.value || "").trim();
+      if(!texto) return;
+
+      const btn = formChat.querySelector("button");
+      btn.disabled = true;
+      btn.textContent = "Enviando...";
+      setStatus("Enviando mensagem...");
+
+      try{
+        await enviarMensagem(texto);
+        textoMensagem.value = "";
+        await carregarMensagens();
+        setStatus("Mensagem enviada.");
+        textoMensagem.focus();
+      }catch(err){
+        console.error("Erro ao enviar mensagem:", err);
+        setStatus("Erro ao enviar mensagem.");
+        alert("Erro ao enviar mensagem.");
+      }finally{
+        btn.disabled = false;
+        btn.textContent = "Enviar";
+      }
+    });
+
+    textoMensagem.addEventListener("keydown", function(e){
+      if(e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        formChat.requestSubmit();
+      }
+    });
+
+    async function iniciar(){
+      if(!validarSessao()) return;
+
+      await carregarMensagens();
+
+      if(pollingMensagens) clearInterval(pollingMensagens);
+      pollingMensagens = setInterval(async () => {
+        await carregarMensagens();
+      }, 2000);
+    }
+
+    iniciar();
+  </script>
+</body>
+</html>
