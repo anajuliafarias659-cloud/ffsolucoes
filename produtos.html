@@ -202,470 +202,120 @@ small{opacity:.7}
 
 </div>
 
-<script>
-const sb = supabase.createClient(
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const sb = createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let admin = null;
+let admin = JSON.parse(localStorage.getItem("admin"));
 let fotosTemp = [];
 let fotosExistentes = [];
 let variacoes = [];
-const LIMITE = 3;
-let editando = false;
-let produtoEditandoId = null;
-let complementaresSelecionados = [];
+let salvandoAgora = false;
 
-/* ===== ELEMENTOS ===== */
 const nome = document.getElementById("nome");
 const preco = document.getElementById("preco");
 const estoque = document.getElementById("estoque");
-const peso = document.getElementById("peso");
 const descricao = document.getElementById("descricao");
 const categoria = document.getElementById("categoria");
-const camera = document.getElementById("camera");
-const preview = document.getElementById("preview");
-const lista = document.getElementById("lista");
 const btnSalvar = document.getElementById("btnSalvar");
-const listaVariacoes = document.getElementById("listaVariacoes");
+const inputFotos = document.getElementById("fotos");
 
-const tipoVariacaoInput = document.getElementById("tipoVariacaoInput");
-const valorVariacaoInput = document.getElementById("valorVariacaoInput");
-const estoqueVariacaoInput = document.getElementById("estoqueVariacaoInput");
-const precoVariacaoInput = document.getElementById("precoVariacaoInput");
-
-/* ===== FORMATAR REAL ===== */
-function formatarReal(valor){
-  return Number(valor || 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL"
-  });
-}
-
-function moedaParaNumero(valor){
-  return Number(
-    String(valor || "")
-      .replace(/\s/g,"")
-      .replace("R$","")
-      .replace(/\./g,"")
-      .replace(",",".")
-  ) || 0;
-}
-
-/* ===== MÁSCARA DE MOEDA ===== */
-document.addEventListener("DOMContentLoaded", function(){
-  function aplicarMascaraMoeda(input){
-    input.addEventListener("input", function(e){
-      let valor = e.target.value.replace(/\D/g, "");
-
-      if(valor === ""){
-        e.target.value = "";
-        return;
-      }
-
-      valor = (Number(valor) / 100).toFixed(2);
-
-      e.target.value = Number(valor).toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL"
-      });
-    });
-  }
-
-  aplicarMascaraMoeda(preco);
-  aplicarMascaraMoeda(precoVariacaoInput);
+inputFotos.addEventListener("change", (e)=>{
+  fotosTemp = [...e.target.files];
 });
 
-/* ===== SESSÃO ===== */
-async function verificarSessao(){
-  const { data:{ session } } = await sb.auth.getSession();
-  if(!session){
-    window.location.href = "/auth/login.html";
-    return null;
-  }
-  return session.user.id;
+function moedaParaNumero(v){
+  return Number(String(v).replace(/[^\d]/g,""))/100;
 }
 
-async function carregarAdmin(){
-  const userId = await verificarSessao();
-  if(!userId) return;
-
-  const { data: usuario, error } = await sb
-    .from("usuarios")
-    .select("app_id")
-    .eq("id", userId)
-    .single();
-
-  if(error || !usuario){
-    alert("Não foi possível carregar o admin.");
-    return;
-  }
-
-  admin = usuario;
-}
-
-/* ===== CATEGORIAS ===== */
-async function carregarCategorias(){
-  const { data, error } = await sb
-    .from("categorias")
-    .select("*")
-    .eq("app_id", admin.app_id)
-    .order("nome");
-
-  if(error){
-    categoria.innerHTML = "<option value=''>Erro ao carregar categorias</option>";
-    return;
-  }
-
-  if(!data || data.length === 0){
-    categoria.innerHTML = "<option value=''>Nenhuma categoria cadastrada</option>";
-    return;
-  }
-
-  categoria.innerHTML = `<option value="">Selecione a categoria</option>` + data.map(c =>
-    `<option value="${c.nome}">${c.nome}</option>`
-  ).join("");
-}
-
-/* ===== COMPLEMENTARES ===== */
-async function carregarComplementares(){
-  const { data, error } = await sb
-    .from("produtos")
-    .select("id,nome")
-    .eq("app_id", admin.app_id)
-    .order("nome");
-
-  if(error){
-    document.getElementById("listaComplementares").innerHTML = "<small>Erro ao carregar complementares.</small>";
-    return;
-  }
-
-  const listaProdutos = data || [];
-  const filtrados = listaProdutos.filter(p => String(p.id) !== String(produtoEditandoId));
-
-  const html = filtrados.map(p => `
-    <div class="item-comp">
-      <input
-        type="checkbox"
-        id="comp_${p.id}"
-        value="${p.id}"
-        ${complementaresSelecionados.includes(String(p.id)) ? "checked" : ""}
-      >
-      <label for="comp_${p.id}">${p.nome}</label>
-    </div>
-  `).join("");
-
-  document.getElementById("listaComplementares").innerHTML =
-    html || "<small>Nenhum outro produto cadastrado ainda.</small>";
-}
-
-function lerComplementaresSelecionados(){
-  const checks = document.querySelectorAll('#listaComplementares input[type="checkbox"]:checked');
-  return [...checks].map(c => String(c.value));
-}
-
-/* ===== FOTO ===== */
-function tirarFoto(){
-  if(fotosTemp.length + fotosExistentes.length >= LIMITE){
-    alert("Máximo de 3 fotos por produto");
-    return;
-  }
-  camera.click();
-}
-
-camera.onchange = ()=>{
-  const file = camera.files[0];
-  if(!file) return;
-  fotosTemp.push(file);
-  camera.value = "";
-  atualizarPreview();
-};
-
-function atualizarPreview(){
-  preview.innerHTML = "";
-
-  fotosExistentes.forEach((url,i)=>{
-    preview.innerHTML += `
-      <div class="preview-item">
-        <img src="${url}">
-        <button type="button" onclick="removerExistente(${i})">×</button>
-      </div>`;
-  });
-
-  fotosTemp.forEach((f,i)=>{
-    preview.innerHTML += `
-      <div class="preview-item">
-        <img src="${URL.createObjectURL(f)}">
-        <button type="button" onclick="removerTemp(${i})">×</button>
-      </div>`;
-  });
-}
-
-function removerExistente(i){
-  fotosExistentes.splice(i,1);
-  atualizarPreview();
-}
-
-function removerTemp(i){
-  fotosTemp.splice(i,1);
-  atualizarPreview();
-}
-
-/* ===== VARIAÇÕES UNIVERSAIS ===== */
-function adicionarVariacao(){
-  const tipo = tipoVariacaoInput.value.trim();
-  const valor = valorVariacaoInput.value.trim();
-  const estoqueVar = estoqueVariacaoInput.value;
-  const precoVarTexto = precoVariacaoInput.value.trim();
-  const precoVar = precoVarTexto ? moedaParaNumero(precoVarTexto) : null;
-
-  if(!tipo || !valor || estoqueVar === "" || Number(estoqueVar) < 0){
-    alert("Informe tipo, valor e estoque da variação");
-    return;
-  }
-
-  variacoes.push({
-    tipo,
-    valor,
-    estoque: Number(estoqueVar),
-    preco: precoVar
-  });
-
-  tipoVariacaoInput.value = "";
-  valorVariacaoInput.value = "";
-  estoqueVariacaoInput.value = "";
-  precoVariacaoInput.value = "";
-  atualizarVariacoes();
-}
-
-function atualizarVariacoes(){
-  listaVariacoes.innerHTML = variacoes.map((v,i)=>`
-    <div class="variacao-box">
-      <span>
-        <b>${v.tipo}:</b> ${v.valor}
-        - ${v.estoque} unidades
-        - ${v.preco !== null && v.preco !== undefined ? formatarReal(v.preco) : "usa preço padrão"}
-      </span>
-      <button type="button" onclick="removerVariacao(${i})">x</button>
-    </div>
-  `).join("");
-}
-
-function removerVariacao(i){
-  variacoes.splice(i,1);
-  atualizarVariacoes();
-}
-
-/* ===== SALVAR ===== */
 async function salvar(){
+  if(salvandoAgora) return;
+
   if(!nome.value.trim() || !preco.value.trim()){
     alert("Nome e preço obrigatórios");
     return;
   }
 
-  let imagens = [...fotosExistentes];
+  salvandoAgora = true;
+  btnSalvar.disabled = true;
+  const textoOriginal = btnSalvar.innerText;
+  btnSalvar.innerText = "Salvando...";
 
-  for(const foto of fotosTemp){
-    const extensao = (foto.name.split('.').pop() || 'jpg').toLowerCase();
-    const path = `${admin.app_id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${extensao}`;
+  try{
+    let imagens = [...fotosExistentes];
 
-    const { error: uploadError } = await sb.storage
+    // upload imagens
+    for(const foto of fotosTemp){
+      const ext = foto.name.split('.').pop() || 'jpg';
+      const nomeArquivo = `${admin.app_id}/${crypto.randomUUID()}.${ext}`;
+
+      const { error: erroUpload } = await sb.storage
+        .from("produtos")
+        .upload(nomeArquivo, foto, { upsert:false });
+
+      if(erroUpload){
+        console.error(erroUpload);
+        alert("Erro upload: " + erroUpload.message);
+        return;
+      }
+
+      const url = sb.storage.from("produtos")
+        .getPublicUrl(nomeArquivo).data.publicUrl;
+
+      imagens.push(url);
+    }
+
+    const payload = {
+      nome: nome.value.trim(),
+      preco: moedaParaNumero(preco.value),
+      estoque: Number(estoque.value || 0),
+      descricao: descricao.value.trim(),
+      categoria: categoria.value || "",
+      imagens: JSON.stringify(imagens),
+      variacoes: JSON.stringify(variacoes)
+    };
+
+    const { error } = await sb
       .from("produtos")
-      .upload(path, foto, { upsert:true });
+      .insert({
+        ...payload,
+        app_id: admin.app_id,
+        ativo: true
+      });
 
-    if(uploadError){
-      alert("Erro ao enviar imagem");
+    if(error){
+      console.error(error);
+      alert("Erro ao salvar: " + error.message);
       return;
     }
 
-    imagens.push(
-      sb.storage.from("produtos").getPublicUrl(path).data.publicUrl
-    );
+    alert("✅ Produto cadastrado");
+    limpar();
+
+  }catch(err){
+    console.error(err);
+    alert("Erro inesperado");
+  }finally{
+    salvandoAgora = false;
+    btnSalvar.disabled = false;
+    btnSalvar.innerText = textoOriginal;
   }
-
-  const idsComplementares = lerComplementaresSelecionados();
-
-  const variacoesTratadas = (variacoes || []).map(v => ({
-    tipo: String(v.tipo || "").trim(),
-    valor: String(v.valor || "").trim(),
-    estoque: Number(v.estoque || 0),
-    preco: v.preco === null || v.preco === undefined || v.preco === "" ? null : Number(v.preco || 0)
-  }));
-
-  const payload = {
-    nome: nome.value.trim(),
-    preco: moedaParaNumero(preco.value),
-    estoque: Number(estoque.value || 0),
-    peso: Number(peso.value || 0),
-    descricao: descricao.value.trim(),
-    categoria: categoria.value || "",
-    variacoes: JSON.stringify(variacoesTratadas),
-    imagens: JSON.stringify(imagens),
-    produtos_complementares: JSON.stringify(idsComplementares)
-  };
-
-  let error;
-
-  if(editando){
-    ({ error } = await sb
-      .from("produtos")
-      .update(payload)
-      .eq("id", produtoEditandoId));
-  }else{
-    ({ error } = await sb.from("produtos").insert({
-      ...payload,
-      app_id: admin.app_id,
-      ativo: true
-    }));
-  }
-
-  if(error){
-    alert("Erro ao salvar produto");
-    console.error(error);
-    return;
-  }
-
-  limpar();
-  await carregar();
-  await carregarComplementares();
-  alert("✅ Produto salvo");
 }
 
-/* ===== EDITAR ===== */
-function editar(p){
-  editando = true;
-  produtoEditandoId = p.id;
-
-  nome.value = p.nome || "";
-  preco.value = formatarReal(p.preco || 0);
-  estoque.value = p.estoque ?? "";
-  peso.value = p.peso ?? "";
-  descricao.value = p.descricao || "";
-  categoria.value = p.categoria || "";
-
-  try { fotosExistentes = JSON.parse(p.imagens || "[]"); }
-  catch { fotosExistentes = []; }
-
-  try {
-    const parsed = JSON.parse(p.variacoes || "[]");
-    variacoes = Array.isArray(parsed) ? parsed.map(v => ({
-      tipo: v.tipo || "",
-      valor: v.valor || "",
-      estoque: Number(v.estoque || 0),
-      preco: v.preco === null || v.preco === undefined || v.preco === "" ? null : Number(v.preco || 0)
-    })) : [];
-  } catch {
-    variacoes = [];
-  }
-
-  try {
-    complementaresSelecionados = JSON.parse(p.produtos_complementares || "[]").map(String);
-  } catch {
-    complementaresSelecionados = [];
-  }
-
-  fotosTemp = [];
-  atualizarPreview();
-  atualizarVariacoes();
-  carregarComplementares();
-
-  btnSalvar.innerText = "💾 Salvar alterações";
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-/* ===== LISTAR ===== */
-async function carregar(){
-  const { data, error } = await sb
-    .from("produtos")
-    .select("*")
-    .eq("app_id", admin.app_id)
-    .order("nome");
-
-  if(error){
-    lista.innerHTML = "<small>Erro ao carregar produtos.</small>";
-    return;
-  }
-
-  lista.innerHTML = (data || []).map(p=>{
-    let imgs = [];
-    let vars = [];
-
-    try { imgs = JSON.parse(p.imagens || "[]"); } catch {}
-    try { vars = JSON.parse(p.variacoes || "[]"); } catch {}
-
-    const resumoVariacoes = Array.isArray(vars) && vars.length
-      ? vars.slice(0,2).map(v => {
-          const precoVar = v.preco !== null && v.preco !== undefined && v.preco !== ""
-            ? ` - ${formatarReal(v.preco)}`
-            : "";
-          return `${v.tipo}: ${v.valor}${precoVar}`;
-        }).join(" | ")
-      : "Sem variações";
-
-    return `
-      <div class="produto">
-        ${imgs[0] ? `<img src="${imgs[0]}">` : `<div class="sem-foto">Sem foto</div>`}
-        <b>${p.nome || ""}</b>
-        <div class="preco">${formatarReal(p.preco)}</div>
-        <small>Categoria: ${p.categoria || "Sem categoria"}</small><br>
-        <small>Estoque geral: ${p.estoque ?? 0}</small><br>
-        <small>${resumoVariacoes}</small><br>
-        <small>${p.descricao || ""}</small><br><br>
-        <button type="button" onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
-        <button type="button" class="excluir" onclick="excluir('${p.id}')">Excluir</button>
-      </div>
-    `;
-  }).join("");
-}
-
-/* ===== EXCLUIR ===== */
-async function excluir(id){
-  if(!confirm("Excluir produto?")) return;
-
-  const { error } = await sb.from("produtos").delete().eq("id", id);
-
-  if(error){
-    alert("Erro ao excluir produto");
-    return;
-  }
-
-  await carregar();
-  await carregarComplementares();
-}
-
-/* ===== LIMPAR ===== */
 function limpar(){
-  editando = false;
-  produtoEditandoId = null;
   nome.value = "";
   preco.value = "";
   estoque.value = "";
-  peso.value = "";
   descricao.value = "";
   categoria.value = "";
-  variacoes = [];
   fotosTemp = [];
-  fotosExistentes = [];
-  complementaresSelecionados = [];
-  tipoVariacaoInput.value = "";
-  valorVariacaoInput.value = "";
-  estoqueVariacaoInput.value = "";
-  precoVariacaoInput.value = "";
-  preview.innerHTML = "";
-  listaVariacoes.innerHTML = "";
-  btnSalvar.innerText = "Cadastrar Produto";
-  carregarComplementares();
 }
 
-/* ===== INIT ===== */
-carregarAdmin().then(async ()=>{
-  if(admin){
-    await carregarCategorias();
-    await carregar();
-    await carregarComplementares();
-  }
-});
+btnSalvar.addEventListener("click", salvar);
 </script>
 
 </body>
