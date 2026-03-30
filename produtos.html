@@ -246,13 +246,21 @@ function formatarReal(valor){
 }
 
 function moedaParaNumero(valor){
-  return Number(
-    String(valor || "")
-      .replace(/\s/g,"")
-      .replace("R$","")
-      .replace(/\./g,"")
-      .replace(",",".")
-  ) || 0;
+  const texto = String(valor || "").trim();
+  if(!texto) return 0;
+
+  if(texto.includes("R$") || texto.includes(",")){
+    return Number(
+      texto
+        .replace(/\s/g,"")
+        .replace("R$","")
+        .replace(/\./g,"")
+        .replace(",",".")
+    ) || 0;
+  }
+
+  const somenteDigitos = texto.replace(/\D/g, "");
+  return Number(somenteDigitos) / 100 || 0;
 }
 
 /* ===== MÁSCARA DE MOEDA ===== */
@@ -336,6 +344,7 @@ async function carregarComplementares(){
     .from("produtos")
     .select("id,nome")
     .eq("app_id", admin.app_id)
+    .eq("ativo", true)
     .order("nome");
 
   if(error){
@@ -359,7 +368,7 @@ async function carregarComplementares(){
   `).join("");
 
   document.getElementById("listaComplementares").innerHTML =
-    html || "<small>Nenhum outro produto cadastrado ainda.</small>";
+    html || "<small>Nenhum outro produto ativo cadastrado ainda.</small>";
 }
 
 function lerComplementaresSelecionados(){
@@ -492,7 +501,7 @@ function removerTemp(i){
   atualizarPreview();
 }
 
-/* ===== VARIAÇÕES UNIVERSAIS ===== */
+/* ===== VARIAÇÕES ===== */
 function adicionarVariacao(){
   const tipo = tipoVariacaoInput.value.trim();
   const valor = valorVariacaoInput.value.trim();
@@ -604,7 +613,7 @@ async function salvar(){
       produtos_complementares: JSON.stringify(idsComplementares)
     };
 
-    let error;
+    let error = null;
 
     if(editando){
       ({ error } = await sb
@@ -612,11 +621,13 @@ async function salvar(){
         .update(payload)
         .eq("id", produtoEditandoId));
     }else{
-      ({ error } = await sb.from("produtos").insert({
-        ...payload,
-        app_id: admin.app_id,
-        ativo: true
-      }));
+      ({ error } = await sb
+        .from("produtos")
+        .insert({
+          ...payload,
+          app_id: admin.app_id,
+          ativo: true
+        }));
     }
 
     if(error){
@@ -651,11 +662,24 @@ function editar(p){
   descricao.value = p.descricao || "";
   categoria.value = p.categoria || "";
 
-  try { fotosExistentes = JSON.parse(p.imagens || "[]"); }
-  catch { fotosExistentes = []; }
+  try {
+    fotosExistentes = JSON.parse(p.imagens || "[]");
+    if(!Array.isArray(fotosExistentes)) fotosExistentes = [];
+  } catch {
+    fotosExistentes = [];
+  }
 
-  try { variacoes = JSON.parse(p.variacoes || "[]"); }
-  catch { variacoes = []; }
+  try {
+    const parsed = JSON.parse(p.variacoes || "[]");
+    variacoes = Array.isArray(parsed) ? parsed.map(v => ({
+      tipo: v.tipo || "",
+      valor: v.valor || "",
+      estoque: Number(v.estoque || 0),
+      preco: v.preco === null || v.preco === undefined || v.preco === "" ? null : Number(v.preco || 0)
+    })) : [];
+  } catch {
+    variacoes = [];
+  }
 
   try {
     const comps = JSON.parse(p.produtos_complementares || "[]");
@@ -679,9 +703,11 @@ async function carregar(){
     .from("produtos")
     .select("*")
     .eq("app_id", admin.app_id)
+    .eq("ativo", true)
     .order("nome");
 
   if(error){
+    console.error(error);
     lista.innerHTML = "<small>Erro ao carregar produtos.</small>";
     return;
   }
@@ -702,6 +728,11 @@ async function carregar(){
         }).join(" | ")
       : "Sem variações";
 
+    const produtoSafe = JSON.stringify(p)
+      .replace(/</g, "\\u003c")
+      .replace(/>/g, "\\u003e")
+      .replace(/'/g, "\\u0027");
+
     return `
       <div class="produto">
         ${imgs[0] ? `<img src="${imgs[0]}">` : `<div class="sem-foto">Sem foto</div>`}
@@ -711,7 +742,7 @@ async function carregar(){
         <small>Estoque geral: ${p.estoque ?? 0}</small><br>
         <small>${resumoVariacoes}</small><br>
         <small>${p.descricao || ""}</small><br><br>
-        <button type="button" onclick='editar(${JSON.stringify(p)})'>✏️ Editar</button>
+        <button type="button" onclick='editar(${produtoSafe})'>✏️ Editar</button>
         <button type="button" class="excluir" onclick="excluir('${p.id}')">Excluir</button>
       </div>
     `;
@@ -725,53 +756,79 @@ async function excluir(id){
   try{
     const { data: produto, error: erroBusca } = await sb
       .from("produtos")
-      .select("imagens")
+      .select("id, imagens")
       .eq("id", id)
       .single();
 
-    if(erroBusca){
+    if(erroBusca || !produto){
       console.error(erroBusca);
-      alert("Erro ao localizar produto para exclusão");
+      alert("Erro ao localizar produto");
       return;
     }
 
     let imagens = [];
-    try { imagens = JSON.parse(produto?.imagens || "[]"); }
-    catch { imagens = []; }
+    try {
+      imagens = JSON.parse(produto.imagens || "[]");
+      if(!Array.isArray(imagens)) imagens = [];
+    } catch {
+      imagens = [];
+    }
 
     const caminhos = imagens
       .map(extrairCaminhoStorage)
       .filter(Boolean);
 
-    if(caminhos.length){
-      const { error: erroStorage } = await sb
-        .storage
-        .from("produtos")
-        .remove(caminhos);
-
-      if(erroStorage){
-        console.warn("Erro ao apagar imagens do storage:", erroStorage);
-      }
-    }
-
-    const { error } = await sb
+    const { error: erroDelete } = await sb
       .from("produtos")
       .delete()
       .eq("id", id);
 
-    if(error){
-      console.error(error);
-      alert("Erro ao excluir produto");
+    if(!erroDelete){
+      if(caminhos.length){
+        const { error: erroStorage } = await sb
+          .storage
+          .from("produtos")
+          .remove(caminhos);
+
+        if(erroStorage){
+          console.warn("Produto apagado do banco, mas falhou ao apagar imagens:", erroStorage);
+        }
+      }
+
+      if(String(produtoEditandoId) === String(id)){
+        limpar();
+      }
+
+      await carregar();
+      await carregarComplementares();
+      alert("Produto excluído");
       return;
     }
 
-    if(String(produtoEditandoId) === String(id)){
-      limpar();
+    if(erroDelete.code === "23503"){
+      const { error: erroInativar } = await sb
+        .from("produtos")
+        .update({ ativo: false })
+        .eq("id", id);
+
+      if(erroInativar){
+        console.error(erroInativar);
+        alert("Erro ao desativar produto");
+        return;
+      }
+
+      if(String(produtoEditandoId) === String(id)){
+        limpar();
+      }
+
+      await carregar();
+      await carregarComplementares();
+      alert("Produto já foi usado em pedidos e foi desativado.");
+      return;
     }
 
-    await carregar();
-    await carregarComplementares();
-    alert("Produto excluído");
+    console.error(erroDelete);
+    alert("Erro ao excluir produto");
   }catch(err){
     console.error(err);
     alert("Erro ao excluir produto");
