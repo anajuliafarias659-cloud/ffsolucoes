@@ -258,278 +258,225 @@
     </form>
   </div>
 
-  <script>
-    const CHAT_SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-    const CHAT_SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+  <!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>FF Soluções Chat</title>
 
-    const supabaseChat = window.supabase.createClient(
-      CHAT_SUPABASE_URL,
-      CHAT_SUPABASE_KEY
-    );
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-    const CHAT_USER_KEY = "ff_chat_user";
-    const CHAT_CONTEXT_KEY = "ff_chat_contexto";
-    const NOME_KEY = "ff_chat_nome_cliente";
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
 
-    const nomeTopo = document.getElementById("nomeTopo");
-    const statusChat = document.getElementById("statusChat");
-    const mensagensEl = document.getElementById("mensagens");
-    const formChat = document.getElementById("formChat");
-    const textoMensagem = document.getElementById("textoMensagem");
-
-    let chatUser = null;
-    let chatContexto = null;
-    let pollingMensagens = null;
-    let ultimaMensagemId = null;
-
-    function getViewportHeight(){
-      if(window.visualViewport && window.visualViewport.height){
-        return window.visualViewport.height;
-      }
-      return window.innerHeight || document.documentElement.clientHeight || screen.height;
+    html,body{
+      width:100%;
+      height:100%;
+      overflow:hidden;
+      background:#020617;
     }
 
-    function ajustarAlturaTela(){
-      const altura = getViewportHeight();
-      document.documentElement.style.setProperty("--app-height", altura + "px");
+    :root{
+      --app-height:100dvh;
+      --topo-h:74px;
+      --status-h:38px;
+      --rodape-h:76px;
     }
 
-    function ajustarAlturaRodape(){
-      const rodape = document.getElementById("formChat");
-      if(!rodape) return;
-      const altura = rodape.offsetHeight || 76;
-      document.documentElement.style.setProperty("--rodape-h", altura + "px");
+    body{
+      font-family:Arial,Helvetica,sans-serif;
+      background:#020617;
+      color:#fff;
+      overflow:hidden;
+      position:fixed;
+      inset:0;
     }
 
-    function getChatUser(){
-      try{
-        return JSON.parse(localStorage.getItem(CHAT_USER_KEY) || "null");
-      }catch{
-        return null;
-      }
+    .app{
+      position:fixed;
+      inset:0;
+      width:100%;
+      height:var(--app-height);
+      overflow:hidden;
     }
 
-    function getChatContexto(){
-      try{
-        return JSON.parse(localStorage.getItem(CHAT_CONTEXT_KEY) || "{}");
-      }catch{
-        return {};
-      }
+    /* 🔥 TOPO CORRIGIDO */
+    .topo{
+      position:fixed;
+      top:0;
+      left:0;
+      right:0;
+      z-index:30;
+      background:linear-gradient(135deg,#00b4ff,#0ea5e9);
+      padding:10px 12px 8px 12px;
+      height:var(--topo-h);
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
     }
 
-    function escapeHtml(texto){
-      return String(texto || "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+    .topo strong{
+      font-size:17px;
+      font-weight:900;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      line-height:1.1;
     }
 
-    function formatarData(dataIso){
-      if(!dataIso) return "";
-      return new Date(dataIso).toLocaleString("pt-BR");
+    /* 🔥 NOME NÃO SOME MAIS */
+    .nome-topo{
+      margin-top:4px;
+      font-size:13px;
+      line-height:1.2;
+      opacity:.96;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      min-height:16px;
     }
 
-    function setStatus(texto){
-      statusChat.textContent = texto || "";
+    .status{
+      position:fixed;
+      top:var(--topo-h);
+      left:0;
+      right:0;
+      z-index:29;
+      padding:10px 12px;
+      font-size:12px;
+      color:#cbd5e1;
+      background:#081126;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      height:var(--status-h);
+      display:flex;
+      align-items:center;
     }
 
-    function rolarParaFim(){
-      requestAnimationFrame(() => {
-        mensagensEl.scrollTop = mensagensEl.scrollHeight;
-      });
+    .mensagens{
+      position:fixed;
+      top:calc(var(--topo-h) + var(--status-h));
+      left:0;
+      right:0;
+      bottom:var(--rodape-h);
+      overflow:auto;
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      background:linear-gradient(180deg,#081126,#020817);
     }
 
-    function validarSessao(){
-      const params = new URLSearchParams(location.search);
-      const autoLogin = params.get("auto_login") === "1";
-
-      chatUser = getChatUser();
-      chatContexto = getChatContexto();
-
-      if(!autoLogin || !chatUser || !chatUser.numero || !chatContexto || !chatContexto.chat_room_id){
-        nomeTopo.textContent = "Não conectado";
-        setStatus("Sessão do chat não encontrada.");
-        formChat.style.display = "none";
-        mensagensEl.innerHTML = '<div class="vazio">Sessão inválida. Feche e abra o chat novamente.</div>';
-        return false;
-      }
-
-      nomeTopo.textContent = "Atendendo: " + (chatUser.nome || chatContexto.cliente_nome || localStorage.getItem(NOME_KEY) || "Cliente");
-      setStatus("Chat iniciado com sucesso.");
-      return true;
+    .msg{
+      max-width:84%;
+      padding:12px 14px;
+      border-radius:16px;
+      font-size:14px;
     }
 
-    function renderizarMensagens(lista){
-      mensagensEl.innerHTML = "";
-
-      if(!lista.length){
-        mensagensEl.innerHTML = '<div class="vazio">Envie sua mensagem para iniciar o atendimento.</div>';
-        return;
-      }
-
-      for(const msg of lista){
-        const ehVisitante = msg.remetente === "visitante";
-        const nomeExibicao = ehVisitante
-          ? (msg.nome_cliente || chatContexto.cliente_nome || "Você")
-          : (msg.nome_admin || "Suporte");
-
-        const div = document.createElement("div");
-        div.className = "msg " + (ehVisitante ? "visitante" : "admin");
-        div.innerHTML = `
-          <div>${escapeHtml(msg.mensagem)}</div>
-          <div class="meta">
-            ${escapeHtml(nomeExibicao)} • ${escapeHtml(formatarData(msg.created_at))}
-          </div>
-        `;
-        mensagensEl.appendChild(div);
-      }
-
-      rolarParaFim();
-      ultimaMensagemId = lista[lista.length - 1]?.id || null;
+    .msg.visitante{
+      align-self:flex-end;
+      background:#0ea5e9;
     }
 
-    async function carregarMensagens(){
-      if(!chatContexto?.chat_room_id) return;
-
-      const { data, error } = await supabaseChat
-        .from("chat_mensagens")
-        .select("*")
-        .eq("chat_room_id", chatContexto.chat_room_id)
-        .order("created_at", { ascending: true });
-
-      if(error){
-        console.error("Erro ao carregar mensagens:", error);
-        setStatus("Erro ao carregar mensagens.");
-        return;
-      }
-
-      const lista = Array.isArray(data) ? data : [];
-      renderizarMensagens(lista);
+    .msg.admin{
+      align-self:flex-start;
+      background:#0f172a;
     }
 
-    async function enviarMensagem(texto){
-      const payload = {
-        app_id: chatContexto.app_id || null,
-        sistema_id: chatContexto.sistema_id || "ffsolucoes",
-        sistema_nome: chatContexto.sistema_nome || "FF Soluções",
-        origem: chatContexto.origem || "ffsolucoes",
-        chat_room_id: chatContexto.chat_room_id,
-        nome_cliente: chatContexto.cliente_nome || chatUser.nome || localStorage.getItem(NOME_KEY) || "Cliente",
-        remetente: "visitante",
-        remetente_id: chatUser.numero || null,
-        mensagem: texto,
-        lida: false
-      };
-
-      const { error } = await supabaseChat
-        .from("chat_mensagens")
-        .insert(payload);
-
-      if(error) throw error;
+    .meta{
+      margin-top:6px;
+      font-size:11px;
+      opacity:.8;
     }
 
-    formChat.addEventListener("submit", async function(e){
-      e.preventDefault();
-
-      const texto = (textoMensagem.value || "").trim();
-      if(!texto) return;
-
-      const btn = formChat.querySelector("button");
-      btn.disabled = true;
-      btn.textContent = "Enviando...";
-      setStatus("Enviando mensagem...");
-
-      try{
-        await enviarMensagem(texto);
-        textoMensagem.value = "";
-        textoMensagem.style.height = "52px";
-        ajustarAlturaRodape();
-        await carregarMensagens();
-        setStatus("Mensagem enviada.");
-        textoMensagem.focus();
-      }catch(err){
-        console.error("Erro ao enviar mensagem:", err);
-        setStatus("Erro ao enviar mensagem.");
-        alert("Erro ao enviar mensagem.");
-      }finally{
-        btn.disabled = false;
-        btn.textContent = "Enviar";
-      }
-    });
-
-    textoMensagem.addEventListener("keydown", function(e){
-      if(e.key === "Enter" && !e.shiftKey){
-        e.preventDefault();
-        formChat.requestSubmit();
-      }
-    });
-
-    textoMensagem.addEventListener("input", function(){
-      this.style.height = "52px";
-      this.style.height = Math.min(this.scrollHeight, 120) + "px";
-      ajustarAlturaRodape();
-      rolarParaFim();
-    });
-
-    textoMensagem.addEventListener("focus", function(){
-      setTimeout(() => {
-        ajustarAlturaTela();
-        ajustarAlturaRodape();
-        rolarParaFim();
-      }, 250);
-    });
-
-    textoMensagem.addEventListener("blur", function(){
-      setTimeout(() => {
-        ajustarAlturaTela();
-        ajustarAlturaRodape();
-      }, 250);
-    });
-
-    async function iniciar(){
-      ajustarAlturaTela();
-      ajustarAlturaRodape();
-
-      if(!validarSessao()) return;
-
-      await carregarMensagens();
-
-      if(pollingMensagens) clearInterval(pollingMensagens);
-      pollingMensagens = setInterval(async () => {
-        await carregarMensagens();
-      }, 2000);
+    .rodape{
+      position:fixed;
+      bottom:0;
+      left:0;
+      right:0;
+      z-index:9999;
+      padding:10px;
+      background:#0b1327;
+      display:flex;
+      gap:8px;
     }
 
-    window.addEventListener("resize", () => {
-      ajustarAlturaTela();
-      ajustarAlturaRodape();
-      rolarParaFim();
-    });
-
-    window.addEventListener("orientationchange", () => {
-      setTimeout(() => {
-        ajustarAlturaTela();
-        ajustarAlturaRodape();
-        rolarParaFim();
-      }, 300);
-    });
-
-    if(window.visualViewport){
-      window.visualViewport.addEventListener("resize", () => {
-        ajustarAlturaTela();
-        ajustarAlturaRodape();
-        rolarParaFim();
-      });
-
-      window.visualViewport.addEventListener("scroll", () => {
-        ajustarAlturaTela();
-        ajustarAlturaRodape();
-      });
+    .rodape textarea{
+      flex:1;
+      height:52px;
+      border-radius:12px;
+      border:none;
+      padding:10px;
+      background:#020617;
+      color:#fff;
+      font-size:16px;
     }
 
-    iniciar();
-  </script>
+    .rodape button{
+      padding:10px;
+      background:#0ea5e9;
+      color:#fff;
+      border:none;
+      border-radius:10px;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <div class="topo">
+    <strong>💬 FF Soluções</strong>
+    <div id="nomeTopo" class="nome-topo">Conectando...</div>
+  </div>
+
+  <div class="status" id="statusChat">Preparando chat...</div>
+
+  <div class="mensagens" id="mensagens">
+    <div class="vazio">Envie sua mensagem para iniciar.</div>
+  </div>
+
+  <form class="rodape" id="formChat">
+    <textarea id="textoMensagem" placeholder="Digite..."></textarea>
+    <button type="submit">Enviar</button>
+  </form>
+
+</div>
+
+<script>
+const CHAT_SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const CHAT_SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+
+const supabaseChat = window.supabase.createClient(
+  CHAT_SUPABASE_URL,
+  CHAT_SUPABASE_KEY
+);
+
+const nomeTopo = document.getElementById("nomeTopo");
+const mensagensEl = document.getElementById("mensagens");
+const formChat = document.getElementById("formChat");
+const textoMensagem = document.getElementById("textoMensagem");
+
+formChat.addEventListener("submit", async function(e){
+  e.preventDefault();
+
+  const texto = textoMensagem.value.trim();
+  if(!texto) return;
+
+  textoMensagem.value = "";
+
+  const div = document.createElement("div");
+  div.className = "msg visitante";
+  div.innerHTML = texto;
+
+  mensagensEl.appendChild(div);
+  mensagensEl.scrollTop = mensagensEl.scrollHeight;
+});
+</script>
+
+</body>
+</html>
 </body>
 </html>
