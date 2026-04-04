@@ -2,29 +2,51 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>FF Soluções Chat</title>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    html,body{width:100%;height:100%}
+    html,body{
+      width:100%;
+      height:100%;
+      overflow:hidden;
+    }
+
+    :root{
+      --app-height:100vh;
+      --topo-h:72px;
+      --status-h:38px;
+      --rodape-h:76px;
+    }
 
     body{
       font-family:Arial,Helvetica,sans-serif;
       background:#020617;
       color:#fff;
-      display:flex;
-      flex-direction:column;
       overflow:hidden;
     }
 
+    .app{
+      position:relative;
+      width:100%;
+      height:var(--app-height);
+      overflow:hidden;
+      background:#020617;
+    }
+
     .topo{
+      position:fixed;
+      top:0;
+      left:0;
+      right:0;
+      z-index:30;
       background:linear-gradient(135deg,#00b4ff,#0ea5e9);
       padding:16px;
-      flex-shrink:0;
       box-shadow:0 4px 20px rgba(0,0,0,.18);
+      min-height:var(--topo-h);
     }
 
     .topo strong{
@@ -42,23 +64,35 @@
     }
 
     .status{
+      position:fixed;
+      top:var(--topo-h);
+      left:0;
+      right:0;
+      z-index:29;
       padding:10px 12px;
       font-size:12px;
       color:#cbd5e1;
       background:#081126;
       border-bottom:1px solid rgba(255,255,255,.06);
-      min-height:38px;
-      flex-shrink:0;
+      min-height:var(--status-h);
+      display:flex;
+      align-items:center;
     }
 
     .mensagens{
-      flex:1;
+      position:fixed;
+      top:calc(var(--topo-h) + var(--status-h));
+      left:0;
+      right:0;
+      bottom:var(--rodape-h);
       overflow:auto;
       padding:14px;
       display:flex;
       flex-direction:column;
       gap:10px;
       background:linear-gradient(180deg,#081126,#020817);
+      -webkit-overflow-scrolling:touch;
+      scroll-behavior:smooth;
     }
 
     .msg{
@@ -99,19 +133,26 @@
     }
 
     .rodape{
+      position:fixed;
+      left:0;
+      right:0;
+      bottom:0;
+      z-index:31;
       padding:12px;
       background:#0b1327;
       border-top:1px solid rgba(255,255,255,.08);
       display:flex;
       gap:10px;
-      flex-shrink:0;
+      align-items:flex-end;
+      min-height:var(--rodape-h);
+      padding-bottom:max(12px, env(safe-area-inset-bottom));
     }
 
     .rodape textarea{
       flex:1;
       min-height:52px;
       max-height:120px;
-      resize:vertical;
+      resize:none;
       border-radius:14px;
       border:1px solid rgba(255,255,255,.10);
       background:#020617;
@@ -135,6 +176,7 @@
       color:#fff;
       font-weight:900;
       cursor:pointer;
+      height:52px;
     }
 
     .rodape button:disabled{
@@ -143,35 +185,50 @@
     }
 
     @media (max-width:600px){
+      :root{
+        --topo-h:70px;
+        --status-h:38px;
+        --rodape-h:78px;
+      }
+
       .msg{max-width:90%}
+
       .rodape{
         padding:10px;
         gap:8px;
+        padding-bottom:max(10px, env(safe-area-inset-bottom));
       }
+
       .rodape button{
         min-width:92px;
         padding:12px 10px;
+      }
+
+      .rodape textarea{
+        font-size:16px;
       }
     }
   </style>
 </head>
 <body>
 
-  <div class="topo">
-    <strong>💬 FF Soluções</strong>
-    <small id="nomeTopo">Conectando...</small>
+  <div class="app">
+    <div class="topo">
+      <strong>💬 FF Soluções</strong>
+      <small id="nomeTopo">Conectando...</small>
+    </div>
+
+    <div class="status" id="statusChat">Preparando chat...</div>
+
+    <div class="mensagens" id="mensagens">
+      <div class="vazio">Envie sua mensagem para iniciar o atendimento.</div>
+    </div>
+
+    <form class="rodape" id="formChat">
+      <textarea id="textoMensagem" placeholder="Digite sua mensagem..."></textarea>
+      <button type="submit">Enviar</button>
+    </form>
   </div>
-
-  <div class="status" id="statusChat">Preparando chat...</div>
-
-  <div class="mensagens" id="mensagens">
-    <div class="vazio">Envie sua mensagem para iniciar o atendimento.</div>
-  </div>
-
-  <form class="rodape" id="formChat">
-    <textarea id="textoMensagem" placeholder="Digite sua mensagem..."></textarea>
-    <button type="submit">Enviar</button>
-  </form>
 
   <script>
     const CHAT_SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
@@ -182,7 +239,6 @@
       CHAT_SUPABASE_KEY
     );
 
-    // MESMAS CHAVES DA TELA FF SOLUÇÕES
     const CHAT_USER_KEY = "ff_chat_user";
     const CHAT_CONTEXT_KEY = "ff_chat_contexto";
     const NOME_KEY = "ff_chat_nome_cliente";
@@ -197,6 +253,18 @@
     let chatContexto = null;
     let pollingMensagens = null;
     let ultimaMensagemId = null;
+
+    function ajustarAlturaTela(){
+      const altura = window.innerHeight;
+      document.documentElement.style.setProperty("--app-height", altura + "px");
+    }
+
+    function ajustarAlturaRodape(){
+      const rodape = document.getElementById("formChat");
+      if(!rodape) return;
+      const altura = rodape.offsetHeight || 76;
+      document.documentElement.style.setProperty("--rodape-h", altura + "px");
+    }
 
     function getChatUser(){
       try{
@@ -230,6 +298,12 @@
 
     function setStatus(texto){
       statusChat.textContent = texto || "";
+    }
+
+    function rolarParaFim(){
+      requestAnimationFrame(() => {
+        mensagensEl.scrollTop = mensagensEl.scrollHeight;
+      });
     }
 
     function validarSessao(){
@@ -277,7 +351,7 @@
         mensagensEl.appendChild(div);
       }
 
-      mensagensEl.scrollTop = mensagensEl.scrollHeight;
+      rolarParaFim();
       ultimaMensagemId = lista[lista.length - 1]?.id || null;
     }
 
@@ -335,6 +409,7 @@
       try{
         await enviarMensagem(texto);
         textoMensagem.value = "";
+        ajustarAlturaRodape();
         await carregarMensagens();
         setStatus("Mensagem enviada.");
         textoMensagem.focus();
@@ -355,7 +430,24 @@
       }
     });
 
+    textoMensagem.addEventListener("input", function(){
+      this.style.height = "52px";
+      this.style.height = Math.min(this.scrollHeight, 120) + "px";
+      ajustarAlturaRodape();
+    });
+
+    textoMensagem.addEventListener("focus", function(){
+      setTimeout(() => {
+        ajustarAlturaTela();
+        ajustarAlturaRodape();
+        rolarParaFim();
+      }, 300);
+    });
+
     async function iniciar(){
+      ajustarAlturaTela();
+      ajustarAlturaRodape();
+
       if(!validarSessao()) return;
 
       await carregarMensagens();
@@ -364,6 +456,28 @@
       pollingMensagens = setInterval(async () => {
         await carregarMensagens();
       }, 2000);
+    }
+
+    window.addEventListener("resize", () => {
+      ajustarAlturaTela();
+      ajustarAlturaRodape();
+      rolarParaFim();
+    });
+
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => {
+        ajustarAlturaTela();
+        ajustarAlturaRodape();
+        rolarParaFim();
+      }, 300);
+    });
+
+    if(window.visualViewport){
+      window.visualViewport.addEventListener("resize", () => {
+        ajustarAlturaTela();
+        ajustarAlturaRodape();
+        rolarParaFim();
+      });
     }
 
     iniciar();
