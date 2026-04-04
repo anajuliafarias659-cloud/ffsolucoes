@@ -1201,7 +1201,10 @@ const supabase = createClient(
 );
 
 const ADMIN_PASSWORD = "123456admin";
-const AUTO_REFRESH_MS = 5000;
+const AUTO_REFRESH_MS = 3000;
+const STATUS_REFRESH_EVERY = 15000;
+const TYPING_CHECK_EVERY = 4000;
+const ENABLE_TYPING_STATUS = false;
 const AUDIO_BUCKET = "chat-audios";
 const FOTO_BUCKET = "chat-fotos";
 const STATUS_BUCKET = "chat-status";
@@ -1310,6 +1313,8 @@ let fotoMensagemPreviewUrl = "";
 let typingTimer = null;
 let typingSentAt = 0;
 let onlineHeartbeatTimer = null;
+let lastStatusRefreshAt = 0;
+let lastTypingCheckAt = 0;
 
 function setStatus(el, text="", type=""){
   el.className = "status" + (type ? " " + type : "");
@@ -2020,14 +2025,29 @@ async function detectarNovasMensagens(){
 
 async function startAutoRefresh(){
   stopAutoRefresh();
+  lastStatusRefreshAt = 0;
+  lastTypingCheckAt = 0;
+
   autoRefreshTimer = setInterval(async () => {
     if(!usuarioLogado) return;
+
+    const agora = Date.now();
+
     await carregarContatos();
-    await renderStatus();
     await detectarNovasMensagens();
+
+    if(agora - lastStatusRefreshAt >= STATUS_REFRESH_EVERY){
+      lastStatusRefreshAt = agora;
+      await renderStatus();
+    }
+
     if(contatoAtual){
       await carregarMensagens(false);
-      await verificarDigitando();
+
+      if(ENABLE_TYPING_STATUS && (agora - lastTypingCheckAt >= TYPING_CHECK_EVERY)) {
+        lastTypingCheckAt = agora;
+        await verificarDigitando();
+      }
     }
   }, AUTO_REFRESH_MS);
 }
@@ -2111,7 +2131,9 @@ btnLogout.onclick = async () => {
   stopRinging();
   cancelarAudio();
   resetPhotoPreview();
-  await limparStatusDigitando();
+  if(ENABLE_TYPING_STATUS){
+    await limparStatusDigitando();
+  }
   if(usuarioLogado){
     await atualizarPresenca(false);
   }
@@ -2886,6 +2908,8 @@ messageActionMenu.addEventListener("click", async (e) => {
 });
 
 msgInput.addEventListener("input", async () => {
+  if(!ENABLE_TYPING_STATUS) return;
+
   if(!msgInput.value.trim()){
     clearTimeout(typingTimer);
     await limparStatusDigitando();
@@ -2926,7 +2950,9 @@ async function enviarMensagem(){
 
   msgInput.value = "";
   cancelarResposta();
-  await limparStatusDigitando();
+  if(ENABLE_TYPING_STATUS){
+    await limparStatusDigitando();
+  }
   await carregarMensagens(true);
   await renderContatos(contatosPermitidos);
   atualizarMedidasChat();
