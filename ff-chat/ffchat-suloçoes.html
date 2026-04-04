@@ -16,7 +16,6 @@
       --header2:#0ea5e9;
       --text:#ffffff;
       --muted:#94a3b8;
-      --line:rgba(255,255,255,.08);
       --real-vh:100vh;
       --topo-h:76px;
       --status-h:38px;
@@ -243,12 +242,12 @@
       <div class="status" id="statusChat">Preparando chat...</div>
 
       <div class="mensagens" id="mensagens">
-        <div class="vazio">Envie sua mensagem para iniciar o atendimento.</div>
+        <div class="vazio" id="vazioChat">Envie sua mensagem para iniciar o atendimento.</div>
       </div>
 
       <form class="rodape" id="formChat">
         <textarea id="textoMensagem" placeholder="Digite sua mensagem..."></textarea>
-        <button type="submit">Enviar</button>
+        <button type="submit" id="btnEnviar">Enviar</button>
       </form>
     </div>
   </div>
@@ -269,13 +268,18 @@
     const nomeTopo = document.getElementById("nomeTopo");
     const statusChat = document.getElementById("statusChat");
     const mensagensEl = document.getElementById("mensagens");
+    const vazioChat = document.getElementById("vazioChat");
     const formChat = document.getElementById("formChat");
     const textoMensagem = document.getElementById("textoMensagem");
+    const btnEnviar = document.getElementById("btnEnviar");
 
     let chatUser = null;
     let chatContexto = null;
     let pollingMensagens = null;
-    let ultimaMensagemId = null;
+    let ultimaMensagemId = 0;
+    let carregamentoInicialFeito = false;
+    let buscandoMensagens = false;
+    let ultimaQtdRenderizada = 0;
 
     function getViewportHeight(){
       if(window.visualViewport && window.visualViewport.height){
@@ -295,13 +299,9 @@
         const status = document.getElementById("statusChat");
         const rodape = document.getElementById("formChat");
 
-        const topoH = topo ? topo.offsetHeight : 76;
-        const statusH = status ? status.offsetHeight : 38;
-        const rodapeH = rodape ? rodape.offsetHeight : 78;
-
-        document.documentElement.style.setProperty("--topo-h", topoH + "px");
-        document.documentElement.style.setProperty("--status-h", statusH + "px");
-        document.documentElement.style.setProperty("--rodape-h", rodapeH + "px");
+        document.documentElement.style.setProperty("--topo-h", ((topo && topo.offsetHeight) || 76) + "px");
+        document.documentElement.style.setProperty("--status-h", ((status && status.offsetHeight) || 38) + "px");
+        document.documentElement.style.setProperty("--rodape-h", ((rodape && rodape.offsetHeight) || 78) + "px");
       });
     }
 
@@ -344,10 +344,100 @@
       statusChat.textContent = texto || "";
     }
 
-    function rolarParaFim(){
+    function estaPertoDoFim(){
+      const margem = 120;
+      return (mensagensEl.scrollHeight - mensagensEl.scrollTop - mensagensEl.clientHeight) <= margem;
+    }
+
+    function rolarParaFim(suave = false){
       requestAnimationFrame(() => {
-        mensagensEl.scrollTop = mensagensEl.scrollHeight;
+        mensagensEl.scrollTo({
+          top: mensagensEl.scrollHeight,
+          behavior: suave ? "smooth" : "auto"
+        });
       });
+    }
+
+    function limparVazio(){
+      if(vazioChat && vazioChat.parentNode){
+        vazioChat.parentNode.removeChild(vazioChat);
+      }
+    }
+
+    function criarMensagemElemento(msg){
+      const ehVisitante = msg.remetente === "visitante";
+      const nomeExibicao = ehVisitante
+        ? (msg.nome_cliente || chatContexto.cliente_nome || "Você")
+        : (msg.nome_admin || "Suporte");
+
+      const div = document.createElement("div");
+      div.className = "msg " + (ehVisitante ? "visitante" : "admin");
+      div.dataset.msgId = String(msg.id || "");
+
+      div.innerHTML = `
+        <div>${escapeHtml(msg.mensagem)}</div>
+        <div class="meta">
+          ${escapeHtml(nomeExibicao)} • ${escapeHtml(formatarData(msg.created_at))}
+        </div>
+      `;
+
+      return div;
+    }
+
+    function appendMensagens(lista, forcarScroll = false){
+      if(!Array.isArray(lista) || !lista.length) return;
+
+      limparVazio();
+
+      const deveRolar = forcarScroll || estaPertoDoFim();
+      const frag = document.createDocumentFragment();
+
+      for(const msg of lista){
+        if(msg.id && document.querySelector('[data-msg-id="' + String(msg.id) + '"]')){
+          continue;
+        }
+
+        frag.appendChild(criarMensagemElemento(msg));
+
+        const idNumerico = Number(msg.id);
+        if(!Number.isNaN(idNumerico) && idNumerico > ultimaMensagemId){
+          ultimaMensagemId = idNumerico;
+        }
+      }
+
+      if(frag.childNodes.length){
+        mensagensEl.appendChild(frag);
+        ultimaQtdRenderizada = mensagensEl.querySelectorAll(".msg").length;
+
+        if(deveRolar){
+          rolarParaFim();
+        }
+      }
+    }
+
+    function renderizarInicial(lista){
+      mensagensEl.innerHTML = "";
+
+      if(!lista.length){
+        mensagensEl.innerHTML = '<div class="vazio" id="vazioChat">Envie sua mensagem para iniciar o atendimento.</div>';
+        ultimaQtdRenderizada = 0;
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+
+      for(const msg of lista){
+        frag.appendChild(criarMensagemElemento(msg));
+
+        const idNumerico = Number(msg.id);
+        if(!Number.isNaN(idNumerico) && idNumerico > ultimaMensagemId){
+          ultimaMensagemId = idNumerico;
+        }
+      }
+
+      mensagensEl.appendChild(frag);
+      ultimaQtdRenderizada = lista.length;
+      rolarParaFim();
     }
 
     function validarSessao(){
@@ -370,52 +460,66 @@
       return true;
     }
 
-    function renderizarMensagens(lista){
-      mensagensEl.innerHTML = "";
+    async function carregarMensagensIniciais(){
+      if(!chatContexto?.chat_room_id || buscandoMensagens) return;
 
-      if(!lista.length){
-        mensagensEl.innerHTML = '<div class="vazio">Envie sua mensagem para iniciar o atendimento.</div>';
-        return;
+      buscandoMensagens = true;
+      try{
+        const { data, error } = await supabaseChat
+          .from("chat_mensagens")
+          .select("id, mensagem, remetente, nome_cliente, nome_admin, created_at")
+          .eq("chat_room_id", chatContexto.chat_room_id)
+          .order("id", { ascending: false })
+          .limit(40);
+
+        if(error){
+          console.error("Erro ao carregar mensagens iniciais:", error);
+          setStatus("Erro ao carregar mensagens.");
+          return;
+        }
+
+        const lista = Array.isArray(data) ? data.slice().reverse() : [];
+        renderizarInicial(lista);
+        carregamentoInicialFeito = true;
+        setStatus("Chat carregado.");
+      }finally{
+        buscandoMensagens = false;
       }
-
-      for(const msg of lista){
-        const ehVisitante = msg.remetente === "visitante";
-        const nomeExibicao = ehVisitante
-          ? (msg.nome_cliente || chatContexto.cliente_nome || "Você")
-          : (msg.nome_admin || "Suporte");
-
-        const div = document.createElement("div");
-        div.className = "msg " + (ehVisitante ? "visitante" : "admin");
-        div.innerHTML = `
-          <div>${escapeHtml(msg.mensagem)}</div>
-          <div class="meta">
-            ${escapeHtml(nomeExibicao)} • ${escapeHtml(formatarData(msg.created_at))}
-          </div>
-        `;
-        mensagensEl.appendChild(div);
-      }
-
-      rolarParaFim();
-      ultimaMensagemId = lista[lista.length - 1]?.id || null;
     }
 
-    async function carregarMensagens(){
-      if(!chatContexto?.chat_room_id) return;
+    async function buscarNovasMensagens(){
+      if(!chatContexto?.chat_room_id || buscandoMensagens || !carregamentoInicialFeito) return;
 
-      const { data, error } = await supabaseChat
-        .from("chat_mensagens")
-        .select("*")
-        .eq("chat_room_id", chatContexto.chat_room_id)
-        .order("created_at", { ascending: true });
+      buscandoMensagens = true;
+      try{
+        let query = supabaseChat
+          .from("chat_mensagens")
+          .select("id, mensagem, remetente, nome_cliente, nome_admin, created_at")
+          .eq("chat_room_id", chatContexto.chat_room_id)
+          .order("id", { ascending: true });
 
-      if(error){
-        console.error("Erro ao carregar mensagens:", error);
-        setStatus("Erro ao carregar mensagens.");
-        return;
+        if(ultimaMensagemId > 0){
+          query = query.gt("id", ultimaMensagemId);
+        }else{
+          query = query.limit(40);
+        }
+
+        const { data, error } = await query;
+
+        if(error){
+          console.error("Erro ao buscar novas mensagens:", error);
+          setStatus("Erro ao atualizar mensagens.");
+          return;
+        }
+
+        const lista = Array.isArray(data) ? data : [];
+        if(lista.length){
+          appendMensagens(lista, false);
+          setStatus("Mensagens atualizadas.");
+        }
+      }finally{
+        buscandoMensagens = false;
       }
-
-      const lista = Array.isArray(data) ? data : [];
-      renderizarMensagens(lista);
     }
 
     async function enviarMensagem(texto){
@@ -432,11 +536,15 @@
         lida: false
       };
 
-      const { error } = await supabaseChat
+      const { data, error } = await supabaseChat
         .from("chat_mensagens")
-        .insert(payload);
+        .insert(payload)
+        .select("id, mensagem, remetente, nome_cliente, nome_admin, created_at")
+        .single();
 
       if(error) throw error;
+
+      return data || null;
     }
 
     formChat.addEventListener("submit", async function(e){
@@ -445,17 +553,23 @@
       const texto = (textoMensagem.value || "").trim();
       if(!texto) return;
 
-      const btn = formChat.querySelector("button");
-      btn.disabled = true;
-      btn.textContent = "Enviando...";
+      btnEnviar.disabled = true;
+      btnEnviar.textContent = "Enviando...";
       setStatus("Enviando mensagem...");
 
       try{
-        await enviarMensagem(texto);
+        const msgCriada = await enviarMensagem(texto);
+
         textoMensagem.value = "";
         textoMensagem.style.height = "52px";
         atualizarMedidasChat();
-        await carregarMensagens();
+
+        if(msgCriada){
+          appendMensagens([msgCriada], true);
+        }else{
+          await buscarNovasMensagens();
+        }
+
         setStatus("Mensagem enviada.");
         textoMensagem.focus();
       }catch(err){
@@ -463,8 +577,8 @@
         setStatus("Erro ao enviar mensagem.");
         alert("Erro ao enviar mensagem.");
       }finally{
-        btn.disabled = false;
-        btn.textContent = "Enviar";
+        btnEnviar.disabled = false;
+        btnEnviar.textContent = "Enviar";
       }
     });
 
@@ -479,20 +593,19 @@
       this.style.height = "52px";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
       atualizarMedidasChat();
-      rolarParaFim();
     });
 
     textoMensagem.addEventListener("focus", function(){
       setTimeout(() => {
         ajustarAlturaTela();
         rolarParaFim();
-      }, 250);
+      }, 200);
     });
 
     textoMensagem.addEventListener("blur", function(){
       setTimeout(() => {
         ajustarAlturaTela();
-      }, 250);
+      }, 200);
     });
 
     async function iniciar(){
@@ -500,30 +613,27 @@
 
       if(!validarSessao()) return;
 
-      await carregarMensagens();
+      await carregarMensagensIniciais();
 
       if(pollingMensagens) clearInterval(pollingMensagens);
       pollingMensagens = setInterval(async () => {
-        await carregarMensagens();
-      }, 2000);
+        await buscarNovasMensagens();
+      }, 4000);
     }
 
     window.addEventListener("resize", () => {
       ajustarAlturaTela();
-      rolarParaFim();
     });
 
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
         ajustarAlturaTela();
-        rolarParaFim();
       }, 300);
     });
 
     if(window.visualViewport){
       window.visualViewport.addEventListener("resize", () => {
         ajustarAlturaTela();
-        rolarParaFim();
       });
 
       window.visualViewport.addEventListener("scroll", () => {
