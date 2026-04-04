@@ -1201,10 +1201,7 @@ const supabase = createClient(
 );
 
 const ADMIN_PASSWORD = "123456admin";
-const AUTO_REFRESH_MS = 3000;
-const STATUS_REFRESH_EVERY = 15000;
-const TYPING_CHECK_EVERY = 4000;
-const ENABLE_TYPING_STATUS = false;
+const AUTO_REFRESH_MS = 5000;
 const AUDIO_BUCKET = "chat-audios";
 const FOTO_BUCKET = "chat-fotos";
 const STATUS_BUCKET = "chat-status";
@@ -1313,8 +1310,6 @@ let fotoMensagemPreviewUrl = "";
 let typingTimer = null;
 let typingSentAt = 0;
 let onlineHeartbeatTimer = null;
-let lastStatusRefreshAt = 0;
-let lastTypingCheckAt = 0;
 
 function setStatus(el, text="", type=""){
   el.className = "status" + (type ? " " + type : "");
@@ -1446,17 +1441,37 @@ function atualizarMedidasChat(){
   });
 }
 
+function isNearChatBottom(threshold=120){
+  if(!messagesBox) return true;
+  const distance = messagesBox.scrollHeight - messagesBox.scrollTop - messagesBox.clientHeight;
+  return distance <= threshold;
+}
+
+function scrollToBottom(force=false, smooth=false){
+  if(!messagesBox) return;
+  if(!force && !isNearChatBottom()) return;
+
+  const top = messagesBox.scrollHeight;
+
+  if(smooth && typeof messagesBox.scrollTo === "function"){
+    messagesBox.scrollTo({ top, behavior:"smooth" });
+    return;
+  }
+
+  messagesBox.scrollTop = top;
+}
+
 function ajustarAlturaMobile(){
   fixKeyboardViewport();
   atualizarMedidasChat();
 
   if(contatoAtual && messagesBox){
     requestAnimationFrame(() => {
-      messagesBox.scrollTop = messagesBox.scrollHeight;
+      scrollToBottom(true);
     });
 
     setTimeout(() => {
-      messagesBox.scrollTop = messagesBox.scrollHeight;
+      scrollToBottom(true);
     }, 120);
   }
 }
@@ -2025,29 +2040,14 @@ async function detectarNovasMensagens(){
 
 async function startAutoRefresh(){
   stopAutoRefresh();
-  lastStatusRefreshAt = 0;
-  lastTypingCheckAt = 0;
-
   autoRefreshTimer = setInterval(async () => {
     if(!usuarioLogado) return;
-
-    const agora = Date.now();
-
     await carregarContatos();
+    await renderStatus();
     await detectarNovasMensagens();
-
-    if(agora - lastStatusRefreshAt >= STATUS_REFRESH_EVERY){
-      lastStatusRefreshAt = agora;
-      await renderStatus();
-    }
-
     if(contatoAtual){
       await carregarMensagens(false);
-
-      if(ENABLE_TYPING_STATUS && (agora - lastTypingCheckAt >= TYPING_CHECK_EVERY)) {
-        lastTypingCheckAt = agora;
-        await verificarDigitando();
-      }
+      await verificarDigitando();
     }
   }, AUTO_REFRESH_MS);
 }
@@ -2131,9 +2131,7 @@ btnLogout.onclick = async () => {
   stopRinging();
   cancelarAudio();
   resetPhotoPreview();
-  if(ENABLE_TYPING_STATUS){
-    await limparStatusDigitando();
-  }
+  await limparStatusDigitando();
   if(usuarioLogado){
     await atualizarPresenca(false);
   }
@@ -2586,7 +2584,7 @@ async function abrirConversa(contato){
   setTimeout(() => {
     fixKeyboardViewport();
     atualizarMedidasChat();
-    messagesBox.scrollTop = messagesBox.scrollHeight;
+    scrollToBottom(true);
   }, 500);
 }
 
@@ -2838,11 +2836,9 @@ async function carregarMensagens(forceScroll=false){
     });
   });
 
-  if(forceScroll){
-    requestAnimationFrame(() => {
-      messagesBox.scrollTop = messagesBox.scrollHeight;
-    });
-  }
+  requestAnimationFrame(() => {
+    scrollToBottom(forceScroll, forceScroll);
+  });
 
   atualizarMedidasChat();
 }
@@ -2908,8 +2904,6 @@ messageActionMenu.addEventListener("click", async (e) => {
 });
 
 msgInput.addEventListener("input", async () => {
-  if(!ENABLE_TYPING_STATUS) return;
-
   if(!msgInput.value.trim()){
     clearTimeout(typingTimer);
     await limparStatusDigitando();
@@ -2950,9 +2944,7 @@ async function enviarMensagem(){
 
   msgInput.value = "";
   cancelarResposta();
-  if(ENABLE_TYPING_STATUS){
-    await limparStatusDigitando();
-  }
+  await limparStatusDigitando();
   await carregarMensagens(true);
   await renderContatos(contatosPermitidos);
   atualizarMedidasChat();
