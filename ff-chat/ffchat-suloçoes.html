@@ -16,13 +16,9 @@
       --header2:#0ea5e9;
       --text:#ffffff;
       --muted:#94a3b8;
-
-      --topo-h:76px;
-      --status-h:38px;
-      --rodape-h:78px;
+      --safe-top:env(safe-area-inset-top, 0px);
       --safe-bottom:env(safe-area-inset-bottom, 0px);
-      --app-top:0px;
-      --app-h:100vh;
+      --real-vh:100vh;
     }
 
     html,body{
@@ -37,35 +33,31 @@
       color:var(--text);
       background:var(--bg);
       -webkit-text-size-adjust:100%;
+      overscroll-behavior:none;
       position:relative;
-      inset:auto;
     }
 
     .app{
-      position:fixed;
-      top:var(--app-top);
-      left:0;
-      right:0;
-      height:var(--app-h);
+      position:relative;
+      width:100%;
+      height:100vh;
+      min-height:100vh;
       background:var(--bg);
       overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      isolation:isolate;
     }
 
-    /* TOPO REALMENTE FIXO */
     .topo{
-      position:fixed;
-      top:var(--app-top);
-      left:0;
-      right:0;
-      height:var(--topo-h);
       background:linear-gradient(135deg,var(--header1),var(--header2));
-      padding:12px 14px 10px 14px;
+      padding:calc(var(--safe-top) + 12px) 14px 10px 14px;
       display:flex;
       flex-direction:column;
       justify-content:center;
       box-shadow:0 4px 20px rgba(0,0,0,.18);
-      z-index:1000;
-      transform:translateZ(0);
+      z-index:30;
+      flex-shrink:0;
     }
 
     .topo strong{
@@ -91,13 +83,7 @@
       min-height:16px;
     }
 
-    /* STATUS FIXO TAMBÉM */
     .status{
-      position:fixed;
-      top:calc(var(--app-top) + var(--topo-h));
-      left:0;
-      right:0;
-      height:var(--status-h);
       padding:10px 12px;
       font-size:12px;
       color:#cbd5e1;
@@ -108,27 +94,22 @@
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
-      z-index:999;
-      transform:translateZ(0);
+      z-index:29;
+      flex-shrink:0;
     }
 
-    /* SÓ ESSA ÁREA MUDA */
     .chat-corpo{
-      position:fixed;
-      top:calc(var(--app-top) + var(--topo-h) + var(--status-h));
-      left:0;
-      right:0;
-      bottom:0;
+      flex:1;
+      min-height:0;
       overflow:hidden;
       background:linear-gradient(180deg,#081126,#020817);
+      display:flex;
+      flex-direction:column;
     }
 
     .mensagens{
-      position:absolute;
-      top:0;
-      left:0;
-      right:0;
-      bottom:var(--rodape-h);
+      flex:1;
+      min-height:0;
       overflow-y:auto;
       overflow-x:hidden;
       padding:14px;
@@ -179,11 +160,6 @@
     }
 
     .rodape{
-      position:absolute;
-      left:0;
-      right:0;
-      bottom:0;
-      min-height:var(--rodape-h);
       padding:10px;
       padding-bottom:calc(10px + var(--safe-bottom));
       background:#0b1327;
@@ -192,6 +168,7 @@
       gap:8px;
       align-items:flex-end;
       z-index:20;
+      flex-shrink:0;
     }
 
     .rodape textarea{
@@ -234,14 +211,13 @@
     }
 
     @media (max-width:600px){
-      :root{
-        --topo-h:78px;
-        --status-h:40px;
-        --rodape-h:80px;
+      .app{
+        height:var(--real-vh);
+        min-height:var(--real-vh);
       }
 
       .topo{
-        padding:12px 12px 10px 12px;
+        padding:calc(var(--safe-top) + 12px) 12px 10px 12px;
       }
 
       .msg{
@@ -292,7 +268,6 @@
     const formChat = document.getElementById("formChat");
     const textoMensagem = document.getElementById("textoMensagem");
     const btnEnviar = document.getElementById("btnEnviar");
-    const chatCorpo = document.getElementById("chatCorpo");
 
     let chatUser = null;
     let chatContexto = null;
@@ -301,26 +276,10 @@
     let carregamentoInicialFeito = false;
     let buscandoMensagens = false;
 
-    function ajustarAreaChat(){
+    function fixKeyboardViewport(){
       const vv = window.visualViewport;
-      const alturaJanela = window.innerHeight;
-      const alturaViewport = vv ? vv.height : alturaJanela;
-      const offsetTopoViewport = vv ? vv.offsetTop : 0;
-
-      const topoH = document.querySelector(".topo")?.offsetHeight || 76;
-      const statusH = document.getElementById("statusChat")?.offsetHeight || 38;
-      const rodapeH = document.getElementById("formChat")?.offsetHeight || 78;
-
-      document.documentElement.style.setProperty("--app-top", offsetTopoViewport + "px");
-      document.documentElement.style.setProperty("--app-h", alturaViewport + "px");
-      document.documentElement.style.setProperty("--topo-h", topoH + "px");
-      document.documentElement.style.setProperty("--status-h", statusH + "px");
-      document.documentElement.style.setProperty("--rodape-h", rodapeH + "px");
-
-      const alturaCorpo = Math.max(220, alturaViewport - topoH - statusH);
-      chatCorpo.style.top = `calc(${offsetTopoViewport}px + ${topoH + statusH}px)`;
-      chatCorpo.style.height = alturaCorpo + "px";
-      chatCorpo.style.bottom = "auto";
+      const vh = vv ? vv.height : window.innerHeight;
+      document.documentElement.style.setProperty("--real-vh", `${vh}px`);
     }
 
     function getChatUser(){
@@ -344,7 +303,7 @@
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
+        .replace(/\"/g, "&quot;")
         .replace(/'/g, "&#039;");
     }
 
@@ -427,6 +386,7 @@
 
     function renderizarInicial(lista){
       mensagensEl.innerHTML = "";
+      ultimaMensagemId = 0;
 
       if(!lista.length){
         mensagensEl.innerHTML = '<div class="vazio" id="vazioChat">Envie sua mensagem para iniciar o atendimento.</div>';
@@ -569,7 +529,7 @@
 
         textoMensagem.value = "";
         textoMensagem.style.height = "52px";
-        ajustarAreaChat();
+        fixKeyboardViewport();
 
         if(msgCriada){
           appendMensagens([msgCriada], true);
@@ -599,24 +559,24 @@
     textoMensagem.addEventListener("input", function(){
       this.style.height = "52px";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
-      ajustarAreaChat();
+      fixKeyboardViewport();
     });
 
     textoMensagem.addEventListener("focus", function(){
       setTimeout(() => {
-        ajustarAreaChat();
+        fixKeyboardViewport();
         rolarParaFim();
       }, 250);
     });
 
     textoMensagem.addEventListener("blur", function(){
       setTimeout(() => {
-        ajustarAreaChat();
+        fixKeyboardViewport();
       }, 250);
     });
 
     async function iniciar(){
-      ajustarAreaChat();
+      fixKeyboardViewport();
 
       if(!validarSessao()) return;
 
@@ -628,24 +588,14 @@
       }, 4000);
     }
 
-    window.addEventListener("resize", () => {
-      ajustarAreaChat();
-    });
-
+    window.addEventListener("resize", fixKeyboardViewport);
     window.addEventListener("orientationchange", () => {
-      setTimeout(() => {
-        ajustarAreaChat();
-      }, 300);
+      setTimeout(fixKeyboardViewport, 300);
     });
 
     if(window.visualViewport){
-      window.visualViewport.addEventListener("resize", () => {
-        ajustarAreaChat();
-      });
-
-      window.visualViewport.addEventListener("scroll", () => {
-        ajustarAreaChat();
-      });
+      window.visualViewport.addEventListener("resize", fixKeyboardViewport);
+      window.visualViewport.addEventListener("scroll", fixKeyboardViewport);
     }
 
     iniciar();
