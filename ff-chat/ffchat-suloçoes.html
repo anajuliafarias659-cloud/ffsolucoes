@@ -16,10 +16,11 @@
       --header2:#0ea5e9;
       --text:#ffffff;
       --muted:#94a3b8;
-      --real-vh:100vh;
+
       --topo-h:76px;
       --status-h:38px;
       --rodape-h:78px;
+      --safe-bottom:env(safe-area-inset-bottom, 0px);
     }
 
     html,body{
@@ -34,36 +35,32 @@
       color:var(--text);
       background:var(--bg);
       -webkit-text-size-adjust:100%;
+      position:fixed;
+      inset:0;
     }
 
     .app{
-      width:100%;
-      height:var(--real-vh);
-      min-height:var(--real-vh);
-      overflow:hidden;
+      position:fixed;
+      inset:0;
       background:var(--bg);
-    }
-
-    .chat-area{
-      width:100%;
-      height:100%;
-      display:flex;
-      flex-direction:column;
       overflow:hidden;
-      background:linear-gradient(180deg,#081126,#020817);
     }
 
+    /* TOPO REALMENTE FIXO */
     .topo{
-      flex-shrink:0;
-      min-height:var(--topo-h);
+      position:fixed;
+      top:0;
+      left:0;
+      right:0;
+      height:var(--topo-h);
       background:linear-gradient(135deg,var(--header1),var(--header2));
       padding:12px 14px 10px 14px;
       display:flex;
       flex-direction:column;
       justify-content:center;
       box-shadow:0 4px 20px rgba(0,0,0,.18);
-      position:relative;
-      z-index:3;
+      z-index:1000;
+      transform:translateZ(0);
     }
 
     .topo strong{
@@ -75,7 +72,6 @@
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
-      flex-shrink:0;
     }
 
     .topo small{
@@ -88,12 +84,15 @@
       overflow:hidden;
       text-overflow:ellipsis;
       min-height:16px;
-      flex-shrink:0;
     }
 
+    /* STATUS FIXO TAMBÉM */
     .status{
-      flex-shrink:0;
-      min-height:var(--status-h);
+      position:fixed;
+      top:var(--topo-h);
+      left:0;
+      right:0;
+      height:var(--status-h);
       padding:10px 12px;
       font-size:12px;
       color:#cbd5e1;
@@ -104,13 +103,27 @@
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
-      position:relative;
-      z-index:2;
+      z-index:999;
+      transform:translateZ(0);
+    }
+
+    /* SÓ ESSA ÁREA MUDA */
+    .chat-corpo{
+      position:fixed;
+      top:calc(var(--topo-h) + var(--status-h));
+      left:0;
+      right:0;
+      bottom:0;
+      overflow:hidden;
+      background:linear-gradient(180deg,#081126,#020817);
     }
 
     .mensagens{
-      flex:1;
-      min-height:0;
+      position:absolute;
+      top:0;
+      left:0;
+      right:0;
+      bottom:var(--rodape-h);
       overflow-y:auto;
       overflow-x:hidden;
       padding:14px;
@@ -161,17 +174,19 @@
     }
 
     .rodape{
-      flex-shrink:0;
+      position:absolute;
+      left:0;
+      right:0;
+      bottom:0;
       min-height:var(--rodape-h);
       padding:10px;
+      padding-bottom:calc(10px + var(--safe-bottom));
       background:#0b1327;
       border-top:1px solid rgba(255,255,255,.08);
       display:flex;
       gap:8px;
       align-items:flex-end;
-      padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px));
-      position:relative;
-      z-index:3;
+      z-index:20;
     }
 
     .rodape textarea{
@@ -233,14 +248,14 @@
 <body>
 
   <div class="app">
-    <div class="chat-area">
-      <div class="topo">
-        <strong>💬 FF Soluções</strong>
-        <small id="nomeTopo">Conectando...</small>
-      </div>
+    <div class="topo">
+      <strong>💬 FF Soluções</strong>
+      <small id="nomeTopo">Conectando...</small>
+    </div>
 
-      <div class="status" id="statusChat">Preparando chat...</div>
+    <div class="status" id="statusChat">Preparando chat...</div>
 
+    <div class="chat-corpo" id="chatCorpo">
       <div class="mensagens" id="mensagens">
         <div class="vazio" id="vazioChat">Envie sua mensagem para iniciar o atendimento.</div>
       </div>
@@ -272,6 +287,7 @@
     const formChat = document.getElementById("formChat");
     const textoMensagem = document.getElementById("textoMensagem");
     const btnEnviar = document.getElementById("btnEnviar");
+    const chatCorpo = document.getElementById("chatCorpo");
 
     let chatUser = null;
     let chatContexto = null;
@@ -279,35 +295,24 @@
     let ultimaMensagemId = 0;
     let carregamentoInicialFeito = false;
     let buscandoMensagens = false;
-    let ultimaQtdRenderizada = 0;
 
-    function getViewportHeight(){
-      if(window.visualViewport && window.visualViewport.height){
-        return Math.round(window.visualViewport.height);
-      }
-      return Math.round(window.innerHeight || document.documentElement.clientHeight || screen.height);
-    }
+    function ajustarAreaChat(){
+      const vv = window.visualViewport;
+      const alturaJanela = window.innerHeight;
+      const alturaViewport = vv ? vv.height : alturaJanela;
 
-    function fixKeyboardViewport(){
-      const vh = getViewportHeight();
-      document.documentElement.style.setProperty("--real-vh", vh + "px");
-    }
+      const topoH = document.querySelector(".topo")?.offsetHeight || 76;
+      const statusH = document.getElementById("statusChat")?.offsetHeight || 38;
+      const rodapeH = document.getElementById("formChat")?.offsetHeight || 78;
 
-    function atualizarMedidasChat(){
-      requestAnimationFrame(() => {
-        const topo = document.querySelector(".topo");
-        const status = document.getElementById("statusChat");
-        const rodape = document.getElementById("formChat");
+      document.documentElement.style.setProperty("--topo-h", topoH + "px");
+      document.documentElement.style.setProperty("--status-h", statusH + "px");
+      document.documentElement.style.setProperty("--rodape-h", rodapeH + "px");
 
-        document.documentElement.style.setProperty("--topo-h", ((topo && topo.offsetHeight) || 76) + "px");
-        document.documentElement.style.setProperty("--status-h", ((status && status.offsetHeight) || 38) + "px");
-        document.documentElement.style.setProperty("--rodape-h", ((rodape && rodape.offsetHeight) || 78) + "px");
-      });
-    }
-
-    function ajustarAlturaTela(){
-      fixKeyboardViewport();
-      atualizarMedidasChat();
+      const alturaCorpo = Math.max(220, alturaViewport - topoH - statusH);
+      chatCorpo.style.top = (topoH + statusH) + "px";
+      chatCorpo.style.height = alturaCorpo + "px";
+      chatCorpo.style.bottom = "auto";
     }
 
     function getChatUser(){
@@ -359,8 +364,9 @@
     }
 
     function limparVazio(){
-      if(vazioChat && vazioChat.parentNode){
-        vazioChat.parentNode.removeChild(vazioChat);
+      const vazio = document.getElementById("vazioChat");
+      if(vazio && vazio.parentNode){
+        vazio.parentNode.removeChild(vazio);
       }
     }
 
@@ -393,7 +399,7 @@
       const frag = document.createDocumentFragment();
 
       for(const msg of lista){
-        if(msg.id && document.querySelector('[data-msg-id="' + String(msg.id) + '"]')){
+        if(msg.id && mensagensEl.querySelector('[data-msg-id="' + String(msg.id) + '"]')){
           continue;
         }
 
@@ -407,11 +413,7 @@
 
       if(frag.childNodes.length){
         mensagensEl.appendChild(frag);
-        ultimaQtdRenderizada = mensagensEl.querySelectorAll(".msg").length;
-
-        if(deveRolar){
-          rolarParaFim();
-        }
+        if(deveRolar) rolarParaFim();
       }
     }
 
@@ -420,7 +422,6 @@
 
       if(!lista.length){
         mensagensEl.innerHTML = '<div class="vazio" id="vazioChat">Envie sua mensagem para iniciar o atendimento.</div>';
-        ultimaQtdRenderizada = 0;
         return;
       }
 
@@ -436,7 +437,6 @@
       }
 
       mensagensEl.appendChild(frag);
-      ultimaQtdRenderizada = lista.length;
       rolarParaFim();
     }
 
@@ -543,7 +543,6 @@
         .single();
 
       if(error) throw error;
-
       return data || null;
     }
 
@@ -562,7 +561,7 @@
 
         textoMensagem.value = "";
         textoMensagem.style.height = "52px";
-        atualizarMedidasChat();
+        ajustarAreaChat();
 
         if(msgCriada){
           appendMensagens([msgCriada], true);
@@ -592,24 +591,24 @@
     textoMensagem.addEventListener("input", function(){
       this.style.height = "52px";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
-      atualizarMedidasChat();
+      ajustarAreaChat();
     });
 
     textoMensagem.addEventListener("focus", function(){
       setTimeout(() => {
-        ajustarAlturaTela();
+        ajustarAreaChat();
         rolarParaFim();
-      }, 200);
+      }, 250);
     });
 
     textoMensagem.addEventListener("blur", function(){
       setTimeout(() => {
-        ajustarAlturaTela();
-      }, 200);
+        ajustarAreaChat();
+      }, 250);
     });
 
     async function iniciar(){
-      ajustarAlturaTela();
+      ajustarAreaChat();
 
       if(!validarSessao()) return;
 
@@ -622,22 +621,22 @@
     }
 
     window.addEventListener("resize", () => {
-      ajustarAlturaTela();
+      ajustarAreaChat();
     });
 
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
-        ajustarAlturaTela();
+        ajustarAreaChat();
       }, 300);
     });
 
     if(window.visualViewport){
       window.visualViewport.addEventListener("resize", () => {
-        ajustarAlturaTela();
+        ajustarAreaChat();
       });
 
       window.visualViewport.addEventListener("scroll", () => {
-        ajustarAlturaTela();
+        ajustarAreaChat();
       });
     }
 
