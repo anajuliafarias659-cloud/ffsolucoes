@@ -117,7 +117,7 @@
     }
     .info{
       margin-top:10px;
-      line-height:1.6;
+      line-height:1.7;
       color:#e5e7eb;
       font-size:15px;
     }
@@ -134,6 +134,15 @@
     }
     .oculto{
       display:none !important;
+    }
+    .destaque{
+      background:#0f172a;
+      border:1px solid rgba(251,191,36,.25);
+      border-radius:14px;
+      padding:12px;
+      margin-top:12px;
+      color:#fde68a;
+      font-weight:700;
     }
     @media(max-width:640px){
       .grid{grid-template-columns:1fr}
@@ -239,6 +248,7 @@
 
       <div id="resultadoConsulta" style="display:none;">
         <div class="status-box" id="statusBox">AGUARDANDO</div>
+        <div id="destaqueBorracheiro"></div>
         <div class="info" id="infoChamado"></div>
       </div>
     </div>
@@ -320,6 +330,40 @@
       );
     }
 
+    async function verificarBorracheirosDisponiveis(){
+      const { data: borracheiros, error } = await supabase
+        .from("borracheiros")
+        .select("id")
+        .eq("ativo", true);
+
+      if(error){
+        console.error("Erro ao verificar borracheiros:", error);
+        return false;
+      }
+
+      if(!borracheiros || borracheiros.length === 0){
+        return false;
+      }
+
+      const idsBorracheiros = borracheiros.map(item => item.id);
+
+      const { data: chamadosAtivos, error: errorChamados } = await supabase
+        .from("chamados_borracharia")
+        .select("borracheiro_id")
+        .in("status", ["aceito", "em_andamento"])
+        .in("borracheiro_id", idsBorracheiros);
+
+      if(errorChamados){
+        console.error("Erro ao verificar chamados ativos:", errorChamados);
+        return borracheiros.length > 0;
+      }
+
+      const ocupados = new Set((chamadosAtivos || []).map(item => item.borracheiro_id).filter(Boolean));
+      const livre = borracheiros.find(item => !ocupados.has(item.id));
+
+      return !!livre;
+    }
+
     async function solicitarAtendimento(){
       limparMensagem();
 
@@ -339,6 +383,13 @@
 
       if(!endereco_texto && (latitude === null || longitude === null)){
         mostrarMensagem("Informe a localização pelo GPS ou digite uma referência/endereço.");
+        return;
+      }
+
+      const temBorracheiroDisponivel = await verificarBorracheirosDisponiveis();
+
+      if(!temBorracheiroDisponivel){
+        mostrarMensagem("⚠️ Nenhuma borracharia disponível no momento. Tente novamente mais tarde.");
         return;
       }
 
@@ -410,7 +461,11 @@
           created_at,
           aceito_em,
           finalizado_em,
-          borracheiro_id
+          borracheiro_id,
+          borracheiros (
+            nome,
+            telefone
+          )
         `)
         .eq("codigo_acompanhamento", codigo)
         .order("created_at", { ascending: false })
@@ -421,6 +476,7 @@
         el("resultadoConsulta").style.display = "block";
         el("statusBox").className = "status-box cancelado";
         el("statusBox").textContent = "CHAMADO NÃO ENCONTRADO";
+        el("destaqueBorracheiro").innerHTML = "";
         el("infoChamado").innerHTML = "Verifique o código e tente novamente.";
         mostrarModoNormal();
         limparChamadoSalvo();
@@ -433,9 +489,31 @@
         ? status
         : "aguardando";
 
+      const nomeBorracheiro = data.borracheiros?.nome || "";
+      const telefoneBorracheiro = data.borracheiros?.telefone || "";
+
+      let textoStatus = traduzirStatus(status);
+      if(status === "aceito" && nomeBorracheiro){
+        textoStatus = `Aceito por ${nomeBorracheiro}`;
+      }
+      if(status === "em_andamento" && nomeBorracheiro){
+        textoStatus = `Em atendimento com ${nomeBorracheiro}`;
+      }
+
       el("resultadoConsulta").style.display = "block";
       el("statusBox").className = "status-box " + classe;
-      el("statusBox").textContent = traduzirStatus(status).toUpperCase();
+      el("statusBox").textContent = textoStatus.toUpperCase();
+
+      if((status === "aceito" || status === "em_andamento") && nomeBorracheiro){
+        el("destaqueBorracheiro").innerHTML = `
+          <div class="destaque">
+            Serviço ${status === "aceito" ? "aceito" : "em andamento"} pela borracharia <strong>${nomeBorracheiro}</strong>
+            ${telefoneBorracheiro ? `<br>Contato: ${telefoneBorracheiro}` : ""}
+          </div>
+        `;
+      } else {
+        el("destaqueBorracheiro").innerHTML = "";
+      }
 
       el("infoChamado").innerHTML = `
         <div><strong>Cliente:</strong> ${data.cliente_nome || "-"}</div>
@@ -447,6 +525,8 @@
         <div><strong>Valor estimado:</strong> R$ ${Number(data.valor_estimado || 0).toFixed(2)}</div>
         <div><strong>Valor final:</strong> R$ ${Number(data.valor_final || 0).toFixed(2)}</div>
         <div><strong>Pagamento:</strong> ${data.forma_pagamento || "-"}</div>
+        ${nomeBorracheiro ? `<div><strong>Borracharia:</strong> ${nomeBorracheiro}</div>` : ""}
+        ${telefoneBorracheiro ? `<div><strong>Contato da borracharia:</strong> ${telefoneBorracheiro}</div>` : ""}
         <div class="linha"></div>
         <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
       `;
