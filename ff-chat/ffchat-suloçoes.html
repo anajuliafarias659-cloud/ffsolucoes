@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>FF Soluções Chat</title>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -18,8 +18,10 @@
       --muted:#94a3b8;
       --safe-top:env(safe-area-inset-top, 0px);
       --safe-bottom:env(safe-area-inset-bottom, 0px);
-      --app-height:100dvh;
-      --header-total:110px;
+      --topo-h:68px;
+      --status-h:40px;
+      --rodape-h:82px;
+      --app-h:100vh;
     }
 
     html,body{
@@ -35,30 +37,37 @@
       background:var(--bg);
       -webkit-text-size-adjust:100%;
       overscroll-behavior:none;
+      position:fixed;
+      inset:0;
+      width:100%;
+      height:var(--app-h);
     }
 
     .app{
       position:fixed;
       inset:0;
       width:100%;
-      height:var(--app-height);
-      background:var(--bg);
-      display:flex;
-      flex-direction:column;
+      height:var(--app-h);
       overflow:hidden;
+      background:var(--bg);
     }
 
-    .cabecalho{
-      position:sticky;
+    .topo-wrap{
+      position:fixed;
       top:0;
-      z-index:100;
-      flex-shrink:0;
+      left:0;
+      right:0;
+      z-index:1000;
       background:var(--bg);
     }
 
     .topo{
+      min-height:var(--topo-h);
       background:linear-gradient(135deg,var(--header1),var(--header2));
       padding:calc(var(--safe-top) + 12px) 14px 10px 14px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
       box-shadow:0 4px 20px rgba(0,0,0,.18);
     }
 
@@ -86,7 +95,7 @@
     }
 
     .status{
-      min-height:40px;
+      min-height:var(--status-h);
       padding:10px 12px;
       font-size:12px;
       color:#cbd5e1;
@@ -100,17 +109,18 @@
     }
 
     .chat-corpo{
-      flex:1;
-      min-height:0;
-      display:flex;
-      flex-direction:column;
+      position:fixed;
+      left:0;
+      right:0;
+      top:calc(var(--safe-top) + var(--topo-h) + var(--status-h));
+      bottom:calc(var(--rodape-h) + var(--safe-bottom));
       overflow:hidden;
       background:linear-gradient(180deg,#081126,#020817);
     }
 
     .mensagens{
-      flex:1;
-      min-height:0;
+      width:100%;
+      height:100%;
       overflow-y:auto;
       overflow-x:hidden;
       padding:14px;
@@ -160,7 +170,12 @@
     }
 
     .rodape{
-      flex-shrink:0;
+      position:fixed;
+      left:0;
+      right:0;
+      bottom:0;
+      z-index:1000;
+      min-height:var(--rodape-h);
       padding:10px;
       padding-bottom:calc(10px + var(--safe-bottom));
       background:#0b1327;
@@ -212,21 +227,16 @@
     }
 
     @media (max-width:600px){
-      .topo{
-        padding:calc(var(--safe-top) + 12px) 12px 10px 12px;
-      }
-
-      .msg{
-        max-width:90%;
-      }
+      .msg{max-width:90%}
+      .topo{padding:calc(var(--safe-top) + 12px) 12px 10px 12px}
     }
   </style>
 </head>
 <body>
 
-  <div class="app" id="app">
-    <div class="cabecalho" id="cabecalho">
-      <div class="topo">
+  <div class="app">
+    <div class="topo-wrap" id="topoWrap">
+      <div class="topo" id="topo">
         <strong>💬 FF Soluções</strong>
         <small id="nomeTopo">Conectando...</small>
       </div>
@@ -237,12 +247,12 @@
       <div class="mensagens" id="mensagens">
         <div class="vazio" id="vazioChat">Envie sua mensagem para iniciar o atendimento.</div>
       </div>
-
-      <form class="rodape" id="formChat">
-        <textarea id="textoMensagem" placeholder="Digite sua mensagem..."></textarea>
-        <button type="submit" id="btnEnviar">Enviar</button>
-      </form>
     </div>
+
+    <form class="rodape" id="formChat">
+      <textarea id="textoMensagem" placeholder="Digite sua mensagem..."></textarea>
+      <button type="submit" id="btnEnviar">Enviar</button>
+    </form>
   </div>
 
   <script>
@@ -264,7 +274,9 @@
     const formChat = document.getElementById("formChat");
     const textoMensagem = document.getElementById("textoMensagem");
     const btnEnviar = document.getElementById("btnEnviar");
-    const cabecalho = document.getElementById("cabecalho");
+    const topoWrap = document.getElementById("topoWrap");
+    const topo = document.getElementById("topo");
+    const chatCorpo = document.getElementById("chatCorpo");
 
     let chatUser = null;
     let chatContexto = null;
@@ -273,18 +285,23 @@
     let carregamentoInicialFeito = false;
     let buscandoMensagens = false;
 
-    function atualizarAlturaApp(){
-      let h = window.innerHeight;
+    function atualizarLayoutFixo(){
+      let altura = window.innerHeight;
 
       if(window.visualViewport && window.visualViewport.height){
-        h = window.visualViewport.height;
+        altura = window.visualViewport.height;
       }
 
-      document.documentElement.style.setProperty("--app-height", h + "px");
+      document.documentElement.style.setProperty("--app-h", altura + "px");
 
       requestAnimationFrame(() => {
-        const headerH = cabecalho ? cabecalho.offsetHeight : 110;
-        document.documentElement.style.setProperty("--header-total", headerH + "px");
+        const topoH = topo ? topo.offsetHeight : 68;
+        const statusH = statusChat ? statusChat.offsetHeight : 40;
+        const rodapeH = formChat ? formChat.offsetHeight : 82;
+
+        document.documentElement.style.setProperty("--topo-h", topoH + "px");
+        document.documentElement.style.setProperty("--status-h", statusH + "px");
+        document.documentElement.style.setProperty("--rodape-h", rodapeH + "px");
       });
     }
 
@@ -334,12 +351,6 @@
           behavior: suave ? "smooth" : "auto"
         });
       });
-    }
-
-    function garantirTopoVisivel(){
-      if(cabecalho){
-        cabecalho.style.transform = "translateZ(0)";
-      }
     }
 
     function limparVazio(){
@@ -434,7 +445,7 @@
         nomeTopo.textContent = "Não conectado";
         setStatus("Sessão do chat não encontrada.");
         formChat.style.display = "none";
-        mensagensEl.innerHTML = '<div class="vazio">Sessão inválida. Feche e abra o chat novamente.</div>';
+        chatCorpo.innerHTML = '<div class="mensagens"><div class="vazio">Sessão inválida. Feche e abra o chat novamente.</div></div>';
         return false;
       }
 
@@ -544,6 +555,7 @@
 
         textoMensagem.value = "";
         textoMensagem.style.height = "52px";
+        atualizarLayoutFixo();
 
         if(msgCriada){
           appendMensagens([msgCriada], true);
@@ -554,8 +566,6 @@
         setStatus("Mensagem enviada.");
 
         setTimeout(() => {
-          atualizarAlturaApp();
-          garantirTopoVisivel();
           rolarParaFim(false);
         }, 80);
       }catch(err){
@@ -578,39 +588,35 @@
     textoMensagem.addEventListener("input", function(){
       this.style.height = "52px";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
+      atualizarLayoutFixo();
       setTimeout(() => rolarParaFim(false), 30);
     });
 
     textoMensagem.addEventListener("focus", function(){
       setTimeout(() => {
-        atualizarAlturaApp();
-        garantirTopoVisivel();
+        atualizarLayoutFixo();
         rolarParaFim(false);
-      }, 50);
+      }, 80);
 
       setTimeout(() => {
-        atualizarAlturaApp();
-        garantirTopoVisivel();
+        atualizarLayoutFixo();
         rolarParaFim(false);
       }, 250);
 
       setTimeout(() => {
-        atualizarAlturaApp();
-        garantirTopoVisivel();
+        atualizarLayoutFixo();
         rolarParaFim(false);
       }, 500);
     });
 
     textoMensagem.addEventListener("blur", function(){
       setTimeout(() => {
-        atualizarAlturaApp();
-        garantirTopoVisivel();
+        atualizarLayoutFixo();
       }, 250);
     });
 
     async function iniciar(){
-      atualizarAlturaApp();
-      garantirTopoVisivel();
+      atualizarLayoutFixo();
 
       if(!validarSessao()) return;
 
@@ -623,37 +629,32 @@
     }
 
     window.addEventListener("resize", () => {
-      atualizarAlturaApp();
-      garantirTopoVisivel();
+      atualizarLayoutFixo();
     });
 
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
-        atualizarAlturaApp();
-        garantirTopoVisivel();
+        atualizarLayoutFixo();
         rolarParaFim(false);
       }, 250);
     });
 
     if(window.visualViewport){
       window.visualViewport.addEventListener("resize", () => {
-        atualizarAlturaApp();
-        garantirTopoVisivel();
+        atualizarLayoutFixo();
       });
 
       window.visualViewport.addEventListener("scroll", () => {
-        atualizarAlturaApp();
-        garantirTopoVisivel();
+        atualizarLayoutFixo();
       });
     }
 
     document.addEventListener("focusin", function(e){
       if(e.target === textoMensagem){
         setTimeout(() => {
-          atualizarAlturaApp();
-          garantirTopoVisivel();
+          atualizarLayoutFixo();
           rolarParaFim(false);
-        }, 80);
+        }, 100);
       }
     });
 
