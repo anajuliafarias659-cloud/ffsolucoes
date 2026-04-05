@@ -979,29 +979,69 @@ function iniciarSistema(){
         aviso.innerHTML = "";
       }
     }
+    
+    function horaParaMinutos(hora) {
+  if (!hora || !String(hora).includes(":")) return null;
+  const [h, m] = String(hora).split(":").map(Number);
+  return (h * 60) + m;
+}
 
+function estaDentroIntervalo(agora, inicio, fim) {
+  if (inicio == null || fim == null) return false;
+
+  if (inicio < fim) {
+    return agora >= inicio && agora < fim;
+  }
+
+  // Ex: 18:00 até 00:00 ou 18:00 até 02:00
+  if (inicio > fim) {
+    return agora >= inicio || agora < fim;
+  }
+
+  return false;
+}
+
+function lojaAbertaAutomatica(config) {
+  if (!config?.fechamento_automatico) {
+    return config?.loja_fechada !== true;
+  }
+
+  const agora = new Date();
+  const minutosAgora = (agora.getHours() * 60) + agora.getMinutes();
+
+  return estaDentroIntervalo(
+    minutosAgora,
+    horaParaMinutos(config.horario_abertura_1),
+    horaParaMinutos(config.horario_fechamento_1)
+  );
+}
     async function verificarLojaFechadaServidor() {
-      const { data } = await supabase
-        .from("config_site")
-        .select("loja_fechada, mensagem_fechado, modo_exibicao, horario_funcionamento")
-        .eq("app_id", APP_ID)
-        .maybeSingle();
+  const { data } = await supabase
+    .from("config_site")
+    .select("loja_fechada, mensagem_fechado, modo_exibicao, horario_funcionamento, fechamento_automatico, horario_abertura_1, horario_fechamento_1")
+    .eq("app_id", APP_ID)
+    .maybeSingle();
 
-      const modo = String(data?.modo_exibicao || "").trim().toLowerCase();
+  const modo = String(data?.modo_exibicao || "").trim().toLowerCase();
 
-      let modoFinal = "aberta";
+  let modoFinal = "aberta";
 
-      if (modo === "vitrine") modoFinal = "vitrine";
-      else if (modo === "fechada") modoFinal = "fechada";
-      else if (data?.loja_fechada === true) modoFinal = "fechada";
+  if (modo === "vitrine") {
+    modoFinal = "vitrine";
+  } else if (modo === "fechada") {
+    modoFinal = "fechada";
+  } else {
+    const abertaAgora = lojaAbertaAutomatica(data);
+    modoFinal = abertaAgora ? "aberta" : "fechada";
+  }
 
-      return {
-        fechada: modoFinal !== "aberta",
-        modo: modoFinal,
-        mensagem: data?.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde.",
-        horario: data?.horario_funcionamento || ""
-      };
-    }
+  return {
+    fechada: modoFinal !== "aberta",
+    modo: modoFinal,
+    mensagem: data?.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde.",
+    horario: data?.horario_funcionamento || ""
+  };
+}
 
     function atualizarModoVendaUI() {
       const areaPagamentoCompleta = document.getElementById("areaPagamentoCompleta");
@@ -1163,10 +1203,9 @@ if (modoConfig === "vitrine") {
   modoExibicaoLoja = "vitrine";
 } else if (modoConfig === "fechada") {
   modoExibicaoLoja = "fechada";
-} else if (config.loja_fechada === true) {
-  modoExibicaoLoja = "fechada";
 } else {
-  modoExibicaoLoja = "aberta";
+  const abertaAgora = lojaAbertaAutomatica(config);
+  modoExibicaoLoja = abertaAgora ? "aberta" : "fechada";
 }
 
 
