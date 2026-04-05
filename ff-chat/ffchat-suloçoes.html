@@ -263,6 +263,36 @@
       cursor:not-allowed;
     }
 
+.quick-actions{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:12px;
+}
+
+.quick-btn{
+  width:100%;
+  border:none;
+  background:linear-gradient(135deg,#1d4ed8,#2563eb);
+  color:#fff;
+  padding:12px 14px;
+  border-radius:12px;
+  font-size:13px;
+  font-weight:800;
+  text-align:left;
+  cursor:pointer;
+  transition:.15s;
+  box-shadow:0 8px 18px rgba(0,0,0,.18);
+}
+
+.quick-btn:hover{
+  filter:brightness(1.05);
+}
+
+.quick-btn:disabled{
+  opacity:.6;
+  cursor:not-allowed;
+}
     @media (max-width:600px){
       .msg{max-width:90%}
       .topo{padding:calc(var(--safe-top) + 12px) 12px 10px 12px}
@@ -419,57 +449,59 @@
     }
 
     function criarMensagemElemento(msg){
-      const ehVisitante = msg.remetente === "visitante";
-      const nomeExibicao = ehVisitante
-        ? (msg.nome_cliente || chatContexto.cliente_nome || "Você")
-        : (msg.nome_admin || "Suporte");
+  const ehVisitante = msg.remetente === "visitante";
+  const nomeExibicao = ehVisitante
+    ? (msg.nome_cliente || chatContexto.cliente_nome || "Você")
+    : (msg.nome_admin || "Suporte");
 
-      const textoLimpo = removerMarcadoresChat(msg.mensagem);
-      const botoes = !ehVisitante ? extrairBotoesMensagem(msg.mensagem) : [];
+  const textoOriginal = String(msg.mensagem || "");
+  const textoLimpo = removerMarcadoresChat(textoOriginal);
+  const botoes = !ehVisitante ? extrairBotoesMensagem(textoOriginal) : [];
 
-      const div = document.createElement("div");
-      div.className = "msg " + (ehVisitante ? "visitante" : "admin");
-      div.dataset.msgId = String(msg.id || "");
+  const div = document.createElement("div");
+  div.className = "msg " + (ehVisitante ? "visitante" : "admin");
+  div.dataset.msgId = String(msg.id || "");
 
-      div.innerHTML = `
-        <div class="msg-texto">${escapeHtml(textoLimpo)}</div>
-        <div class="meta">
-          ${escapeHtml(nomeExibicao)} • ${escapeHtml(formatarData(msg.created_at))}
-        </div>
-      `;
+  div.innerHTML = `
+    <div class="msg-texto">${escapeHtml(textoLimpo)}</div>
+    <div class="meta">
+      ${escapeHtml(nomeExibicao)} • ${escapeHtml(formatarData(msg.created_at))}
+    </div>
+  `;
 
-      if(botoes.length){
-        const areaBotoes = document.createElement("div");
-        areaBotoes.className = "quick-actions";
+  if(!ehVisitante && botoes.length){
+    const areaBotoes = document.createElement("div");
+    areaBotoes.className = "quick-actions";
 
-        botoes.forEach(opcao => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "quick-btn";
-          btn.textContent = opcao;
+    botoes.forEach(opcao => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "quick-btn";
+      btn.textContent = opcao;
 
-          btn.addEventListener("click", async () => {
-            const numero = opcao.split("-")[0].trim();
-            areaBotoes.querySelectorAll("button").forEach(b => b.disabled = true);
-            setStatus("Enviando opção...");
-            try{
-              await enviarOpcaoRapida(numero);
-              setStatus("Opção enviada.");
-            }catch(err){
-              console.error("Erro ao enviar opção:", err);
-              areaBotoes.querySelectorAll("button").forEach(b => b.disabled = false);
-              setStatus("Erro ao enviar opção.");
-            }
-          });
+      btn.addEventListener("click", async () => {
+        const numero = String(opcao).split("-")[0].trim();
+        areaBotoes.querySelectorAll("button").forEach(b => b.disabled = true);
+        setStatus("Enviando opção...");
+        try{
+          await enviarMensagem(numero);
+          await buscarNovasMensagens();
+          setStatus("Opção enviada.");
+        }catch(err){
+          console.error("Erro ao enviar opção:", err);
+          areaBotoes.querySelectorAll("button").forEach(b => b.disabled = false);
+          setStatus("Erro ao enviar opção.");
+        }
+      });
 
-          areaBotoes.appendChild(btn);
-        });
+      areaBotoes.appendChild(btn);
+    });
 
-        div.appendChild(areaBotoes);
-      }
+    div.appendChild(areaBotoes);
+  }
 
-      return div;
-    }
+  return div;
+}
 
     function appendMensagens(lista, forcarScroll = false){
       if(!Array.isArray(lista) || !lista.length) return;
