@@ -802,13 +802,15 @@
     const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    const APP_ID = new URLSearchParams(window.location.search).get("app_id");
-    const URL_PAGAMENTO = `${SUPABASE_URL}/functions/v1/criar-pagamento-loja`;
-    const URL_PAGAMENTO_PIX = `${SUPABASE_URL}/functions/v1/criar-pix-loja`;
+    let APP_ID = null;
 
-    if (!APP_ID) {
-      alert("APP_ID não informado.");
-    }
+const params = new URLSearchParams(window.location.search);
+const app_id_url = params.get("app_id");
+const partes = location.pathname.split("/").filter(Boolean);
+const slug = partes[partes.length - 1];
+
+const URL_PAGAMENTO = `${SUPABASE_URL}/functions/v1/criar-pagamento-loja`;
+const URL_PAGAMENTO_PIX = `${SUPABASE_URL}/functions/v1/criar-pix-loja`;
 
     const nomeLoja = document.getElementById("nomeLoja");
     const infoLoja = document.getElementById("infoLoja");
@@ -833,10 +835,10 @@
     const itensCarrinho = document.getElementById("itensCarrinho");
     const tituloFinalizarPedido = document.getElementById("tituloFinalizarPedido");
 
-    const CARRINHO_KEY = `carrinho_${APP_ID}`;
-    const ULTIMO_PEDIDO_KEY = `ultimo_pedido_${APP_ID}`;
+    let CARRINHO_KEY = "";
+let ULTIMO_PEDIDO_KEY = "";
 
-    let carrinho = JSON.parse(localStorage.getItem(CARRINHO_KEY)) || [];
+let carrinho = [];
     let todosProdutos = [];
     let modoVenda = "whatsapp";
     let numeroWhatsapp = "";
@@ -850,7 +852,62 @@
     let mensagemLojaFechada = "Estamos fechados no momento. Tente novamente mais tarde.";
     let modoExibicaoLoja = "aberta";
     let horarioFuncionamento = "";
+async function resolverAppId(){
+  if (app_id_url) {
+    APP_ID = app_id_url;
+    iniciarSistema();
+    return;
+  }
 
+  const { data, error } = await supabase
+    .from("apps")
+    .select("app_id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Erro ao buscar slug:", error);
+  }
+
+  if (data?.app_id) {
+    APP_ID = data.id;
+    iniciarSistema();
+    return;
+  }
+
+  document.body.innerHTML = `
+    <div style="
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      font-family:Arial,sans-serif;
+      background:#f5f5f5;
+      color:#111;
+      text-align:center;
+    ">
+      <div>
+        <h2>❌ Loja não encontrada</h2>
+        <p>Verifique o link e tente novamente.</p>
+      </div>
+    </div>
+  `;
+}
+
+function iniciarSistema(){
+  if (!APP_ID) {
+    alert("APP_ID não encontrado.");
+    return;
+  }
+
+  CARRINHO_KEY = `carrinho_${APP_ID}`;
+  ULTIMO_PEDIDO_KEY = `ultimo_pedido_${APP_ID}`;
+  carrinho = JSON.parse(localStorage.getItem(CARRINHO_KEY) || "[]");
+
+  salvarCarrinhoLocal();
+  carregar();
+}
     function formatarReal(valor) {
       return Number(valor || 0).toLocaleString("pt-BR", {
         style: "currency",
@@ -1061,11 +1118,10 @@
       if (areaTroco) areaTroco.style.display = "none";
       if (trocoPara) trocoPara.value = "";
 
-      salvarCarrinhoLocal();
+      
       atualizarBotaoComprarNovamente();
     }
 
-    salvarCarrinhoLocal();
 
     async function carregar() {
       const { data: config } = await supabase
@@ -1379,7 +1435,7 @@
       const btnGerarPixMP = document.getElementById("btnGerarPixMP");
       if (btnGerarPixMP) btnGerarPixMP.style.display = "none";
 
-      salvarCarrinhoLocal();
+      
       atualizarBotaoComprarNovamente();
     }
 
@@ -1543,7 +1599,7 @@
         });
       }
 
-      salvarCarrinhoLocal();
+      
       abrirCarrinho();
     }
 
@@ -2637,7 +2693,7 @@ Enviado pela vitrine online.`;
       alert("📋 Link do pedido copiado!");
     };
 
-    carregar();
+    resolverAppId();
   </script>
 </body>
 </html>
