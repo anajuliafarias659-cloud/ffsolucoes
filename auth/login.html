@@ -322,6 +322,139 @@ async function resetSenha(){
 window.login = login;
 window.resetSenha = resetSenha;
 </script>
+<script>
+const FF_CHAT_USER_KEY = "ff_chat_user";
+const FF_CHAT_CONTEXT_KEY = "ff_chat_contexto";
+const FF_CHAT_NOME_KEY = "ff_chat_nome_cliente";
 
+function slugTexto(texto){
+  return String(texto || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function gerarIdAleatorio(prefixo = "chat"){
+  return prefixo + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 10);
+}
+
+function abrirModalNomeChat(){
+  const overlay = document.getElementById("chatNomeOverlay");
+  const input = document.getElementById("chatNomeCliente");
+  const status = document.getElementById("chatNomeStatus");
+
+  if(!overlay || !input || !status) return;
+
+  status.textContent = "";
+  input.value = "";
+  overlay.classList.add("ativo");
+
+  setTimeout(() => input.focus(), 120);
+}
+
+function fecharModalNomeChat(){
+  const overlay = document.getElementById("chatNomeOverlay");
+  if(overlay) overlay.classList.remove("ativo");
+}
+
+function fecharChat(){
+  const box = document.getElementById("chatBox");
+  const frame = document.getElementById("ffChatFrame");
+  const botao = document.getElementById("chatBotao");
+
+  if(box) box.classList.remove("ativo");
+  if(frame) frame.src = "";
+  if(botao) botao.classList.remove("oculto");
+}
+
+function montarUsuarioTemporario(nome){
+  const nomeLimpo = String(nome || "").trim();
+  const slug = slugTexto(nomeLimpo) || "cliente";
+
+  return {
+    numero: "visitante_" + slug + "_" + Date.now(),
+    senha: gerarIdAleatorio("senha"),
+    nome: nomeLimpo,
+    tipo: "visitante_temporario",
+    sistema: "ffsolucoes",
+    criado_em: new Date().toISOString()
+  };
+}
+
+function montarContextoChat(nome, usuarioTemp){
+  return {
+    sistema_id: "ffsolucoes",
+    sistema_nome: "FF Soluções",
+    origem: "ffsolucoes",
+    app_id: null,
+    cliente_nome: nome,
+    chat_room_id: "ffsolucoes_" + slugTexto(nome) + "_" + Date.now(),
+    usuario_temporario: usuarioTemp.numero,
+    criado_em: new Date().toISOString()
+  };
+}
+
+function abrirChatComSessao(){
+  const frame = document.getElementById("ffChatFrame");
+  const box = document.getElementById("chatBox");
+  const botao = document.getElementById("chatBotao");
+
+  if(!frame || !box) return;
+
+  frame.src = "/ff-chat/ffchat-suloçoes.html?auto_login=1&origem=ffsolucoes&sistema=ffsolucoes&t=" + Date.now();
+  box.classList.add("ativo");
+  if(botao) botao.classList.add("oculto");
+}
+
+function confirmarEntradaChat(){
+  const input = document.getElementById("chatNomeCliente");
+  const status = document.getElementById("chatNomeStatus");
+
+  if(!input || !status) return;
+
+  const nome = (input.value || "").trim();
+
+  if(!nome){
+    status.textContent = "Digite seu nome para continuar.";
+    input.focus();
+    return;
+  }
+
+  try{
+    const usuarioTemp = montarUsuarioTemporario(nome);
+    const contexto = montarContextoChat(nome, usuarioTemp);
+
+    localStorage.setItem(FF_CHAT_NOME_KEY, nome);
+    localStorage.setItem(FF_CHAT_USER_KEY, JSON.stringify(usuarioTemp));
+    localStorage.setItem(FF_CHAT_CONTEXT_KEY, JSON.stringify(contexto));
+
+    fecharModalNomeChat();
+    abrirChatComSessao();
+  }catch(err){
+    console.error("Erro ao iniciar chat:", err);
+    status.textContent = "Erro ao iniciar o chat.";
+  }
+}
+
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape"){
+    fecharModalNomeChat();
+  }
+});
+
+document.addEventListener("DOMContentLoaded", function(){
+  const inputNome = document.getElementById("chatNomeCliente");
+
+  if(inputNome){
+    inputNome.addEventListener("keydown", function(e){
+      if(e.key === "Enter"){
+        confirmarEntradaChat();
+      }
+    });
+  }
+});
+</script>
 </body>
 </html>
