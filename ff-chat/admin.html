@@ -51,7 +51,7 @@
       align-items:center;
     }
 
-    .filtro, .busca{
+    .filtro,.busca{
       background:#020617;
       color:#fff;
       border:1px solid rgba(255,255,255,.10);
@@ -247,7 +247,7 @@
 
     .msg-texto{
       font-size:14px;
-      line-height:1.5;
+      line-height:1.6;
       white-space:pre-wrap;
     }
 
@@ -334,8 +334,6 @@
       .msg{
         max-width:88%;
       }
-      .chat-head{top:0}
-      .chat-form{bottom:0}
     }
   </style>
 </head>
@@ -359,7 +357,7 @@
         <option value="loja">Loja</option>
       </select>
 
-      <input id="buscaNome" class="busca" type="text" placeholder="Buscar cliente.">
+      <input id="buscaNome" class="busca" type="text" placeholder="Buscar cliente">
     </div>
   </div>
 
@@ -390,7 +388,7 @@
         <div id="mensagens" class="mensagens"></div>
 
         <form id="formResposta" class="chat-form">
-          <textarea id="textoResposta" placeholder="Digite sua resposta."></textarea>
+          <textarea id="textoResposta" placeholder="Digite sua resposta"></textarea>
           <button type="submit">Responder</button>
         </form>
       </div>
@@ -401,9 +399,8 @@
     const CHAT_ADMIN_SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
     const CHAT_ADMIN_SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
-    // TROQUE PELO SEU NÚMERO COM DDI + DDD
-    const TELEFONE_ADMIN = "5589981452698";
-    const LINK_PAINEL_MOBILE = "https://www.ffsolucoes.com.br/admin-chat";
+    const TELEFONE_ADMIN = "5588999999999";
+    const LINK_PAINEL_MOBILE = "https://www.ffsolucoes.com.br/SEU-PAINEL-ADMIN.html";
 
     const supabaseAdminChat = window.supabase.createClient(
       CHAT_ADMIN_SUPABASE_URL,
@@ -476,6 +473,84 @@
       return "Sistema";
     }
 
+    function removerMarcadoresFluxo(texto){
+      return String(texto || "")
+        .replace(/\[#etapa:[^\]]+\]/gi, "")
+        .replace(/\[#dados:[^\]]+\]/gi, "")
+        .trim();
+    }
+
+    function limparTextoFluxo(texto){
+      return removerMarcadoresFluxo(texto).toLowerCase();
+    }
+
+    function extrairEtapaDaMensagem(texto){
+      const match = String(texto || "").match(/\[#etapa:([^\]]+)\]/i);
+      return match ? match[1].trim().toLowerCase() : null;
+    }
+
+    function obterUltimaEtapaDoAdmin(mensagensAdmin){
+      for(let i = mensagensAdmin.length - 1; i >= 0; i--){
+        const etapa = extrairEtapaDaMensagem(mensagensAdmin[i].mensagem);
+        if(etapa) return etapa;
+      }
+      return null;
+    }
+
+    function extrairUltimoTelefone(mensagensAdmin){
+      for(let i = mensagensAdmin.length - 1; i >= 0; i--){
+        const txt = String(mensagensAdmin[i].mensagem || "");
+        const match = txt.match(/\[#dados:telefone=([^\]]+)\]/i);
+        if(match) return match[1].trim();
+      }
+      return "";
+    }
+
+    function extrairUltimoDocumento(mensagensAdmin){
+      for(let i = mensagensAdmin.length - 1; i >= 0; i--){
+        const txt = String(mensagensAdmin[i].mensagem || "");
+        const match = txt.match(/\[#dados:documento=([^\]]+)\]/i);
+        if(match) return match[1].trim();
+      }
+      return "";
+    }
+
+    function saudacaoPorHorario(){
+      const hora = new Date().getHours();
+      if(hora < 12) return "Olá, bom dia";
+      if(hora < 18) return "Olá, boa tarde";
+      return "Olá, boa noite";
+    }
+
+    function mensagemAutomaticaInicial(nomeCliente){
+      const nome = String(nomeCliente || "cliente").trim();
+
+      return `${saudacaoPorHorario()}, ${nome}!
+
+Seja bem-vindo ao atendimento da FF Soluções.
+
+Escolha uma opção:
+
+1 - Dificuldade no sistema
+
+2 - Cadastro / acesso
+
+3 - Financeiro
+
+4 - Falar com atendente
+
+Responda com o número da opção.
+
+[#etapa:menu_principal]`;
+    }
+
+    function adminJaMandouBoasVindas(mensagensAdmin){
+      return mensagensAdmin.some(m => {
+        const txt = String(m.mensagem || "").toLowerCase();
+        return txt.includes("seja bem-vindo ao atendimento") && txt.includes("[#etapa:menu_principal]");
+      });
+    }
+
     function agruparConversas(mensagens){
       const mapa = {};
 
@@ -511,6 +586,12 @@
       }
 
       return Object.values(mapa).sort((a,b) => new Date(b.ultima_data) - new Date(a.ultima_data));
+    }
+
+    function obterMensagensDaConversa(chatRoomId){
+      return todasMensagens
+        .filter(m => m.chat_room_id === chatRoomId)
+        .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
     }
 
     function filtrarConversas(lista){
@@ -552,19 +633,13 @@
             ${conversa.app_id ? `<span class="mini-badge">app_id: ${escapeHtml(conversa.app_id)}</span>` : ""}
           </div>
 
-          <div class="conversa-msg">${escapeHtml(resumoTexto(conversa.ultima_mensagem, 100))}</div>
+          <div class="conversa-msg">${escapeHtml(resumoTexto(removerMarcadoresFluxo(conversa.ultima_mensagem), 100))}</div>
           <div class="conversa-data">${escapeHtml(formatarData(conversa.ultima_data))}</div>
         `;
 
         div.addEventListener("click", () => abrirConversa(conversa));
         listaConversasEl.appendChild(div);
       }
-    }
-
-    function obterMensagensDaConversa(chatRoomId){
-      return todasMensagens
-        .filter(m => m.chat_room_id === chatRoomId)
-        .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
     }
 
     function renderizarMensagens(chatRoomId){
@@ -594,67 +669,6 @@
       });
     }
 
-    function removerMarcadoresFluxo(texto){
-      return String(texto || "")
-        .replace(/\[#etapa:[^\]]+\]/gi, "")
-        .replace(/\[#dados:[^\]]+\]/gi, "")
-        .trim();
-    }
-
-    function saudacaoPorHorario(){
-      const hora = new Date().getHours();
-      if(hora < 12) return "Olá, bom dia";
-      if(hora < 18) return "Olá, boa tarde";
-      return "Olá, boa noite";
-    }
-
-    function mensagemAutomaticaInicial(nomeCliente){
-      const nome = String(nomeCliente || "cliente").trim();
-
-      return `${saudacaoPorHorario()}, ${nome}!
-
-Seja bem-vindo ao atendimento da FF Soluções.
-
-return `Escolha uma opção:
-
-1️⃣ Dificuldade no sistema  
-2️⃣ Cadastro / acesso  
-3️⃣ Financeiro  
-4️⃣ Falar com atendente  
-
-Responda com o número.`;
-
-[#etapa:menu_principal]`;
-    }
-
-    function limparTextoFluxo(texto){
-      return String(texto || "")
-        .replace(/\[#etapa:[^\]]+\]/gi, "")
-        .replace(/\[#dados:[^\]]+\]/gi, "")
-        .trim()
-        .toLowerCase();
-    }
-
-    function extrairEtapaDaMensagem(texto){
-      const match = String(texto || "").match(/\[#etapa:([^\]]+)\]/i);
-      return match ? match[1].trim().toLowerCase() : null;
-    }
-
-    function obterUltimaEtapaDoAdmin(mensagensAdmin){
-      for(let i = mensagensAdmin.length - 1; i >= 0; i--){
-        const etapa = extrairEtapaDaMensagem(mensagensAdmin[i].mensagem);
-        if(etapa) return etapa;
-      }
-      return null;
-    }
-
-    function adminJaMandouBoasVindas(mensagensAdmin){
-      return mensagensAdmin.some(m => {
-        const txt = String(m.mensagem || "").toLowerCase();
-        return txt.includes("seja bem-vindo ao atendimento") && txt.includes("[#etapa:menu_principal]");
-      });
-    }
-
     function montarRespostaFluxo(etapaAtual, textoOriginal){
       const texto = limparTextoFluxo(textoOriginal);
 
@@ -664,12 +678,17 @@ Responda com o número.`;
 
 Qual sistema você está usando?
 
-*1 - Bar / Restaurante*
-*2 - Pizzaria*
-*3 - Loja*
-*4 - Hotel*
-*5 - FF Filmes*
-*6 - Outro*
+1 - Bar / Restaurante
+
+2 - Pizzaria
+
+3 - Loja
+
+4 - Hotel
+
+5 - FF Filmes
+
+6 - Outro
 
 [#etapa:dificuldade_sistema]`;
         }
@@ -679,11 +698,15 @@ Qual sistema você está usando?
 
 Qual assunto?
 
-*1 - Não consigo entrar*
-*2 - Esqueci senha*
-*3 - Cadastro novo*
-*4 - Usuário bloqueado*
-*5 - Outro*
+1 - Não consigo entrar
+
+2 - Esqueci senha
+
+3 - Cadastro novo
+
+4 - Usuário bloqueado
+
+5 - Outro
 
 [#etapa:cadastro_menu]`;
         }
@@ -693,12 +716,17 @@ Qual assunto?
 
 Selecione o assunto:
 
-*1 - Renovação*
-*2 - PIX*
-*3 - Cartão*
-*4 - Cobrança*
-*5 - Cancelamento*
-*6 - Outro*
+1 - Renovação
+
+2 - PIX
+
+3 - Cartão
+
+4 - Cobrança
+
+5 - Cancelamento
+
+6 - Outro
 
 [#etapa:financeiro_menu]`;
         }
@@ -716,14 +744,15 @@ Exemplo: 89999999999
 
         return `Não entendi a opção.
 
-return `Escolha uma opção:
+Escolha uma opção:
 
-1️⃣ Dificuldade no sistema  
-2️⃣ Cadastro / acesso  
-3️⃣ Financeiro  
-4️⃣ Falar com atendente  
+1 - Dificuldade no sistema
 
-Responda com o número.`;
+2 - Cadastro / acesso
+
+3 - Financeiro
+
+4 - Falar com atendente
 
 [#etapa:menu_principal]`;
       }
@@ -812,11 +841,15 @@ Me envie:
 
 Responda com:
 
-*1 - Não consigo entrar*
-*2 - Esqueci senha*
-*3 - Cadastro novo*
-*4 - Usuário bloqueado*
-*5 - Outro*
+1 - Não consigo entrar
+
+2 - Esqueci senha
+
+3 - Cadastro novo
+
+4 - Usuário bloqueado
+
+5 - Outro
 
 [#etapa:cadastro_menu]`;
       }
@@ -847,10 +880,13 @@ Me envie:
 
 Escolha uma opção:
 
-*1 - PIX não gerou*
-*2 - PIX gerou mas não paguei*
-*3 - PIX pago e não liberou*
-*4 - Outro*
+1 - PIX não gerou
+
+2 - PIX gerou mas não paguei
+
+3 - PIX pago e não liberou
+
+4 - Outro
 
 [#etapa:financeiro_pix]`;
         }
@@ -860,10 +896,13 @@ Escolha uma opção:
 
 Escolha uma opção:
 
-*1 - Erro ao pagar*
-*2 - Pagamento aprovado e não liberou*
-*3 - Pagamento recusado*
-*4 - Outro*
+1 - Erro ao pagar
+
+2 - Pagamento aprovado e não liberou
+
+3 - Pagamento recusado
+
+4 - Outro
 
 [#etapa:financeiro_cartao]`;
         }
@@ -900,12 +939,17 @@ Me envie:
 
 Responda com:
 
-*1 - Renovação*
-*2 - PIX*
-*3 - Cartão*
-*4 - Cobrança*
-*5 - Cancelamento*
-*6 - Outro*
+1 - Renovação
+
+2 - PIX
+
+3 - Cartão
+
+4 - Cobrança
+
+5 - Cancelamento
+
+6 - Outro
 
 [#etapa:financeiro_menu]`;
       }
@@ -965,10 +1009,13 @@ Depois disso, informe seu telefone com DDD.
 
         return `Responda com:
 
-*1 - PIX não gerou*
-*2 - PIX gerou mas não paguei*
-*3 - PIX pago e não liberou*
-*4 - Outro*
+1 - PIX não gerou
+
+2 - PIX gerou mas não paguei
+
+3 - PIX pago e não liberou
+
+4 - Outro
 
 [#etapa:financeiro_pix]`;
       }
@@ -1016,10 +1063,13 @@ Depois disso, informe seu telefone com DDD.
 
         return `Responda com:
 
-*1 - Erro ao pagar*
-*2 - Pagamento aprovado e não liberou*
-*3 - Pagamento recusado*
-*4 - Outro*
+1 - Erro ao pagar
+
+2 - Pagamento aprovado e não liberou
+
+3 - Pagamento recusado
+
+4 - Outro
 
 [#etapa:financeiro_cartao]`;
       }
@@ -1083,14 +1133,15 @@ Se quiser adiantar, pode enviar mais detalhes do problema.
 
       return `Não entendi sua resposta.
 
-return `Escolha uma opção:
+Escolha uma opção:
 
-1️⃣ Dificuldade no sistema  
-2️⃣ Cadastro / acesso  
-3️⃣ Financeiro  
-4️⃣ Falar com atendente  
+1 - Dificuldade no sistema
 
-Responda com o número.`;
+2 - Cadastro / acesso
+
+3 - Financeiro
+
+4 - Falar com atendente
 
 [#etapa:menu_principal]`;
     }
@@ -1182,24 +1233,6 @@ Responda com o número.`;
       }
     }
 
-    function extrairUltimoTelefone(mensagensAdmin){
-      for(let i = mensagensAdmin.length - 1; i >= 0; i--){
-        const txt = String(mensagensAdmin[i].mensagem || "");
-        const match = txt.match(/\[#dados:telefone=([^\]]+)\]/i);
-        if(match) return match[1].trim();
-      }
-      return "";
-    }
-
-    function extrairUltimoDocumento(mensagensAdmin){
-      for(let i = mensagensAdmin.length - 1; i >= 0; i--){
-        const txt = String(mensagensAdmin[i].mensagem || "");
-        const match = txt.match(/\[#dados:documento=([^\]]+)\]/i);
-        if(match) return match[1].trim();
-      }
-      return "";
-    }
-
     function gerarLinkWhats(conversa, mensagensConversa){
       const mensagensAdmin = mensagensConversa.filter(m => m.remetente === "admin");
       const mensagensVisitante = mensagensConversa.filter(m => m.remetente === "visitante");
@@ -1244,65 +1277,32 @@ ${LINK_PAINEL_MOBILE}`;
     }
 
     async function processarMensagensAutomaticas(){
-  if(processandoAutoResposta) return;
-  processandoAutoResposta = true;
+      if(processandoAutoResposta) return;
+      processandoAutoResposta = true;
 
-  try{
-    const conversas = agruparConversas(todasMensagens);
-    if(!conversas.length) return;
+      try{
+        const conversas = agruparConversas(todasMensagens);
+        if(!conversas.length) return;
 
-    // processa só as mais recentes
-    for(const conversa of conversas.slice(0, 10)){
-      const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
-      if(!mensagensConversa.length) continue;
+        for(const conversa of conversas.slice(0, 10)){
+          const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
+          if(!mensagensConversa.length) continue;
 
-      const mensagensVisitante = mensagensConversa.filter(m => m.remetente === "visitante");
-      const mensagensAdmin = mensagensConversa.filter(m => m.remetente === "admin");
+          const mensagensVisitante = mensagensConversa.filter(m => m.remetente === "visitante");
+          const mensagensAdmin = mensagensConversa.filter(m => m.remetente === "admin");
 
-      if(!mensagensVisitante.length) continue;
+          if(!mensagensVisitante.length) continue;
 
-      const primeiraMensagemVisitante = mensagensVisitante[0];
-      const ultimaMensagemVisitante = mensagensVisitante[mensagensVisitante.length - 1];
-      const ultimaMensagemAdmin = mensagensAdmin.length ? mensagensAdmin[mensagensAdmin.length - 1] : null;
+          const primeiraMensagemVisitante = mensagensVisitante[0];
+          const ultimaMensagemVisitante = mensagensVisitante[mensagensVisitante.length - 1];
+          const ultimaMensagemAdmin = mensagensAdmin.length ? mensagensAdmin[mensagensAdmin.length - 1] : null;
 
-      if(!adminJaMandouBoasVindas(mensagensAdmin)){
-        const textoInicial = mensagemAutomaticaInicial(
-          conversa.nome_cliente || primeiraMensagemVisitante.nome_cliente || "Cliente"
-        );
+          if(!adminJaMandouBoasVindas(mensagensAdmin)){
+            const textoInicial = mensagemAutomaticaInicial(
+              conversa.nome_cliente || primeiraMensagemVisitante.nome_cliente || "Cliente"
+            );
 
-        await enviarRespostaAutomaticaParaConversa(conversa, textoInicial);
-
-        todasMensagens.unshift({
-          chat_room_id: conversa.chat_room_id,
-          app_id: conversa.app_id || null,
-          sistema_id: conversa.sistema_id || null,
-          sistema_nome: conversa.sistema_nome || null,
-          nome_cliente: conversa.nome_cliente || "Cliente",
-          nome_admin: ADMIN_NOME,
-          remetente: "admin",
-          remetente_id: ADMIN_ID,
-          mensagem: textoInicial,
-          created_at: new Date().toISOString(),
-          lida: true
-        });
-
-        continue;
-      }
-
-      if(
-        ultimaMensagemVisitante &&
-        (!ultimaMensagemAdmin || new Date(ultimaMensagemVisitante.created_at) > new Date(ultimaMensagemAdmin.created_at))
-      ){
-        const etapaAtual = obterUltimaEtapaDoAdmin(mensagensAdmin) || "menu_principal";
-        const respostaAuto = montarRespostaFluxo(etapaAtual, ultimaMensagemVisitante.mensagem);
-
-        if(respostaAuto){
-          const ultimaAdminTexto = mensagensAdmin.length
-            ? String(mensagensAdmin[mensagensAdmin.length - 1].mensagem || "").trim()
-            : "";
-
-          if(ultimaAdminTexto !== respostaAuto.trim()){
-            await enviarRespostaAutomaticaParaConversa(conversa, respostaAuto);
+            await enviarRespostaAutomaticaParaConversa(conversa, textoInicial);
 
             todasMensagens.unshift({
               chat_room_id: conversa.chat_room_id,
@@ -1313,61 +1313,94 @@ ${LINK_PAINEL_MOBILE}`;
               nome_admin: ADMIN_NOME,
               remetente: "admin",
               remetente_id: ADMIN_ID,
-              mensagem: respostaAuto,
+              mensagem: textoInicial,
               created_at: new Date().toISOString(),
               lida: true
             });
+
+            continue;
+          }
+
+          if(
+            ultimaMensagemVisitante &&
+            (!ultimaMensagemAdmin || new Date(ultimaMensagemVisitante.created_at) > new Date(ultimaMensagemAdmin.created_at))
+          ){
+            const etapaAtual = obterUltimaEtapaDoAdmin(mensagensAdmin) || "menu_principal";
+            const respostaAuto = montarRespostaFluxo(etapaAtual, ultimaMensagemVisitante.mensagem);
+
+            if(respostaAuto){
+              const ultimaAdminTexto = mensagensAdmin.length
+                ? String(mensagensAdmin[mensagensAdmin.length - 1].mensagem || "").trim()
+                : "";
+
+              if(ultimaAdminTexto !== respostaAuto.trim()){
+                await enviarRespostaAutomaticaParaConversa(conversa, respostaAuto);
+
+                todasMensagens.unshift({
+                  chat_room_id: conversa.chat_room_id,
+                  app_id: conversa.app_id || null,
+                  sistema_id: conversa.sistema_id || null,
+                  sistema_nome: conversa.sistema_nome || null,
+                  nome_cliente: conversa.nome_cliente || "Cliente",
+                  nome_admin: ADMIN_NOME,
+                  remetente: "admin",
+                  remetente_id: ADMIN_ID,
+                  mensagem: respostaAuto,
+                  created_at: new Date().toISOString(),
+                  lida: true
+                });
+              }
+            }
           }
         }
+      }catch(err){
+        console.error("Erro no auto atendimento:", err);
+      }finally{
+        processandoAutoResposta = false;
       }
     }
-  }catch(err){
-    console.error("Erro no auto atendimento:", err);
-  }finally{
-    processandoAutoResposta = false;
-  }
-}
+
     async function carregarConversas(manterSelecao = true){
-  try{
-    const { data, error } = await supabaseAdminChat
-      .from("chat_mensagens")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(120);
+      try{
+        const { data, error } = await supabaseAdminChat
+          .from("chat_mensagens")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(120);
 
-    if(error) throw error;
+        if(error) throw error;
 
-    todasMensagens = Array.isArray(data) ? data : [];
+        todasMensagens = Array.isArray(data) ? data : [];
 
-    await processarMensagensAutomaticas();
+        await processarMensagensAutomaticas();
 
-    conversasAgrupadas = agruparConversas(todasMensagens);
+        conversasAgrupadas = agruparConversas(todasMensagens);
 
-    for(const conversa of conversasAgrupadas.slice(0, 10)){
-      const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
-      verificarDisparoWhats(conversa, mensagensConversa);
-    }
+        for(const conversa of conversasAgrupadas.slice(0, 10)){
+          const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
+          verificarDisparoWhats(conversa, mensagensConversa);
+        }
 
-    if(manterSelecao && conversaAtual){
-      const novaAtual = conversasAgrupadas.find(c => c.chat_room_id === conversaAtual.chat_room_id);
-      if(novaAtual){
-        conversaAtual = novaAtual;
-        chatTituloEl.textContent = novaAtual.nome_cliente || "Cliente";
-        chatSubtituloEl.textContent =
-          `Sistema: ${novaAtual.sistema_nome || novaAtual.sistema_id || "-"}`
-          + ` | app_id: ${novaAtual.app_id || "-"}`
-          + ` | sala: ${novaAtual.chat_room_id || "-"}`;
+        if(manterSelecao && conversaAtual){
+          const novaAtual = conversasAgrupadas.find(c => c.chat_room_id === conversaAtual.chat_room_id);
+          if(novaAtual){
+            conversaAtual = novaAtual;
+            chatTituloEl.textContent = novaAtual.nome_cliente || "Cliente";
+            chatSubtituloEl.textContent =
+              `Sistema: ${novaAtual.sistema_nome || novaAtual.sistema_id || "-"}`
+              + ` | app_id: ${novaAtual.app_id || "-"}`
+              + ` | sala: ${novaAtual.chat_room_id || "-"}`;
 
-        renderizarMensagens(novaAtual.chat_room_id);
+            renderizarMensagens(novaAtual.chat_room_id);
+          }
+        }
+
+        renderizarConversas();
+      }catch(err){
+        console.error(err);
+        estadoListaEl.textContent = "Erro ao carregar conversas.";
       }
     }
-
-    renderizarConversas();
-  }catch(err){
-    console.error(err);
-    estadoListaEl.textContent = "Erro ao carregar conversas.";
-  }
-}
 
     formRespostaEl.addEventListener("submit", async function(e){
       e.preventDefault();
