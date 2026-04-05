@@ -18,9 +18,11 @@ body{
 }
 .card{
   width:380px;
+  max-width:calc(100vw - 32px);
   background:#0f172a;
   padding:30px;
   border-radius:16px;
+  box-sizing:border-box;
 }
 input,button{
   width:100%;
@@ -34,6 +36,7 @@ button{
   background:#22c55e;
   font-weight:bold;
   cursor:pointer;
+  color:#fff;
 }
 .link{
   margin-top:12px;
@@ -88,6 +91,168 @@ button{
   cursor:pointer;
   margin-top:10px;
 }
+
+/* BOTÃO FLUTUANTE */
+#chatBotao{
+  position:fixed;
+  bottom:20px;
+  left:20px;
+  width:60px;
+  height:60px;
+  background:#22c55e;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:26px;
+  cursor:pointer;
+  z-index:9999;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+
+#chatBotao.oculto{
+  display:none;
+}
+
+/* BOX CHAT */
+#chatBox{
+  position:fixed;
+  bottom:90px;
+  left:20px;
+  width:360px;
+  max-width:calc(100vw - 24px);
+  height:520px;
+  max-height:calc(100vh - 120px);
+  background:#020617;
+  border-radius:16px;
+  overflow:hidden;
+  display:none;
+  flex-direction:column;
+  z-index:9999;
+  box-shadow:0 10px 35px rgba(0,0,0,.45);
+  border:1px solid #1e293b;
+}
+
+#chatBox.ativo{
+  display:flex;
+}
+
+#chatTopo{
+  background:#0f172a;
+  padding:12px 14px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-weight:bold;
+  border-bottom:1px solid #1e293b;
+}
+
+#chatTopo button{
+  width:auto;
+  margin-top:0;
+  padding:0;
+  background:none;
+  border:none;
+  color:#fff;
+  font-size:20px;
+  cursor:pointer;
+  line-height:1;
+}
+
+#ffChatFrame{
+  width:100%;
+  height:100%;
+  flex:1;
+  border:none;
+  background:#020617;
+}
+
+/* MODAL NOME */
+#chatNomeOverlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.7);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:10000;
+  padding:16px;
+  box-sizing:border-box;
+}
+
+#chatNomeOverlay.ativo{
+  display:flex;
+}
+
+.chatNomeBox{
+  background:#0f172a;
+  padding:20px;
+  border-radius:12px;
+  width:320px;
+  max-width:100%;
+  text-align:center;
+  box-sizing:border-box;
+  border:1px solid #1e293b;
+}
+
+.chatNomeBox h3{
+  margin:0 0 10px;
+}
+
+.chatNomeBox input{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border-radius:8px;
+  border:none;
+  outline:none;
+}
+
+.chatNomeBox button{
+  margin-top:12px;
+  width:100%;
+  padding:12px;
+  background:#22c55e;
+  border:none;
+  border-radius:8px;
+  color:#fff;
+}
+
+#chatNomeStatus{
+  min-height:18px;
+  margin-top:10px;
+  color:#fca5a5;
+  font-size:13px;
+}
+
+@media (max-width: 700px){
+  body{
+    align-items:center;
+    padding:16px;
+    box-sizing:border-box;
+  }
+
+  .card{
+    width:100%;
+    padding:22px;
+  }
+
+  #chatBotao{
+    left:14px;
+    bottom:14px;
+    width:56px;
+    height:56px;
+  }
+
+  #chatBox{
+    left:12px;
+    right:12px;
+    bottom:80px;
+    width:auto;
+    height:70vh;
+    max-height:70vh;
+  }
+}
 </style>
 </head>
 
@@ -101,6 +266,28 @@ button{
   <button id="btnEntrar" onclick="login()">Entrar</button>
 
   <div class="link" onclick="resetSenha()">Esqueci minha senha</div>
+</div>
+
+<!-- BOTÃO FLUTUANTE -->
+<div id="chatBotao" onclick="abrirModalNomeChat()">💬</div>
+
+<!-- BOX DO CHAT -->
+<div id="chatBox">
+  <div id="chatTopo">
+    <span>FF Soluções</span>
+    <button type="button" onclick="fecharChat()">✕</button>
+  </div>
+  <iframe id="ffChatFrame" title="Chat FF Soluções"></iframe>
+</div>
+
+<!-- MODAL NOME -->
+<div id="chatNomeOverlay">
+  <div class="chatNomeBox">
+    <h3>Digite seu nome</h3>
+    <input id="chatNomeCliente" placeholder="Seu nome">
+    <div id="chatNomeStatus"></div>
+    <button type="button" onclick="confirmarEntradaChat()">Entrar no chat</button>
+  </div>
 </div>
 
 <script type="module">
@@ -231,7 +418,6 @@ async function login(){
 
     const userId = data.user.id;
 
-    // FONTE PRINCIPAL: USUARIOS
     const { data: usuarioSistema, error: uErr } = await supabase
       .from("usuarios")
       .select("*")
@@ -243,32 +429,19 @@ async function login(){
       return;
     }
 
-    // FONTE SECUNDÁRIA/LEGADO: APPS
     const appLegado = await buscarAppLegado(usuarioSistema.app_id);
 
     const basePath = getBasePath();
     const destinoPainel = montarDestinoPainel(basePath, usuarioSistema, appLegado);
 
-    // PRIORIDADE DE VENCIMENTO:
-    // 1) usuarios
-    // 2) apps legado (fallback)
     const dataExpiracao =
       normalizarDataExpiracao(usuarioSistema) ||
       normalizarDataExpiracao(appLegado);
 
-    // PRIORIDADE DE ATIVO:
-    // 1) usuarios.ativo
-    // 2) apps.ativo
     const ativo =
       typeof usuarioSistema?.ativo === "boolean"
         ? usuarioSistema.ativo
         : (typeof appLegado?.ativo === "boolean" ? appLegado.ativo : true);
-
-    console.log("LOGIN USUARIO:", usuarioSistema);
-    console.log("LOGIN APP LEGADO:", appLegado);
-    console.log("DATA EXPIRAÇÃO FINAL:", dataExpiracao);
-    console.log("ATIVO FINAL:", ativo);
-    console.log("DESTINO PAINEL:", destinoPainel);
 
     const hoje = new Date();
     const expiracao = dataExpiracao ? new Date(dataExpiracao) : null;
@@ -298,6 +471,9 @@ async function login(){
 
     window.location.href = destinoPainel;
 
+  } catch(err){
+    console.error("Erro no login:", err);
+    alert("Erro ao entrar.");
   } finally {
     btnEntrar.disabled = false;
     btnEntrar.textContent = "Entrar";
@@ -322,6 +498,7 @@ async function resetSenha(){
 window.login = login;
 window.resetSenha = resetSenha;
 </script>
+
 <script>
 const FF_CHAT_USER_KEY = "ff_chat_user";
 const FF_CHAT_CONTEXT_KEY = "ff_chat_contexto";
@@ -403,7 +580,7 @@ function abrirChatComSessao(){
 
   if(!frame || !box) return;
 
-  frame.src = "/ff-chat/ffchat-suloçoes.html?auto_login=1&origem=ffsolucoes&sistema=ffsolucoes&t=" + Date.now();
+  frame.src = "/ff-chat/ffchat-solucoes.html?auto_login=1&origem=ffsolucoes&sistema=ffsolucoes&t=" + Date.now();
   box.classList.add("ativo");
   if(botao) botao.classList.add("oculto");
 }
@@ -446,6 +623,11 @@ document.addEventListener("keydown", function(e){
 
 document.addEventListener("DOMContentLoaded", function(){
   const inputNome = document.getElementById("chatNomeCliente");
+  const botao = document.getElementById("chatBotao");
+
+  if(botao){
+    botao.style.display = "flex";
+  }
 
   if(inputNome){
     inputNome.addEventListener("keydown", function(e){
@@ -455,127 +637,11 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 });
+
+window.abrirModalNomeChat = abrirModalNomeChat;
+window.fecharChat = fecharChat;
+window.confirmarEntradaChat = confirmarEntradaChat;
 </script>
-  <!-- BOTÃO FLUTUANTE -->
-<div id="chatBotao" onclick="abrirModalNomeChat()">💬</div>
 
-<!-- BOX DO CHAT -->
-<div id="chatBox">
-  <div id="chatTopo">
-    <span>FF Soluções</span>
-    <button onclick="fecharChat()">✕</button>
-  </div>
-  <iframe id="ffChatFrame"></iframe>
-</div>
-
-<!-- MODAL NOME -->
-<div id="chatNomeOverlay">
-  <div class="chatNomeBox">
-    <h3>Digite seu nome</h3>
-    <input id="chatNomeCliente" placeholder="Seu nome">
-    <div id="chatNomeStatus"></div>
-    <button onclick="confirmarEntradaChat()">Entrar no chat</button>
-  </div>
-</div>
-
-<style>
-/* BOTÃO */
-#chatBotao{
-  position:fixed;
-  bottom:20px;
-  left:20px; /* 👈 ESQUERDO */
-  width:60px;
-  height:60px;
-  background:#22c55e;
-  border-radius:50%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:26px;
-  cursor:pointer;
-  z-index:9999;
-}
-
-/* CHAT */
-#chatBox{
-  position:fixed;
-  bottom:90px;
-  left:20px; /* 👈 ESQUERDO */
-  width:320px;
-  height:480px;
-  background:#020617;
-  border-radius:16px;
-  overflow:hidden;
-  display:none;
-  flex-direction:column;
-  z-index:9999;
-}
-
-#chatBox.ativo{
-  display:flex;
-}
-
-#chatTopo{
-  background:#0f172a;
-  padding:12px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-
-#chatTopo button{
-  background:none;
-  border:none;
-  color:#fff;
-  font-size:18px;
-  cursor:pointer;
-}
-
-#ffChatFrame{
-  flex:1;
-  border:none;
-}
-
-/* MODAL */
-#chatNomeOverlay{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,0.7);
-  display:none;
-  align-items:center;
-  justify-content:center;
-  z-index:10000;
-}
-
-#chatNomeOverlay.ativo{
-  display:flex;
-}
-
-.chatNomeBox{
-  background:#0f172a;
-  padding:20px;
-  border-radius:12px;
-  width:300px;
-  text-align:center;
-}
-
-.chatNomeBox input{
-  width:100%;
-  padding:10px;
-  margin-top:10px;
-  border-radius:8px;
-  border:none;
-}
-
-.chatNomeBox button{
-  margin-top:10px;
-  width:100%;
-  padding:10px;
-  background:#22c55e;
-  border:none;
-  border-radius:8px;
-  color:#fff;
-}
-</style>
 </body>
 </html>
