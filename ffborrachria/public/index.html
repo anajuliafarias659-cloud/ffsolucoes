@@ -132,6 +132,9 @@
       color:#fca5a5;
       min-height:18px;
     }
+    .oculto{
+      display:none !important;
+    }
     @media(max-width:640px){
       .grid{grid-template-columns:1fr}
       .topo h1{font-size:24px}
@@ -145,7 +148,7 @@
       <p>Furou o pneu? Ficou no prego? Solicite atendimento rápido e acompanhe seu chamado em tempo real.</p>
     </div>
 
-    <div class="card">
+    <div class="card" id="cardSolicitacao">
       <h2>Solicitar socorro</h2>
 
       <div class="grid">
@@ -221,8 +224,8 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>Acompanhar chamado</h2>
+    <div class="card" id="cardConsulta">
+      <h2 id="tituloConsulta">Acompanhar chamado</h2>
 
       <div class="grid">
         <div class="full">
@@ -269,6 +272,31 @@
       if(status === "finalizado") return "Finalizado";
       if(status === "cancelado") return "Cancelado";
       return status || "-";
+    }
+
+    function statusAindaAtivo(status){
+      return ["aguardando", "aceito", "em_andamento"].includes(status);
+    }
+
+    function mostrarModoSomenteConsulta(codigo = ""){
+      el("cardSolicitacao").classList.add("oculto");
+      el("tituloConsulta").textContent = "Acompanhar atendimento";
+      if(codigo){
+        el("codigoConsulta").value = codigo;
+      }
+    }
+
+    function mostrarModoNormal(){
+      el("cardSolicitacao").classList.remove("oculto");
+      el("tituloConsulta").textContent = "Acompanhar chamado";
+    }
+
+    function limparChamadoSalvo(){
+      localStorage.removeItem("ff_borracharia_codigo");
+    }
+
+    function salvarChamadoSalvo(codigo){
+      localStorage.setItem("ff_borracharia_codigo", codigo);
     }
 
     async function pegarLocalizacao(){
@@ -350,6 +378,8 @@
       el("codigoGerado").textContent = codigo;
 
       el("codigoConsulta").value = codigo;
+      salvarChamadoSalvo(codigo);
+      mostrarModoSomenteConsulta(codigo);
       mostrarMensagem("Chamado criado com sucesso.", "#86efac");
 
       consultarChamado(codigo);
@@ -392,6 +422,9 @@
         el("statusBox").className = "status-box cancelado";
         el("statusBox").textContent = "CHAMADO NÃO ENCONTRADO";
         el("infoChamado").innerHTML = "Verifique o código e tente novamente.";
+        mostrarModoNormal();
+        limparChamadoSalvo();
+        if(intervalConsulta) clearInterval(intervalConsulta);
         return;
       }
 
@@ -418,28 +451,39 @@
         <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
       `;
 
+      if(statusAindaAtivo(status)){
+        mostrarModoSomenteConsulta(codigo);
+        salvarChamadoSalvo(codigo);
+      } else {
+        mostrarModoNormal();
+        limparChamadoSalvo();
+      }
+
       if(intervalConsulta) clearInterval(intervalConsulta);
-      intervalConsulta = setInterval(() => consultarChamado(codigo), 5000);
+
+      if(statusAindaAtivo(status)){
+        intervalConsulta = setInterval(() => consultarChamado(codigo), 5000);
+      }
+    }
+
+    async function verificarChamadoSalvoAoAbrir(){
+      const codigoSalvo = localStorage.getItem("ff_borracharia_codigo");
+
+      if(!codigoSalvo){
+        mostrarModoNormal();
+        return;
+      }
+
+      el("codigoConsulta").value = codigoSalvo;
+      mostrarModoSomenteConsulta(codigoSalvo);
+      await consultarChamado(codigoSalvo);
     }
 
     el("btnLocalizacao").addEventListener("click", pegarLocalizacao);
     el("btnSolicitar").addEventListener("click", solicitarAtendimento);
     el("btnConsultar").addEventListener("click", () => consultarChamado());
 
-    const codigoSalvo = localStorage.getItem("ff_borracharia_codigo");
-    if(codigoSalvo){
-      el("codigoConsulta").value = codigoSalvo;
-      consultarChamado(codigoSalvo);
-    }
-
-    const originalSolicitar = solicitarAtendimento;
-    solicitarAtendimento = async function(){
-      await originalSolicitar();
-      const codigo = el("codigoGerado").textContent.trim();
-      if(codigo && codigo !== "--------"){
-        localStorage.setItem("ff_borracharia_codigo", codigo);
-      }
-    };
+    verificarChamadoSalvoAoAbrir();
   </script>
 </body>
 </html>
