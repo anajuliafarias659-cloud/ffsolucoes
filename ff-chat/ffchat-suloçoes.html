@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>FF Soluções Chat</title>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -18,8 +18,8 @@
       --muted:#94a3b8;
       --safe-top:env(safe-area-inset-top, 0px);
       --safe-bottom:env(safe-area-inset-bottom, 0px);
-      --real-vh:100vh;
-      --keyboard-offset:0px;
+      --app-height:100dvh;
+      --header-total:110px;
     }
 
     html,body{
@@ -35,41 +35,31 @@
       background:var(--bg);
       -webkit-text-size-adjust:100%;
       overscroll-behavior:none;
-      position:fixed;
-      inset:0;
-      width:100%;
-      height:var(--real-vh);
-      min-height:var(--real-vh);
-      overflow:hidden;
-      touch-action:manipulation;
     }
 
     .app{
       position:fixed;
       inset:0;
       width:100%;
-      height:var(--real-vh);
-      min-height:var(--real-vh);
-      max-height:var(--real-vh);
+      height:var(--app-height);
       background:var(--bg);
-      overflow:hidden;
-      isolation:isolate;
       display:flex;
       flex-direction:column;
+      overflow:hidden;
+    }
+
+    .cabecalho{
+      position:sticky;
+      top:0;
+      z-index:100;
+      flex-shrink:0;
+      background:var(--bg);
     }
 
     .topo{
-      position:relative;
-      flex-shrink:0;
       background:linear-gradient(135deg,var(--header1),var(--header2));
       padding:calc(var(--safe-top) + 12px) 14px 10px 14px;
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
       box-shadow:0 4px 20px rgba(0,0,0,.18);
-      z-index:50;
-      transform:translateZ(0);
-      backface-visibility:hidden;
     }
 
     .topo strong{
@@ -96,9 +86,7 @@
     }
 
     .status{
-      position:relative;
-      flex-shrink:0;
-      min-height:38px;
+      min-height:40px;
       padding:10px 12px;
       font-size:12px;
       color:#cbd5e1;
@@ -109,19 +97,15 @@
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
-      z-index:49;
-      transform:translateZ(0);
-      backface-visibility:hidden;
     }
 
     .chat-corpo{
-      position:relative;
       flex:1;
       min-height:0;
-      overflow:hidden;
-      background:linear-gradient(180deg,#081126,#020817);
       display:flex;
       flex-direction:column;
+      overflow:hidden;
+      background:linear-gradient(180deg,#081126,#020817);
     }
 
     .mensagens{
@@ -133,11 +117,9 @@
       display:flex;
       flex-direction:column;
       gap:10px;
-      background:linear-gradient(180deg,#081126,#020817);
       -webkit-overflow-scrolling:touch;
       overscroll-behavior:contain;
       scroll-behavior:smooth;
-      padding-bottom:12px;
     }
 
     .msg{
@@ -178,9 +160,7 @@
     }
 
     .rodape{
-      position:relative;
       flex-shrink:0;
-      min-height:78px;
       padding:10px;
       padding-bottom:calc(10px + var(--safe-bottom));
       background:#0b1327;
@@ -188,9 +168,6 @@
       display:flex;
       gap:8px;
       align-items:flex-end;
-      z-index:40;
-      transform:translateZ(0);
-      backface-visibility:hidden;
     }
 
     .rodape textarea{
@@ -235,22 +212,8 @@
     }
 
     @media (max-width:600px){
-      .app{
-        height:var(--real-vh);
-        min-height:var(--real-vh);
-        max-height:var(--real-vh);
-      }
-
       .topo{
         padding:calc(var(--safe-top) + 12px) 12px 10px 12px;
-      }
-
-      .status{
-        min-height:40px;
-      }
-
-      .rodape{
-        min-height:80px;
       }
 
       .msg{
@@ -261,13 +224,14 @@
 </head>
 <body>
 
-  <div class="app">
-    <div class="topo">
-      <strong>💬 FF Soluções</strong>
-      <small id="nomeTopo">Conectando...</small>
+  <div class="app" id="app">
+    <div class="cabecalho" id="cabecalho">
+      <div class="topo">
+        <strong>💬 FF Soluções</strong>
+        <small id="nomeTopo">Conectando...</small>
+      </div>
+      <div class="status" id="statusChat">Preparando chat...</div>
     </div>
-
-    <div class="status" id="statusChat">Preparando chat...</div>
 
     <div class="chat-corpo" id="chatCorpo">
       <div class="mensagens" id="mensagens">
@@ -297,10 +261,10 @@
     const nomeTopo = document.getElementById("nomeTopo");
     const statusChat = document.getElementById("statusChat");
     const mensagensEl = document.getElementById("mensagens");
-    const vazioChat = document.getElementById("vazioChat");
     const formChat = document.getElementById("formChat");
     const textoMensagem = document.getElementById("textoMensagem");
     const btnEnviar = document.getElementById("btnEnviar");
+    const cabecalho = document.getElementById("cabecalho");
 
     let chatUser = null;
     let chatContexto = null;
@@ -308,35 +272,20 @@
     let ultimaMensagemId = 0;
     let carregamentoInicialFeito = false;
     let buscandoMensagens = false;
-    let tecladoAberto = false;
 
-    function ajustarAreaChat(){
-      const vv = window.visualViewport;
-      let alturaViewport = window.innerHeight;
+    function atualizarAlturaApp(){
+      let h = window.innerHeight;
 
-      if(vv && vv.height){
-        alturaViewport = vv.height;
+      if(window.visualViewport && window.visualViewport.height){
+        h = window.visualViewport.height;
       }
 
-      document.documentElement.style.setProperty("--real-vh", alturaViewport + "px");
-      document.body.style.height = alturaViewport + "px";
-      document.body.style.minHeight = alturaViewport + "px";
-    }
+      document.documentElement.style.setProperty("--app-height", h + "px");
 
-    function atualizarEstadoTeclado(){
-      const vv = window.visualViewport;
-      if(!vv) return;
-
-      const diferenca = window.innerHeight - vv.height;
-      tecladoAberto = diferenca > 120;
-
-      document.documentElement.style.setProperty("--real-vh", vv.height + "px");
-
-      if(tecladoAberto){
-        requestAnimationFrame(() => {
-          rolarParaFim(false);
-        });
-      }
+      requestAnimationFrame(() => {
+        const headerH = cabecalho ? cabecalho.offsetHeight : 110;
+        document.documentElement.style.setProperty("--header-total", headerH + "px");
+      });
     }
 
     function getChatUser(){
@@ -387,6 +336,12 @@
       });
     }
 
+    function garantirTopoVisivel(){
+      if(cabecalho){
+        cabecalho.style.transform = "translateZ(0)";
+      }
+    }
+
     function limparVazio(){
       const vazio = document.getElementById("vazioChat");
       if(vazio && vazio.parentNode){
@@ -419,7 +374,7 @@
 
       limparVazio();
 
-      const deveRolar = forcarScroll || estaPertoDoFim() || tecladoAberto;
+      const deveRolar = forcarScroll || estaPertoDoFim();
       const frag = document.createDocumentFragment();
 
       for(const msg of lista){
@@ -438,8 +393,8 @@
       if(frag.childNodes.length){
         mensagensEl.appendChild(frag);
         if(deveRolar){
-          setTimeout(() => rolarParaFim(false), 30);
-          setTimeout(() => rolarParaFim(false), 180);
+          setTimeout(() => rolarParaFim(false), 20);
+          setTimeout(() => rolarParaFim(false), 150);
         }
       }
     }
@@ -464,9 +419,8 @@
       }
 
       mensagensEl.appendChild(frag);
-
-      setTimeout(() => rolarParaFim(false), 50);
-      setTimeout(() => rolarParaFim(false), 220);
+      setTimeout(() => rolarParaFim(false), 30);
+      setTimeout(() => rolarParaFim(false), 180);
     }
 
     function validarSessao(){
@@ -590,7 +544,6 @@
 
         textoMensagem.value = "";
         textoMensagem.style.height = "52px";
-        ajustarAreaChat();
 
         if(msgCriada){
           appendMensagens([msgCriada], true);
@@ -601,7 +554,8 @@
         setStatus("Mensagem enviada.");
 
         setTimeout(() => {
-          textoMensagem.focus();
+          atualizarAlturaApp();
+          garantirTopoVisivel();
           rolarParaFim(false);
         }, 80);
       }catch(err){
@@ -624,30 +578,39 @@
     textoMensagem.addEventListener("input", function(){
       this.style.height = "52px";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
-      ajustarAreaChat();
-      setTimeout(() => rolarParaFim(false), 50);
+      setTimeout(() => rolarParaFim(false), 30);
     });
 
     textoMensagem.addEventListener("focus", function(){
-      tecladoAberto = true;
-      ajustarAreaChat();
-      atualizarEstadoTeclado();
+      setTimeout(() => {
+        atualizarAlturaApp();
+        garantirTopoVisivel();
+        rolarParaFim(false);
+      }, 50);
 
-      setTimeout(() => rolarParaFim(false), 80);
-      setTimeout(() => rolarParaFim(false), 260);
-      setTimeout(() => rolarParaFim(false), 500);
+      setTimeout(() => {
+        atualizarAlturaApp();
+        garantirTopoVisivel();
+        rolarParaFim(false);
+      }, 250);
+
+      setTimeout(() => {
+        atualizarAlturaApp();
+        garantirTopoVisivel();
+        rolarParaFim(false);
+      }, 500);
     });
 
     textoMensagem.addEventListener("blur", function(){
       setTimeout(() => {
-        tecladoAberto = false;
-        ajustarAreaChat();
-        rolarParaFim(false);
+        atualizarAlturaApp();
+        garantirTopoVisivel();
       }, 250);
     });
 
     async function iniciar(){
-      ajustarAreaChat();
+      atualizarAlturaApp();
+      garantirTopoVisivel();
 
       if(!validarSessao()) return;
 
@@ -660,48 +623,37 @@
     }
 
     window.addEventListener("resize", () => {
-      ajustarAreaChat();
-      atualizarEstadoTeclado();
+      atualizarAlturaApp();
+      garantirTopoVisivel();
     });
 
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
-        ajustarAreaChat();
-        atualizarEstadoTeclado();
+        atualizarAlturaApp();
+        garantirTopoVisivel();
         rolarParaFim(false);
       }, 250);
     });
 
     if(window.visualViewport){
       window.visualViewport.addEventListener("resize", () => {
-        ajustarAreaChat();
-        atualizarEstadoTeclado();
+        atualizarAlturaApp();
+        garantirTopoVisivel();
       });
 
       window.visualViewport.addEventListener("scroll", () => {
-        ajustarAreaChat();
-        atualizarEstadoTeclado();
+        atualizarAlturaApp();
+        garantirTopoVisivel();
       });
     }
 
     document.addEventListener("focusin", function(e){
       if(e.target === textoMensagem){
-        tecladoAberto = true;
-        ajustarAreaChat();
-        atualizarEstadoTeclado();
-
-        setTimeout(() => rolarParaFim(false), 100);
-        setTimeout(() => rolarParaFim(false), 300);
-      }
-    });
-
-    document.addEventListener("focusout", function(e){
-      if(e.target === textoMensagem){
         setTimeout(() => {
-          tecladoAberto = false;
-          ajustarAreaChat();
-          atualizarEstadoTeclado();
-        }, 250);
+          atualizarAlturaApp();
+          garantirTopoVisivel();
+          rolarParaFim(false);
+        }, 80);
       }
     });
 
