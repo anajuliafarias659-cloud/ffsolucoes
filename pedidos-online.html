@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1173,9 +1172,10 @@ function montarCardPedidoDetalhado(p, isHistorico){
             >
 
             <div class="linha-botoes">
-  <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar como envio</button>
-  <button class="btn-entrega" onclick="marcarEntregue('${p.id}')">Marcar como entregue</button>
-</div>
+              <button class="btn-envio" onclick="marcarPostado('${p.id}')">Marcar envio</button>
+              <button class="btn-entrega" onclick="marcarSaiuEntrega('${p.id}')">Saiu para entrega</button>
+              <button class="btn-aceitar" onclick="marcarEntregue('${p.id}')">Entregue</button>
+            </div>
           ` : ""}
         </div>
       ` : `
@@ -1448,20 +1448,19 @@ window.marcarPostado = async function(id){
       textoLower.includes("entregador") ||
       textoLower.includes("motoboy") ||
       textoLower.includes("uber") ||
-      textoLower.includes("99")
+      textoLower.includes("bike")
     ) {
       statusEntrega = "Saiu para entrega";
-      transportadora = infoEnvio;
+      transportadora = "Entrega local";
     } else {
-      statusEntrega = "Pedido enviado";
-      transportadora = infoEnvio;
+      statusEntrega = "Postado nos Correios";
+      transportadora = "Correios";
     }
   }
 
   const { error } = await supabase
     .from("pedidos")
     .update({
-      status: "aceito",
       status_entrega: statusEntrega,
       codigo_rastreio: infoEnvio || null,
       transportadora: transportadora || null
@@ -1470,61 +1469,81 @@ window.marcarPostado = async function(id){
 
   if (error) {
     console.error(error);
-    alert("Erro ao marcar envio.");
+    alert("Erro ao salvar envio.");
     return;
   }
 
-  if (!pedidoEhMesa(pedido)) {
-    let texto = `📦 *PEDIDO EM ENVIO*\n\n`;
-    texto += `Olá ${nomeClientePedido(pedido)}!\n\n`;
-    texto += `Seu pedido foi atualizado ✅\n`;
-    texto += `Status: ${statusEntrega}\n`;
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
 
-    if (infoEnvio) {
-      texto += `Informação de envio: ${infoEnvio}\n`;
-    }
+  let texto = `📦 *PEDIDO EM ENVIO*\n\n`;
+  texto += `Olá ${nomeClientePedido(pedido)}!\n\n`;
 
-    if (pedido.codigo_acompanhamento) {
-      texto += `\nCódigo do pedido: ${pedido.codigo_acompanhamento}\n`;
-      texto += `Acompanhe aqui:\n${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}\n`;
-    }
-
-    abrirWhats(telefoneClientePedido(pedido), texto);
+  if (!infoEnvio) {
+    texto += `Seu pedido foi enviado.\n`;
+  } else if (transportadora === "Entrega local") {
+    texto += `Seu pedido saiu para entrega local.\n`;
+    texto += `Informação da entrega: ${infoEnvio}\n`;
+  } else {
+    texto += `Seu pedido foi postado nos Correios.\n`;
+    texto += `Código de rastreio: ${infoEnvio}\n`;
   }
 
+  if (transportadora) {
+    texto += `Transportadora: ${transportadora}\n`;
+  }
+
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(telefoneClientePedido(pedido), texto);
   await carregarPedidos();
   abrirDetalhe(id, false);
 };
 
-window.marcarEntregue = async function(id){
+window.marcarSaiuEntrega = async function(id){
   const pedido = pedidosCache.find(p => String(p.id) === String(id));
   if (!pedido) return;
+
+  const input = document.getElementById(`rastreio_${id}`);
+  const info = input?.value?.trim() || "";
 
   const { error } = await supabase
     .from("pedidos")
     .update({
-      status_entrega: "Entregue",
-      status: "historico"
+      status_entrega: "Saiu para entrega",
+      codigo_rastreio: info || null,
+      transportadora: "Entrega local"
     })
     .eq("id", id);
 
   if (error) {
     console.error(error);
-    alert("Erro ao marcar como entregue.");
+    alert("Erro ao atualizar entrega.");
     return;
   }
 
-  if (!pedidoEhMesa(pedido)) {
-    let texto = `✅ *PEDIDO ENTREGUE*\n\n`;
-    texto += `Olá ${nomeClientePedido(pedido)}!\n\n`;
-    texto += `Seu pedido foi entregue com sucesso.\n`;
-    texto += `Obrigado pela compra!`;
+  const linkAcompanhamento = pedido.codigo_acompanhamento
+    ? `${window.location.origin}/celular/acompanhar.html?codigo=${encodeURIComponent(pedido.codigo_acompanhamento)}`
+    : "";
 
-    abrirWhats(telefoneClientePedido(pedido), texto);
+  let texto = `🚚 *SAIU PARA ENTREGA*\n\n`;
+  texto += `Olá ${nomeClientePedido(pedido)}!\n\n`;
+  texto += `Seu pedido saiu para entrega.\n`;
+
+  if (info) {
+    texto += `Entregador / observação: ${info}\n`;
   }
 
+  if (linkAcompanhamento) {
+    texto += `\nAcompanhe seu pedido aqui:\n${linkAcompanhamento}\n`;
+  }
+
+  abrirWhats(telefoneClientePedido(pedido), texto);
   await carregarPedidos();
-  fecharDetalhe();
+  abrirDetalhe(id, false);
 };
 
 window.marcarEntregue = async function(id){
