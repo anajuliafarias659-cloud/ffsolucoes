@@ -55,6 +55,11 @@
       grid-template-columns:repeat(3,1fr);
       gap:12px;
     }
+    .grid4{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:12px;
+    }
     .full{grid-column:1/-1}
     input,button,select{
       width:100%;
@@ -114,12 +119,6 @@
       font-size:14px;
       color:#e5e7eb;
     }
-    .acoes{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:10px;
-      margin-top:12px;
-    }
     .acoes3{
       display:grid;
       grid-template-columns:1fr 1fr 1fr;
@@ -132,8 +131,24 @@
       font-size:14px;
       color:#86efac;
     }
-    @media(max-width:800px){
-      .grid,.grid3,.acoes,.acoes3{grid-template-columns:1fr}
+    .toggleBox{
+      background:#0f172a;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      padding:12px;
+    }
+    .statusLoja{
+      display:inline-block;
+      margin-top:8px;
+      padding:8px 12px;
+      border-radius:999px;
+      font-size:13px;
+      font-weight:700;
+    }
+    .abertoTag{background:#166534}
+    .fechadoTag{background:#7f1d1d}
+    @media(max-width:900px){
+      .grid,.grid3,.grid4,.acoes3{grid-template-columns:1fr}
       .hero h1{font-size:22px}
     }
   </style>
@@ -143,7 +158,7 @@
     <div class="topo">
       <div class="box hero">
         <h1>FF Borracharia - Painel do Borracheiro</h1>
-        <div class="muted">Entre com seu login, receba chamados e aceite atendimentos em tempo real.</div>
+        <div class="muted">Marque aberto ou fechado, defina raio de atendimento e receba chamados.</div>
       </div>
     </div>
 
@@ -166,19 +181,50 @@
 
     <div id="painelApp" style="display:none;">
       <div class="box">
-        <div class="grid3">
+        <div class="grid4">
           <div>
-            <label class="muted">Nome do borracheiro</label>
-            <input id="nomeBorracheiro" placeholder="Seu nome" />
+            <label class="muted">Nome da borracharia</label>
+            <input id="nomeBorracheiro" placeholder="Nome" />
           </div>
           <div>
             <label class="muted">Telefone</label>
-            <input id="telefoneBorracheiro" placeholder="Seu telefone" />
+            <input id="telefoneBorracheiro" placeholder="Telefone" />
           </div>
           <div>
             <label class="muted">Cidade</label>
-            <input id="cidadeBorracheiro" placeholder="Sua cidade" />
+            <input id="cidadeBorracheiro" placeholder="Cidade" />
           </div>
+          <div>
+            <label class="muted">Raio de atendimento (km)</label>
+            <input id="raioAtendimento" type="number" min="1" step="0.1" placeholder="10" />
+          </div>
+
+          <div>
+            <label class="muted">Latitude da borracharia</label>
+            <input id="latBorracheiro" placeholder="-9.000000" />
+          </div>
+          <div>
+            <label class="muted">Longitude da borracharia</label>
+            <input id="lngBorracheiro" placeholder="-42.000000" />
+          </div>
+
+          <div>
+            <label class="muted">Status da borracharia</label>
+            <select id="statusAberto">
+              <option value="true">Aberta</option>
+              <option value="false">Fechada</option>
+            </select>
+          </div>
+
+          <div class="toggleBox">
+            <div class="muted">Situação atual</div>
+            <div id="statusAtualLoja" class="statusLoja abertoTag">ABERTA</div>
+          </div>
+
+          <div class="full">
+            <button id="btnPegarMinhaLocalizacao" class="sec">Usar minha localização atual</button>
+          </div>
+
           <div class="full">
             <button id="btnSalvarPerfil" class="blue">Salvar perfil</button>
             <button id="btnSair" class="sec" style="margin-top:10px;">Sair</button>
@@ -243,6 +289,12 @@
       return status || "-";
     }
 
+    function atualizarStatusVisualLoja(valor){
+      const aberto = String(valor) === "true" || valor === true;
+      el("statusAtualLoja").textContent = aberto ? "ABERTA" : "FECHADA";
+      el("statusAtualLoja").className = "statusLoja " + (aberto ? "abertoTag" : "fechadoTag");
+    }
+
     async function login(){
       const email = el("email").value.trim();
       const senha = el("senha").value.trim();
@@ -301,9 +353,7 @@
 
       if(perfilExistente){
         perfilBorracheiro = perfilExistente;
-        el("nomeBorracheiro").value = perfilExistente.nome || "";
-        el("telefoneBorracheiro").value = perfilExistente.telefone || "";
-        el("cidadeBorracheiro").value = perfilExistente.cidade || "";
+        preencherPerfil(perfilExistente);
         return;
       }
 
@@ -314,7 +364,11 @@
           nome: userLogado.email?.split("@")[0] || "Borracheiro",
           telefone: "",
           cidade: "",
-          ativo: true
+          ativo: true,
+          aberto: true,
+          raio_atendimento_km: 10,
+          latitude: null,
+          longitude: null
         }])
         .select()
         .single();
@@ -325,9 +379,37 @@
       }
 
       perfilBorracheiro = criado;
-      el("nomeBorracheiro").value = criado.nome || "";
-      el("telefoneBorracheiro").value = criado.telefone || "";
-      el("cidadeBorracheiro").value = criado.cidade || "";
+      preencherPerfil(criado);
+    }
+
+    function preencherPerfil(perfil){
+      el("nomeBorracheiro").value = perfil.nome || "";
+      el("telefoneBorracheiro").value = perfil.telefone || "";
+      el("cidadeBorracheiro").value = perfil.cidade || "";
+      el("raioAtendimento").value = perfil.raio_atendimento_km ?? 10;
+      el("latBorracheiro").value = perfil.latitude ?? "";
+      el("lngBorracheiro").value = perfil.longitude ?? "";
+      el("statusAberto").value = String(perfil.aberto ?? true);
+      atualizarStatusVisualLoja(perfil.aberto ?? true);
+    }
+
+    async function pegarMinhaLocalizacao(){
+      if(!navigator.geolocation){
+        setMsg("perfilMsg", "Seu navegador não suporta localização.", "#fca5a5");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          el("latBorracheiro").value = pos.coords.latitude;
+          el("lngBorracheiro").value = pos.coords.longitude;
+          setMsg("perfilMsg", "Localização capturada com sucesso.");
+        },
+        () => {
+          setMsg("perfilMsg", "Não foi possível capturar sua localização.", "#fca5a5");
+        },
+        { enableHighAccuracy:true, timeout:10000 }
+      );
     }
 
     async function salvarPerfil(){
@@ -336,9 +418,18 @@
       const nome = el("nomeBorracheiro").value.trim();
       const telefone = el("telefoneBorracheiro").value.trim();
       const cidade = el("cidadeBorracheiro").value.trim();
+      const raio = Number(el("raioAtendimento").value || 10);
+      const latitude = el("latBorracheiro").value === "" ? null : Number(el("latBorracheiro").value);
+      const longitude = el("lngBorracheiro").value === "" ? null : Number(el("lngBorracheiro").value);
+      const aberto = el("statusAberto").value === "true";
 
       if(!nome){
         setMsg("perfilMsg", "Informe o nome.", "#fca5a5");
+        return;
+      }
+
+      if(isNaN(raio) || raio <= 0){
+        setMsg("perfilMsg", "Informe um raio válido.", "#fca5a5");
         return;
       }
 
@@ -347,7 +438,11 @@
         .update({
           nome,
           telefone,
-          cidade
+          cidade,
+          aberto,
+          raio_atendimento_km: raio,
+          latitude,
+          longitude
         })
         .eq("id", perfilBorracheiro.id)
         .select()
@@ -360,6 +455,7 @@
       }
 
       perfilBorracheiro = data;
+      atualizarStatusVisualLoja(aberto);
       setMsg("perfilMsg", "Perfil salvo com sucesso.");
     }
 
@@ -459,6 +555,11 @@
         return;
       }
 
+      if(!perfilBorracheiro.aberto){
+        alert("Sua borracharia está fechada. Abra no perfil antes de aceitar chamados.");
+        return;
+      }
+
       const valor = prompt("Digite o valor estimado do atendimento:", "30");
       const valor_estimado = Number(valor || 0);
 
@@ -527,6 +628,8 @@
     el("btnSalvarPerfil").addEventListener("click", salvarPerfil);
     el("btnAtualizar").addEventListener("click", listarChamados);
     el("filtroStatus").addEventListener("change", listarChamados);
+    el("statusAberto").addEventListener("change", (e) => atualizarStatusVisualLoja(e.target.value));
+    el("btnPegarMinhaLocalizacao").addEventListener("click", pegarMinhaLocalizacao);
 
     carregarSessao();
   </script>
