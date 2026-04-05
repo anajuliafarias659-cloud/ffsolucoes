@@ -237,8 +237,8 @@
       <div class="switch-box">
         <div class="switch-linha">
           <div>
-            <div class="switch-label">Loja aberta para vendas</div>
-            <div class="switch-sub">Desative para bloquear a vitrine e impedir novos pedidos.</div>
+            <div class="switch-label">Loja aberta manualmente</div>
+            <div class="switch-sub">Use isso quando o automático estiver desligado.</div>
           </div>
 
           <label class="switch">
@@ -248,6 +248,36 @@
         </div>
 
         <div id="statusLoja" class="status-pill status-aberta">🟢 Loja aberta</div>
+      </div>
+
+      <div class="switch-box">
+        <div class="switch-linha">
+          <div>
+            <div class="switch-label">Fechamento automático</div>
+            <div class="switch-sub">Quando ligado, a vitrine abre e fecha pelo horário abaixo.</div>
+          </div>
+
+          <label class="switch">
+            <input type="checkbox" id="fechamentoAutomatico" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div id="boxHorarios" class="hidden">
+        <div class="row">
+          <div>
+            <label>Abre</label>
+            <input type="time" id="horarioAbertura1" />
+          </div>
+          <div>
+            <label>Fecha</label>
+            <input type="time" id="horarioFechamento1" />
+          </div>
+        </div>
+        <small>
+          Exemplo: abre 18:00 e fecha 00:00. Também funciona passando da meia-noite.
+        </small>
       </div>
 
       <label>Mensagem quando a loja estiver fechada</label>
@@ -285,6 +315,11 @@
     const pixChave = document.getElementById("pixChave");
 
     const lojaAberta = document.getElementById("lojaAberta");
+    const fechamentoAutomatico = document.getElementById("fechamentoAutomatico");
+    const horarioAbertura1 = document.getElementById("horarioAbertura1");
+    const horarioFechamento1 = document.getElementById("horarioFechamento1");
+    const boxHorarios = document.getElementById("boxHorarios");
+
     const mensagemFechado = document.getElementById("mensagemFechado");
     const statusLoja = document.getElementById("statusLoja");
 
@@ -304,25 +339,82 @@
     // ===== STATE
     let APP_ID = null;
 
-    function setStatus(msg){ statusEl.textContent = msg || ""; }
-    function basePath(){ return location.pathname.split("/config")[0]; }
+    function setStatus(msg){
+      statusEl.textContent = msg || "";
+    }
+
+    function basePath(){
+      return location.pathname.split("/config")[0];
+    }
 
     function alternarCamposPagamento(){
       boxMp.classList.toggle("hidden", modoVenda.value !== "sistema");
     }
 
+    function alternarCamposHorario(){
+      boxHorarios.classList.toggle("hidden", !fechamentoAutomatico.checked);
+    }
+
+    function horaParaMinutos(hora){
+      if(!hora || !String(hora).includes(":")) return null;
+      const [h, m] = String(hora).split(":").map(Number);
+      return (h * 60) + m;
+    }
+
+    function estaDentroIntervalo(agora, inicio, fim){
+      if(inicio == null || fim == null) return false;
+
+      if(inicio < fim){
+        return agora >= inicio && agora < fim;
+      }
+
+      // Ex: 18:00 até 00:00 ou 18:00 até 02:00
+      if(inicio > fim){
+        return agora >= inicio || agora < fim;
+      }
+
+      return false;
+    }
+
+    function calcularLojaAberta(){
+      if(!fechamentoAutomatico.checked){
+        return lojaAberta.checked;
+      }
+
+      const agora = new Date();
+      const minutosAgora = (agora.getHours() * 60) + agora.getMinutes();
+
+      return estaDentroIntervalo(
+        minutosAgora,
+        horaParaMinutos(horarioAbertura1.value),
+        horaParaMinutos(horarioFechamento1.value)
+      );
+    }
+
     function atualizarStatusLojaUI(){
-      if(lojaAberta.checked){
+      const abertaAgora = calcularLojaAberta();
+
+      if(abertaAgora){
         statusLoja.className = "status-pill status-aberta";
-        statusLoja.textContent = "🟢 Aberta";
+        statusLoja.textContent = fechamentoAutomatico.checked
+          ? "🟢 Aberta agora (automático)"
+          : "🟢 Aberta";
       }else{
         statusLoja.className = "status-pill status-fechada";
-        statusLoja.textContent = "🔴 Fechado";
+        statusLoja.textContent = fechamentoAutomatico.checked
+          ? "🔴 Fechada agora (automático)"
+          : "🔴 Fechado";
       }
     }
 
     modoVenda.addEventListener("change", alternarCamposPagamento);
     lojaAberta.addEventListener("change", atualizarStatusLojaUI);
+    fechamentoAutomatico.addEventListener("change", () => {
+      alternarCamposHorario();
+      atualizarStatusLojaUI();
+    });
+    horarioAbertura1.addEventListener("input", atualizarStatusLojaUI);
+    horarioFechamento1.addEventListener("input", atualizarStatusLojaUI);
 
     // ===== AUTH / APP_ID
     async function verificarSessao(){
@@ -455,17 +547,25 @@
         pixChave.value = data.pix_chave || "";
 
         lojaAberta.checked = data.loja_fechada === true ? false : true;
+        fechamentoAutomatico.checked = data.fechamento_automatico === true;
+        horarioAbertura1.value = data.horario_abertura_1 || "";
+        horarioFechamento1.value = data.horario_fechamento_1 || "";
+
         mensagemFechado.value = data.mensagem_fechado || "Estamos fechados no momento. Tente novamente mais tarde.";
 
         previewLogo.src = data.logo_url || "";
         previewBanner.src = data.banner_url || "";
       } else {
         lojaAberta.checked = true;
+        fechamentoAutomatico.checked = false;
+        horarioAbertura1.value = "";
+        horarioFechamento1.value = "";
         mensagemFechado.value = "Estamos fechados no momento. Tente novamente mais tarde.";
       }
 
       await carregarTokenMP();
       alternarCamposPagamento();
+      alternarCamposHorario();
       atualizarStatusLojaUI();
     }
 
@@ -474,6 +574,14 @@
       try{
         if(!APP_ID){
           alert("APP_ID não carregado.");
+          return;
+        }
+
+        if(
+          fechamentoAutomatico.checked &&
+          (!horarioAbertura1.value || !horarioFechamento1.value)
+        ){
+          alert("Preencha o horário de abertura e fechamento do automático.");
           return;
         }
 
@@ -507,7 +615,10 @@
           modo_venda: modoVenda.value,
           whatsapp_numero: whatsapp.value.trim(),
           pix_chave: pixChave.value.trim(),
-          loja_fechada: !lojaAberta.checked,
+          fechamento_automatico: fechamentoAutomatico.checked,
+          horario_abertura_1: fechamentoAutomatico.checked ? horarioAbertura1.value : null,
+          horario_fechamento_1: fechamentoAutomatico.checked ? horarioFechamento1.value : null,
+          loja_fechada: !calcularLojaAberta(),
           mensagem_fechado: mensagemFechado.value.trim() || "Estamos fechados no momento. Tente novamente mais tarde."
         };
 
