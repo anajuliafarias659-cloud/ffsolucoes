@@ -97,6 +97,37 @@
       line-height:1.5;
     }
 
+    .acoes-botoes{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-top:10px;
+    }
+
+    .botao-resposta-chat{
+      border:none;
+      border-radius:12px;
+      padding:10px 12px;
+      background:rgba(34,197,94,.14);
+      color:#86efac;
+      border:1px solid rgba(34,197,94,.35);
+      font-weight:700;
+      font-size:13px;
+      cursor:pointer;
+      transition:.15s ease;
+    }
+
+    .botao-resposta-chat:hover{
+      transform:translateY(-1px);
+      background:rgba(34,197,94,.22);
+    }
+
+    .botao-resposta-chat:disabled{
+      opacity:.6;
+      cursor:not-allowed;
+      transform:none;
+    }
+
     .rodape{
       padding:12px;
       background:#0b1327;
@@ -182,6 +213,7 @@
     let chatUser = null;
     let chatContexto = null;
     let pollingMensagens = null;
+    let enviandoCliqueBotao = false;
 
     function getChatUser(){
       try{
@@ -237,6 +269,73 @@
       return true;
     }
 
+    function removerMarcadoresFluxo(texto){
+      return String(texto || "")
+        .replace(/\[#etapa:[^\]]+\]/gi, "")
+        .replace(/\[#dados:[^\]]+\]/gi, "")
+        .replace(/\[#botoes:[^\]]+\]/gi, "")
+        .trim();
+    }
+
+    function extrairBotoesDaMensagem(texto){
+      const match = String(texto || "").match(/\[#botoes:([^\]]+)\]/i);
+      if(!match) return [];
+
+      return match[1]
+        .split("|")
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+
+    function desabilitarBotoesDasMensagens(){
+      document.querySelectorAll(".botao-resposta-chat").forEach(btn => {
+        btn.disabled = true;
+      });
+    }
+
+    async function enviarMensagem(texto){
+      const payload = {
+        app_id: chatContexto.app_id || null,
+        sistema_id: chatContexto.sistema_id || "fffilmes",
+        sistema_nome: chatContexto.sistema_nome || "FFFILMES",
+        origem: chatContexto.origem || "fffilmes",
+        chat_room_id: chatContexto.chat_room_id,
+        nome_cliente: chatContexto.cliente_nome || chatUser.nome || "Cliente",
+        remetente: "visitante",
+        remetente_id: chatUser.numero || null,
+        mensagem: texto,
+        lida: false
+      };
+
+      const { error } = await supabaseChat
+        .from("chat_mensagens")
+        .insert(payload);
+
+      if(error) throw error;
+    }
+
+    async function responderBotao(textoBotao, botaoEl){
+      if(enviandoCliqueBotao) return;
+
+      enviandoCliqueBotao = true;
+      setStatus("Enviando resposta...");
+
+      try{
+        desabilitarBotoesDasMensagens();
+        if(botaoEl) botaoEl.disabled = true;
+
+        await enviarMensagem(textoBotao);
+        await carregarMensagens();
+        setStatus("Resposta enviada.");
+      }catch(err){
+        console.error("Erro ao enviar resposta por botão:", err);
+        setStatus("Erro ao enviar resposta.");
+        alert("Erro ao enviar resposta.");
+      }finally{
+        enviandoCliqueBotao = false;
+      }
+    }
+
     async function carregarMensagens(){
       if(!chatContexto?.chat_room_id) return;
 
@@ -263,38 +362,50 @@
       for(const msg of lista){
         const div = document.createElement("div");
         div.className = "msg " + (msg.remetente === "visitante" ? "visitante" : "admin");
+
+        const textoLimpo = removerMarcadoresFluxo(msg.mensagem || "");
+        const botoes = msg.remetente === "admin"
+          ? extrairBotoesDaMensagem(msg.mensagem || "")
+          : [];
+
+        let htmlBotoes = "";
+        if(botoes.length){
+          htmlBotoes = `
+            <div class="acoes-botoes">
+              ${botoes.map((botaoTexto, idx) => `
+                <button
+                  type="button"
+                  class="botao-resposta-chat"
+                  data-botao-texto="${escapeHtml(botaoTexto)}"
+                  data-botao-idx="${idx}">
+                  ${escapeHtml(botaoTexto)}
+                </button>
+              `).join("")}
+            </div>
+          `;
+        }
+
         div.innerHTML = `
-          <div>${escapeHtml(msg.mensagem)}</div>
+          <div>${escapeHtml(textoLimpo).replace(/\n/g, "<br>")}</div>
+          ${htmlBotoes}
           <div class="meta">
             ${escapeHtml(msg.remetente === "visitante" ? (msg.nome_cliente || "Você") : "Suporte")}
             • ${escapeHtml(formatarData(msg.created_at))}
           </div>
         `;
+
+        const botoesEls = div.querySelectorAll(".botao-resposta-chat");
+        botoesEls.forEach(botao => {
+          botao.addEventListener("click", async () => {
+            const textoBotao = botao.getAttribute("data-botao-texto") || "";
+            await responderBotao(textoBotao, botao);
+          });
+        });
+
         mensagensEl.appendChild(div);
       }
 
       mensagensEl.scrollTop = mensagensEl.scrollHeight;
-    }
-
-    async function enviarMensagem(texto){
-      const payload = {
-        app_id: chatContexto.app_id || null,
-        sistema_id: chatContexto.sistema_id || "fffilmes",
-        sistema_nome: chatContexto.sistema_nome || "FFFILMES",
-        origem: chatContexto.origem || "fffilmes",
-        chat_room_id: chatContexto.chat_room_id,
-        nome_cliente: chatContexto.cliente_nome || chatUser.nome || "Cliente",
-        remetente: "visitante",
-        remetente_id: chatUser.numero || null,
-        mensagem: texto,
-        lida: false
-      };
-
-      const { error } = await supabaseChat
-        .from("chat_mensagens")
-        .insert(payload);
-
-      if(error) throw error;
     }
 
     formChat.addEventListener("submit", async function(e){
