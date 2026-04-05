@@ -133,6 +133,11 @@
     .em_andamento{background:#0f766e}
     .finalizado{background:#166534}
     .cancelado{background:#7f1d1d}
+    .meuHistorico{
+      background:#4c1d95;
+      color:#fff;
+      margin-left:6px;
+    }
     .titulo{
       font-size:18px;
       font-weight:800;
@@ -208,7 +213,6 @@
     }
     a.link:hover{text-decoration:underline}
 
-    /* NOVO BLOCO DE COMPARTILHAR */
     .shareBox{
       display:grid;
       grid-template-columns:repeat(3,1fr);
@@ -256,7 +260,6 @@
         <h1>FF Borracharia - Painel do Borracheiro</h1>
         <div class="muted">Marque aberto ou fechado, defina raio de atendimento e receba chamados.</div>
 
-        <!-- NOVO: BOTÕES DE LINK -->
         <div class="shareBox">
           <a
             href="https://www.ffsolucoes.com.br/borracharia/public"
@@ -641,16 +644,35 @@
       intervalLista = setInterval(listarChamados, 5000);
     }
 
+    function montarFiltroLista(filtro){
+      const idAtual = perfilBorracheiro?.id;
+
+      if(!idAtual) return "";
+
+      if(filtro === "todos"){
+        return `and(status.eq.aguardando,borracheiro_id.is.null),borracheiro_id.eq.${idAtual}`;
+      }
+
+      if(filtro === "aguardando"){
+        return `and(status.eq.aguardando,borracheiro_id.is.null)`;
+      }
+
+      return `and(status.eq.${filtro},borracheiro_id.eq.${idAtual})`;
+    }
+
     async function listarChamados(){
+      if(!perfilBorracheiro?.id) return;
+
       const filtro = el("filtroStatus").value;
+      const filtroOr = montarFiltroLista(filtro);
 
       let query = supabase
         .from("chamados_borracharia")
         .select("*")
         .order("created_at", { ascending:false });
 
-      if(filtro !== "todos"){
-        query = query.eq("status", filtro);
+      if(filtroOr){
+        query = query.or(filtroOr);
       }
 
       const { data, error } = await query;
@@ -676,7 +698,10 @@
         const valorEstimado = Number(item.valor_estimado || 0).toFixed(2);
         const valorFinal = Number(item.valor_final || 0).toFixed(2);
 
-        const podeAceitar = status === "aguardando";
+        const ehMeuChamado = item.borracheiro_id === perfilBorracheiro.id;
+        const ehHistorico = ehMeuChamado && ["aceito","em_andamento","finalizado","cancelado"].includes(status);
+
+        const podeAceitar = status === "aguardando" && !item.borracheiro_id;
         const podeIniciar = status === "aceito" && item.borracheiro_id === perfilBorracheiro.id;
         const podeFinalizar = (status === "aceito" || status === "em_andamento") && item.borracheiro_id === perfilBorracheiro.id;
 
@@ -694,6 +719,7 @@
             <div class="card-top">
               <div>
                 <div class="tag ${status}">${traduzirStatus(status)}</div>
+                ${ehHistorico ? `<div class="tag meuHistorico">Meu histórico</div>` : ``}
                 <div class="titulo">${item.tipo_veiculo || "-"} • ${item.problema || "-"}</div>
                 <div class="subtitulo">Código: ${item.codigo_acompanhamento || "-"}</div>
               </div>
@@ -756,7 +782,7 @@
       const valor = prompt("Digite o valor estimado do atendimento:", "30");
       const valor_estimado = Number(valor || 0);
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("chamados_borracharia")
         .update({
           status: "aceito",
@@ -765,11 +791,19 @@
           aceito_em: new Date().toISOString()
         })
         .eq("id", id)
-        .eq("status", "aguardando");
+        .eq("status", "aguardando")
+        .is("borracheiro_id", null)
+        .select();
 
       if(error){
         console.error(error);
         alert("Erro ao aceitar chamado.");
+        return;
+      }
+
+      if(!data || !data.length){
+        alert("Esse atendimento já foi pego por outra borracharia.");
+        await listarChamados();
         return;
       }
 
