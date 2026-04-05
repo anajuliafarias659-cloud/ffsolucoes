@@ -1240,107 +1240,130 @@ ${LINK_PAINEL_MOBILE}`;
     }
 
     async function processarMensagensAutomaticas(){
-      if(processandoAutoResposta) return;
-      processandoAutoResposta = true;
+  if(processandoAutoResposta) return;
+  processandoAutoResposta = true;
 
-      try{
-        const conversas = agruparConversas(todasMensagens);
+  try{
+    const conversas = agruparConversas(todasMensagens);
+    if(!conversas.length) return;
 
-        for(const conversa of conversas){
-          const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
-          if(!mensagensConversa.length) continue;
+    // processa só as mais recentes
+    for(const conversa of conversas.slice(0, 10)){
+      const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
+      if(!mensagensConversa.length) continue;
 
-          const mensagensVisitante = mensagensConversa.filter(m => m.remetente === "visitante");
-          const mensagensAdmin = mensagensConversa.filter(m => m.remetente === "admin");
+      const mensagensVisitante = mensagensConversa.filter(m => m.remetente === "visitante");
+      const mensagensAdmin = mensagensConversa.filter(m => m.remetente === "admin");
 
-          if(!mensagensVisitante.length) continue;
+      if(!mensagensVisitante.length) continue;
 
-          const primeiraMensagemVisitante = mensagensVisitante[0];
-          const ultimaMensagemVisitante = mensagensVisitante[mensagensVisitante.length - 1];
-          const ultimaMensagemAdmin = mensagensAdmin.length ? mensagensAdmin[mensagensAdmin.length - 1] : null;
+      const primeiraMensagemVisitante = mensagensVisitante[0];
+      const ultimaMensagemVisitante = mensagensVisitante[mensagensVisitante.length - 1];
+      const ultimaMensagemAdmin = mensagensAdmin.length ? mensagensAdmin[mensagensAdmin.length - 1] : null;
 
-          if(!adminJaMandouBoasVindas(mensagensAdmin)){
-            const textoInicial = mensagemAutomaticaInicial(
-              conversa.nome_cliente || primeiraMensagemVisitante.nome_cliente || "Cliente"
-            );
-            await enviarRespostaAutomaticaParaConversa(conversa, textoInicial);
-            continue;
-          }
+      if(!adminJaMandouBoasVindas(mensagensAdmin)){
+        const textoInicial = mensagemAutomaticaInicial(
+          conversa.nome_cliente || primeiraMensagemVisitante.nome_cliente || "Cliente"
+        );
 
-          if(
-            ultimaMensagemVisitante &&
-            (!ultimaMensagemAdmin || new Date(ultimaMensagemVisitante.created_at) > new Date(ultimaMensagemAdmin.created_at))
-          ){
-            const etapaAtual = obterUltimaEtapaDoAdmin(mensagensAdmin) || "menu_principal";
-            const respostaAuto = montarRespostaFluxo(etapaAtual, ultimaMensagemVisitante.mensagem);
+        await enviarRespostaAutomaticaParaConversa(conversa, textoInicial);
 
-            if(respostaAuto){
-              const ultimaAdminTexto = mensagensAdmin.length
-                ? String(mensagensAdmin[mensagensAdmin.length - 1].mensagem || "").trim()
-                : "";
+        todasMensagens.unshift({
+          chat_room_id: conversa.chat_room_id,
+          app_id: conversa.app_id || null,
+          sistema_id: conversa.sistema_id || null,
+          sistema_nome: conversa.sistema_nome || null,
+          nome_cliente: conversa.nome_cliente || "Cliente",
+          nome_admin: ADMIN_NOME,
+          remetente: "admin",
+          remetente_id: ADMIN_ID,
+          mensagem: textoInicial,
+          created_at: new Date().toISOString(),
+          lida: true
+        });
 
-              if(ultimaAdminTexto !== respostaAuto.trim()){
-                await enviarRespostaAutomaticaParaConversa(conversa, respostaAuto);
-              }
-            }
+        continue;
+      }
+
+      if(
+        ultimaMensagemVisitante &&
+        (!ultimaMensagemAdmin || new Date(ultimaMensagemVisitante.created_at) > new Date(ultimaMensagemAdmin.created_at))
+      ){
+        const etapaAtual = obterUltimaEtapaDoAdmin(mensagensAdmin) || "menu_principal";
+        const respostaAuto = montarRespostaFluxo(etapaAtual, ultimaMensagemVisitante.mensagem);
+
+        if(respostaAuto){
+          const ultimaAdminTexto = mensagensAdmin.length
+            ? String(mensagensAdmin[mensagensAdmin.length - 1].mensagem || "").trim()
+            : "";
+
+          if(ultimaAdminTexto !== respostaAuto.trim()){
+            await enviarRespostaAutomaticaParaConversa(conversa, respostaAuto);
+
+            todasMensagens.unshift({
+              chat_room_id: conversa.chat_room_id,
+              app_id: conversa.app_id || null,
+              sistema_id: conversa.sistema_id || null,
+              sistema_nome: conversa.sistema_nome || null,
+              nome_cliente: conversa.nome_cliente || "Cliente",
+              nome_admin: ADMIN_NOME,
+              remetente: "admin",
+              remetente_id: ADMIN_ID,
+              mensagem: respostaAuto,
+              created_at: new Date().toISOString(),
+              lida: true
+            });
           }
         }
-      }catch(err){
-        console.error("Erro no auto atendimento:", err);
-      }finally{
-        processandoAutoResposta = false;
       }
     }
-
+  }catch(err){
+    console.error("Erro no auto atendimento:", err);
+  }finally{
+    processandoAutoResposta = false;
+  }
+}
     async function carregarConversas(manterSelecao = true){
-      try{
-        const { data, error } = await supabaseAdminChat
-          .from("chat_mensagens")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(2000);
+  try{
+    const { data, error } = await supabaseAdminChat
+      .from("chat_mensagens")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(120);
 
-        if(error) throw error;
+    if(error) throw error;
 
-        todasMensagens = Array.isArray(data) ? data : [];
+    todasMensagens = Array.isArray(data) ? data : [];
 
-        await processarMensagensAutomaticas();
+    await processarMensagensAutomaticas();
 
-        const { data: dataAtualizada, error: errorAtualizado } = await supabaseAdminChat
-          .from("chat_mensagens")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(2000);
+    conversasAgrupadas = agruparConversas(todasMensagens);
 
-        if(errorAtualizado) throw errorAtualizado;
+    for(const conversa of conversasAgrupadas.slice(0, 10)){
+      const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
+      verificarDisparoWhats(conversa, mensagensConversa);
+    }
 
-        todasMensagens = Array.isArray(dataAtualizada) ? dataAtualizada : [];
-        conversasAgrupadas = agruparConversas(todasMensagens);
+    if(manterSelecao && conversaAtual){
+      const novaAtual = conversasAgrupadas.find(c => c.chat_room_id === conversaAtual.chat_room_id);
+      if(novaAtual){
+        conversaAtual = novaAtual;
+        chatTituloEl.textContent = novaAtual.nome_cliente || "Cliente";
+        chatSubtituloEl.textContent =
+          `Sistema: ${novaAtual.sistema_nome || novaAtual.sistema_id || "-"}`
+          + ` | app_id: ${novaAtual.app_id || "-"}`
+          + ` | sala: ${novaAtual.chat_room_id || "-"}`;
 
-        for(const conversa of conversasAgrupadas){
-          const mensagensConversa = obterMensagensDaConversa(conversa.chat_room_id);
-          verificarDisparoWhats(conversa, mensagensConversa);
-        }
-
-        if(manterSelecao && conversaAtual){
-          const novaAtual = conversasAgrupadas.find(c => c.chat_room_id === conversaAtual.chat_room_id);
-          if(novaAtual){
-            conversaAtual = novaAtual;
-            chatTituloEl.textContent = novaAtual.nome_cliente || "Cliente";
-            chatSubtituloEl.textContent =
-              `Sistema: ${novaAtual.sistema_nome || novaAtual.sistema_id || "-"}`
-              + ` | app_id: ${novaAtual.app_id || "-"}`
-              + ` | sala: ${novaAtual.chat_room_id || "-"}`;
-            renderizarMensagens(novaAtual.chat_room_id);
-          }
-        }
-
-        renderizarConversas();
-      }catch(err){
-        console.error(err);
-        estadoListaEl.textContent = "Erro ao carregar conversas.";
+        renderizarMensagens(novaAtual.chat_room_id);
       }
     }
+
+    renderizarConversas();
+  }catch(err){
+    console.error(err);
+    estadoListaEl.textContent = "Erro ao carregar conversas.";
+  }
+}
 
     formRespostaEl.addEventListener("submit", async function(e){
       e.preventDefault();
@@ -1388,7 +1411,7 @@ ${LINK_PAINEL_MOBILE}`;
         if(conversaAtual){
           chatStatusEl.textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR");
         }
-      }, 3000);
+      }, 500);
     }
 
     iniciarPainel();
