@@ -20,6 +20,8 @@
       --safe-bottom:env(safe-area-inset-bottom, 0px);
       --topo-real:110px;
       --rodape-real:84px;
+      --vvh:100vh;
+      --keyboard-offset:0px;
     }
 
     html,body{
@@ -45,6 +47,7 @@
       inset:0;
       overflow:hidden;
       background:var(--bg);
+      height:var(--vvh);
     }
 
     .cabecalho-fixo{
@@ -54,6 +57,7 @@
       right:0;
       z-index:9999;
       background:var(--bg);
+      transform:translateY(0);
     }
 
     .topo{
@@ -108,9 +112,10 @@
       left:0;
       right:0;
       top:var(--topo-real);
-      bottom:var(--rodape-real);
+      bottom:calc(var(--rodape-real) + var(--keyboard-offset));
       overflow:hidden;
       background:linear-gradient(180deg,#081126,#020817);
+      transition:bottom .18s ease;
     }
 
     .mensagens{
@@ -149,6 +154,11 @@
       color:#fff;
     }
 
+    .msg-texto{
+      white-space:pre-wrap;
+      line-height:1.55;
+    }
+
     .meta{
       margin-top:6px;
       font-size:11px;
@@ -161,6 +171,37 @@
       padding:24px 14px;
       font-size:14px;
       line-height:1.5;
+    }
+
+    .quick-actions{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      margin-top:12px;
+    }
+
+    .quick-btn{
+      width:100%;
+      border:none;
+      background:linear-gradient(135deg,#1d4ed8,#2563eb);
+      color:#fff;
+      padding:12px 14px;
+      border-radius:12px;
+      font-size:13px;
+      font-weight:800;
+      text-align:left;
+      cursor:pointer;
+      transition:.15s;
+      box-shadow:0 8px 18px rgba(0,0,0,.18);
+    }
+
+    .quick-btn:hover{
+      filter:brightness(1.05);
+    }
+
+    .quick-btn:disabled{
+      opacity:.6;
+      cursor:not-allowed;
     }
 
     .rodape-fixo{
@@ -177,6 +218,8 @@
       display:flex;
       gap:8px;
       align-items:flex-end;
+      transform:translateY(calc(var(--keyboard-offset) * -1));
+      transition:transform .18s ease;
     }
 
     .rodape-fixo textarea{
@@ -268,6 +311,7 @@
     const textoMensagem = document.getElementById("textoMensagem");
     const btnEnviar = document.getElementById("btnEnviar");
     const cabecalhoFixo = document.getElementById("cabecalhoFixo");
+    const areaMensagens = document.getElementById("areaMensagens");
 
     let chatUser = null;
     let chatContexto = null;
@@ -282,6 +326,18 @@
 
       document.documentElement.style.setProperty("--topo-real", headerH + "px");
       document.documentElement.style.setProperty("--rodape-real", footerH + "px");
+    }
+
+    function atualizarViewportVisual(){
+      const vv = window.visualViewport;
+      const altura = vv ? vv.height : window.innerHeight;
+      const offsetTop = vv ? vv.offsetTop : 0;
+      const keyboardOffset = Math.max(0, window.innerHeight - (altura + offsetTop));
+
+      document.documentElement.style.setProperty("--vvh", altura + "px");
+      document.documentElement.style.setProperty("--keyboard-offset", keyboardOffset + "px");
+
+      travarAlturasFixas();
     }
 
     function getChatUser(){
@@ -339,22 +395,79 @@
       }
     }
 
+    function removerMarcadoresChat(texto){
+      return String(texto || "")
+        .replace(/\[#etapa:[^\]]+\]/gi, "")
+        .replace(/\[#dados:[^\]]+\]/gi, "")
+        .replace(/\[#botoes:[^\]]+\]/gi, "")
+        .trim();
+    }
+
+    function extrairBotoesMensagem(texto){
+      const match = String(texto || "").match(/\[#botoes:([^\]]+)\]/i);
+      if(!match) return [];
+
+      return match[1]
+        .split("|")
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+
+    async function enviarOpcaoRapida(texto){
+      await enviarMensagem(texto);
+      await buscarNovasMensagens();
+    }
+
     function criarMensagemElemento(msg){
       const ehVisitante = msg.remetente === "visitante";
       const nomeExibicao = ehVisitante
         ? (msg.nome_cliente || chatContexto.cliente_nome || "Você")
         : (msg.nome_admin || "Suporte");
 
+      const textoLimpo = removerMarcadoresChat(msg.mensagem);
+      const botoes = !ehVisitante ? extrairBotoesMensagem(msg.mensagem) : [];
+
       const div = document.createElement("div");
       div.className = "msg " + (ehVisitante ? "visitante" : "admin");
       div.dataset.msgId = String(msg.id || "");
 
       div.innerHTML = `
-        <div>${escapeHtml(msg.mensagem)}</div>
+        <div class="msg-texto">${escapeHtml(textoLimpo)}</div>
         <div class="meta">
           ${escapeHtml(nomeExibicao)} • ${escapeHtml(formatarData(msg.created_at))}
         </div>
       `;
+
+      if(botoes.length){
+        const areaBotoes = document.createElement("div");
+        areaBotoes.className = "quick-actions";
+
+        botoes.forEach(opcao => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "quick-btn";
+          btn.textContent = opcao;
+
+          btn.addEventListener("click", async () => {
+            const numero = opcao.split("-")[0].trim();
+            areaBotoes.querySelectorAll("button").forEach(b => b.disabled = true);
+            setStatus("Enviando opção...");
+            try{
+              await enviarOpcaoRapida(numero);
+              setStatus("Opção enviada.");
+            }catch(err){
+              console.error("Erro ao enviar opção:", err);
+              areaBotoes.querySelectorAll("button").forEach(b => b.disabled = false);
+              setStatus("Erro ao enviar opção.");
+            }
+          });
+
+          areaBotoes.appendChild(btn);
+        });
+
+        div.appendChild(areaBotoes);
+      }
+
       return div;
     }
 
@@ -442,7 +555,7 @@
           .select("id, mensagem, remetente, nome_cliente, nome_admin, created_at")
           .eq("chat_room_id", chatContexto.chat_room_id)
           .order("id", { ascending: false })
-          .limit(40);
+          .limit(60);
 
         if(error){
           console.error("Erro ao carregar mensagens iniciais:", error);
@@ -473,7 +586,7 @@
         if(ultimaMensagemId > 0){
           query = query.gt("id", ultimaMensagemId);
         }else{
-          query = query.limit(40);
+          query = query.limit(60);
         }
 
         const { data, error } = await query;
@@ -533,7 +646,7 @@
 
         textoMensagem.value = "";
         textoMensagem.style.height = "52px";
-        travarAlturasFixas();
+        atualizarViewportVisual();
 
         if(msgCriada){
           appendMensagens([msgCriada], true);
@@ -562,27 +675,29 @@
     textoMensagem.addEventListener("input", function(){
       this.style.height = "52px";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
-      travarAlturasFixas();
+      atualizarViewportVisual();
     });
 
     textoMensagem.addEventListener("focus", function(){
       setTimeout(() => {
-        travarAlturasFixas();
+        atualizarViewportVisual();
         rolarParaFim(false);
       }, 120);
 
       setTimeout(() => {
+        atualizarViewportVisual();
         rolarParaFim(false);
       }, 320);
     });
 
     textoMensagem.addEventListener("blur", function(){
       setTimeout(() => {
-        travarAlturasFixas();
+        atualizarViewportVisual();
       }, 250);
     });
 
     async function iniciar(){
+      atualizarViewportVisual();
       travarAlturasFixas();
 
       if(!validarSessao()) return;
@@ -592,16 +707,29 @@
       if(pollingMensagens) clearInterval(pollingMensagens);
       pollingMensagens = setInterval(async () => {
         await buscarNovasMensagens();
-      }, 4000);
+      }, 1000);
     }
 
-    window.addEventListener("resize", travarAlturasFixas);
+    window.addEventListener("resize", () => {
+      atualizarViewportVisual();
+    });
+
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
-        travarAlturasFixas();
+        atualizarViewportVisual();
         rolarParaFim(false);
       }, 250);
     });
+
+    if(window.visualViewport){
+      window.visualViewport.addEventListener("resize", () => {
+        atualizarViewportVisual();
+      });
+
+      window.visualViewport.addEventListener("scroll", () => {
+        atualizarViewportVisual();
+      });
+    }
 
     iniciar();
   </script>
