@@ -52,6 +52,27 @@ async function gerarSlugUnico(nome){
   }
 }
 
+/* 🔥 NOME BONITO DO TIPO */
+function nomeBonitoTipo(tipo){
+  const mapa = {
+    bar: "Bar",
+    mercado: "Mercado",
+    locadora: "Locadora",
+    hotel: "Hotel",
+    "loja-roupas": "Loja de Roupas",
+    celular: "Loja de Celular",
+    provedor: "Provedor",
+    gas: "Água e Gás"
+  };
+
+  return mapa[tipo] || "Loja";
+}
+
+/* 🔥 MONTAR LINK DA VITRINE */
+function montarLinkVitrine(slug){
+  return `${window.location.origin}/loj/${slug}`;
+}
+
 /* 🚀 CRIAR DEMO */
 window.criarDemo = async () => {
   const nome = document.getElementById("nomeNegocio").value.trim();
@@ -74,7 +95,7 @@ window.criarDemo = async () => {
   botao.textContent = "Criando...";
 
   try {
-    /* 1 - CRIA USUÁRIO */
+    /* 1 - CRIA USUÁRIO AUTH */
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password: senha
@@ -89,7 +110,7 @@ window.criarDemo = async () => {
     const expiracao = new Date();
     expiracao.setDate(expiracao.getDate() + 15);
 
-    /* 🔥 3 - GERA SLUG AUTOMÁTICO */
+    /* 3 - GERA SLUG AUTOMÁTICO */
     const slug = await gerarSlugUnico(nome);
 
     /* 4 - CRIA APP */
@@ -98,6 +119,7 @@ window.criarDemo = async () => {
       .insert({
         nome: nome,
         tipo: tipo,
+        sistema: tipo,
         slug: slug,
         plano: "demo",
         data_expiracao: expiracao.toISOString(),
@@ -108,22 +130,72 @@ window.criarDemo = async () => {
 
     if (appError) throw appError;
 
-    /* 5 - USUÁRIO */
+    /* 5 - CRIA USUÁRIO DO SISTEMA */
     const { error: usuarioError } = await supabase
       .from("usuarios")
       .insert({
         id: userId,
-        nome: email,
+        nome: nome,
         email: email,
         tipo: "admin",
+        sistema: tipo,
         app_id: app.id,
-        ativo: true
+        ativo: true,
+        data_expiracao: expiracao.toISOString()
       });
 
     if (usuarioError) throw usuarioError;
 
-    /* 🎉 SUCESSO */
-    alert(`Conta criada!\n\nSeu link:\n/public/${slug}`);
+    /* 6 - CRIA CONFIG SITE BÁSICA */
+    const { error: configError } = await supabase
+      .from("config_site")
+      .insert({
+        app_id: app.id,
+        nome_site: nome,
+        telefone: "",
+        whatsapp_numero: "",
+        tema_site: "padrao",
+        modo_venda: "whatsapp",
+        modo_exibicao: "aberta",
+        loja_fechada: false,
+        mensagem_fechado: "Estamos fechados no momento. Tente novamente mais tarde."
+      });
+
+    if (configError) {
+      console.warn("Erro ao criar config_site inicial:", configError);
+    }
+
+    /* 7 - SE FOR GÁS, CRIA CONFIG DA ENTREGA */
+    if (tipo === "gas") {
+      const { error: gasError } = await supabase
+        .from("lojas_gas")
+        .insert({
+          app_id: app.id,
+          nome_loja: nome,
+          endereco: "",
+          latitude: null,
+          longitude: null,
+          raio_entrega_km: 8,
+          velocidade_media_kmh: 30,
+          taxa_base: 0,
+          taxa_por_km: 2.5,
+          ativa: true
+        });
+
+      if (gasError) {
+        console.warn("Erro ao criar lojas_gas inicial:", gasError);
+      }
+    }
+
+    /* 8 - LINK FINAL */
+    const linkVitrine = montarLinkVitrine(slug);
+
+    alert(
+      `Conta criada com sucesso!\n\n` +
+      `Tipo: ${nomeBonitoTipo(tipo)}\n` +
+      `Link da vitrine:\n${linkVitrine}\n\n` +
+      `Agora faça login para entrar no painel.`
+    );
 
     window.location.href = "/auth/login.html";
 
@@ -140,13 +212,15 @@ window.criarDemo = async () => {
 <style>
 body{
   margin:0;
-  height:100vh;
+  min-height:100vh;
   display:flex;
   justify-content:center;
   align-items:center;
   background:#020617;
   font-family:Arial;
   color:#fff;
+  padding:16px;
+  box-sizing:border-box;
 }
 .box{
   width:100%;
@@ -154,6 +228,7 @@ body{
   background:#0f172a;
   padding:30px;
   border-radius:20px;
+  box-sizing:border-box;
 }
 input,select,button{
   width:100%;
@@ -161,14 +236,27 @@ input,select,button{
   margin-top:10px;
   border-radius:12px;
   border:none;
+  box-sizing:border-box;
+}
+input,select{
+  background:#111827;
+  color:#fff;
 }
 button{
   background:#22c55e;
   font-weight:bold;
   cursor:pointer;
+  color:#04120a;
 }
 button:disabled{
   opacity:.7;
+  cursor:not-allowed;
+}
+small{
+  display:block;
+  color:#94a3b8;
+  margin-top:8px;
+  line-height:1.4;
 }
 </style>
 </head>
@@ -188,12 +276,18 @@ button:disabled{
     <option value="loja-roupas">Loja de Roupas</option>
     <option value="celular">📱 Loja de Celular</option>
     <option value="provedor">📡 Provedor</option>
+    <option value="gas">🛢️ Água e Gás</option>
   </select>
 
   <input id="usuarioAdmin" type="email" placeholder="E-mail">
   <input id="senhaAdmin" type="password" placeholder="Senha">
 
   <button id="btnCriar" onclick="criarDemo()">Criar Conta</button>
+
+  <small>
+    Ao criar a conta, o sistema gera automaticamente o app, o usuário admin,
+    a config básica da vitrine e, no caso de Água e Gás, a configuração inicial da entrega.
+  </small>
 </div>
 
 </body>
