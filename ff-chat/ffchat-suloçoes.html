@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
   <title>FF Soluções Chat</title>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -19,6 +19,7 @@
       --safe-top:env(safe-area-inset-top, 0px);
       --safe-bottom:env(safe-area-inset-bottom, 0px);
       --real-vh:100vh;
+      --keyboard-offset:0px;
     }
 
     html,body{
@@ -34,14 +35,22 @@
       background:var(--bg);
       -webkit-text-size-adjust:100%;
       overscroll-behavior:none;
-      position:relative;
+      position:fixed;
+      inset:0;
+      width:100%;
+      height:var(--real-vh);
+      min-height:var(--real-vh);
+      overflow:hidden;
+      touch-action:manipulation;
     }
 
     .app{
       position:fixed;
       inset:0;
+      width:100%;
       height:var(--real-vh);
       min-height:var(--real-vh);
+      max-height:var(--real-vh);
       background:var(--bg);
       overflow:hidden;
       isolation:isolate;
@@ -58,7 +67,7 @@
       flex-direction:column;
       justify-content:center;
       box-shadow:0 4px 20px rgba(0,0,0,.18);
-      z-index:30;
+      z-index:50;
       transform:translateZ(0);
       backface-visibility:hidden;
     }
@@ -100,7 +109,7 @@
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
-      z-index:29;
+      z-index:49;
       transform:translateZ(0);
       backface-visibility:hidden;
     }
@@ -128,6 +137,7 @@
       -webkit-overflow-scrolling:touch;
       overscroll-behavior:contain;
       scroll-behavior:smooth;
+      padding-bottom:12px;
     }
 
     .msg{
@@ -178,7 +188,9 @@
       display:flex;
       gap:8px;
       align-items:flex-end;
-      z-index:20;
+      z-index:40;
+      transform:translateZ(0);
+      backface-visibility:hidden;
     }
 
     .rodape textarea{
@@ -196,6 +208,8 @@
       font-size:16px;
       font-family:Arial,Helvetica,sans-serif;
       overflow:auto;
+      -webkit-appearance:none;
+      appearance:none;
     }
 
     .rodape textarea::placeholder{
@@ -224,6 +238,7 @@
       .app{
         height:var(--real-vh);
         min-height:var(--real-vh);
+        max-height:var(--real-vh);
       }
 
       .topo{
@@ -293,11 +308,35 @@
     let ultimaMensagemId = 0;
     let carregamentoInicialFeito = false;
     let buscandoMensagens = false;
+    let tecladoAberto = false;
 
     function ajustarAreaChat(){
       const vv = window.visualViewport;
-      const alturaViewport = vv ? vv.height : window.innerHeight;
+      let alturaViewport = window.innerHeight;
+
+      if(vv && vv.height){
+        alturaViewport = vv.height;
+      }
+
       document.documentElement.style.setProperty("--real-vh", alturaViewport + "px");
+      document.body.style.height = alturaViewport + "px";
+      document.body.style.minHeight = alturaViewport + "px";
+    }
+
+    function atualizarEstadoTeclado(){
+      const vv = window.visualViewport;
+      if(!vv) return;
+
+      const diferenca = window.innerHeight - vv.height;
+      tecladoAberto = diferenca > 120;
+
+      document.documentElement.style.setProperty("--real-vh", vv.height + "px");
+
+      if(tecladoAberto){
+        requestAnimationFrame(() => {
+          rolarParaFim(false);
+        });
+      }
     }
 
     function getChatUser(){
@@ -335,7 +374,7 @@
     }
 
     function estaPertoDoFim(){
-      const margem = 120;
+      const margem = 140;
       return (mensagensEl.scrollHeight - mensagensEl.scrollTop - mensagensEl.clientHeight) <= margem;
     }
 
@@ -380,7 +419,7 @@
 
       limparVazio();
 
-      const deveRolar = forcarScroll || estaPertoDoFim();
+      const deveRolar = forcarScroll || estaPertoDoFim() || tecladoAberto;
       const frag = document.createDocumentFragment();
 
       for(const msg of lista){
@@ -398,7 +437,10 @@
 
       if(frag.childNodes.length){
         mensagensEl.appendChild(frag);
-        if(deveRolar) rolarParaFim();
+        if(deveRolar){
+          setTimeout(() => rolarParaFim(false), 30);
+          setTimeout(() => rolarParaFim(false), 180);
+        }
       }
     }
 
@@ -422,7 +464,9 @@
       }
 
       mensagensEl.appendChild(frag);
-      rolarParaFim();
+
+      setTimeout(() => rolarParaFim(false), 50);
+      setTimeout(() => rolarParaFim(false), 220);
     }
 
     function validarSessao(){
@@ -555,7 +599,11 @@
         }
 
         setStatus("Mensagem enviada.");
-        textoMensagem.focus();
+
+        setTimeout(() => {
+          textoMensagem.focus();
+          rolarParaFim(false);
+        }, 80);
       }catch(err){
         console.error("Erro ao enviar mensagem:", err);
         setStatus("Erro ao enviar mensagem.");
@@ -577,16 +625,24 @@
       this.style.height = "52px";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
       ajustarAreaChat();
+      setTimeout(() => rolarParaFim(false), 50);
     });
 
     textoMensagem.addEventListener("focus", function(){
-      setTimeout(() => rolarParaFim(true), 120);
-      setTimeout(() => rolarParaFim(true), 320);
+      tecladoAberto = true;
+      ajustarAreaChat();
+      atualizarEstadoTeclado();
+
+      setTimeout(() => rolarParaFim(false), 80);
+      setTimeout(() => rolarParaFim(false), 260);
+      setTimeout(() => rolarParaFim(false), 500);
     });
 
     textoMensagem.addEventListener("blur", function(){
       setTimeout(() => {
+        tecladoAberto = false;
         ajustarAreaChat();
+        rolarParaFim(false);
       }, 250);
     });
 
@@ -603,10 +659,51 @@
       }, 4000);
     }
 
-    window.addEventListener("resize", ajustarAreaChat);
-    window.addEventListener("orientationchange", ajustarAreaChat);
-    window.visualViewport?.addEventListener("resize", ajustarAreaChat);
-    window.visualViewport?.addEventListener("scroll", ajustarAreaChat);
+    window.addEventListener("resize", () => {
+      ajustarAreaChat();
+      atualizarEstadoTeclado();
+    });
+
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => {
+        ajustarAreaChat();
+        atualizarEstadoTeclado();
+        rolarParaFim(false);
+      }, 250);
+    });
+
+    if(window.visualViewport){
+      window.visualViewport.addEventListener("resize", () => {
+        ajustarAreaChat();
+        atualizarEstadoTeclado();
+      });
+
+      window.visualViewport.addEventListener("scroll", () => {
+        ajustarAreaChat();
+        atualizarEstadoTeclado();
+      });
+    }
+
+    document.addEventListener("focusin", function(e){
+      if(e.target === textoMensagem){
+        tecladoAberto = true;
+        ajustarAreaChat();
+        atualizarEstadoTeclado();
+
+        setTimeout(() => rolarParaFim(false), 100);
+        setTimeout(() => rolarParaFim(false), 300);
+      }
+    });
+
+    document.addEventListener("focusout", function(e){
+      if(e.target === textoMensagem){
+        setTimeout(() => {
+          tecladoAberto = false;
+          ajustarAreaChat();
+          atualizarEstadoTeclado();
+        }, 250);
+      }
+    });
 
     iniciar();
   </script>
