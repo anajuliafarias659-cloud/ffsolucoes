@@ -42,12 +42,6 @@
       font-size:26px;
       margin-bottom:6px;
     }
-    .secaoTitulo{
-      font-size:20px;
-      font-weight:800;
-      color:#fbbf24;
-      margin-bottom:10px;
-    }
     .muted{
       color:#cbd5e1;
       font-size:14px;
@@ -128,9 +122,8 @@
       background:linear-gradient(180deg, rgba(245,158,11,.08), rgba(15,23,42,1));
     }
     .card.emAtendimento{
-      border:2px solid rgba(37,99,235,.55);
-      box-shadow:0 0 0 1px rgba(37,99,235,.18), 0 14px 28px rgba(0,0,0,.28);
-      background:linear-gradient(180deg, rgba(37,99,235,.11), rgba(15,23,42,1));
+      border:2px solid rgba(37,99,235,.45);
+      background:linear-gradient(180deg, rgba(37,99,235,.08), rgba(15,23,42,1));
     }
     .card-top{
       display:flex;
@@ -325,7 +318,7 @@
     <div class="topo">
       <div class="box hero">
         <h1>FF Borracharia - Painel do Borracheiro</h1>
-        <div class="muted">Atendimentos ativos ficam no topo. Histórico some da tela principal para não poluir.</div>
+        <div class="muted">Marque aberto ou fechado, defina raio de atendimento e receba chamados.</div>
 
         <div class="shareBox">
           <a
@@ -365,37 +358,6 @@
 
     <div id="painelApp" style="display:none;">
       <div class="box">
-        <div class="grid3">
-          <div>
-            <label>Filtro de status</label>
-            <select id="filtroStatus">
-              <option value="ativos">Ativos</option>
-              <option value="em_andamento">Em andamento</option>
-              <option value="aceito">Aceito</option>
-              <option value="aguardando">Aguardando</option>
-              <option value="historico">Histórico</option>
-              <option value="todos">Todos</option>
-            </select>
-          </div>
-          <div>
-            <label>Atualização</label>
-            <input value="5 segundos" readonly />
-          </div>
-          <div>
-            <label>Ação</label>
-            <button id="btnAtualizar" class="green">Atualizar agora</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="box">
-        <div class="secaoTitulo">Atendimentos</div>
-        <div class="muted" style="margin-bottom:12px;">Primeiro aparece o que já está em atendimento, depois o que foi aceito e logo abaixo os mais recentes aguardando.</div>
-        <div class="lista" id="listaChamados"></div>
-      </div>
-
-      <div class="box">
-        <div class="secaoTitulo">Dados da borracharia</div>
         <div class="grid4">
           <div>
             <label>Nome da borracharia</label>
@@ -447,6 +409,32 @@
           </div>
         </div>
       </div>
+
+      <div class="box">
+        <div class="grid3">
+          <div>
+            <label>Filtro de status</label>
+            <select id="filtroStatus">
+              <option value="todos">Todos</option>
+              <option value="aguardando">Aguardando</option>
+              <option value="aceito">Aceito</option>
+              <option value="em_andamento">Em andamento</option>
+              <option value="finalizado">Finalizado</option>
+              <option value="cancelado">Cancelado</option>
+            </select>
+          </div>
+          <div>
+            <label>Atualização</label>
+            <input value="5 segundos" readonly />
+          </div>
+          <div>
+            <label>Ação</label>
+            <button id="btnAtualizar" class="green">Atualizar agora</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="lista" id="listaChamados"></div>
     </div>
   </div>
 
@@ -647,62 +635,25 @@
     }
 
     async function salvarPerfil(){
-  if(!perfilBorracheiro) return;
+      if(!perfilBorracheiro) return;
 
-  const nome = el("nomeBorracheiro").value.trim();
-  const telefone = el("telefoneBorracheiro").value.trim();
-  const cidade = el("cidadeBorracheiro").value.trim();
-  const raio = Number(el("raioAtendimento").value || 10);
-  const latitude = el("latBorracheiro").value === "" ? null : Number(String(el("latBorracheiro").value).replace(",", "."));
-  const longitude = el("lngBorracheiro").value === "" ? null : Number(String(el("lngBorracheiro").value).replace(",", "."));
-  const aberto = el("statusAberto").value === "true";
+      const nome = el("nomeBorracheiro").value.trim();
+      const telefone = el("telefoneBorracheiro").value.trim();
+      const cidade = el("cidadeBorracheiro").value.trim();
+      const raio = Number(el("raioAtendimento").value || 10);
+      const latitude = el("latBorracheiro").value === "" ? null : Number(el("latBorracheiro").value);
+      const longitude = el("lngBorracheiro").value === "" ? null : Number(el("lngBorracheiro").value);
+      const aberto = el("statusAberto").value === "true";
 
-  if(!nome){
-    setMsg("perfilMsg", "Informe o nome.", "#fca5a5");
-    return;
-  }
+      if(!nome){
+        setMsg("perfilMsg", "Informe o nome.", "#fca5a5");
+        return;
+      }
 
-  if(isNaN(raio) || raio <= 0){
-    setMsg("perfilMsg", "Informe um raio válido.", "#fca5a5");
-    return;
-  }
-
-  if(latitude !== null && Number.isNaN(latitude)){
-    setMsg("perfilMsg", "Latitude inválida.", "#fca5a5");
-    return;
-  }
-
-  if(longitude !== null && Number.isNaN(longitude)){
-    setMsg("perfilMsg", "Longitude inválida.", "#fca5a5");
-    return;
-  }
-
-  const { data, error } = await supabase
-    .from("borracheiros")
-    .update({
-      nome,
-      telefone,
-      cidade,
-      ativo: true,
-      aberto,
-      raio_atendimento_km: raio,
-      latitude,
-      longitude
-    })
-    .eq("id", perfilBorracheiro.id)
-    .select()
-    .single();
-
-  if(error){
-    console.error(error);
-    setMsg("perfilMsg", "Erro ao salvar perfil.", "#fca5a5");
-    return;
-  }
-
-  perfilBorracheiro = data;
-  atualizarStatusVisualLoja(aberto);
-  setMsg("perfilMsg", "Perfil salvo com sucesso.");
-}
+      if(isNaN(raio) || raio <= 0){
+        setMsg("perfilMsg", "Informe um raio válido.", "#fca5a5");
+        return;
+      }
 
       const { data, error } = await supabase
         .from("borracheiros")
@@ -742,18 +693,11 @@
 
     function montarFiltroLista(filtro){
       const idAtual = perfilBorracheiro?.id;
-      if(!idAtual) return "";
 
-      if(filtro === "ativos"){
-        return `and(status.eq.aguardando,borracheiro_id.is.null),and(status.eq.aceito,borracheiro_id.eq.${idAtual}),and(status.eq.em_andamento,borracheiro_id.eq.${idAtual})`;
-      }
+      if(!idAtual) return "";
 
       if(filtro === "todos"){
         return `and(status.eq.aguardando,borracheiro_id.is.null),borracheiro_id.eq.${idAtual}`;
-      }
-
-      if(filtro === "historico"){
-        return `and(status.eq.finalizado,borracheiro_id.eq.${idAtual}),and(status.eq.cancelado,borracheiro_id.eq.${idAtual})`;
       }
 
       if(filtro === "aguardando"){
@@ -785,37 +729,27 @@
         return;
       }
 
-      renderChamados(data || [], filtro);
+      renderChamados(data || []);
     }
 
     function prioridadeStatus(status){
-      if(status === "em_andamento") return 0;
+      if(status === "aguardando") return 0;
       if(status === "aceito") return 1;
-      if(status === "aguardando") return 2;
+      if(status === "em_andamento") return 2;
       if(status === "finalizado") return 3;
       if(status === "cancelado") return 4;
       return 5;
     }
 
-    function renderChamados(lista, filtroAtual = "ativos"){
+    function renderChamados(lista){
       const box = el("listaChamados");
 
-      let listaFiltrada = [...lista];
-
-      if(filtroAtual === "ativos"){
-        listaFiltrada = listaFiltrada.filter(item =>
-          item.status === "aguardando" ||
-          (item.status === "aceito" && item.borracheiro_id === perfilBorracheiro.id) ||
-          (item.status === "em_andamento" && item.borracheiro_id === perfilBorracheiro.id)
-        );
-      }
-
-      if(!listaFiltrada.length){
-        box.innerHTML = `<div class="vazio">Nenhum atendimento para mostrar.</div>`;
+      if(!lista.length){
+        box.innerHTML = `<div class="vazio">Nenhum chamado encontrado.</div>`;
         return;
       }
 
-      const listaOrdenada = [...listaFiltrada].sort((a,b) => {
+      const listaOrdenada = [...lista].sort((a,b) => {
         const pa = prioridadeStatus(a.status || "aguardando");
         const pb = prioridadeStatus(b.status || "aguardando");
         if(pa !== pb) return pa - pb;
@@ -828,7 +762,7 @@
         const valorFinal = Number(item.valor_final || 0).toFixed(2);
 
         const ehMeuChamado = item.borracheiro_id === perfilBorracheiro.id;
-        const ehHistorico = ehMeuChamado && ["finalizado","cancelado"].includes(status);
+        const ehHistorico = ehMeuChamado && ["aceito","em_andamento","finalizado","cancelado"].includes(status);
 
         const podeAceitar = status === "aguardando" && !item.borracheiro_id;
         const podeIniciar = status === "aceito" && item.borracheiro_id === perfilBorracheiro.id;
@@ -852,7 +786,7 @@
             <div class="card-top">
               <div>
                 <div class="tag ${status}">${traduzirStatus(status)}</div>
-                ${ehHistorico ? `<div class="tag meuHistorico">Oculto da tela principal</div>` : ``}
+                ${ehHistorico ? `<div class="tag meuHistorico">Meu histórico</div>` : ``}
                 <div class="titulo">${item.tipo_veiculo || "-"} • ${item.problema || "-"}</div>
                 <div class="subtitulo">Código: ${item.codigo_acompanhamento || "-"}</div>
               </div>
@@ -992,6 +926,7 @@
     el("filtroStatus").addEventListener("change", listarChamados);
     el("statusAberto").addEventListener("change", (e) => atualizarStatusVisualLoja(e.target.value));
     el("btnPegarMinhaLocalizacao").addEventListener("click", pegarMinhaLocalizacao);
+
     el("btnCompartilharLink").addEventListener("click", compartilharLinkPublico);
 
     carregarSessao();
