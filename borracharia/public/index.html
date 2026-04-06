@@ -478,6 +478,86 @@
       localStorage.setItem("ff_borracharia_codigo", codigo);
     }
 
+    function calcularDistanciaKm(lat1, lon1, lat2, lon2){
+      const toRad = (graus) => graus * Math.PI / 180;
+      const R = 6371;
+
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    async function buscarBorrachariasDisponiveisDentroDoRaio(latitude, longitude){
+      const { data, error } = await supabase
+        .from("borracharias")
+        .select("id, nome, aberto, latitude, longitude, raio_km")
+        .eq("aberto", true);
+
+      if (error) {
+        console.error("Erro ao buscar borracharias:", error);
+        return {
+          erro: true,
+          mensagem: "Erro ao verificar borracharias disponíveis.",
+          lista: []
+        };
+      }
+
+      if (!data || data.length === 0) {
+        return {
+          erro: false,
+          mensagem: "Nenhuma borracharia aberta no momento.",
+          lista: []
+        };
+      }
+
+      const dentroDoRaio = data
+        .map((b) => {
+          if (
+            b.latitude == null ||
+            b.longitude == null ||
+            b.raio_km == null ||
+            latitude == null ||
+            longitude == null
+          ) {
+            return null;
+          }
+
+          const distancia_km = calcularDistanciaKm(
+            Number(latitude),
+            Number(longitude),
+            Number(b.latitude),
+            Number(b.longitude)
+          );
+
+          return {
+            ...b,
+            distancia_km
+          };
+        })
+        .filter((b) => b && b.distancia_km <= Number(b.raio_km));
+
+      if (dentroDoRaio.length === 0) {
+        return {
+          erro: false,
+          mensagem: "Nenhuma borracharia atende sua localização no raio configurado.",
+          lista: []
+        };
+      }
+
+      return {
+        erro: false,
+        mensagem: "",
+        lista: dentroDoRaio
+      };
+    }
+
     async function pegarLocalizacao(){
       limparMensagem();
 
@@ -521,8 +601,22 @@
         return;
       }
 
+      if(latitude === null || longitude === null){
+        mostrarMensagem("Para solicitar atendimento, permita a localização para validar as borracharias abertas no raio.");
+        return;
+      }
+
       el("btnSolicitar").disabled = true;
       el("btnSolicitar").textContent = "Enviando...";
+
+      const disponibilidade = await buscarBorrachariasDisponiveisDentroDoRaio(latitude, longitude);
+
+      if (disponibilidade.erro || disponibilidade.lista.length === 0) {
+        el("btnSolicitar").disabled = false;
+        el("btnSolicitar").textContent = "Solicitar atendimento";
+        mostrarMensagem(disponibilidade.mensagem || "Nenhuma borracharia disponível.");
+        return;
+      }
 
       const { data, error } = await supabase
         .from("chamados_borracharia")
