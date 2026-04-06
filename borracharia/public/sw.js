@@ -1,4 +1,4 @@
-const CACHE_NAME = "ff-borracharia-cache-v7";
+const CACHE_NAME = "ff-borracharia-cache-v8";
 const APP_SHELL = [
   "/borracharia/public/",
   "/borracharia/public/index.html",
