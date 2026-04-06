@@ -1,208 +1,50 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>FF Borracharia - Socorro Rápido</title>
+const CACHE_NAME = "ff-borracharia-v1";
+const URLS_TO_CACHE = [
+  "/borracharia/public/",
+  "/borracharia/public/index.html",
+  "/borracharia/public/manifest.webmanifest",
+  "/borracharia/public/icons/icon-192.png",
+  "/borracharia/public/icons/icon-512.png"
+];
 
-<!-- PWA -->
-<link rel="manifest" href="/borracharia/public/manifest.webmanifest" />
-<meta name="theme-color" content="#f59e0b" />
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(URLS_TO_CACHE))
+  );
+  self.skipWaiting();
+});
 
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys.map((key) => {
+          if(key !== CACHE_NAME){
+            return caches.delete(key);
+          }
+        })
+      )
+    )
+  );
+  self.clients.claim();
+});
 
-:root{
-  --topo-altura:140px;
-}
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
 
-body{
-  font-family:Arial,Helvetica,sans-serif;
-  background:linear-gradient(180deg,#0f172a,#020617);
-  color:#fff;
-  min-height:100vh;
-}
+  if(req.method !== "GET") return;
 
-/* 🔥 TOPO FIXO */
-.topo{
-  position:fixed;
-  top:0;
-  left:0;
-  width:100%;
-  z-index:999;
-  background:linear-gradient(135deg,#f59e0b,#dc2626);
-  padding:20px;
-  border-bottom-left-radius:20px;
-  border-bottom-right-radius:20px;
-  box-shadow:0 10px 30px rgba(0,0,0,.3);
-}
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      if(cached) return cached;
 
-.topo h1{font-size:24px;margin-bottom:6px}
-.topo p{font-size:14px}
-
-/* 🔥 COMPENSA TOPO */
-.container{
-  width:min(100%,700px);
-  margin:0 auto;
-  padding:
-    calc(var(--topo-altura) + 10px)
-    14px
-    40px;
-}
-
-.card{
-  background:#111827;
-  border-radius:18px;
-  padding:16px;
-  margin-bottom:16px;
-}
-
-h2{margin-bottom:12px;color:#fbbf24}
-
-.grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:12px;
-}
-
-.full{grid-column:1/-1}
-
-input,select,textarea,button{
-  width:100%;
-  border-radius:12px;
-  padding:12px;
-  border:none;
-}
-
-input,select,textarea{
-  background:#1f2937;
-  color:#fff;
-}
-
-button{
-  background:linear-gradient(135deg,#f59e0b,#ef4444);
-  color:#fff;
-  font-weight:700;
-}
-
-.msg{margin-top:10px;color:#fca5a5}
-
-.codigo{font-size:26px;font-weight:900;color:#fbbf24}
-
-.status-box{
-  padding:12px;
-  border-radius:12px;
-  margin-top:10px;
-  text-align:center;
-}
-
-.aguardando{background:#78350f}
-.aceito{background:#1d4ed8}
-.em_andamento{background:#0f766e}
-.finalizado{background:#166534}
-.cancelado{background:#7f1d1d}
-
-.oculto{display:none}
-
-@media(max-width:640px){
-  .grid{grid-template-columns:1fr}
-}
-</style>
-</head>
-
-<body>
-
-<!-- 🔥 TOPO FIXO -->
-<div class="topo">
-  <h1>FF Borracharia</h1>
-  <p>Solicite socorro rápido e acompanhe seu chamado</p>
-</div>
-
-<div class="container">
-
-<div class="card" id="cardSolicitacao">
-<h2>Solicitar socorro</h2>
-
-<div class="grid">
-<input id="cliente_nome" placeholder="Nome">
-<input id="cliente_telefone" placeholder="Telefone">
-
-<select id="tipo_veiculo">
-<option>Carro</option>
-<option>Moto</option>
-</select>
-
-<select id="problema">
-<option>Pneu furado</option>
-<option>Troca de pneu</option>
-</select>
-
-<textarea id="observacoes" class="full"></textarea>
-<input id="endereco_texto" class="full">
-
-<button id="btnLocalizacao" class="full">Pegar localização</button>
-
-<input id="latitude">
-<input id="longitude">
-
-<button id="btnSolicitar" class="full">Solicitar</button>
-<div class="msg" id="msgSolicitacao"></div>
-</div>
-
-<div id="resultadoSolicitacao" style="display:none">
-<div class="codigo" id="codigoGerado"></div>
-</div>
-
-</div>
-
-<div class="card">
-<h2>Acompanhar</h2>
-
-<input id="codigoConsulta">
-<button id="btnConsultar">Consultar</button>
-
-<div id="resultadoConsulta" style="display:none">
-<div id="statusBox" class="status-box"></div>
-<div id="infoChamado"></div>
-</div>
-
-</div>
-
-</div>
-
-<script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-
-const supabase = createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-const el = id => document.getElementById(id);
-
-async function solicitarAtendimento(){
-  const { data, error } = await supabase
-    .from("chamados_borracharia")
-    .insert([{ status:"aguardando" }])
-    .select()
-    .single();
-
-  if(error){
-    alert("erro");
-    return;
-  }
-
-  el("codigoGerado").textContent = data.codigo_acompanhamento;
-  el("resultadoSolicitacao").style.display = "block";
-}
-
-el("btnSolicitar").onclick = solicitarAtendimento;
-
-/* 🔥 PWA */
-if("serviceWorker" in navigator){
-  navigator.serviceWorker.register("/borracharia/public/sw.js");
-}
-</script>
-
-</body>
-</html>
+      return fetch(req)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+          return response;
+        })
+        .catch(() => caches.match("/borracharia/public/index.html"));
+    })
+  );
+});
