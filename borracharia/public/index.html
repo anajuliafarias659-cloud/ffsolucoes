@@ -580,6 +580,13 @@
       localStorage.setItem("ff_borracharia_codigo", codigo);
     }
 
+    function normalizarNumero(valor){
+      if(valor === null || valor === undefined || valor === "") return null;
+      const texto = String(valor).replace(",", ".").trim();
+      const numero = Number(texto);
+      return Number.isFinite(numero) ? numero : null;
+    }
+
     function calcularDistanciaKm(lat1, lon1, lat2, lon2){
       if(
         lat1 == null || lon1 == null ||
@@ -601,6 +608,11 @@
 
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return R * c;
+    }
+
+    function statusChamadoAtivo(status){
+      const s = String(status || "").toLowerCase().trim();
+      return s === "aceito" || s === "em_andamento" || s === "em andamento";
     }
 
     async function pegarLocalizacao(){
@@ -625,8 +637,8 @@
     }
 
     async function verificarBorracheirosDisponiveis(){
-      const latitudeCliente = el("latitude").value ? Number(el("latitude").value) : null;
-      const longitudeCliente = el("longitude").value ? Number(el("longitude").value) : null;
+      const latitudeCliente = normalizarNumero(el("latitude").value);
+      const longitudeCliente = normalizarNumero(el("longitude").value);
 
       const { data: borracheirosAbertos, error } = await supabase
         .from("borracheiros")
@@ -643,12 +655,11 @@
         return { disponivel: false, motivo: "sem_abertas" };
       }
 
-      const idsBorracheiros = borracheirosAbertos.map(item => item.id);
+      const idsBorracheiros = borracheirosAbertos.map(item => item.id).filter(Boolean);
 
       const { data: chamadosAtivos, error: errorChamados } = await supabase
         .from("chamados_borracharia")
-        .select("borracheiro_id")
-        .in("status", ["aceito", "em_andamento"])
+        .select("borracheiro_id, status, created_at")
         .in("borracheiro_id", idsBorracheiros);
 
       if(errorChamados){
@@ -656,10 +667,24 @@
         return { disponivel: false, motivo: "erro" };
       }
 
+      const agora = new Date();
+
       const ocupados = new Set(
         (chamadosAtivos || [])
+          .filter(item => {
+            if(!item?.borracheiro_id) return false;
+            if(!statusChamadoAtivo(item.status)) return false;
+
+            if(!item.created_at) return true;
+
+            const dataChamado = new Date(item.created_at);
+            if(Number.isNaN(dataChamado.getTime())) return true;
+
+            const diffMin = (agora.getTime() - dataChamado.getTime()) / 1000 / 60;
+
+            return diffMin <= 120;
+          })
           .map(item => item.borracheiro_id)
-          .filter(Boolean)
       );
 
       const borracheirosLivres = borracheirosAbertos.filter(item => !ocupados.has(item.id));
@@ -673,18 +698,22 @@
       }
 
       const borracheirosNoRaio = borracheirosLivres.filter(item => {
-        if(item.latitude == null || item.longitude == null){
+        const lat = normalizarNumero(item.latitude);
+        const lon = normalizarNumero(item.longitude);
+        const raio = normalizarNumero(item.raio_atendimento_km) ?? 10;
+
+        if(lat == null || lon == null){
           return false;
         }
 
         const distancia = calcularDistanciaKm(
           latitudeCliente,
           longitudeCliente,
-          Number(item.latitude),
-          Number(item.longitude)
+          lat,
+          lon
         );
 
-        return distancia != null && distancia <= Number(item.raio_atendimento_km || 10);
+        return distancia != null && distancia <= raio;
       });
 
       if(!borracheirosNoRaio.length){
@@ -703,8 +732,8 @@
       const problema = el("problema").value;
       const observacoes = el("observacoes").value.trim();
       const endereco_texto = el("endereco_texto").value.trim();
-      const latitude = el("latitude").value ? Number(el("latitude").value) : null;
-      const longitude = el("longitude").value ? Number(el("longitude").value) : null;
+      const latitude = normalizarNumero(el("latitude").value);
+      const longitude = normalizarNumero(el("longitude").value);
 
       if(!cliente_nome || !cliente_telefone){
         mostrarMensagem("Preencha nome e telefone.");
