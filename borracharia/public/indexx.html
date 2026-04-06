@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -82,11 +83,6 @@
     button:hover{transform:translateY(-1px)}
     button.sec{
       background:#334155;
-    }
-    button:disabled{
-      opacity:.7;
-      cursor:not-allowed;
-      transform:none;
     }
     .status-box{
       padding:14px;
@@ -268,6 +264,7 @@
     );
 
     const el = (id) => document.getElementById(id);
+
     let intervalConsulta = null;
 
     function limparMensagem(){
@@ -313,29 +310,6 @@
       localStorage.setItem("ff_borracharia_codigo", codigo);
     }
 
-    function calcularDistanciaKm(lat1, lon1, lat2, lon2){
-      if(
-        lat1 == null || lon1 == null ||
-        lat2 == null || lon2 == null ||
-        isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)
-      ){
-        return null;
-      }
-
-      const R = 6371;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1 * Math.PI / 180) *
-        Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    }
-
     async function pegarLocalizacao(){
       limparMensagem();
 
@@ -358,73 +332,37 @@
     }
 
     async function verificarBorracheirosDisponiveis(){
-      const latitudeCliente = el("latitude").value ? Number(el("latitude").value) : null;
-      const longitudeCliente = el("longitude").value ? Number(el("longitude").value) : null;
-
-      const { data: todasAbertas, error: erroAbertas } = await supabase
+      const { data: borracheiros, error } = await supabase
         .from("borracheiros")
-        .select("id, aberto, ativo, raio_atendimento_km, latitude, longitude")
-        .eq("ativo", true)
-        .eq("aberto", true);
+        .select("id")
+        .eq("ativo", true);
 
-      if(erroAbertas){
-        console.error("Erro ao verificar abertas:", erroAbertas);
-        return { disponivel: false, motivo: "erro" };
+      if(error){
+        console.error("Erro ao verificar borracheiros:", error);
+        return false;
       }
 
-      if(!todasAbertas || todasAbertas.length === 0){
-        return { disponivel: false, motivo: "sem_abertas" };
+      if(!borracheiros || borracheiros.length === 0){
+        return false;
       }
 
-      const idsAbertas = todasAbertas.map(item => item.id);
+      const idsBorracheiros = borracheiros.map(item => item.id);
 
-      const { data: chamadosAtivos, error: erroAtivos } = await supabase
+      const { data: chamadosAtivos, error: errorChamados } = await supabase
         .from("chamados_borracharia")
-        .select("borracheiro_id, status")
+        .select("borracheiro_id")
         .in("status", ["aceito", "em_andamento"])
-        .in("borracheiro_id", idsAbertas);
+        .in("borracheiro_id", idsBorracheiros);
 
-      if(erroAtivos){
-        console.error("Erro ao verificar chamados ativos:", erroAtivos);
-        return { disponivel: false, motivo: "erro" };
+      if(errorChamados){
+        console.error("Erro ao verificar chamados ativos:", errorChamados);
+        return borracheiros.length > 0;
       }
 
-      const idsOcupadas = new Set(
-        (chamadosAtivos || [])
-          .map(item => item.borracheiro_id)
-          .filter(Boolean)
-      );
+      const ocupados = new Set((chamadosAtivos || []).map(item => item.borracheiro_id).filter(Boolean));
+      const livre = borracheiros.find(item => !ocupados.has(item.id));
 
-      const abertasELivres = todasAbertas.filter(item => !idsOcupadas.has(item.id));
-
-      if(abertasELivres.length === 0){
-        return { disponivel: false, motivo: "ocupadas" };
-      }
-
-      if(latitudeCliente == null || longitudeCliente == null){
-        return { disponivel: true, motivo: "ok" };
-      }
-
-      const abertasLivresNoRaio = abertasELivres.filter(item => {
-        if(item.latitude == null || item.longitude == null){
-          return false;
-        }
-
-        const distancia = calcularDistanciaKm(
-          latitudeCliente,
-          longitudeCliente,
-          Number(item.latitude),
-          Number(item.longitude)
-        );
-
-        return distancia != null && distancia <= Number(item.raio_atendimento_km || 10);
-      });
-
-      if(abertasLivresNoRaio.length === 0){
-        return { disponivel: false, motivo: "fora_do_raio" };
-      }
-
-      return { disponivel: true, motivo: "ok" };
+      return !!livre;
     }
 
     async function solicitarAtendimento(){
@@ -449,34 +387,14 @@
         return;
       }
 
-      el("btnSolicitar").disabled = true;
-      el("btnSolicitar").textContent = "Validando...";
+      const temBorracheiroDisponivel = await verificarBorracheirosDisponiveis();
 
-      const disponibilidade = await verificarBorracheirosDisponiveis();
-
-      if(!disponibilidade.disponivel){
-        el("btnSolicitar").disabled = false;
-        el("btnSolicitar").textContent = "Solicitar atendimento";
-
-        if(disponibilidade.motivo === "sem_abertas"){
-          mostrarMensagem("⚠️ Nenhuma borracharia aberta no momento.");
-          return;
-        }
-
-        if(disponibilidade.motivo === "ocupadas"){
-          mostrarMensagem("⚠️ Todas as borracharias abertas estão ocupadas agora.");
-          return;
-        }
-
-        if(disponibilidade.motivo === "fora_do_raio"){
-          mostrarMensagem("⚠️ Nenhuma borracharia atende sua localização neste raio.");
-          return;
-        }
-
-        mostrarMensagem("⚠️ Nenhuma borracharia disponível no momento.");
+      if(!temBorracheiroDisponivel){
+        mostrarMensagem("⚠️ Nenhuma borracharia disponível no momento. Tente novamente mais tarde.");
         return;
       }
 
+      el("btnSolicitar").disabled = true;
       el("btnSolicitar").textContent = "Enviando...";
 
       const { data, error } = await supabase
@@ -502,7 +420,7 @@
       el("btnSolicitar").textContent = "Solicitar atendimento";
 
       if(error){
-        console.error("Erro ao criar chamado:", error);
+        console.error(error);
         mostrarMensagem("Erro ao solicitar atendimento.");
         return;
       }
@@ -521,6 +439,7 @@
 
     async function consultarChamado(codigoManual = null){
       const codigo = (codigoManual || el("codigoConsulta").value).trim().toUpperCase();
+
       if(!codigo) return;
 
       const { data, error } = await supabase
