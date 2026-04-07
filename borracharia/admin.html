@@ -384,155 +384,487 @@
   </div>
 
   <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-const supabase = createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+    const supabase = createClient(
+      "https://pdajixsoowcyhnjwhgpc.supabase.co",
+      "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+    );
 
-const el = (id) => document.getElementById(id);
+    const el = (id) => document.getElementById(id);
+    const LINK_PUBLICO_BORRACHARIA = "https://www.ffsolucoes.com.br/borracharia/public";
 
-let userLogado = null;
-let perfilBorracheiro = null;
-let chamadosJaVistos = new Set();
+    let userLogado = null;
+    let perfilBorracheiro = null;
+    let intervalLista = null;
 
-// 🔊 SOM
-function tocarSomNovoChamado(){
-  try{
-    const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
-    audio.volume = 1;
-    audio.play().catch(()=>{});
-  }catch(e){}
-}
-
-// LOGIN
-async function login(){
-  const email = el("email").value.trim();
-  const senha = el("senha").value.trim();
-
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email, password: senha
-  });
-
-  if(error){
-    alert("Login inválido");
-    return;
-  }
-
-  const { data: perfil } = await supabase
-    .from("borracheiros")
-    .select("*")
-    .eq("user_id", data.user.id)
-    .single();
-
-  userLogado = data.user;
-  perfilBorracheiro = perfil;
-
-  iniciar();
-}
-
-// INICIAR
-async function iniciar(){
-  document.getElementById("boxLogin").style.display = "none";
-  document.getElementById("painelApp").style.display = "block";
-
-  listarChamados();
-
-  // 🚀 REALTIME
-  supabase
-    .channel('chamados')
-    .on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'chamados_borracharia'
-    }, () => {
-      listarChamados();
-    })
-    .subscribe();
-}
-
-// LISTAR
-async function listarChamados(){
-  if(!perfilBorracheiro) return;
-
-  const { data, error } = await supabase
-    .from("chamados_borracharia")
-    .select("*")
-    .order("created_at", { ascending:false });
-
-  if(error) return;
-
-  let novo = false;
-
-  (data || []).forEach(item => {
-    if(
-      item.status === "aguardando" &&
-      !item.borracheiro_id &&
-      !chamadosJaVistos.has(item.id)
-    ){
-      chamadosJaVistos.add(item.id);
-      novo = true;
+    function setMsg(id, texto, cor = "#86efac"){
+      el(id).style.color = cor;
+      el(id).textContent = texto;
     }
-  });
 
-  if(novo){
-    tocarSomNovoChamado();
-  }
+    function traduzirStatus(status){
+      if(status === "aguardando") return "Aguardando";
+      if(status === "aceito") return "Aceito";
+      if(status === "em_andamento") return "Em andamento";
+      if(status === "finalizado") return "Finalizado";
+      if(status === "cancelado") return "Cancelado";
+      return status || "-";
+    }
 
-  render(data || []);
-}
+    function atualizarStatusVisualLoja(valor){
+      const aberto = String(valor) === "true" || valor === true;
+      el("statusAtualLoja").textContent = aberto ? "ABERTA" : "FECHADA";
+      el("statusAtualLoja").className = "statusLoja " + (aberto ? "abertoTag" : "fechadoTag");
+    }
 
-// RENDER
-function render(lista){
-  const box = el("listaChamados");
+    function soNumero(v){
+      return String(v || "").replace(/\D/g, "");
+    }
 
-  if(!lista.length){
-    box.innerHTML = "Nenhum chamado";
-    return;
-  }
+    function montarLinkWhatsApp(telefone, texto = ""){
+      const numero = soNumero(telefone);
+      if(!numero) return "";
+      return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
+    }
 
-  box.innerHTML = lista.map(item => {
-    return `
-      <div style="background:#111;padding:10px;margin:10px;border-radius:10px">
-        <b>${item.cliente_nome || ""}</b><br>
-        ${item.problema || ""}<br>
-        Status: ${item.status}<br><br>
+    function calcularDistanciaKm(lat1, lon1, lat2, lon2){
+      if(
+        lat1 == null || lon1 == null ||
+        lat2 == null || lon2 == null ||
+        isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)
+      ) return null;
 
-        ${
-          item.status === "aguardando" && !item.borracheiro_id
-          ? `<button onclick="aceitar('${item.id}')">Aceitar</button>`
-          : ""
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a =
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    function mapaLink(lat, lng){
+      if(lat == null || lng == null) return "";
+      return `https://www.google.com/maps?q=${lat},${lng}`;
+    }
+
+    async function copiarLinkPublico(){
+      try{
+        await navigator.clipboard.writeText(LINK_PUBLICO_BORRACHARIA);
+        setMsg("msgCompartilhar", "Link copiado com sucesso.");
+      }catch(error){
+        console.error(error);
+        setMsg("msgCompartilhar", "Não foi possível copiar o link.", "#fca5a5");
+      }
+    }
+
+    async function compartilharLinkPublico(){
+      try{
+        if(navigator.share){
+          await navigator.share({
+            title: "FF Borracharia",
+            text: "Acesse a página pública da borracharia:",
+            url: LINK_PUBLICO_BORRACHARIA
+          });
+          setMsg("msgCompartilhar", "Link compartilhado com sucesso.");
+        }else{
+          await copiarLinkPublico();
         }
-      </div>
-    `;
-  }).join("");
-}
+      }catch(error){
+        console.error(error);
+        setMsg("msgCompartilhar", "Compartilhamento cancelado ou não disponível.", "#fca5a5");
+      }
+    }
 
-// ACEITAR
-window.aceitar = async function(id){
-  const { data, error } = await supabase
-    .from("chamados_borracharia")
-    .update({
-      status: "aceito",
-      borracheiro_id: perfilBorracheiro.id
-    })
-    .eq("id", id)
-    .eq("status", "aguardando")
-    .is("borracheiro_id", null)
-    .select();
+    async function login(){
+      const email = el("email").value.trim();
+      const senha = el("senha").value.trim();
 
-  if(!data.length){
-    alert("Já foi pego por outro");
-    return;
-  }
+      if(!email || !senha){
+        setMsg("loginMsg", "Preencha email e senha.", "#fca5a5");
+        return;
+      }
 
-  listarChamados();
-}
+      el("btnLogin").disabled = true;
+      el("btnLogin").textContent = "Entrando...";
 
-// EVENTOS
-document.getElementById("btnLogin").onclick = login;
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: senha
+      });
 
-</script>
+      el("btnLogin").disabled = false;
+      el("btnLogin").textContent = "Entrar";
+
+      if(error){
+        console.error(error);
+        setMsg("loginMsg", "Login inválido.", "#fca5a5");
+        return;
+      }
+
+      const user = data.user;
+
+      const { data: borracheiro, error: erroPerfil } = await supabase
+        .from("borracheiros")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if(erroPerfil){
+        console.error(erroPerfil);
+        await supabase.auth.signOut();
+        setMsg("loginMsg", "Erro ao validar usuário.", "#fca5a5");
+        return;
+      }
+
+      if(!borracheiro){
+        await supabase.auth.signOut();
+        setMsg("loginMsg", "Acesso negado. Este usuário não é uma borracharia.", "#fca5a5");
+        return;
+      }
+
+      userLogado = user;
+      perfilBorracheiro = borracheiro;
+      setMsg("loginMsg", "Login autorizado.");
+      await iniciarPainel();
+    }
+
+    async function sair(){
+      await supabase.auth.signOut();
+      location.reload();
+    }
+
+    async function carregarSessao(){
+      const { data } = await supabase.auth.getSession();
+      const user = data?.session?.user || null;
+      if(!user) return;
+
+      const { data: borracheiro, error } = await supabase
+        .from("borracheiros")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if(error || !borracheiro){
+        await supabase.auth.signOut();
+        return;
+      }
+
+      userLogado = user;
+      perfilBorracheiro = borracheiro;
+      await iniciarPainel();
+    }
+
+    function preencherPerfil(perfil){
+      el("nomeBorracheiro").value = perfil.nome || "";
+      el("telefoneBorracheiro").value = perfil.telefone || "";
+      el("cidadeBorracheiro").value = perfil.cidade || "";
+      el("raioAtendimento").value = perfil.raio_atendimento_km ?? 10;
+      el("latBorracheiro").value = perfil.latitude ?? "";
+      el("lngBorracheiro").value = perfil.longitude ?? "";
+      el("statusAberto").value = String(perfil.aberto ?? true);
+      atualizarStatusVisualLoja(perfil.aberto ?? true);
+    }
+
+    async function pegarMinhaLocalizacao(){
+      if(!navigator.geolocation){
+        setMsg("perfilMsg", "Seu navegador não suporta localização.", "#fca5a5");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          el("latBorracheiro").value = pos.coords.latitude;
+          el("lngBorracheiro").value = pos.coords.longitude;
+          setMsg("perfilMsg", "Localização capturada com sucesso.");
+        },
+        () => {
+          setMsg("perfilMsg", "Não foi possível capturar sua localização.", "#fca5a5");
+        },
+        { enableHighAccuracy:true, timeout:10000 }
+      );
+    }
+
+    async function salvarPerfil(){
+      if(!perfilBorracheiro) return;
+
+      const nome = el("nomeBorracheiro").value.trim();
+      const telefone = el("telefoneBorracheiro").value.trim();
+      const cidade = el("cidadeBorracheiro").value.trim();
+      const raio = Number(el("raioAtendimento").value || 10);
+      const latitude = el("latBorracheiro").value === "" ? null : Number(el("latBorracheiro").value);
+      const longitude = el("lngBorracheiro").value === "" ? null : Number(el("lngBorracheiro").value);
+      const aberto = el("statusAberto").value === "true";
+
+      if(!nome){
+        setMsg("perfilMsg", "Informe o nome.", "#fca5a5");
+        return;
+      }
+
+      if(isNaN(raio) || raio <= 0){
+        setMsg("perfilMsg", "Informe um raio válido.", "#fca5a5");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("borracheiros")
+        .update({
+          nome,
+          telefone,
+          cidade,
+          aberto,
+          raio_atendimento_km: raio,
+          latitude,
+          longitude
+        })
+        .eq("id", perfilBorracheiro.id)
+        .select()
+        .single();
+
+      if(error){
+        console.error(error);
+        setMsg("perfilMsg", "Erro ao salvar perfil.", "#fca5a5");
+        return;
+      }
+
+      perfilBorracheiro = data;
+      atualizarStatusVisualLoja(aberto);
+      setMsg("perfilMsg", "Perfil salvo com sucesso.");
+    }
+
+    async function iniciarPainel(){
+      el("boxLogin").style.display = "none";
+      el("painelApp").style.display = "block";
+      preencherPerfil(perfilBorracheiro);
+      await listarChamados();
+
+      if(intervalLista) clearInterval(intervalLista);
+      intervalLista = setInterval(listarChamados, 5000);
+    }
+
+    function montarFiltroLista(filtro){
+      const idAtual = perfilBorracheiro?.id;
+
+      if(!idAtual) return "";
+
+      if(filtro === "todos"){
+        return `and(status.eq.aguardando,borracheiro_id.is.null),borracheiro_id.eq.${idAtual}`;
+      }
+
+      if(filtro === "aguardando"){
+        return `and(status.eq.aguardando,borracheiro_id.is.null)`;
+      }
+
+      return `and(status.eq.${filtro},borracheiro_id.eq.${idAtual})`;
+    }
+
+    async function listarChamados(){
+      if(!perfilBorracheiro?.id) return;
+
+      const filtro = el("filtroStatus").value;
+      const filtroOr = montarFiltroLista(filtro);
+
+      let query = supabase
+        .from("chamados_borracharia")
+        .select("*")
+        .order("created_at", { ascending:false });
+
+      if(filtroOr){
+        query = query.or(filtroOr);
+      }
+
+      const { data, error } = await query;
+
+      if(error){
+        console.error(error);
+        return;
+      }
+
+      renderChamados(data || []);
+    }
+
+    function renderChamados(lista){
+      const box = el("listaChamados");
+
+      if(!lista.length){
+        box.innerHTML = `<div class="vazio">Nenhum chamado encontrado.</div>`;
+        return;
+      }
+
+      box.innerHTML = lista.map(item => {
+        const status = item.status || "aguardando";
+        const valorEstimado = Number(item.valor_estimado || 0).toFixed(2);
+        const valorFinal = Number(item.valor_final || 0).toFixed(2);
+
+        const ehMeuChamado = item.borracheiro_id === perfilBorracheiro.id;
+        const ehHistorico = ehMeuChamado && ["aceito","em_andamento","finalizado","cancelado"].includes(status);
+
+        const podeAceitar = status === "aguardando" && !item.borracheiro_id;
+        const podeIniciar = status === "aceito" && item.borracheiro_id === perfilBorracheiro.id;
+        const podeFinalizar = (status === "aceito" || status === "em_andamento") && item.borracheiro_id === perfilBorracheiro.id;
+
+        const distancia = calcularDistanciaKm(
+          Number(perfilBorracheiro?.latitude),
+          Number(perfilBorracheiro?.longitude),
+          Number(item.latitude),
+          Number(item.longitude)
+        );
+
+        const textoWhats = `Olá ${item.cliente_nome || ""}, aqui é da ${perfilBorracheiro?.nome || "borracharia"}. Recebemos seu chamado ${item.codigo_acompanhamento || ""}.`;
+
+        return `
+          <div class="card">
+            <div class="card-top">
+              <div>
+                <div class="tag ${status}">${traduzirStatus(status)}</div>
+                ${ehHistorico ? `<div class="tag meuHistorico">Meu histórico</div>` : ``}
+                <div class="titulo">${item.tipo_veiculo || "-"} • ${item.problema || "-"}</div>
+                <div class="subtitulo">Código: ${item.codigo_acompanhamento || "-"}</div>
+              </div>
+              <div class="subtitulo">${item.created_at ? new Date(item.created_at).toLocaleString("pt-BR") : ""}</div>
+            </div>
+
+            <div class="bloco">
+              <div class="linha"><strong>Cliente:</strong> ${item.cliente_nome || "-"}</div>
+              <div class="linha"><strong>Telefone:</strong> ${item.cliente_telefone || "-"}</div>
+              <div class="linha"><strong>Referência:</strong> ${item.endereco_texto || "-"}</div>
+              <div class="linha"><strong>Observações:</strong> ${item.observacoes || "-"}</div>
+            </div>
+
+            <div class="bloco">
+              <div class="linha"><strong>Valor estimado:</strong> R$ ${valorEstimado}</div>
+              <div class="linha"><strong>Valor final:</strong> R$ ${valorFinal}</div>
+              <div class="linha"><strong>Pagamento:</strong> ${item.forma_pagamento || "-"}</div>
+              <div class="linha"><strong>Distância:</strong> ${distancia != null && isFinite(distancia) ? distancia.toFixed(1) + " km" : "não calculada"}</div>
+              ${
+                item.latitude != null && item.longitude != null
+                  ? `<div class="linha"><strong>GPS:</strong> ${item.latitude}, ${item.longitude}</div>`
+                  : ``
+              }
+            </div>
+
+            <div class="acoes">
+              ${
+                item.latitude != null && item.longitude != null
+                  ? `<a class="link" href="${mapaLink(item.latitude,item.longitude)}" target="_blank">Abrir no mapa</a>`
+                  : `<span class="muted">Sem GPS</span>`
+              }
+              ${
+                item.cliente_telefone
+                  ? `<a class="link" href="${montarLinkWhatsApp(item.cliente_telefone, textoWhats)}" target="_blank">WhatsApp do cliente</a>`
+                  : `<span class="muted">Sem WhatsApp</span>`
+              }
+            </div>
+
+            <div class="acoes3">
+              ${podeAceitar ? `<button class="green" onclick="aceitarChamado('${item.id}')">Aceitar</button>` : `<button class="sec" disabled>Aceitar</button>`}
+              ${podeIniciar ? `<button class="blue" onclick="iniciarChamado('${item.id}')">Iniciar</button>` : `<button class="sec" ${podeIniciar ? "" : "disabled"}>Iniciar</button>`}
+              ${podeFinalizar ? `<button class="red" onclick="finalizarChamado('${item.id}')">Finalizar</button>` : `<button class="sec" ${podeFinalizar ? "" : "disabled"}>Finalizar</button>`}
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    window.aceitarChamado = async function(id){
+      if(!perfilBorracheiro){
+        alert("Perfil do borracheiro não carregado.");
+        return;
+      }
+
+      if(!perfilBorracheiro.aberto){
+        alert("Sua borracharia está fechada. Abra no perfil antes de aceitar chamados.");
+        return;
+      }
+
+      const valor = prompt("Digite o valor estimado do atendimento:", "30");
+      const valor_estimado = Number(valor || 0);
+
+      const { data, error } = await supabase
+        .from("chamados_borracharia")
+        .update({
+          status: "aceito",
+          borracheiro_id: perfilBorracheiro.id,
+          valor_estimado: isNaN(valor_estimado) ? 0 : valor_estimado,
+          aceito_em: new Date().toISOString()
+        })
+        .eq("id", id)
+        .eq("status", "aguardando")
+        .is("borracheiro_id", null)
+        .select();
+
+      if(error){
+        console.error(error);
+        alert("Erro ao aceitar chamado.");
+        return;
+      }
+
+      if(!data || !data.length){
+        alert("Esse atendimento já foi pego por outra borracharia.");
+        await listarChamados();
+        return;
+      }
+
+      await listarChamados();
+    }
+
+    window.iniciarChamado = async function(id){
+      const { error } = await supabase
+        .from("chamados_borracharia")
+        .update({
+          status: "em_andamento"
+        })
+        .eq("id", id)
+        .eq("borracheiro_id", perfilBorracheiro.id);
+
+      if(error){
+        console.error(error);
+        alert("Erro ao iniciar atendimento.");
+        return;
+      }
+
+      await listarChamados();
+    }
+
+    window.finalizarChamado = async function(id){
+      const valorFinal = prompt("Digite o valor final cobrado:", "30");
+      const formaPagamento = prompt("Forma de pagamento: pix / dinheiro / cartao", "pix");
+
+      const { error } = await supabase
+        .from("chamados_borracharia")
+        .update({
+          status: "finalizado",
+          valor_final: Number(valorFinal || 0),
+          forma_pagamento: (formaPagamento || "indefinido").toLowerCase(),
+          finalizado_em: new Date().toISOString()
+        })
+        .eq("id", id)
+        .eq("borracheiro_id", perfilBorracheiro.id);
+
+      if(error){
+        console.error(error);
+        alert("Erro ao finalizar chamado.");
+        return;
+      }
+
+      await listarChamados();
+    }
+
+    el("btnLogin").addEventListener("click", login);
+    el("btnSair").addEventListener("click", sair);
+    el("btnSalvarPerfil").addEventListener("click", salvarPerfil);
+    el("btnAtualizar").addEventListener("click", listarChamados);
+    el("filtroStatus").addEventListener("change", listarChamados);
+    el("statusAberto").addEventListener("change", (e) => atualizarStatusVisualLoja(e.target.value));
+    el("btnPegarMinhaLocalizacao").addEventListener("click", pegarMinhaLocalizacao);
+
+    el("btnCopiarLink").addEventListener("click", copiarLinkPublico);
+    el("btnCompartilharLink").addEventListener("click", compartilharLinkPublico);
+
+    carregarSessao();
+  </script>
 </body>
 </html>
