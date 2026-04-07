@@ -387,157 +387,350 @@
   </div>
 
   <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-const supabase = createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+    const supabase = createClient(
+      "https://pdajixsoowcyhnjwhgpc.supabase.co",
+      "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+    );
 
-const el = (id) => document.getElementById(id);
-let intervalConsulta = null;
+    const el = (id) => document.getElementById(id);
+    let intervalConsulta = null;
 
-function limparMensagem() {
-  el("msgSolicitacao").textContent = "";
-}
+    function limparMensagem() {
+      el("msgSolicitacao").textContent = "";
+    }
 
-function mostrarMensagem(msg, cor = "#fca5a5") {
-  el("msgSolicitacao").style.color = cor;
-  el("msgSolicitacao").textContent = msg;
-}
+    function mostrarMensagem(msg, cor = "#fca5a5") {
+      el("msgSolicitacao").style.color = cor;
+      el("msgSolicitacao").textContent = msg;
+    }
 
-function traduzirStatus(status) {
-  if (status === "aguardando") return "Aguardando borracheiro";
-  if (status === "aceito") return "Chamado aceito";
-  if (status === "em_andamento") return "Em andamento";
-  if (status === "finalizado") return "Finalizado";
-  if (status === "cancelado") return "Cancelado";
-  return status || "-";
-}
+    function traduzirStatus(status) {
+      if (status === "aguardando") return "Aguardando borracheiro";
+      if (status === "aceito") return "Chamado aceito";
+      if (status === "em_andamento") return "Em andamento";
+      if (status === "finalizado") return "Finalizado";
+      if (status === "cancelado") return "Cancelado";
+      return status || "-";
+    }
 
-function statusAindaAtivo(status) {
-  return ["aguardando", "aceito", "em_andamento"].includes(status);
-}
+    function statusAindaAtivo(status) {
+      return ["aguardando", "aceito", "em_andamento"].includes(status);
+    }
 
-function mostrarModoSomenteConsulta(codigo = "") {
-  el("cardSolicitacao").classList.add("oculto");
-  el("tituloConsulta").textContent = "Acompanhar atendimento";
-  if (codigo) el("codigoConsulta").value = codigo;
-}
+    function mostrarModoSomenteConsulta(codigo = "") {
+      el("cardSolicitacao").classList.add("oculto");
+      el("tituloConsulta").textContent = "Acompanhar atendimento";
+      if (codigo) el("codigoConsulta").value = codigo;
+    }
 
-function mostrarModoNormal() {
-  el("cardSolicitacao").classList.remove("oculto");
-  el("tituloConsulta").textContent = "Acompanhar chamado";
-}
+    function mostrarModoNormal() {
+      el("cardSolicitacao").classList.remove("oculto");
+      el("tituloConsulta").textContent = "Acompanhar chamado";
+    }
 
-function limparChamadoSalvo() {
-  localStorage.removeItem("ff_borracharia_codigo");
-}
+    function limparChamadoSalvo() {
+      localStorage.removeItem("ff_borracharia_codigo");
+    }
 
-function salvarChamadoSalvo(codigo) {
-  localStorage.setItem("ff_borracharia_codigo", codigo);
-}
+    function salvarChamadoSalvo(codigo) {
+      localStorage.setItem("ff_borracharia_codigo", codigo);
+    }
 
-async function consultarChamado(codigoManual = null) {
-  const codigo = (codigoManual || el("codigoConsulta").value).trim().toUpperCase();
-  if (!codigo) return;
+    function calcularDistanciaKm(lat1, lon1, lat2, lon2) {
+      const toRad = (graus) => graus * Math.PI / 180;
+      const R = 6371;
 
-  const { data, error } = await supabase
-    .from("chamados_borracharia")
-    .select(`
-      id,
-      cliente_nome,
-      cliente_telefone,
-      tipo_veiculo,
-      problema,
-      observacoes,
-      endereco_texto,
-      latitude,
-      longitude,
-      status,
-      valor_estimado,
-      valor_final,
-      forma_pagamento,
-      codigo_acompanhamento,
-      created_at,
-      aceito_em,
-      finalizado_em,
-      borracheiro_id
-    `)
-    .eq("codigo_acompanhamento", codigo)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
 
-  if (error || !data) {
-    el("resultadoConsulta").style.display = "block";
-    el("statusBox").className = "status-box cancelado";
-    el("statusBox").textContent = "CHAMADO NÃO ENCONTRADO";
-    el("infoChamado").innerHTML = "Verifique o código e tente novamente.";
-    mostrarModoNormal();
-    limparChamadoSalvo();
-    if (intervalConsulta) clearInterval(intervalConsulta);
-    return;
-  }
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
 
-  /* =========================
-     🔥 AJUSTE AQUI (NOVO)
-  ========================== */
-  let nomeBorracheiro = "-";
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
 
-  if (data.borracheiro_id) {
-    const { data: borr } = await supabase
-      .from("borracheiros")
-      .select("nome")
-      .eq("id", data.borracheiro_id)
-      .single();
+    async function buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude) {
+      const { data, error } = await supabase
+        .from("borracheiros")
+        .select("id, nome, aberto, latitude, longitude, raio_km")
+        .eq("aberto", true);
 
-    if (borr) nomeBorracheiro = borr.nome;
-  }
-  /* ========================= */
+      if (error) {
+        console.error("Erro ao buscar borracheiros:", error);
+        return {
+          erro: true,
+          mensagem: "Erro ao verificar borracheiros disponíveis.",
+          lista: []
+        };
+      }
 
-  const status = data.status || "aguardando";
+      if (!data || data.length === 0) {
+        return {
+          erro: false,
+          mensagem: "Nenhuma borracharia aberta no momento.",
+          lista: []
+        };
+      }
 
-  const classe = ["aguardando","aceito","em_andamento","finalizado","cancelado"].includes(status)
-    ? status
-    : "aguardando";
+      const dentroDoRaio = data
+        .map((b) => {
+          if (
+            b.latitude == null ||
+            b.longitude == null ||
+            b.raio_km == null ||
+            latitude == null ||
+            longitude == null
+          ) {
+            return null;
+          }
 
-  el("resultadoConsulta").style.display = "block";
-  el("statusBox").className = "status-box " + classe;
-  el("statusBox").textContent = traduzirStatus(status).toUpperCase();
+          const distancia_km = calcularDistanciaKm(
+            Number(latitude),
+            Number(longitude),
+            Number(b.latitude),
+            Number(b.longitude)
+          );
 
-  el("infoChamado").innerHTML = `
-    <div><strong>Cliente:</strong> ${data.cliente_nome || "-"}</div>
-    <div><strong>Telefone:</strong> ${data.cliente_telefone || "-"}</div>
-    <div><strong>Veículo:</strong> ${data.tipo_veiculo || "-"}</div>
-    <div><strong>Problema:</strong> ${data.problema || "-"}</div>
-    <div><strong>Referência:</strong> ${data.endereco_texto || "-"}</div>
-    <div><strong>Observações:</strong> ${data.observacoes || "-"}</div>
+          return {
+            ...b,
+            distancia_km
+          };
+        })
+        .filter((b) => b && b.distancia_km <= Number(b.raio_km));
 
-    <!-- 🔥 MOSTRANDO O NOME -->
-    <div><strong>Borracheiro:</strong> ${nomeBorracheiro}</div>
+      if (dentroDoRaio.length === 0) {
+        return {
+          erro: false,
+          mensagem: "Nenhuma borracharia atende sua localização no raio configurado.",
+          lista: []
+        };
+      }
 
-    <div><strong>Valor estimado:</strong> R$ ${Number(data.valor_estimado || 0).toFixed(2)}</div>
-    <div><strong>Valor final:</strong> R$ ${Number(data.valor_final || 0).toFixed(2)}</div>
-    <div><strong>Pagamento:</strong> ${data.forma_pagamento || "-"}</div>
-    <div class="linha"></div>
-    <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
-  `;
+      return {
+        erro: false,
+        mensagem: "",
+        lista: dentroDoRaio
+      };
+    }
 
-  if (statusAindaAtivo(status)) {
-    mostrarModoSomenteConsulta(codigo);
-    salvarChamadoSalvo(codigo);
-  } else {
-    mostrarModoNormal();
-    limparChamadoSalvo();
-  }
+    async function pegarMinhaLocalizacao() {
+      limparMensagem();
 
-  if (intervalConsulta) clearInterval(intervalConsulta);
+      if (!navigator.geolocation) {
+        mostrarMensagem("Seu navegador não suporta localização.");
+        return;
+      }
 
-  if (statusAindaAtivo(status)) {
-    intervalConsulta = setInterval(() => consultarChamado(codigo), 5000);
-  }
-}
-</script>
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          el("latitude").value = pos.coords.latitude;
+          el("longitude").value = pos.coords.longitude;
+          mostrarMensagem("Localização capturada com sucesso.", "#86efac");
+        },
+        () => {
+          mostrarMensagem("Não foi possível pegar sua localização.");
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    }
+
+    async function solicitarAtendimento() {
+      limparMensagem();
+
+      const cliente_nome = el("cliente_nome").value.trim();
+      const cliente_telefone = el("cliente_telefone").value.trim();
+      const tipo_veiculo = el("tipo_veiculo").value;
+      const problema = el("problema").value;
+      const observacoes = el("observacoes").value.trim();
+      const endereco_texto = el("endereco_texto").value.trim();
+      const latitude = el("latitude").value ? Number(el("latitude").value) : null;
+      const longitude = el("longitude").value ? Number(el("longitude").value) : null;
+
+      if (!cliente_nome || !cliente_telefone) {
+        mostrarMensagem("Preencha nome e telefone.");
+        return;
+      }
+
+      if (!endereco_texto && (latitude === null || longitude === null)) {
+        mostrarMensagem("Informe a localização pelo GPS ou digite uma referência/endereço.");
+        return;
+      }
+
+      if (latitude === null || longitude === null) {
+        mostrarMensagem("Permita a localização para validar borracharias abertas no raio.");
+        return;
+      }
+
+      el("btnSolicitar").disabled = true;
+      el("btnSolicitar").textContent = "Enviando...";
+
+      const disponibilidade = await buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude);
+
+      if (disponibilidade.erro || disponibilidade.lista.length === 0) {
+        el("btnSolicitar").disabled = false;
+        el("btnSolicitar").textContent = "Solicitar atendimento";
+        mostrarMensagem(disponibilidade.mensagem || "Nenhuma borracharia disponível.");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("chamados_borracharia")
+        .insert([{
+          cliente_nome,
+          cliente_telefone,
+          tipo_veiculo,
+          problema,
+          observacoes,
+          endereco_texto,
+          latitude,
+          longitude,
+          status: "aguardando",
+          forma_pagamento: "indefinido",
+          valor_estimado: 0,
+          valor_final: 0
+        }])
+        .select()
+        .single();
+
+      el("btnSolicitar").disabled = false;
+      el("btnSolicitar").textContent = "Solicitar atendimento";
+
+      if (error) {
+        console.error(error);
+        mostrarMensagem("Erro ao solicitar atendimento.");
+        return;
+      }
+
+      const codigo = data?.codigo_acompanhamento || "";
+      el("resultadoSolicitacao").style.display = "block";
+      el("codigoGerado").textContent = codigo;
+
+      el("codigoConsulta").value = codigo;
+      salvarChamadoSalvo(codigo);
+      mostrarModoSomenteConsulta(codigo);
+      mostrarMensagem("Chamado criado com sucesso.", "#86efac");
+
+      consultarChamado(codigo);
+    }
+
+    async function consultarChamado(codigoManual = null) {
+      const codigo = (codigoManual || el("codigoConsulta").value).trim().toUpperCase();
+      if (!codigo) return;
+
+      const { data, error } = await supabase
+        .from("chamados_borracharia")
+        .select(`
+          id,
+          cliente_nome,
+          cliente_telefone,
+          tipo_veiculo,
+          problema,
+          observacoes,
+          endereco_texto,
+          latitude,
+          longitude,
+          status,
+          valor_estimado,
+          valor_final,
+          forma_pagamento,
+          codigo_acompanhamento,
+          created_at,
+          aceito_em,
+          finalizado_em,
+          borracheiro_id
+        `)
+        .eq("codigo_acompanhamento", codigo)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) {
+        el("resultadoConsulta").style.display = "block";
+        el("statusBox").className = "status-box cancelado";
+        el("statusBox").textContent = "CHAMADO NÃO ENCONTRADO";
+        el("infoChamado").innerHTML = "Verifique o código e tente novamente.";
+        mostrarModoNormal();
+        limparChamadoSalvo();
+        if (intervalConsulta) clearInterval(intervalConsulta);
+        return;
+      }
+
+      let nomeBorracheiro = "-";
+
+      if (data.borracheiro_id) {
+        const { data: borr, error: erroBorr } = await supabase
+          .from("borracheiros")
+          .select("nome")
+          .eq("id", data.borracheiro_id)
+          .maybeSingle();
+
+        if (!erroBorr && borr?.nome) {
+          nomeBorracheiro = borr.nome;
+        }
+      }
+
+      const status = data.status || "aguardando";
+      const classe = ["aguardando","aceito","em_andamento","finalizado","cancelado"].includes(status)
+        ? status
+        : "aguardando";
+
+      el("resultadoConsulta").style.display = "block";
+      el("statusBox").className = "status-box " + classe;
+      el("statusBox").textContent = traduzirStatus(status).toUpperCase();
+
+      el("infoChamado").innerHTML = `
+        <div><strong>Cliente:</strong> ${data.cliente_nome || "-"}</div>
+        <div><strong>Telefone:</strong> ${data.cliente_telefone || "-"}</div>
+        <div><strong>Veículo:</strong> ${data.tipo_veiculo || "-"}</div>
+        <div><strong>Problema:</strong> ${data.problema || "-"}</div>
+        <div><strong>Referência:</strong> ${data.endereco_texto || "-"}</div>
+        <div><strong>Observações:</strong> ${data.observacoes || "-"}</div>
+        <div><strong>Borracheiro:</strong> ${nomeBorracheiro}</div>
+        <div><strong>Valor estimado:</strong> R$ ${Number(data.valor_estimado || 0).toFixed(2)}</div>
+        <div><strong>Valor final:</strong> R$ ${Number(data.valor_final || 0).toFixed(2)}</div>
+        <div><strong>Pagamento:</strong> ${data.forma_pagamento || "-"}</div>
+        <div class="linha"></div>
+        <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
+      `;
+
+      if (statusAindaAtivo(status)) {
+        mostrarModoSomenteConsulta(codigo);
+        salvarChamadoSalvo(codigo);
+      } else {
+        mostrarModoNormal();
+        limparChamadoSalvo();
+      }
+
+      if (intervalConsulta) clearInterval(intervalConsulta);
+
+      if (statusAindaAtivo(status)) {
+        intervalConsulta = setInterval(() => consultarChamado(codigo), 5000);
+      }
+    }
+
+    async function verificarChamadoSalvoAoAbrir() {
+      const codigoSalvo = localStorage.getItem("ff_borracharia_codigo");
+
+      if (!codigoSalvo) {
+        mostrarModoNormal();
+        return;
+      }
+
+      el("codigoConsulta").value = codigoSalvo;
+      mostrarModoSomenteConsulta(codigoSalvo);
+      await consultarChamado(codigoSalvo);
+    }
+
+    el("btnLocalizacao").addEventListener("click", pegarMinhaLocalizacao);
+    el("btnSolicitar").addEventListener("click", solicitarAtendimento);
+    el("btnConsultar").addEventListener("click", () => consultarChamado());
+
+    verificarChamadoSalvoAoAbrir();
+  </script>
 </body>
 </html>
