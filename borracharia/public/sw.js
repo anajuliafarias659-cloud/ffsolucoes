@@ -1,52 +1,65 @@
-const CACHE_NAME = "ff-borracharia-cache-v018";
-const APP_SHELL = [
-  "/borracharia/public/",
-  "/borracharia/public/index.html",
-  "/borracharia/public/manifest.webmanifest",
-  "/borracharia/public/icons/icon-192.png",
-  "/borracharia/public/icons/icon-512.png"
-];
+const CACHE_NAME = "ff-borracharia-v3";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
-  );
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
         keys.map((key) => {
           if (key !== CACHE_NAME) {
             return caches.delete(key);
           }
         })
-      )
-    )
+      );
+      await self.clients.claim();
+    })()
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
+  const url = new URL(req.url);
 
-  if (req.method !== "GET") return;
+  // Nunca cachear HTML/navegação
+  if (req.mode === "navigate") {
+    event.respondWith(fetch(req, { cache: "no-store" }));
+    return;
+  }
 
+  // Nunca cachear chamadas do Supabase
+  if (url.hostname.includes("supabase.co")) {
+    event.respondWith(fetch(req, { cache: "no-store" }));
+    return;
+  }
+
+  // Cache só arquivos estáticos
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.match(req).then(async (cached) => {
       if (cached) return cached;
 
-      return fetch(req)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          return response;
-        })
-        .catch(() => {
-          return caches.match("/borracharia/public/index.html");
-        });
+      const response = await fetch(req);
+      const copy = response.clone();
+
+      if (
+        req.method === "GET" &&
+        (url.pathname.endsWith(".css") ||
+         url.pathname.endsWith(".js") ||
+         url.pathname.endsWith(".png") ||
+         url.pathname.endsWith(".jpg") ||
+         url.pathname.endsWith(".jpeg") ||
+         url.pathname.endsWith(".webp") ||
+         url.pathname.endsWith(".svg") ||
+         url.pathname.endsWith(".json"))
+      ) {
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(req, copy);
+      }
+
+      return response;
     })
   );
 });
