@@ -552,77 +552,89 @@ async function enviarAvaliacao(codigo) {
 
   
    
-    async function buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude) {
-      const { data, error } = await supabase
-        .from("borracheiros")
-        .select("id, nome, aberto, latitude, longitude, raio_km")
-        .eq("aberto", true);
+   async function buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude) {
+  const { data, error } = await supabase
+    .from("borracheiros")
+    .select("id, nome, aberto, latitude, longitude, raio_km")
+    .eq("aberto", true);
 
-      if (error) {
-        console.error("Erro ao buscar borracheiros:", error);
-        return {
-          erro: true,
-          mensagem: "Erro ao verificar borracheiros disponíveis.",
-          lista: []
-        };
-      }
-
-
-      if (!data || data.length === 0) {
-        return {
-          erro: false,
-          mensagem: "Nenhuma borracharia aberta no momento.",
-          lista: []
-        };
-      }
-
-      const dentroDoRaio = data
-  .map((b) => {
-    const latCliente = parseFloat(latitude);
-    const lonCliente = parseFloat(longitude);
-    const latB = parseFloat(b.latitude);
-    const lonB = parseFloat(b.longitude);
-    const raio = parseFloat(b.raio_km);
-
-    console.log("CLIENTE:", latCliente, lonCliente);
-    console.log("BORRACHEIRO:", b.nome, latB, lonB, raio);
-
-    if (!latB || !lonB || !raio) {
-      console.log("ERRO BORRACHEIRO (dados inválidos):", b);
-      return null;
-    }
-
-    const distancia_km = calcularDistanciaKm(
-      latCliente,
-      lonCliente,
-      latB,
-      lonB
-    );
-
-    console.log(`DISTANCIA até ${b.nome}:`, distancia_km, "KM | RAIO:", raio);
-
+  if (error) {
+    console.error("Erro ao buscar borracheiros:", error);
     return {
-      ...b,
-      distancia_km,
-      raio_km: raio
+      erro: true,
+      mensagem: "Erro ao verificar borracheiros disponíveis.",
+      lista: []
     };
-  })
-  .filter((b) => b && b.distancia_km <= b.raio_km);
+  }
 
-      if (dentroDoRaio.length === 0) {
-        return {
-          erro: false,
-          mensagem: "Nenhuma borracharia atende sua localização no raio configurado.",
-          lista: []
-        };
+  if (!data || data.length === 0) {
+    return {
+      erro: false,
+      mensagem: "Nenhuma borracharia aberta no momento.",
+      lista: []
+    };
+  }
+
+  // 🔥 NORMALIZA CLIENTE
+  const latCliente = parseFloat(String(latitude).replace(",", "."));
+  const lonCliente = parseFloat(String(longitude).replace(",", "."));
+
+  if (isNaN(latCliente) || isNaN(lonCliente)) {
+    console.log("ERRO CLIENTE (lat/lon inválido):", latitude, longitude);
+    return {
+      erro: true,
+      mensagem: "Localização inválida.",
+      lista: []
+    };
+  }
+
+  const dentroDoRaio = data
+    .map((b) => {
+      // 🔥 NORMALIZA BORRACHEIRO
+      const latB = parseFloat(String(b.latitude).replace(",", "."));
+      const lonB = parseFloat(String(b.longitude).replace(",", "."));
+      const raio = parseFloat(String(b.raio_km).replace(",", "."));
+
+      console.log("CLIENTE:", latCliente, lonCliente);
+      console.log("BORRACHEIRO:", b.nome, latB, lonB, raio);
+
+      // ✅ VALIDAÇÃO CORRETA
+      if (isNaN(latB) || isNaN(lonB) || isNaN(raio)) {
+        console.log("ERRO BORRACHEIRO (dados inválidos):", b);
+        return null;
       }
+
+      const distancia_km = calcularDistanciaKm(
+        latCliente,
+        lonCliente,
+        latB,
+        lonB
+      );
+
+      console.log(`DISTANCIA até ${b.nome}:`, distancia_km, "KM | RAIO:", raio);
 
       return {
-        erro: false,
-        mensagem: "",
-        lista: dentroDoRaio
+        ...b,
+        distancia_km,
+        raio_km: raio
       };
-    }
+    })
+    .filter((b) => b && b.distancia_km <= b.raio_km);
+
+  if (dentroDoRaio.length === 0) {
+    return {
+      erro: false,
+      mensagem: "Nenhuma borracharia atende sua localização no raio configurado.",
+      lista: []
+    };
+  }
+
+  return {
+    erro: false,
+    mensagem: "",
+    lista: dentroDoRaio
+  };
+}
 
     async function pegarMinhaLocalizacao() {
       limparMensagem();
@@ -658,30 +670,24 @@ async function enviarAvaliacao(codigo) {
       const longitude = el("longitude").value ? Number(el("longitude").value) : null;
 
       if (!cliente_nome || !cliente_telefone) {
-        mostrarMensagem("Preencha nome e telefone.");
-        return;
-      }
+  mostrarMensagem("Preencha nome e telefone.");
+  return;
+}
 
-      if (!endereco_texto && (latitude === null || longitude === null)) {
-        mostrarMensagem("Informe a localização pelo GPS ou digite uma referência/endereço.");
-        return;
-      }
+// precisa de localização OU endereço
+if (!endereco_texto && (latitude === null || longitude === null)) {
+  mostrarMensagem("Informe a localização pelo GPS ou digite uma referência.");
+  return;
+}
 
-      if (latitude === null || longitude === null) {
-        mostrarMensagem("Permita a localização para validar borracharias abertas no raio.");
-        return;
-      }
-
-      el("btnSolicitar").disabled = true;
-      el("btnSolicitar").textContent = "Enviando...";
-
-      if (latitude === null || longitude === null) {
-        mostrarMensagem("Permita a localização para validar borracharias abertas no raio.");
-        return;
-      }
+// 🔥 ESSA LINHA É O SEGREDO (não pode faltar)
+if (latitude === null || longitude === null) {
+  mostrarMensagem("Permita a localização para buscar borracharias próximas.");
+  return;
+}
 
       el("btnSolicitar").disabled = true;
-      el("btnSolicitar").textContent = "Enviando...";
+el("btnSolicitar").textContent = "Enviando...";
 
       const disponibilidade = await buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude);
 
@@ -878,6 +884,8 @@ el("btnEnviarAvaliacao").addEventListener("click", () => {
   </script>
 
   <script>
+document.addEventListener("DOMContentLoaded", () => {
+
 let deferredPrompt = null;
 const btnInstalar = document.querySelector(".btn-instalar");
 
@@ -909,6 +917,8 @@ window.addEventListener("appinstalled", () => {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js");
 }
+
+});
 </script>
 </body>
 </html>
