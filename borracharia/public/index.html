@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -25,6 +26,11 @@
       --shadow:0 18px 40px rgba(0,0,0,.28);
       --topo-h:140px;
     }
+
+#btnEnviarAvaliacao{
+  background: linear-gradient(135deg,#22c55e,#16a34a);
+  margin-top:10px;
+}
 
     html,body{min-height:100%}
 
@@ -408,11 +414,31 @@
       </div>
 
       <div id="resultadoConsulta" style="display:none;">
-        <div class="status-box" id="statusBox">AGUARDANDO</div>
-        <div class="info" id="infoChamado"></div>
-      </div>
-    </div>
+  <div class="status-box" id="statusBox">AGUARDANDO</div>
+  <div class="info" id="infoChamado"></div>
+
+  <!-- AVALIAÇÃO AQUI DENTRO -->
+  <div id="areaAvaliacao" class="card oculto">
+    <h2>Avaliar atendimento</h2>
+
+    <label>Nota</label>
+    <select id="notaAvaliacao">
+      <option value="5">⭐⭐⭐⭐⭐ - Excelente</option>
+      <option value="4">⭐⭐⭐⭐ - Bom</option>
+      <option value="3">⭐⭐⭐ - Regular</option>
+      <option value="2">⭐⭐ - Ruim</option>
+      <option value="1">⭐ - Péssimo</option>
+    </select>
+
+    <label>Comentário (opcional)</label>
+    <textarea id="comentarioAvaliacao"></textarea>
+
+    <button id="btnEnviarAvaliacao">Enviar avaliação</button>
+    <div class="msg" id="msgAvaliacao"></div>
   </div>
+
+</div>
+
 
   <script type="module">
     import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
@@ -491,6 +517,41 @@
       return R * c;
     }
 
+async function enviarAvaliacao(codigo) {
+  const btn = el("btnEnviarAvaliacao");
+  btn.disabled = true;
+  btn.textContent = "Enviando...";
+
+  const nota = el("notaAvaliacao").value;
+  const comentario = el("comentarioAvaliacao").value.trim();
+
+  const { error } = await supabase
+    .from("chamados_borracharia")
+    .update({
+      avaliacao: Number(nota),
+      comentario_avaliacao: comentario
+    })
+    .eq("codigo_acompanhamento", codigo);
+
+  if (error) {
+    el("msgAvaliacao").textContent = "Erro ao enviar avaliação.";
+    btn.disabled = false;
+    btn.textContent = "Enviar avaliação";
+    return;
+  }
+
+  // limpa campos
+  el("notaAvaliacao").value = "5";
+  el("comentarioAvaliacao").value = "";
+
+  el("msgAvaliacao").textContent = "Avaliação enviada com sucesso!";
+  el("areaAvaliacao").classList.add("oculto");
+
+  consultarChamado(codigo);
+}
+
+  
+   
     async function buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude) {
       const { data, error } = await supabase
         .from("borracheiros")
@@ -505,6 +566,7 @@
           lista: []
         };
       }
+
 
       if (!data || data.length === 0) {
         return {
@@ -606,6 +668,7 @@
       el("btnSolicitar").disabled = true;
       el("btnSolicitar").textContent = "Enviando...";
 
+
       const disponibilidade = await buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude);
 
       if (disponibilidade.erro || disponibilidade.lista.length === 0) {
@@ -662,25 +725,26 @@
       const { data, error } = await supabase
         .from("chamados_borracharia")
         .select(`
-          id,
-          cliente_nome,
-          cliente_telefone,
-          tipo_veiculo,
-          problema,
-          observacoes,
-          endereco_texto,
-          latitude,
-          longitude,
-          status,
-          valor_estimado,
-          valor_final,
-          forma_pagamento,
-          codigo_acompanhamento,
-          created_at,
-          aceito_em,
-          finalizado_em,
-          borracheiro_id
-        `)
+  id,
+  cliente_nome,
+  cliente_telefone,
+  tipo_veiculo,
+  problema,
+  observacoes,
+  endereco_texto,
+  latitude,
+  longitude,
+  status,
+  valor_estimado,
+  valor_final,
+  forma_pagamento,
+  codigo_acompanhamento,
+  created_at,
+  aceito_em,
+  finalizado_em,
+  borracheiro_id,
+  avaliacao
+`)
         .eq("codigo_acompanhamento", codigo)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -743,13 +807,26 @@ const classe = ["aguardando","aceito","em_andamento","finalizado","cancelado"].i
         <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
       `;
 
-      if (statusAindaAtivo(status)) {
-        mostrarModoSomenteConsulta(codigo);
-        salvarChamadoSalvo(codigo);
-      } else {
-        mostrarModoNormal();
-        limparChamadoSalvo();
-      }
+      // controle da avaliação
+// controle da avaliação
+if (status === "finalizado") {
+  if (data.avaliacao === null || data.avaliacao === undefined) {
+    el("areaAvaliacao").classList.remove("oculto");
+  } else {
+    el("areaAvaliacao").classList.add("oculto");
+  }
+} else {
+  el("areaAvaliacao").classList.add("oculto");
+}
+
+// controle de tela
+if (statusAindaAtivo(status)) {
+  mostrarModoSomenteConsulta(codigo);
+  salvarChamadoSalvo(codigo);
+} else {
+  mostrarModoNormal();
+  limparChamadoSalvo();
+}
 
       if (intervalConsulta) clearInterval(intervalConsulta);
 
@@ -777,6 +854,11 @@ if (statusAindaAtivo(status)) {
     el("btnSolicitar").addEventListener("click", solicitarAtendimento);
     el("btnConsultar").addEventListener("click", () => consultarChamado());
 
+el("btnEnviarAvaliacao").addEventListener("click", () => {
+  const codigo = el("codigoConsulta").value.trim();
+  if (!codigo) return;
+  enviarAvaliacao(codigo);
+});
     verificarChamadoSalvoAoAbrir();
   </script>
 
