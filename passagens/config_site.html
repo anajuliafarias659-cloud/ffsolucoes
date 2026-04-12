@@ -15,6 +15,8 @@
       --primary:#22c55e;
       --danger:#ef4444;
       --input:#0b1220;
+      --warning:#f59e0b;
+      --info:#93c5fd;
     }
 
     *{box-sizing:border-box}
@@ -142,8 +144,35 @@
 
     .status{
       margin-top:12px;
-      color:#93c5fd;
       font-size:13px;
+      line-height:1.5;
+      padding:10px 12px;
+      border-radius:10px;
+      display:none;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+
+    .status.show{display:block}
+    .status.info{
+      background:rgba(59,130,246,.12);
+      color:var(--info);
+      border:1px solid rgba(59,130,246,.25);
+    }
+    .status.ok{
+      background:rgba(34,197,94,.12);
+      color:#86efac;
+      border:1px solid rgba(34,197,94,.25);
+    }
+    .status.erro{
+      background:rgba(239,68,68,.12);
+      color:#fca5a5;
+      border:1px solid rgba(239,68,68,.25);
+    }
+    .status.aviso{
+      background:rgba(245,158,11,.12);
+      color:#fcd34d;
+      border:1px solid rgba(245,158,11,.25);
     }
 
     .link-box{
@@ -285,12 +314,35 @@
 
     let APP_ID = null;
 
-    function setStatus(msg){
+    function setStatus(msg, tipo = "info"){
+      statusEl.className = `status show ${tipo}`;
       statusEl.textContent = msg || "";
     }
 
+    function limparStatus(){
+      statusEl.className = "status";
+      statusEl.textContent = "";
+    }
+
+    function extrairMensagemErro(error){
+      if(!error) return "Erro desconhecido.";
+      return (
+        error.message ||
+        error.details ||
+        error.hint ||
+        JSON.stringify(error)
+      );
+    }
+
     function alternarCamposPagamento(){
-      boxMp.classList.toggle("hidden", modoVenda.value !== "sistema");
+      const mostrarMp = modoVenda.value === "sistema";
+      boxMp.classList.toggle("hidden", !mostrarMp);
+
+      if(mostrarMp){
+        setStatus("Modo sistema ativo. Informe e salve o token do Mercado Pago para PIX e cartão funcionarem.", "aviso");
+      }else{
+        limparStatus();
+      }
     }
 
     modoVenda.addEventListener("change", alternarCamposPagamento);
@@ -317,6 +369,7 @@
         .single();
 
       if(error || !data?.app_id){
+        console.error("Erro ao carregar app_id:", error);
         alert("Usuário sem app_id vinculado.");
         return;
       }
@@ -352,7 +405,8 @@
         .maybeSingle();
 
       if(error){
-        console.error(error);
+        console.error("Erro ao carregar token MP:", error);
+        setStatus("Erro ao carregar token do Mercado Pago:\n" + extrairMensagemErro(error), "erro");
         return;
       }
 
@@ -360,18 +414,29 @@
     }
 
     async function salvarTokenMP(){
-      if(!APP_ID) return;
+      if(!APP_ID){
+        throw new Error("APP_ID não carregado para salvar token.");
+      }
 
       const token = (mpToken.value || "").trim();
-      if(!token) return;
+
+      if(!token){
+        throw new Error("Informe o token do Mercado Pago.");
+      }
 
       const { error } = await supabase
         .from("mp_contas")
-        .upsert({ app_id: APP_ID, mp_access_token: token }, { onConflict:"app_id" });
+        .upsert(
+          { app_id: APP_ID, mp_access_token: token },
+          { onConflict:"app_id" }
+        );
 
       if(error){
-        alert("Erro ao salvar token do Mercado Pago.");
+        console.error("Erro ao salvar token MP:", error);
+        throw new Error("Erro ao salvar token do Mercado Pago: " + extrairMensagemErro(error));
       }
+
+      await carregarTokenMP();
     }
 
     async function removerTokenMP(){
@@ -384,11 +449,13 @@
         .eq("app_id", APP_ID);
 
       if(error){
-        alert("Erro ao remover token.");
+        console.error("Erro ao remover token MP:", error);
+        alert("Erro ao remover token: " + extrairMensagemErro(error));
         return;
       }
 
       mpToken.value = "";
+      setStatus("Token do Mercado Pago removido com sucesso.", "ok");
       alert("Token removido!");
     }
 
@@ -413,7 +480,7 @@
 
       try{
         await navigator.clipboard.writeText(url);
-        alert("🔗 Link copiado com sucesso!\\n\\n" + url);
+        alert("🔗 Link copiado com sucesso!\n\n" + url);
       }catch{
         prompt("Copie o link:", url);
       }
@@ -429,7 +496,8 @@
         .maybeSingle();
 
       if(error){
-        console.error(error);
+        console.error("Erro ao carregar config_site:", error);
+        setStatus("Erro ao carregar config_site:\n" + extrairMensagemErro(error), "erro");
         return;
       }
 
@@ -462,7 +530,10 @@
           return;
         }
 
-        setStatus("Salvando...");
+        limparStatus();
+        setStatus("Salvando configurações...", "info");
+        btnSalvar.disabled = true;
+        btnSalvar.textContent = "Salvando...";
 
         let logoUrl = previewLogo.src || "";
         let bannerUrl = previewBanner.src || "";
@@ -500,22 +571,24 @@
           .upsert(payload, { onConflict:"app_id" });
 
         if(error){
-          console.error(error);
-          alert("Erro ao salvar config_site.");
-          setStatus("");
-          return;
+          console.error("Erro ao salvar config_site:", error);
+          throw new Error("Erro ao salvar config_site: " + extrairMensagemErro(error));
         }
 
         if(modoVenda.value === "sistema"){
           await salvarTokenMP();
         }
 
+        setStatus("Configurações salvas com sucesso.", "ok");
         alert("Salvo com sucesso!");
-        setStatus("");
       } catch(e){
-        console.error(e);
-        alert("Erro inesperado ao salvar.");
-        setStatus("");
+        console.error("Erro em salvarTudo:", e);
+        const mensagem = e?.message || "Erro inesperado ao salvar.";
+        setStatus(mensagem, "erro");
+        alert(mensagem);
+      } finally {
+        btnSalvar.disabled = false;
+        btnSalvar.textContent = "Salvar Configurações";
       }
     }
 
@@ -538,12 +611,13 @@
         .eq("app_id", APP_ID);
 
       if(error){
-        alert("Erro ao remover logo.");
+        alert("Erro ao remover logo: " + extrairMensagemErro(error));
         return;
       }
 
       previewLogo.src = "";
       inputLogo.value = "";
+      setStatus("Logo removida com sucesso.", "ok");
       alert("Logo removido!");
     }
 
@@ -556,12 +630,13 @@
         .eq("app_id", APP_ID);
 
       if(error){
-        alert("Erro ao remover banner.");
+        alert("Erro ao remover banner: " + extrairMensagemErro(error));
         return;
       }
 
       previewBanner.src = "";
       inputBanner.value = "";
+      setStatus("Banner removido com sucesso.", "ok");
       alert("Banner removido!");
     }
 
