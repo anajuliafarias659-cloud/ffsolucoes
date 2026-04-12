@@ -188,258 +188,217 @@
 
   </div>
 
-  <script>
-    const supabase = window.supabase.createClient(
-      "https://pdajixsoowcyhnjwhgpc.supabase.co",
-      "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-    );
+ <script>
 
-    let app_id = null;
-    let usuarioLogado = null;
+// 🔥 SUPABASE
+const supabase = window.supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
 
-    function setMsg(id, texto, tipo = "ok"){
-      const el = document.getElementById(id);
-      if(!el) return;
-      if(!texto){
-        el.innerHTML = "";
-        return;
-      }
-      el.innerHTML = `<div class="${tipo}">${texto}</div>`;
-    }
+let app_id = null;
 
-    async function sair(){
-      await supabase.auth.signOut();
-      window.location.href = "/login.html";
-    }
+// 🔐 SESSION + APP_ID
+async function carregarApp(){
 
-    async function carregarApp(){
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  const { data: { session } } = await supabase.auth.getSession();
 
-      if(sessionError || !sessionData?.session?.user){
-        window.location.href = "/login.html";
-        return;
-      }
+  if(!session){
+    location.href = "/login.html";
+    return;
+  }
 
-      usuarioLogado = sessionData.session.user;
+  const user = session.user;
 
-      const { data: usuario, error: usuarioError } = await supabase
-        .from("usuarios")
-        .select("app_id")
-        .eq("id", usuarioLogado.id)
-        .single();
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", user.id)
+    .single();
 
-      if(usuarioError || !usuario?.app_id){
-        document.body.insertAdjacentHTML(
-          "beforeend",
-          `<div style="padding:20px;color:#fff;">Não foi possível localizar o app_id do usuário logado.</div>`
-        );
-        return;
-      }
+  if(error || !data){
+    alert("Erro ao carregar usuário");
+    return;
+  }
 
-      app_id = usuario.app_id;
+  app_id = data.app_id;
 
-      await carregarVeiculos();
-      await carregarViagens();
-    }
+  carregarVeiculos();
+  carregarViagens();
+}
 
-    async function criarVeiculo(){
-      setMsg("msgVeiculo", "");
+// 🚐 CRIAR VEÍCULO
+async function criarVeiculo(){
 
-      const nome = document.getElementById("nomeVeiculo").value.trim();
-      const tipo = document.getElementById("tipoVeiculo").value;
-      const total = Number(document.getElementById("poltronasVeiculo").value);
-      const layout = document.getElementById("layoutVeiculo").value;
+  const nome = document.getElementById("nomeVeiculo").value.trim();
+  const tipo = document.getElementById("tipoVeiculo").value;
+  const total = parseInt(document.getElementById("poltronasVeiculo").value);
+  const layout = document.getElementById("layoutVeiculo").value;
 
-      if(!nome){
-        setMsg("msgVeiculo", "Digite o nome do veículo.", "erro");
-        return;
-      }
+  if(!nome || !total){
+    return alert("Preencha os dados do veículo");
+  }
 
-      if(!total || total < 1){
-        setMsg("msgVeiculo", "Informe o total de poltronas.", "erro");
-        return;
-      }
+  const { error } = await supabase
+    .from("veiculos_passagens")
+    .insert([{
+      nome,
+      tipo,
+      total_poltronas: total,
+      layout,
+      app_id
+    }]);
 
-      const { error } = await supabase
-        .from("veiculos_passagens")
-        .insert([{
-          nome,
-          tipo,
-          total_poltronas: total,
-          layout,
-          app_id
-        }]);
+  if(error){
+    return alert("Erro: " + error.message);
+  }
 
-      if(error){
-        setMsg("msgVeiculo", "Erro ao salvar veículo: " + error.message, "erro");
-        return;
-      }
+  alert("Veículo criado");
+  carregarVeiculos();
+}
 
-      document.getElementById("nomeVeiculo").value = "";
-      document.getElementById("poltronasVeiculo").value = "";
-      document.getElementById("layoutVeiculo").value = "2-2";
-      document.getElementById("tipoVeiculo").value = "onibus";
+// 🔥 LISTAR VEÍCULOS
+async function carregarVeiculos(){
 
-      setMsg("msgVeiculo", "Veículo salvo com sucesso.");
-      await carregarVeiculos();
-    }
+  const { data, error } = await supabase
+    .from("veiculos_passagens")
+    .select("*")
+    .eq("app_id", app_id);
 
-    async function carregarVeiculos(){
-      const { data, error } = await supabase
-        .from("veiculos_passagens")
-        .select("*")
-        .eq("app_id", app_id)
-        .order("created_at", { ascending: false });
+  const lista = document.getElementById("listaVeiculos");
+  const select = document.getElementById("veiculoSelect");
 
-      const lista = document.getElementById("listaVeiculos");
-      const select = document.getElementById("veiculoSelect");
+  lista.innerHTML = "";
+  select.innerHTML = `<option value="">Selecione</option>`;
 
-      lista.innerHTML = "";
-      select.innerHTML = `<option value="">Selecione um veículo</option>`;
+  if(error || !data){
+    lista.innerHTML = "Erro ao carregar";
+    return;
+  }
 
-      if(error){
-        lista.innerHTML = `<div class="erro">Erro ao carregar veículos: ${error.message}</div>`;
-        return;
-      }
+  data.forEach(v => {
 
-      if(!data || !data.length){
-        lista.innerHTML = `<div class="muted">Nenhum veículo cadastrado.</div>`;
-        return;
-      }
+    lista.innerHTML += `
+      <div class="item">
+        ${v.nome} • ${v.total_poltronas} lugares • ${v.layout}
+      </div>
+    `;
 
-      data.forEach(v => {
-        lista.innerHTML += `
-          <div class="item">
-            <strong>${v.nome}</strong><br>
-            <span class="muted">${v.tipo || "-"} • ${v.total_poltronas || 0} poltronas • layout ${v.layout || "-"}</span>
-          </div>
-        `;
+    select.innerHTML += `
+      <option value="${v.id}">${v.nome}</option>
+    `;
+  });
+}
 
-        select.innerHTML += `<option value="${v.id}">${v.nome}</option>`;
-      });
-    }
+// 🛣️ CRIAR VIAGEM
+async function criarViagem(){
 
-    async function criarViagem(){
-      setMsg("msgViagem", "");
+  const rota = document.getElementById("rota").value.trim();
+  const hora = document.getElementById("hora").value.trim();
+  const dias = document.getElementById("dias").value.trim();
+  const veiculo_id = document.getElementById("veiculoSelect").value;
 
-      const rota = document.getElementById("rota").value.trim();
-      const hora = document.getElementById("hora").value.trim();
-      const dias = document.getElementById("dias").value.trim();
-      const veiculo_id = document.getElementById("veiculoSelect").value;
+  if(!rota || !hora || !veiculo_id){
+    return alert("Preencha os dados da viagem");
+  }
 
-      if(!rota){
-        setMsg("msgViagem", "Digite a rota.", "erro");
-        return;
-      }
+  const { error } = await supabase
+    .from("viagens_passagens")
+    .insert([{
+      rota,
+      hora,
+      dias,
+      veiculo_id,
+      app_id,
+      ativo: true
+    }]);
 
-      if(!hora){
-        setMsg("msgViagem", "Digite a hora.", "erro");
-        return;
-      }
+  if(error){
+    return alert("Erro: " + error.message);
+  }
 
-      if(!veiculo_id){
-        setMsg("msgViagem", "Selecione um veículo.", "erro");
-        return;
-      }
+  alert("Viagem criada");
+  carregarViagens();
+}
 
-      const { error } = await supabase
-        .from("viagens_passagens")
-        .insert([{
-          rota,
-          hora,
-          dias,
-          veiculo_id,
-          app_id
-        }]);
+// 🔥 LISTAR VIAGENS
+async function carregarViagens(){
 
-      if(error){
-        setMsg("msgViagem", "Erro ao salvar viagem: " + error.message, "erro");
-        return;
-      }
+  const { data, error } = await supabase
+    .from("viagens_passagens")
+    .select("*")
+    .eq("app_id", app_id);
 
-      document.getElementById("rota").value = "";
-      document.getElementById("hora").value = "";
-      document.getElementById("dias").value = "";
+  const lista = document.getElementById("listaViagens");
+  const select = document.getElementById("viagemReserva");
 
-      setMsg("msgViagem", "Viagem salva com sucesso.");
-      await carregarViagens();
-    }
+  lista.innerHTML = "";
+  select.innerHTML = `<option value="">Selecione</option>`;
 
-    async function carregarViagens(){
-      const { data, error } = await supabase
-        .from("viagens_passagens")
-        .select("id, rota, hora, dias, veiculo_id")
-        .eq("app_id", app_id)
-        .order("created_at", { ascending: false });
+  if(error || !data){
+    lista.innerHTML = "Erro ao carregar viagens";
+    return;
+  }
 
-      const lista = document.getElementById("listaViagens");
-      const select = document.getElementById("viagemReserva");
+  data.forEach(v => {
 
-      lista.innerHTML = "";
-      select.innerHTML = `<option value="">Selecione uma viagem</option>`;
+    lista.innerHTML += `
+      <div class="item">
+        ${v.rota} - ${v.hora}
+      </div>
+    `;
 
-      if(error){
-        lista.innerHTML = `<div class="erro">Erro ao carregar viagens: ${error.message}</div>`;
-        return;
-      }
+    select.innerHTML += `
+      <option value="${v.id}">${v.rota}</option>
+    `;
+  });
+}
 
-      if(!data || !data.length){
-        lista.innerHTML = `<div class="muted">Nenhuma viagem cadastrada.</div>`;
-        return;
-      }
+// 🎟️ RESERVAS
+async function verReservas(){
 
-      data.forEach(v => {
-        lista.innerHTML += `
-          <div class="item">
-            <strong>${v.rota}</strong><br>
-            <span class="muted">${v.hora || "-"} ${v.dias ? "• " + v.dias : ""}</span>
-          </div>
-        `;
+  const viagem_id = document.getElementById("viagemReserva").value;
 
-        select.innerHTML += `<option value="${v.id}">${v.rota} - ${v.hora || ""}</option>`;
-      });
-    }
+  if(!viagem_id){
+    return alert("Selecione a viagem");
+  }
 
-    async function verReservas(){
-      setMsg("msgReserva", "");
+  const { data, error } = await supabase
+    .from("reservas_passagens")
+    .select("*")
+    .eq("viagem_id", viagem_id)
+    .eq("app_id", app_id);
 
-      const viagem_id = document.getElementById("viagemReserva").value;
-      const lista = document.getElementById("listaReservas");
+  const lista = document.getElementById("listaReservas");
+  lista.innerHTML = "";
 
-      lista.innerHTML = "";
+  if(error){
+    return alert("Erro: " + error.message);
+  }
 
-      if(!viagem_id){
-        setMsg("msgReserva", "Selecione uma viagem.", "erro");
-        return;
-      }
+  if(!data.length){
+    lista.innerHTML = "Nenhuma reserva";
+    return;
+  }
 
-      const { data, error } = await supabase
-        .from("reservas_passagens")
-        .select("*")
-        .eq("viagem_id", viagem_id)
-        .order("poltrona", { ascending: true });
+  data.forEach(r => {
+    lista.innerHTML += `
+      <div class="item">
+        Poltrona ${r.poltrona} - ${r.nome}
+      </div>
+    `;
+  });
+}
 
-      if(error){
-        setMsg("msgReserva", "Erro ao carregar reservas: " + error.message, "erro");
-        return;
-      }
+// 🚪 SAIR
+async function sair(){
+  await supabase.auth.signOut();
+  location.href = "/login.html";
+}
 
-      if(!data || !data.length){
-        lista.innerHTML = `<div class="muted">Nenhuma reserva encontrada para esta viagem.</div>`;
-        return;
-      }
+// 🚀 START
+carregarApp();
 
-      data.forEach(r => {
-        lista.innerHTML += `
-          <div class="item">
-            <strong>Poltrona ${r.poltrona}</strong><br>
-            <span class="muted">${r.nome || "Sem nome"}</span>
-          </div>
-        `;
-      });
-    }
-
-    carregarApp();
-  </script>
+</script>
 </body>
 </html>
