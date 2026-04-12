@@ -47,7 +47,7 @@ body{background:#07122b;color:#fff;font-family:Arial,sans-serif;margin:0}
   font-size:14px;
   opacity:.9;
 }
-select,input,button,textarea{
+select,input,button{
   width:100%;
   padding:14px 16px;
   margin-top:10px;
@@ -175,7 +175,7 @@ button:hover{opacity:.95}
   border-radius:10px;
   font-weight:bold;
 }
-.hidden{display:none}
+.hidden{display:none!important}
 </style>
 </head>
 
@@ -204,7 +204,7 @@ button:hover{opacity:.95}
       <input type="date" id="dataVolta">
     </div>
 
-    <div class="subtitulo">Ida</div>
+    <div class="subtitulo">Viagens disponíveis</div>
     <div id="listaViagens" class="lista-viagens"></div>
   </div>
 
@@ -261,6 +261,7 @@ let configLoja = null;
 let viagemSelecionada = null;
 let poltronaSelecionada = null;
 let viagemAtual = null;
+let viagensCache = [];
 
 function hojeLocalISO(){
   const d = new Date();
@@ -287,6 +288,17 @@ function limparPagamentoUI(){
   document.getElementById("checkoutLink").href = "#";
 }
 
+function limparSelecaoViagem(){
+  viagemSelecionada = null;
+  poltronaSelecionada = null;
+  viagemAtual = null;
+  document.getElementById("poltronas").innerHTML = "";
+  document.getElementById("infoViagem").innerHTML = "";
+  document.getElementById("valorViagem").innerHTML = "";
+  document.getElementById("valorViagem").classList.add("hidden");
+  limparPagamentoUI();
+}
+
 function atualizarCamposData(){
   const tipo = document.getElementById("tipoViagem").value;
   const boxVolta = document.getElementById("boxDataVolta");
@@ -298,6 +310,47 @@ function atualizarCamposData(){
     boxVolta.classList.add("hidden");
     dataVolta.value = "";
   }
+
+  renderizarListaViagens();
+}
+
+function nomeDiaSemana(dataISO){
+  if(!dataISO) return "";
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  const dias = ["Dom","Seg","Ter","Qua","Qui","Sex","Sab"];
+  return dias[data.getDay()];
+}
+
+function normalizarDia(txt){
+  return String(txt || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .slice(0,3);
+}
+
+function viagemRodaNaData(viagem, dataISO){
+  if(!viagem || !dataISO) return false;
+
+  const diaEscolhido = normalizarDia(nomeDiaSemana(dataISO));
+  const diasViagem = String(viagem.dias || "")
+    .split(",")
+    .map(v => normalizarDia(v))
+    .filter(Boolean);
+
+  if(!diasViagem.length){
+    return true;
+  }
+
+  return diasViagem.includes(diaEscolhido);
+}
+
+function calcularValorTotal(){
+  const tipoViagem = document.getElementById("tipoViagem").value;
+  const valorBase = Number(viagemAtual?.valor || 0);
+  return tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
 }
 
 async function resolverAppId(){
@@ -350,7 +403,6 @@ async function carregarConfigLoja(){
 async function carregarViagens(){
   const lista = document.getElementById("listaViagens");
   lista.innerHTML = "";
-  limparPagamentoUI();
   setMsg("");
 
   const ok = await resolverAppId();
@@ -374,12 +426,32 @@ async function carregarViagens(){
     return;
   }
 
-  if(!data || !data.length){
+  viagensCache = data || [];
+  await renderizarListaViagens();
+}
+
+async function renderizarListaViagens(){
+  const lista = document.getElementById("listaViagens");
+  const dataIda = document.getElementById("dataIda").value;
+
+  lista.innerHTML = "";
+  limparSelecaoViagem();
+
+  if(!viagensCache.length){
     lista.innerHTML = `<div class="vazio">Nenhuma viagem cadastrada.</div>`;
     return;
   }
 
-  for(const v of data){
+  const viagensFiltradas = dataIda
+    ? viagensCache.filter(v => viagemRodaNaData(v, dataIda))
+    : viagensCache;
+
+  if(!viagensFiltradas.length){
+    lista.innerHTML = `<div class="vazio">Nenhuma viagem disponível para a data escolhida.</div>`;
+    return;
+  }
+
+  for(const v of viagensFiltradas){
     let nomeVeiculo = "";
 
     if(v.veiculo_id){
@@ -387,7 +459,7 @@ async function carregarViagens(){
         .from("veiculos_passagens")
         .select("nome")
         .eq("id", v.veiculo_id)
-        .single();
+        .maybeSingle();
 
       nomeVeiculo = veiculo?.nome || "";
     }
@@ -398,6 +470,7 @@ async function carregarViagens(){
     div.innerHTML = `
       ${v.rota || ""} - ${v.hora || ""}
       ${nomeVeiculo ? `<small>${nomeVeiculo}</small>` : ""}
+      ${v.dias ? `<small>Dias: ${v.dias}</small>` : ""}
       ${v.valor !== null && v.valor !== undefined ? `<small>Valor: R$ ${Number(v.valor).toFixed(2)}</small>` : ""}
     `;
     div.onclick = () => selecionarViagem(v.id);
@@ -427,15 +500,24 @@ async function selecionarViagem(id){
     return;
   }
 
+  const dataIda = document.getElementById("dataIda").value;
+  if(dataIda && !viagemRodaNaData(viagem, dataIda)){
+    setMsg(`Essa viagem não roda na data escolhida. Dias disponíveis: ${viagem.dias || "-"}.`, "erro");
+    limparSelecaoViagem();
+    return;
+  }
+
   viagemAtual = viagem;
 
   document.getElementById("infoViagem").innerHTML =
     `<b>${viagem.rota || ""}</b> - ${viagem.hora || ""}`;
 
   const valorBox = document.getElementById("valorViagem");
+  const valorTotal = calcularValorTotal();
+
   if(viagem.valor !== null && viagem.valor !== undefined && viagem.valor !== ""){
     valorBox.classList.remove("hidden");
-    valorBox.innerHTML = `Valor da passagem: <b>R$ ${Number(viagem.valor).toFixed(2)}</b>`;
+    valorBox.innerHTML = `Valor da passagem: <b>R$ ${valorTotal.toFixed(2)}</b>`;
   } else {
     valorBox.classList.add("hidden");
     valorBox.innerHTML = "";
@@ -464,22 +546,22 @@ async function carregarPoltronas(){
     .single();
 
   const total = veiculo?.total_poltronas || 20;
+  const dataIda = document.getElementById("dataIda").value;
 
-  const { data: reservas } = await client
+  let query = client
     .from("reservas_passagens")
     .select("poltrona, status, data_viagem")
     .eq("viagem_id", viagemSelecionada);
 
-  const tipoViagem = document.getElementById("tipoViagem").value;
-  const dataIda = document.getElementById("dataIda").value;
-  const dataFiltro = tipoViagem === "ida_volta" ? dataIda : dataIda;
+  if(dataIda){
+    query = query.eq("data_viagem", dataIda);
+  }
 
-  const reservasFiltradas = (reservas || []).filter(r => {
-    if(!r.data_viagem) return true;
-    return r.data_viagem === dataFiltro;
-  });
+  const { data: reservas } = await query;
 
-  const ocupadas = reservasFiltradas.map(r => Number(r.poltrona));
+  const ocupadas = (reservas || [])
+    .filter(r => String(r.status || "").toLowerCase() !== "cancelado")
+    .map(r => Number(r.poltrona));
 
   const div = document.getElementById("poltronas");
   div.innerHTML = "";
@@ -539,24 +621,26 @@ async function criarPedidoPassagem(){
   const valorBase = Number(viagemAtual?.valor || 0);
   const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
 
-  const descricao = [
-    "Passagem",
-    `Cliente: ${nome}`,
-    `Tipo: ${tipoViagem}`,
-    `Rota: ${viagemAtual?.rota || ""}`,
-    `Hora: ${viagemAtual?.hora || ""}`,
-    `Data ida: ${dataIda}`,
-    tipoViagem === "ida_volta" ? `Data volta: ${dataVolta}` : "",
-    `Poltrona: ${poltronaSelecionada}`
-  ].filter(Boolean).join(" | ");
-
   const payloadPedido = {
     app_id,
     status: "aguardando_pagamento",
     pagamento_status: "pending",
-    descricao,
-    valor: valorTotal,
-    forma_pagamento: formaPagamento
+    cliente_nome: nome,
+    valor_total: valorTotal,
+    origem: "passagens",
+    forma_pagamento: formaPagamento,
+    itens: [{
+      tipo: "passagem",
+      tipo_viagem: tipoViagem,
+      viagem_id: viagemSelecionada,
+      rota: viagemAtual?.rota || "",
+      hora: viagemAtual?.hora || "",
+      data_ida: dataIda,
+      data_volta: tipoViagem === "ida_volta" ? dataVolta : null,
+      poltrona: poltronaSelecionada,
+      valor_unitario: valorBase,
+      valor_total: valorTotal
+    }]
   };
 
   const { data, error } = await client
@@ -577,14 +661,12 @@ async function registrarReservaPendente(){
   const tipoViagem = document.getElementById("tipoViagem").value;
   const dataIda = document.getElementById("dataIda").value;
   const dataVolta = document.getElementById("dataVolta").value;
-  const valorBase = Number(viagemAtual?.valor || 0);
 
   const reservas = [{
     viagem_id: viagemSelecionada,
     poltrona: poltronaSelecionada,
     nome,
     app_id,
-    valor: valorBase,
     data_viagem: dataIda,
     status: "pendente_pagamento"
   }];
@@ -595,7 +677,6 @@ async function registrarReservaPendente(){
       poltrona: poltronaSelecionada,
       nome: `${nome} (volta)`,
       app_id,
-      valor: valorBase,
       data_viagem: dataVolta,
       status: "pendente_pagamento"
     });
@@ -629,6 +710,12 @@ async function pagarEReservar(){
     if(!nome) return setMsg("Digite seu nome.", "erro");
     if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
     if(!configLoja) return setMsg("Configuração da loja não encontrada.", "erro");
+    if(!viagemRodaNaData(viagemAtual, dataIda)){
+      return setMsg(`Essa viagem não roda na data de ida escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
+    }
+    if(tipoViagem === "ida_volta" && dataVolta && !viagemRodaNaData(viagemAtual, dataVolta)){
+      return setMsg(`Essa viagem não roda na data de volta escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
+    }
 
     const valorBase = Number(viagemAtual?.valor || 0);
     const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
@@ -764,6 +851,30 @@ function copiarPix(){
 
 document.getElementById("dataIda").value = hojeLocalISO();
 document.getElementById("dataVolta").value = hojeLocalISO();
+
+document.getElementById("dataIda").addEventListener("change", async () => {
+  setMsg("");
+  await renderizarListaViagens();
+});
+
+document.getElementById("dataVolta").addEventListener("change", () => {
+  setMsg("");
+  if(!viagemAtual) return;
+
+  const tipoViagem = document.getElementById("tipoViagem").value;
+  const dataVolta = document.getElementById("dataVolta").value;
+
+  if(tipoViagem === "ida_volta" && dataVolta && !viagemRodaNaData(viagemAtual, dataVolta)){
+    setMsg(`A volta não roda nesse dia. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
+    return;
+  }
+
+  const valorBox = document.getElementById("valorViagem");
+  if(!valorBox.classList.contains("hidden")){
+    valorBox.innerHTML = `Valor da passagem: <b>R$ ${calcularValorTotal().toFixed(2)}</b>`;
+  }
+});
+
 atualizarCamposData();
 carregarViagens();
 </script>
