@@ -42,6 +42,11 @@ body{background:#07122b;color:#fff;font-family:Arial,sans-serif;margin:0}
   font-size:22px;
   font-weight:bold;
 }
+.label{
+  margin-top:12px;
+  font-size:14px;
+  opacity:.9;
+}
 select,input,button{
   width:100%;
   padding:14px 16px;
@@ -186,12 +191,18 @@ button:hover{opacity:.95}
   <div class="card">
     <h3>Tipo de Viagem</h3>
 
-    <select id="tipoViagem">
+    <select id="tipoViagem" onchange="atualizarCamposData()">
       <option value="ida">Somente Ida</option>
       <option value="ida_volta">Ida e Volta</option>
     </select>
 
-    <input type="date" id="dataViagem">
+    <div class="label">Data de ida</div>
+    <input type="date" id="dataIda">
+
+    <div id="boxDataVolta" class="hidden">
+      <div class="label">Data de volta</div>
+      <input type="date" id="dataVolta">
+    </div>
 
     <div class="subtitulo">Ida</div>
     <div id="listaViagens" class="lista-viagens"></div>
@@ -274,6 +285,19 @@ function limparPagamentoUI(){
   document.getElementById("pixValor").innerHTML = "";
   document.getElementById("checkoutLink").classList.add("hidden");
   document.getElementById("checkoutLink").href = "#";
+}
+
+function atualizarCamposData(){
+  const tipo = document.getElementById("tipoViagem").value;
+  const boxVolta = document.getElementById("boxDataVolta");
+  const dataVolta = document.getElementById("dataVolta");
+
+  if(tipo === "ida_volta"){
+    boxVolta.classList.remove("hidden");
+  }else{
+    boxVolta.classList.add("hidden");
+    dataVolta.value = "";
+  }
 }
 
 async function resolverAppId(){
@@ -498,28 +522,33 @@ async function carregarPoltronas(){
 
 async function criarPedidoPassagem(){
   const nome = document.getElementById("nome").value.trim();
-  const dataViagem = document.getElementById("dataViagem").value;
+  const tipoViagem = document.getElementById("tipoViagem").value;
+  const dataIda = document.getElementById("dataIda").value;
+  const dataVolta = document.getElementById("dataVolta").value;
   const formaPagamento = document.getElementById("formaPagamento").value;
 
-  const valorNumerico = Number(viagemAtual?.valor || 0);
+  const valorBase = Number(viagemAtual?.valor || 0);
+  const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
 
   const payloadPedido = {
     app_id,
     status: "aguardando_pagamento",
     pagamento_status: "pending",
     cliente_nome: nome,
-    valor_total: valorNumerico,
+    valor_total: valorTotal,
     origem: "passagens",
-    observacoes: `Viagem: ${viagemAtual?.rota || ""} | Hora: ${viagemAtual?.hora || ""} | Data: ${dataViagem} | Poltrona: ${poltronaSelecionada}`,
     forma_pagamento: formaPagamento,
     itens: [{
       tipo: "passagem",
+      tipo_viagem: tipoViagem,
       viagem_id: viagemSelecionada,
       rota: viagemAtual?.rota || "",
       hora: viagemAtual?.hora || "",
-      data_viagem: dataViagem,
+      data_ida: dataIda,
+      data_volta: tipoViagem === "ida_volta" ? dataVolta : null,
       poltrona: poltronaSelecionada,
-      valor: valorNumerico
+      valor_unitario: valorBase,
+      valor_total: valorTotal
     }]
   };
 
@@ -538,20 +567,39 @@ async function criarPedidoPassagem(){
 
 async function registrarReservaPendente(pedidoId){
   const nome = document.getElementById("nome").value.trim();
-  const dataViagem = document.getElementById("dataViagem").value;
+  const tipoViagem = document.getElementById("tipoViagem").value;
+  const dataIda = document.getElementById("dataIda").value;
+  const dataVolta = document.getElementById("dataVolta").value;
+  const valorBase = Number(viagemAtual?.valor || 0);
+  const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
+
+  const reservas = [{
+    viagem_id: viagemSelecionada,
+    poltrona: poltronaSelecionada,
+    nome,
+    app_id,
+    valor: valorTotal,
+    data_viagem: dataIda,
+    pedido_id: pedidoId,
+    status: "pendente_pagamento"
+  }];
+
+  if(tipoViagem === "ida_volta" && dataVolta){
+    reservas.push({
+      viagem_id: viagemSelecionada,
+      poltrona: poltronaSelecionada,
+      nome: `${nome} (volta)`,
+      app_id,
+      valor: 0,
+      data_viagem: dataVolta,
+      pedido_id: pedidoId,
+      status: "pendente_pagamento"
+    });
+  }
 
   const { error } = await client
     .from("reservas_passagens")
-    .insert([{
-      viagem_id: viagemSelecionada,
-      poltrona: poltronaSelecionada,
-      nome,
-      app_id,
-      valor: viagemAtual?.valor || null,
-      data_viagem: dataViagem,
-      pedido_id: pedidoId,
-      status: "pendente_pagamento"
-    }]);
+    .insert(reservas);
 
   if(error){
     throw new Error(error.message || "Erro ao registrar reserva pendente.");
@@ -564,25 +612,34 @@ async function pagarEReservar(){
     limparPagamentoUI();
 
     const nome = document.getElementById("nome").value.trim();
-    const dataViagem = document.getElementById("dataViagem").value;
+    const tipoViagem = document.getElementById("tipoViagem").value;
+    const dataIda = document.getElementById("dataIda").value;
+    const dataVolta = document.getElementById("dataVolta").value;
     const formaPagamento = document.getElementById("formaPagamento").value;
 
     if(!viagemSelecionada) return setMsg("Selecione uma viagem.", "erro");
     if(!poltronaSelecionada) return setMsg("Selecione uma poltrona.", "erro");
-    if(!dataViagem) return setMsg("Escolha o dia da viagem.", "erro");
+    if(!dataIda) return setMsg("Escolha a data de ida.", "erro");
+    if(tipoViagem === "ida_volta" && !dataVolta) return setMsg("Escolha a data de volta.", "erro");
+    if(tipoViagem === "ida_volta" && dataVolta < dataIda) return setMsg("A data de volta não pode ser menor que a data de ida.", "erro");
     if(!nome) return setMsg("Digite seu nome.", "erro");
     if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
     if(!configLoja) return setMsg("Configuração da loja não encontrada.", "erro");
 
+    const valorBase = Number(viagemAtual?.valor || 0);
+    const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
+
     if(configLoja.modo_venda === "whatsapp"){
       const texto = encodeURIComponent(
         `Olá! Quero comprar uma passagem.\n` +
-        `Data: ${dataViagem}\n` +
+        `Tipo: ${tipoViagem === "ida_volta" ? "Ida e Volta" : "Somente Ida"}\n` +
+        `Data ida: ${dataIda}\n` +
+        `${tipoViagem === "ida_volta" ? `Data volta: ${dataVolta}\n` : ""}` +
         `Viagem: ${viagemAtual?.rota || ""}\n` +
         `Hora: ${viagemAtual?.hora || ""}\n` +
         `Poltrona: ${poltronaSelecionada}\n` +
         `Nome: ${nome}\n` +
-        `Valor: R$ ${Number(viagemAtual?.valor || 0).toFixed(2)}`
+        `Valor: R$ ${valorTotal.toFixed(2)}`
       );
 
       const numero = String(configLoja.whatsapp_numero || "").replace(/\D/g, "");
@@ -601,7 +658,6 @@ async function pagarEReservar(){
     const pedidoId = await criarPedidoPassagem();
     await registrarReservaPendente(pedidoId);
 
-    const valorNumerico = Number(viagemAtual?.valor || 0);
     const itemTitulo = `Passagem ${viagemAtual?.rota || ""} ${viagemAtual?.hora || ""} Poltrona ${poltronaSelecionada}`;
 
     if(formaPagamento === "PIX"){
@@ -611,7 +667,7 @@ async function pagarEReservar(){
         body: JSON.stringify({
           appId: app_id,
           pedidoId,
-          valor: valorNumerico,
+          valor: valorTotal,
           descricao: itemTitulo
         })
       });
@@ -637,7 +693,7 @@ async function pagarEReservar(){
 
       document.getElementById("pixBox").style.display = "block";
       document.getElementById("pixValor").innerHTML =
-        `Valor: <b>R$ ${valorNumerico.toFixed(2)}</b>`;
+        `Valor: <b>R$ ${valorTotal.toFixed(2)}</b>`;
 
       if(qrBase64){
         document.getElementById("pixQrImg").src = `data:image/png;base64,${qrBase64}`;
@@ -659,7 +715,7 @@ async function pagarEReservar(){
             title: itemTitulo,
             quantity: 1,
             currency_id: "BRL",
-            unit_price: valorNumerico
+            unit_price: valorTotal
           }]
         })
       });
@@ -702,7 +758,9 @@ function copiarPix(){
     .catch(() => setMsg("Não foi possível copiar o código PIX.", "erro"));
 }
 
-document.getElementById("dataViagem").value = hojeLocalISO();
+document.getElementById("dataIda").value = hojeLocalISO();
+document.getElementById("dataVolta").value = hojeLocalISO();
+atualizarCamposData();
 carregarViagens();
 </script>
 
