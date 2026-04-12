@@ -4,7 +4,255 @@
 <meta charset="UTF-8">
 <title>Admin Passagens</title>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"><!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>FF Transporte</title>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
+<style>
+body {
+    background: #0f172a;
+    color: #fff;
+    font-family: Arial;
+}
+
+.container {
+    display: flex;
+    gap: 20px;
+    padding: 20px;
+    flex-wrap: wrap;
+}
+
+.card {
+    background: #1e293b;
+    padding: 20px;
+    border-radius: 12px;
+    flex: 1;
+    min-width: 300px;
+}
+
+select, input, button {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 8px;
+    border: none;
+}
+
+/* 🚌 POLTRONAS */
+.poltronas {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.linha-onibus {
+    display: grid;
+    grid-template-columns: 1fr 1fr 40px 1fr 1fr;
+    gap: 8px;
+    align-items: center;
+}
+
+.corredor {
+    text-align: center;
+    opacity: 0.3;
+}
+
+.poltrona {
+    padding: 10px;
+    text-align: center;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.livre { background: #22c55e; }
+.ocupado { background: #ef4444; }
+.selecionado { background: #3b82f6; }
+</style>
+</head>
+
+<body>
+
+<h2 style="padding: 10px;">🚌 FF TRANSPORTE</h2>
+
+<div class="container">
+
+<div class="card">
+<h3>Tipo de Viagem</h3>
+<select id="tipoViagem">
+<option value="ida">Somente Ida</option>
+<option value="ida_volta">Ida e Volta</option>
+</select>
+
+<h3>Viagens</h3>
+<div id="listaViagens"></div>
+</div>
+
+<div class="card">
+<h3>Poltronas</h3>
+<div class="poltronas" id="poltronas"></div>
+
+<select>
+<option>Forma de pagamento</option>
+<option>PIX</option>
+<option>Dinheiro</option>
+</select>
+
+<input type="text" id="nome" placeholder="Seu nome">
+
+<button onclick="reservar()">Pagar e Reservar</button>
+</div>
+
+</div>
+
+<script>
+const supabase = window.supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let app_id = null;
+let viagemSelecionada = null;
+let poltronaSelecionada = null;
+
+// 🔥 APP ID
+async function carregarApp() {
+  const params = new URLSearchParams(location.search);
+  const app_id_param = params.get("app_id");
+
+  if (app_id_param) {
+    app_id = app_id_param;
+    carregarViagens();
+  } else {
+    alert("app_id não informado na URL");
+  }
+}
+
+// 🔥 LISTAR VIAGENS
+async function carregarViagens() {
+  const { data } = await supabase
+    .from("viagens_passagens")
+    .select("*")
+    .eq("app_id", app_id);
+
+  const lista = document.getElementById("listaViagens");
+  lista.innerHTML = "";
+
+  data.forEach(v => {
+    lista.innerHTML += `
+      <div style="padding:10px;background:#334155;margin-top:5px;border-radius:8px;cursor:pointer"
+      onclick="selecionarViagem('${v.id}', ${v.veiculo_id})">
+        ${v.rota} - ${v.hora}
+      </div>
+    `;
+  });
+}
+
+// 🔥 SELECIONAR VIAGEM
+async function selecionarViagem(id, veiculo_id) {
+  viagemSelecionada = id;
+
+  const { data: veiculo } = await supabase
+    .from("veiculos_passagens")
+    .select("*")
+    .eq("id", veiculo_id)
+    .single();
+
+  gerarPoltronas(veiculo.total_poltronas);
+  carregarReservas();
+}
+
+// 🔥 GERAR POLTRONAS
+function gerarPoltronas(total) {
+  const container = document.getElementById("poltronas");
+  container.innerHTML = "";
+
+  for (let i = 1; i <= total; i += 4) {
+    const linha = document.createElement("div");
+    linha.className = "linha-onibus";
+
+    for (let j = 0; j < 4; j++) {
+      if (i + j <= total) {
+        const p = document.createElement("div");
+        p.className = "poltrona livre";
+        p.innerText = i + j;
+
+        p.onclick = () => selecionarPoltrona(i + j, p);
+
+        linha.appendChild(p);
+      }
+      if (j === 1) {
+        const corredor = document.createElement("div");
+        corredor.className = "corredor";
+        corredor.innerText = "|";
+        linha.appendChild(corredor);
+      }
+    }
+
+    container.appendChild(linha);
+  }
+}
+
+// 🔥 SELECIONAR POLTRONA
+function selecionarPoltrona(numero, el) {
+  document.querySelectorAll(".poltrona").forEach(p => p.classList.remove("selecionado"));
+
+  el.classList.add("selecionado");
+  poltronaSelecionada = numero;
+}
+
+// 🔥 CARREGAR RESERVAS
+async function carregarReservas() {
+  const { data } = await supabase
+    .from("reservas_passagens")
+    .select("*")
+    .eq("viagem_id", viagemSelecionada);
+
+  data.forEach(r => {
+    document.querySelectorAll(".poltrona").forEach(p => {
+      if (parseInt(p.innerText) === r.poltrona) {
+        p.classList.remove("livre");
+        p.classList.add("ocupado");
+      }
+    });
+  });
+}
+
+// 🔥 RESERVAR
+async function reservar() {
+  const nome = document.getElementById("nome").value;
+
+  if (!nome || !poltronaSelecionada || !viagemSelecionada) {
+    alert("Preencha tudo");
+    return;
+  }
+
+  const { error } = await supabase.from("reservas_passagens").insert([{
+    nome,
+    poltrona: poltronaSelecionada,
+    viagem_id: viagemSelecionada
+  }]);
+
+  if (error) {
+    alert("Erro: " + error.message);
+    return;
+  }
+
+  alert("Reserva feita!");
+  selecionarViagem(viagemSelecionada);
+}
+
+// START
+carregarApp();
+</script>
+
+</body>
+</html></script>
 
 <style>
 body{background:#0f172a;color:#fff;font-family:Arial}
