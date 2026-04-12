@@ -1,259 +1,10 @@
-
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
 <title>Admin Passagens</title>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"><!DOCTYPE html>
-<html lang="pt-br">
-<head>
-<meta charset="UTF-8">
-<title>FF Transporte</title>
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-
-<style>
-body {
-    background: #0f172a;
-    color: #fff;
-    font-family: Arial;
-}
-
-.container {
-    display: flex;
-    gap: 20px;
-    padding: 20px;
-    flex-wrap: wrap;
-}
-
-.card {
-    background: #1e293b;
-    padding: 20px;
-    border-radius: 12px;
-    flex: 1;
-    min-width: 300px;
-}
-
-select, input, button {
-    width: 100%;
-    padding: 10px;
-    margin-top: 10px;
-    border-radius: 8px;
-    border: none;
-}
-
-/* 🚌 POLTRONAS */
-.poltronas {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.linha-onibus {
-    display: grid;
-    grid-template-columns: 1fr 1fr 40px 1fr 1fr;
-    gap: 8px;
-    align-items: center;
-}
-
-.corredor {
-    text-align: center;
-    opacity: 0.3;
-}
-
-.poltrona {
-    padding: 10px;
-    text-align: center;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: bold;
-}
-
-.livre { background: #22c55e; }
-.ocupado { background: #ef4444; }
-.selecionado { background: #3b82f6; }
-</style>
-</head>
-
-<body>
-
-<h2 style="padding: 10px;">🚌 FF TRANSPORTE</h2>
-
-<div class="container">
-
-<div class="card">
-<h3>Tipo de Viagem</h3>
-<select id="tipoViagem">
-<option value="ida">Somente Ida</option>
-<option value="ida_volta">Ida e Volta</option>
-</select>
-
-<h3>Viagens</h3>
-<div id="listaViagens"></div>
-</div>
-
-<div class="card">
-<h3>Poltronas</h3>
-<div class="poltronas" id="poltronas"></div>
-
-<select>
-<option>Forma de pagamento</option>
-<option>PIX</option>
-<option>Dinheiro</option>
-</select>
-
-<input type="text" id="nome" placeholder="Seu nome">
-
-<button onclick="reservar()">Pagar e Reservar</button>
-</div>
-
-</div>
-
-<script>
-const supabase = window.supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
-
-let app_id = null;
-let viagemSelecionada = null;
-let poltronaSelecionada = null;
-
-// 🔥 APP ID
-async function carregarApp() {
-  const params = new URLSearchParams(location.search);
-  const app_id_param = params.get("app_id");
-
-  if (app_id_param) {
-    app_id = app_id_param;
-    carregarViagens();
-  } else {
-    alert("app_id não informado na URL");
-  }
-}
-
-// 🔥 LISTAR VIAGENS
-async function carregarViagens() {
-  const { data } = await supabase
-    .from("viagens_passagens")
-    .select("*")
-    console.log("APP_ID ADMIN:", app_id);
-
-  const lista = document.getElementById("listaViagens");
-  lista.innerHTML = "";
-
-  data.forEach(v => {
-    lista.innerHTML += `
-      <div style="padding:10px;background:#334155;margin-top:5px;border-radius:8px;cursor:pointer"
-      onclick="selecionarViagem('${v.id}', ${v.veiculo_id})">
-        ${v.rota} - ${v.hora}
-      </div>
-    `;
-  });
-}
-
-// 🔥 SELECIONAR VIAGEM
-async function selecionarViagem(id, veiculo_id) {
-  viagemSelecionada = id;
-
-  const { data: veiculo } = await supabase
-    .from("veiculos_passagens")
-    .select("*")
-    .eq("id", veiculo_id)
-    .single();
-
-  gerarPoltronas(veiculo.total_poltronas);
-  carregarReservas();
-}
-
-// 🔥 GERAR POLTRONAS
-function gerarPoltronas(total) {
-  const container = document.getElementById("poltronas");
-  container.innerHTML = "";
-
-  for (let i = 1; i <= total; i += 4) {
-    const linha = document.createElement("div");
-    linha.className = "linha-onibus";
-
-    for (let j = 0; j < 4; j++) {
-      if (i + j <= total) {
-        const p = document.createElement("div");
-        p.className = "poltrona livre";
-        p.innerText = i + j;
-
-        p.onclick = () => selecionarPoltrona(i + j, p);
-
-        linha.appendChild(p);
-      }
-      if (j === 1) {
-        const corredor = document.createElement("div");
-        corredor.className = "corredor";
-        corredor.innerText = "|";
-        linha.appendChild(corredor);
-      }
-    }
-
-    container.appendChild(linha);
-  }
-}
-
-// 🔥 SELECIONAR POLTRONA
-function selecionarPoltrona(numero, el) {
-  document.querySelectorAll(".poltrona").forEach(p => p.classList.remove("selecionado"));
-
-  el.classList.add("selecionado");
-  poltronaSelecionada = numero;
-}
-
-// 🔥 CARREGAR RESERVAS
-async function carregarReservas() {
-  const { data } = await supabase
-    .from("reservas_passagens")
-    .select("*")
-    .eq("viagem_id", viagemSelecionada);
-
-  data.forEach(r => {
-    document.querySelectorAll(".poltrona").forEach(p => {
-      if (parseInt(p.innerText) === r.poltrona) {
-        p.classList.remove("livre");
-        p.classList.add("ocupado");
-      }
-    });
-  });
-}
-
-// 🔥 RESERVAR
-async function reservar() {
-  const nome = document.getElementById("nome").value;
-
-  if (!nome || !poltronaSelecionada || !viagemSelecionada) {
-    alert("Preencha tudo");
-    return;
-  }
-
-  const { error } = await supabase.from("reservas_passagens").insert([{
-    nome,
-    poltrona: poltronaSelecionada,
-    viagem_id: viagemSelecionada
-  }]);
-
-  if (error) {
-    alert("Erro: " + error.message);
-    return;
-  }
-
-  alert("Reserva feita!");
-  selecionarViagem(viagemSelecionada);
-}
-
-// START
-carregarApp();
-</script>
-
-</body>
-</html></script>
 
 <style>
 body{background:#0f172a;color:#fff;font-family:Arial}
@@ -271,88 +22,95 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 
 <div class="container">
 
-<!-- VEICULOS -->
 <div class="card">
 <h3>Cadastrar Veículo</h3>
 
 <input id="nomeVeiculo" placeholder="Nome">
-<select id="tipoVeiculo">
-<option value="onibus">Ônibus</option>
-<option value="van">Van</option>
-</select>
-
 <input id="poltronasVeiculo" type="number" placeholder="Total de poltronas">
-
-<select id="layoutVeiculo">
-<option value="2-2">Ônibus (2-2)</option>
-<option value="2-1">Van (2-1)</option>
-<option value="1-1">Van pequena</option>
-</select>
 
 <button onclick="criarVeiculo()">Salvar Veículo</button>
 
-<div class="lista" id="listaVeiculos"></div>
+<div id="listaVeiculos"></div>
 </div>
 
-<!-- VIAGENS -->
 <div class="card">
 <h3>Cadastrar Viagem</h3>
 
-<input id="rota" placeholder="Ex: SRN → Teresina">
-<input id="hora" placeholder="08:00">
-<input id="dias" placeholder="Seg,Ter,Qua">
+<input id="rota" placeholder="Rota">
+<input id="hora" placeholder="Hora">
 
 <select id="veiculoSelect"></select>
 
 <button onclick="criarViagem()">Salvar Viagem</button>
 
-<div class="lista" id="listaViagens"></div>
-</div>
-
-<!-- RESERVAS -->
-<div class="card">
-<h3>Reservas</h3>
-
-<select id="viagemReserva"></select>
-
-<button onclick="verReservas()">Ver Reservas</button>
-
-<div class="lista" id="listaReservas"></div>
+<div id="listaViagens"></div>
 </div>
 
 </div>
 
 <script>
 
-// 🔥 SUPABASE
-const client = supabase.createClient(
+const supabase = window.supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-// 🔗 PARAMS
 const params = new URLSearchParams(location.search);
 const app_id = params.get("app_id");
 
-let viagemIda = null;
-let viagemVolta = null;
+async function criarVeiculo(){
 
-let poltronaIda = null;
-let poltronaVolta = null;
+  const nome = document.getElementById("nomeVeiculo").value;
+  const total = document.getElementById("poltronasVeiculo").value;
 
-let viagemSelecionada = null;
+  await supabase.from("veiculos_passagens").insert([{
+    nome,
+    total_poltronas: total,
+    app_id
+  }]);
 
-// 📅 DIA
-function diaHoje(){
-  return ["Dom","Seg","Ter","Qua","Qui","Sex","Sab"][new Date().getDay()];
+  carregarVeiculos();
 }
 
-// 🔥 VIAGENS
+async function carregarVeiculos(){
+
+  const { data } = await supabase
+    .from("veiculos_passagens")
+    .select("*")
+    .eq("app_id", app_id);
+
+  const lista = document.getElementById("listaVeiculos");
+  const select = document.getElementById("veiculoSelect");
+
+  lista.innerHTML = "";
+  select.innerHTML = "";
+
+  (data || []).forEach(v => {
+
+    lista.innerHTML += `<div>${v.nome}</div>`;
+    select.innerHTML += `<option value="${v.id}">${v.nome}</option>`;
+  });
+}
+
+async function criarViagem(){
+
+  const rota = document.getElementById("rota").value;
+  const hora = document.getElementById("hora").value;
+  const veiculo_id = document.getElementById("veiculoSelect").value;
+
+  await supabase.from("viagens_passagens").insert([{
+    rota,
+    hora,
+    veiculo_id,
+    app_id
+  }]);
+
+  carregarViagens();
+}
+
 async function carregarViagens(){
 
-  const hoje = diaHoje();
-
-  const { data } = await client
+  const { data } = await supabase
     .from("viagens_passagens")
     .select("*")
     .eq("app_id", app_id);
@@ -360,128 +118,12 @@ async function carregarViagens(){
   const lista = document.getElementById("listaViagens");
   lista.innerHTML = "";
 
-  data.forEach(v => {
-
-    if(v.dias && !v.dias.includes(hoje)) return;
-
-    const div = document.createElement("div");
-
-    div.innerHTML = `
-      <p><b>${v.rota}</b> - ${v.hora}</p>
-      <small>${v.dias || ""}</small>
-      <hr>
-    `;
-
-    div.onclick = () => selecionarViagem(v.id);
-
-    lista.appendChild(div);
+  (data || []).forEach(v => {
+    lista.innerHTML += `<div>${v.rota} - ${v.hora}</div>`;
   });
 }
 
-// 🔥 SELECIONAR VIAGEM
-function selecionarViagem(id){
-
-  const tipo = document.getElementById("tipoViagem").value;
-
-  if(tipo === "ida"){
-    viagemIda = id;
-  } else {
-
-    if(!viagemIda){
-      viagemIda = id;
-      alert("Agora escolha a VOLTA");
-      return;
-    }
-
-    viagemVolta = id;
-  }
-
-  viagemSelecionada = id;
-  carregarPoltronas();
-}
-
-// 🚌 POLTRONAS
-async function carregarPoltronas(){
-
-  const { data } = await client
-    .from("reservas_passagens")
-    .select("poltrona")
-    .eq("viagem_id", viagemSelecionada);
-
-  const ocupadas = (data || []).map(r => r.poltrona);
-
-  const div = document.getElementById("poltronas");
-  div.innerHTML = "";
-
-  let numero = 1;
-
-  for(let linha=0; linha<10; linha++){
-
-    const row = document.createElement("div");
-    row.className = "linha-onibus";
-
-    for(let pos=0; pos<5; pos++){
-
-      if(pos === 2){
-        const corredor = document.createElement("div");
-        corredor.className = "corredor";
-        corredor.innerText = "🚶";
-        row.appendChild(corredor);
-        continue;
-      }
-
-      const btn = document.createElement("div");
-      btn.innerText = numero;
-
-      if(ocupadas.includes(numero)){
-        btn.className = "poltrona ocupado";
-      }else{
-        btn.className = "poltrona livre";
-
-        btn.onclick = () => {
-
-          document.querySelectorAll(".poltrona").forEach(p => p.classList.remove("selecionado"));
-          btn.classList.add("selecionado");
-
-          if(document.getElementById("tipoViagem").value === "ida"){
-            poltronaIda = numero;
-          } else {
-            poltronaVolta = numero;
-          }
-        };
-      }
-
-      row.appendChild(btn);
-      numero++;
-    }
-
-    div.appendChild(row);
-  }
-}
-
-// 💾 RESERVAR
-async function reservar(){
-
-  const nome = document.getElementById("nome").value;
-
-  if(!nome) return alert("Digite seu nome");
-
-  if(!viagemIda || !poltronaIda){
-    return alert("Selecione viagem e poltrona");
-  }
-
-  await client.from("reservas_passagens").insert([{
-    viagem_id: viagemIda,
-    poltrona: poltronaIda,
-    nome,
-    app_id
-  }]);
-
-  alert("Reserva realizada!");
-  location.reload();
-}
-
-// 🚀 START
+carregarVeiculos();
 carregarViagens();
 
 </script>
