@@ -32,7 +32,6 @@ select,input,button {
     border:none;
 }
 
-/* 🚌 ônibus */
 .poltronas { display:flex; flex-direction:column; gap:8px; }
 
 .linha-onibus {
@@ -101,17 +100,13 @@ const client = supabase.createClient(
 
 // 🔗 PARAMS
 const params = new URLSearchParams(location.search);
-const slug = params.get("slug");
-const app_id_param = params.get("app_id");
+const app_id = params.get("app_id") || null;
 
-let app_id = null;
-
+// VARIÁVEIS
 let viagemIda = null;
 let viagemVolta = null;
-
 let poltronaIda = null;
 let poltronaVolta = null;
-
 let viagemSelecionada = null;
 
 // 📅 DIA
@@ -119,51 +114,49 @@ function diaHoje(){
   return ["Dom","Seg","Ter","Qua","Qui","Sex","Sab"][new Date().getDay()];
 }
 
-// 🔥 APP
-async function carregarApp(){
-
-  if(app_id_param){
-    app_id = app_id_param;
-    return carregarViagens();
-  }
-
-  if(slug){
-    const { data } = await client
-      .from("apps")
-      .select("id")
-      .eq("slug", slug)
-      .single();
-
-    app_id = data.id;
-    carregarViagens();
-  }
-}
-
-// 🔥 VIAGENS
+// 🔥 CARREGAR VIAGENS
 async function carregarViagens(){
-
-  const hoje = diaHoje();
-
-  const { data } = await client
-    .from("viagens")
-    .select("*")
-    .eq("app_id", app_id)
-    .eq("ativo", true);
 
   const lista = document.getElementById("listaViagens");
   lista.innerHTML = "";
 
+  if(!app_id){
+    lista.innerHTML = "<div style='color:red'>Falta app_id na URL</div>";
+    return;
+  }
+
+  const { data, error } = await client
+    .from("viagens_passagens")
+    .select("*")
+    .eq("app_id", app_id);
+
+  console.log("VIAGENS:", data, error);
+
+  if(error){
+    lista.innerHTML = "Erro ao carregar viagens";
+    return;
+  }
+
+  if(!data || data.length === 0){
+    lista.innerHTML = "Nenhuma viagem cadastrada";
+    return;
+  }
+
+  const hoje = diaHoje();
+
   data.forEach(v => {
 
-    if(!v.dias.includes(hoje)) return;
+    if(v.dias && !String(v.dias).includes(hoje)) return;
 
     const div = document.createElement("div");
 
-    div.innerHTML = `
-      <p><b>${v.rota}</b> - ${v.hora}</p>
-      <small>Dias: ${v.dias}</small>
-      <hr>
-    `;
+    div.style.padding = "10px";
+    div.style.background = "#334155";
+    div.style.marginTop = "8px";
+    div.style.borderRadius = "8px";
+    div.style.cursor = "pointer";
+
+    div.innerHTML = `<b>${v.rota || ""}</b> - ${v.hora || ""}`;
 
     div.onclick = () => selecionarViagem(v.id);
 
@@ -193,16 +186,15 @@ function selecionarViagem(id){
   carregarPoltronas();
 }
 
-// 🚌 POLTRONAS
+// 🚌 CARREGAR POLTRONAS
 async function carregarPoltronas(){
 
   const { data } = await client
-    .from("reservas")
+    .from("reservas_passagens")
     .select("poltrona")
-    .eq("viagem_id", viagemSelecionada)
-    .eq("status","ativo");
+    .eq("viagem_id", viagemSelecionada);
 
-  const ocupadas = data.map(r => r.poltrona);
+  const ocupadas = (data || []).map(r => r.poltrona);
 
   const div = document.getElementById("poltronas");
   div.innerHTML = "";
@@ -234,21 +226,12 @@ async function carregarPoltronas(){
 
         btn.onclick = () => {
 
-          const tipo = document.getElementById("tipoViagem").value;
-
           document.querySelectorAll(".poltrona").forEach(p => p.classList.remove("selecionado"));
           btn.classList.add("selecionado");
 
-          if(tipo === "ida"){
+          if(document.getElementById("tipoViagem").value === "ida"){
             poltronaIda = numero;
           } else {
-
-            if(!poltronaIda){
-              poltronaIda = numero;
-              alert("Agora escolha a poltrona da VOLTA");
-              return;
-            }
-
             poltronaVolta = numero;
           }
         };
@@ -266,58 +249,26 @@ async function carregarPoltronas(){
 async function reservar(){
 
   const nome = document.getElementById("nome").value;
-  const tipo = document.getElementById("tipoViagem").value;
 
   if(!nome) return alert("Digite seu nome");
 
-  if(tipo === "ida"){
-
-    if(!viagemIda || !poltronaIda){
-      return alert("Selecione viagem e poltrona");
-    }
-
-    await client.from("reservas").insert([{
-      viagem_id: viagemIda,
-      poltrona: poltronaIda,
-      nome,
-      app_id,
-      status: "ativo"
-    }]);
-
-  } else {
-
-    if(!viagemIda || !viagemVolta){
-      return alert("Escolha ida e volta");
-    }
-
-    if(!poltronaIda || !poltronaVolta){
-      return alert("Escolha as duas poltronas");
-    }
-
-    await client.from("reservas").insert([
-      {
-        viagem_id: viagemIda,
-        poltrona: poltronaIda,
-        nome,
-        app_id,
-        status: "ativo"
-      },
-      {
-        viagem_id: viagemVolta,
-        poltrona: poltronaVolta,
-        nome,
-        app_id,
-        status: "ativo"
-      }
-    ]);
+  if(!viagemIda || !poltronaIda){
+    return alert("Selecione viagem e poltrona");
   }
+
+  await client.from("reservas_passagens").insert([{
+    viagem_id: viagemIda,
+    poltrona: poltronaIda,
+    nome,
+    app_id
+  }]);
 
   alert("Reserva realizada!");
   location.reload();
 }
 
-// 🚀 INIT
-carregarApp();
+// 🚀 START
+carregarViagens();
 
 </script>
 
