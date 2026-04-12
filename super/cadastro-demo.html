@@ -13,7 +13,7 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-/* 🔥 GERAR SLUG BASE */
+// 🔥 SLUG
 function gerarSlugBase(texto){
   return String(texto || "")
     .toLowerCase()
@@ -23,58 +23,35 @@ function gerarSlugBase(texto){
     .replace(/^-+|-+$/g, "");
 }
 
-/* 🔥 GARANTIR SLUG ÚNICO */
 async function gerarSlugUnico(nome){
-  let base = gerarSlugBase(nome);
-
-  if(!base){
-    base = "loja";
-  }
-
+  let base = gerarSlugBase(nome) || "loja";
   let slug = base;
-  let contador = 1;
+  let i = 1;
 
   while(true){
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("apps")
       .select("id")
       .eq("slug", slug)
       .maybeSingle();
 
-    if(error) throw error;
+    if(!data) return slug;
 
-    if(!data){
-      return slug;
-    }
-
-    slug = `${base}-${contador}`;
-    contador++;
+    slug = `${base}-${i++}`;
   }
 }
 
-/* 🔥 NOME BONITO DO TIPO */
-function nomeBonitoTipo(tipo){
-  const mapa = {
-    bar: "Bar",
-    mercado: "Mercado",
-    locadora: "Locadora",
-    hotel: "Hotel",
-    "loja-roupas": "Loja de Roupas",
-    celular: "Loja de Celular",
-    gas: "Água e Gás",
-    borracharia: "Borracharia"
-  };
-
-  return mapa[tipo] || "Loja";
+// 🔗 LINK
+function montarLink(slug, tipo){
+  if(tipo === "passagens"){
+    return `${location.origin}/public/passagens/?slug=${slug}`;
+  }
+  return `${location.origin}/loj/${slug}`;
 }
 
-/* 🔥 MONTAR LINK DA VITRINE */
-function montarLinkVitrine(slug){
-  return `${window.location.origin}/loj/${slug}`;
-}
-
-/* 🚀 CRIAR DEMO */
+// 🚀 CRIAR DEMO
 window.criarDemo = async () => {
+
   const nome = document.getElementById("nomeNegocio").value.trim();
   const tipo = document.getElementById("tipoNegocio").value;
   const email = document.getElementById("usuarioAdmin").value.trim().toLowerCase();
@@ -87,7 +64,7 @@ window.criarDemo = async () => {
   }
 
   if (senha.length < 6) {
-    alert("A senha deve ter pelo menos 6 caracteres");
+    alert("Senha mínima 6 caracteres");
     return;
   }
 
@@ -95,32 +72,31 @@ window.criarDemo = async () => {
   botao.textContent = "Criando...";
 
   try {
-    /* 1 - CRIA USUÁRIO AUTH */
+
+    // 🔐 AUTH
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password: senha
     });
 
     if (authError) throw authError;
-    if (!authData?.user?.id) throw new Error("Erro ao criar usuário");
-
     const userId = authData.user.id;
 
-    /* 2 - EXPIRAÇÃO */
+    // 📅 EXPIRAÇÃO
     const expiracao = new Date();
     expiracao.setDate(expiracao.getDate() + 15);
 
-    /* 3 - GERA SLUG AUTOMÁTICO */
+    // 🔗 SLUG
     const slug = await gerarSlugUnico(nome);
 
-    /* 4 - CRIA APP */
+    // 🏢 APP
     const { data: app, error: appError } = await supabase
       .from("apps")
       .insert({
-        nome: nome,
-        tipo: tipo,
+        nome,
+        tipo,
         sistema: tipo,
-        slug: slug,
+        slug,
         plano: "demo",
         data_expiracao: expiracao.toISOString(),
         ativo: true
@@ -130,13 +106,13 @@ window.criarDemo = async () => {
 
     if (appError) throw appError;
 
-    /* 5 - CRIA USUÁRIO DO SISTEMA */
+    // 👤 USUÁRIO
     const { error: usuarioError } = await supabase
       .from("usuarios")
       .insert({
         id: userId,
-        nome: nome,
-        email: email,
+        nome,
+        email,
         tipo: "admin",
         sistema: tipo,
         app_id: app.id,
@@ -146,83 +122,77 @@ window.criarDemo = async () => {
 
     if (usuarioError) throw usuarioError;
 
-    /* 6 - CRIA CONFIG SITE BÁSICA */
-    const { error: configError } = await supabase
-      .from("config_site")
-      .insert({
+    // ⚙️ CONFIG SITE (PADRÃO)
+    await supabase.from("config_site").insert({
+      app_id: app.id,
+      nome_site: nome,
+      tema_site: "padrao",
+      modo_venda: "whatsapp",
+      modo_exibicao: "aberta",
+      loja_fechada: false
+    });
+
+    // 🔥 TIPOS ESPECÍFICOS
+
+    // 🛢️ GÁS
+    if (tipo === "gas") {
+      await supabase.from("lojas_gas").insert({
         app_id: app.id,
-        nome_site: nome,
-        telefone: "",
-        whatsapp_numero: "",
-        tema_site: "padrao",
-        modo_venda: "whatsapp",
-        modo_exibicao: "aberta",
-        loja_fechada: false,
-        mensagem_fechado: "Estamos fechados no momento. Tente novamente mais tarde."
+        nome_loja: nome,
+        raio_entrega_km: 8,
+        taxa_por_km: 2.5,
+        ativa: true
+      });
+    }
+
+    // 🛞 BORRACHARIA
+    if (tipo === "borracharia") {
+      await supabase.from("borracheiros").insert({
+        user_id: userId,
+        nome: nome,
+        ativo: true
+      });
+    }
+
+    // 🚌 PASSAGENS (AGORA CORRETO)
+    if (tipo === "passagens") {
+
+      // CONFIG
+      await supabase.from("config_passagens").insert({
+        app_id: app.id,
+        nome_empresa: nome,
+        total_poltronas: 20,
+        valor_base: 0,
+        ativa: true
       });
 
-    if (configError) {
-      console.warn("Erro ao criar config_site inicial:", configError);
+      // VIAGEM TESTE
+      await supabase.from("viagens").insert({
+        rota: "Cidade A → Cidade B",
+        hora: "08:00",
+        dias: "Seg,Qua,Sex",
+        app_id: app.id,
+        ativo: true
+      });
     }
 
-    /* 7 - SE FOR GÁS, CRIA CONFIG DA ENTREGA */
-    if (tipo === "gas") {
-      const { error: gasError } = await supabase
-        .from("lojas_gas")
-        .insert({
-          app_id: app.id,
-          nome_loja: nome,
-          endereco: "",
-          latitude: null,
-          longitude: null,
-          raio_entrega_km: 8,
-          velocidade_media_kmh: 30,
-          taxa_base: 0,
-          taxa_por_km: 2.5,
-          ativa: true
-        });
-
-      if (gasError) {
-        console.warn("Erro ao criar lojas_gas inicial:", gasError);
-      }
-    }
-
-    /* 8 - SE FOR BORRACHARIA, CRIA PERFIL DE BORRACHEIRO */
-    if (tipo === "borracharia") {
-      const { error: borracheiroError } = await supabase
-        .from("borracheiros")
-        .insert({
-          user_id: userId,
-          nome: nome,
-          telefone: "",
-          cidade: "",
-          ativo: true
-        });
-
-      if (borracheiroError) {
-        console.warn("Erro ao criar borracheiro inicial:", borracheiroError);
-      }
-    }
-
-    /* 9 - LINK FINAL */
-    const linkVitrine = montarLinkVitrine(slug);
+    // 🔗 LINK FINAL
+    const link = montarLink(slug, tipo);
 
     alert(
-      `Conta criada com sucesso!\n\n` +
-      `Tipo: ${nomeBonitoTipo(tipo)}\n` +
-      `Link da vitrine:\n${linkVitrine}\n\n` +
-      `Agora faça login para entrar no painel.`
+      "Conta criada com sucesso!\n\n" +
+      "Acesse:\n" + link
     );
 
     window.location.href = "/auth/login.html";
 
   } catch (err) {
-    console.error("Erro:", err);
+    console.error(err);
     alert(err.message || "Erro ao criar conta");
-  } finally {
-    botao.disabled = false;
-    botao.textContent = "Criar Conta";
   }
+
+  botao.disabled = false;
+  botao.textContent = "Criar Conta";
 };
 </script>
 
@@ -236,44 +206,33 @@ body{
   background:#020617;
   font-family:Arial;
   color:#fff;
-  padding:16px;
-  box-sizing:border-box;
 }
+
 .box{
   width:100%;
   max-width:500px;
   background:#0f172a;
   padding:30px;
   border-radius:20px;
-  box-sizing:border-box;
 }
+
 input,select,button{
   width:100%;
   padding:14px;
   margin-top:10px;
   border-radius:12px;
   border:none;
-  box-sizing:border-box;
 }
+
 input,select{
   background:#111827;
   color:#fff;
 }
+
 button{
   background:#22c55e;
   font-weight:bold;
   cursor:pointer;
-  color:#04120a;
-}
-button:disabled{
-  opacity:.7;
-  cursor:not-allowed;
-}
-small{
-  display:block;
-  color:#94a3b8;
-  margin-top:8px;
-  line-height:1.4;
 }
 </style>
 </head>
@@ -291,21 +250,16 @@ small{
     <option value="locadora">Locadora</option>
     <option value="hotel">Hotel</option>
     <option value="loja-roupas">Loja de Roupas</option>
-    <option value="celular">📱 Loja de Celular</option>
-    <option value="gas">🛢️ Água e Gás</option>
-    <option value="borracharia">🛞 Borracharia</option>
+    <option value="celular">Loja de Celular</option>
+    <option value="gas">Água e Gás</option>
+    <option value="borracharia">Borracharia</option>
+    <option value="passagens">🚌 Passagens</option>
   </select>
 
   <input id="usuarioAdmin" type="email" placeholder="E-mail">
   <input id="senhaAdmin" type="password" placeholder="Senha">
 
   <button id="btnCriar" onclick="criarDemo()">Criar Conta</button>
-
-  <small>
-    Ao criar a conta, o sistema gera automaticamente o app, o usuário admin,
-    a config básica da vitrine e, no caso de Água e Gás, a configuração inicial da entrega.
-    Se for Borracharia, também cria automaticamente o perfil do borracheiro.
-  </small>
 </div>
 
 </body>
