@@ -323,141 +323,165 @@ button{background:#22c55e;font-weight:bold;cursor:pointer}
 
 <script>
 
-// 🔥 CONFIG
-const supabase = window.supabase.createClient(
+// 🔥 SUPABASE
+const client = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-let app_id = null;
+// 🔗 PARAMS
+const params = new URLSearchParams(location.search);
+const app_id = params.get("app_id");
 
-// 🔥 PEGAR APP_ID (igual seu sistema)
-async function carregarApp(){
+let viagemIda = null;
+let viagemVolta = null;
 
-  const params = new URLSearchParams(location.search);
-  const slug = params.get("slug");
-  const app_id_param = params.get("app_id");
+let poltronaIda = null;
+let poltronaVolta = null;
 
-  if(app_id_param){
-    app_id = app_id_param;
-    init();
-    return;
-  }
+let viagemSelecionada = null;
 
-  if(slug){
-    const { data } = await supabase
-      .from("apps")
-      .select("id")
-      .eq("slug", slug)
-      .single();
-
-    app_id = data.id;
-    init();
-  }
+// 📅 DIA
+function diaHoje(){
+  return ["Dom","Seg","Ter","Qua","Qui","Sex","Sab"][new Date().getDay()];
 }
 
-// 🔥 INIT
-function init(){
-  carregarVeiculos();
-  carregarViagens();
-}
-
-// 🚐 CRIAR VEICULO
-async function criarVeiculo(){
-
-  const nome = document.getElementById("nomeVeiculo").value;
-  const tipo = document.getElementById("tipoVeiculo").value;
-  const total = document.getElementById("poltronasVeiculo").value;
-  const layout = document.getElementById("layoutVeiculo").value;
-
-  await supabase.from("veiculos_passagens").insert([{
-    nome, tipo, total_poltronas: total, layout, app_id
-  }]);
-
-  alert("Veículo criado");
-  carregarVeiculos();
-}
-
-// 🔥 LISTAR VEICULOS
-async function carregarVeiculos(){
-
-  const { data } = await supabase
-    .from("veiculos_passagens")
-    .select("*")
-    .eq("app_id", app_id);
-
-  const lista = document.getElementById("listaVeiculos");
-  const select = document.getElementById("veiculoSelect");
-
-  lista.innerHTML = "";
-  select.innerHTML = "";
-
-  data.forEach(v => {
-
-    lista.innerHTML += `<div>${v.nome} (${v.tipo})</div>`;
-
-    select.innerHTML += `<option value="${v.id}">${v.nome}</option>`;
-  });
-}
-
-// 🛣️ CRIAR VIAGEM
-async function criarViagem(){
-
-  const rota = document.getElementById("rota").value;
-  const hora = document.getElementById("hora").value;
-  const dias = document.getElementById("dias").value;
-  const veiculo_id = document.getElementById("veiculoSelect").value;
-
-  await supabase.from("viagens_passagens").insert([{
-    rota, hora, dias, veiculo_id, app_id
-  }]);
-
-  alert("Viagem criada");
-  carregarViagens();
-}
-
-// 🔥 LISTAR VIAGENS
+// 🔥 VIAGENS
 async function carregarViagens(){
 
-  const { data } = await supabase
+  const hoje = diaHoje();
+
+  const { data } = await client
     .from("viagens_passagens")
     .select("*")
     .eq("app_id", app_id);
 
   const lista = document.getElementById("listaViagens");
-  const select = document.getElementById("viagemReserva");
-
   lista.innerHTML = "";
-  select.innerHTML = "";
 
   data.forEach(v => {
 
-    lista.innerHTML += `<div>${v.rota} - ${v.hora}</div>`;
+    if(v.dias && !v.dias.includes(hoje)) return;
 
-    select.innerHTML += `<option value="${v.id}">${v.rota}</option>`;
+    const div = document.createElement("div");
+
+    div.innerHTML = `
+      <p><b>${v.rota}</b> - ${v.hora}</p>
+      <small>${v.dias || ""}</small>
+      <hr>
+    `;
+
+    div.onclick = () => selecionarViagem(v.id);
+
+    lista.appendChild(div);
   });
 }
 
-// 🎟️ VER RESERVAS
-async function verReservas(){
+// 🔥 SELECIONAR VIAGEM
+function selecionarViagem(id){
 
-  const viagem_id = document.getElementById("viagemReserva").value;
+  const tipo = document.getElementById("tipoViagem").value;
 
-  const { data } = await supabase
+  if(tipo === "ida"){
+    viagemIda = id;
+  } else {
+
+    if(!viagemIda){
+      viagemIda = id;
+      alert("Agora escolha a VOLTA");
+      return;
+    }
+
+    viagemVolta = id;
+  }
+
+  viagemSelecionada = id;
+  carregarPoltronas();
+}
+
+// 🚌 POLTRONAS
+async function carregarPoltronas(){
+
+  const { data } = await client
     .from("reservas_passagens")
-    .select("*")
-    .eq("viagem_id", viagem_id);
+    .select("poltrona")
+    .eq("viagem_id", viagemSelecionada);
 
-  const lista = document.getElementById("listaReservas");
-  lista.innerHTML = "";
+  const ocupadas = (data || []).map(r => r.poltrona);
 
-  data.forEach(r => {
-    lista.innerHTML += `<div>Poltrona ${r.poltrona} - ${r.nome}</div>`;
-  });
+  const div = document.getElementById("poltronas");
+  div.innerHTML = "";
+
+  let numero = 1;
+
+  for(let linha=0; linha<10; linha++){
+
+    const row = document.createElement("div");
+    row.className = "linha-onibus";
+
+    for(let pos=0; pos<5; pos++){
+
+      if(pos === 2){
+        const corredor = document.createElement("div");
+        corredor.className = "corredor";
+        corredor.innerText = "🚶";
+        row.appendChild(corredor);
+        continue;
+      }
+
+      const btn = document.createElement("div");
+      btn.innerText = numero;
+
+      if(ocupadas.includes(numero)){
+        btn.className = "poltrona ocupado";
+      }else{
+        btn.className = "poltrona livre";
+
+        btn.onclick = () => {
+
+          document.querySelectorAll(".poltrona").forEach(p => p.classList.remove("selecionado"));
+          btn.classList.add("selecionado");
+
+          if(document.getElementById("tipoViagem").value === "ida"){
+            poltronaIda = numero;
+          } else {
+            poltronaVolta = numero;
+          }
+        };
+      }
+
+      row.appendChild(btn);
+      numero++;
+    }
+
+    div.appendChild(row);
+  }
+}
+
+// 💾 RESERVAR
+async function reservar(){
+
+  const nome = document.getElementById("nome").value;
+
+  if(!nome) return alert("Digite seu nome");
+
+  if(!viagemIda || !poltronaIda){
+    return alert("Selecione viagem e poltrona");
+  }
+
+  await client.from("reservas_passagens").insert([{
+    viagem_id: viagemIda,
+    poltrona: poltronaIda,
+    nome,
+    app_id
+  }]);
+
+  alert("Reserva realizada!");
+  location.reload();
 }
 
 // 🚀 START
-carregarApp();
+carregarViagens();
 
 </script>
 
