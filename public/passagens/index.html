@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <title>FF Transporte</title>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
 <style>
 body {
     background: #0f172a;
@@ -15,13 +17,15 @@ body {
     display: flex;
     gap: 20px;
     padding: 20px;
+    flex-wrap: wrap;
 }
 
 .card {
     background: #1e293b;
     padding: 20px;
     border-radius: 12px;
-    width: 50%;
+    flex: 1;
+    min-width: 300px;
 }
 
 select, input, button {
@@ -32,11 +36,24 @@ select, input, button {
     border: none;
 }
 
+/* 🚌 ESTILO ÔNIBUS */
 .poltronas {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     margin-top: 10px;
+}
+
+.linha-onibus {
+    display: grid;
+    grid-template-columns: 1fr 1fr 40px 1fr 1fr;
+    gap: 8px;
+    align-items: center;
+}
+
+.corredor {
+    text-align: center;
+    opacity: 0.3;
 }
 
 .poltrona {
@@ -44,6 +61,7 @@ select, input, button {
     text-align: center;
     border-radius: 8px;
     cursor: pointer;
+    font-weight: bold;
 }
 
 .livre { background: #22c55e; }
@@ -54,13 +72,11 @@ select, input, button {
 
 <body>
 
-<h2 style="padding: 10px;">FF TRANSPORTE</h2>
+<h2 style="padding: 10px;">🚌 FF TRANSPORTE</h2>
 
 <div class="container">
 
-<!-- LADO ESQUERDO -->
 <div class="card">
-
 <h3>Tipo de Viagem</h3>
 <select>
 <option>Somente Ida</option>
@@ -68,12 +84,9 @@ select, input, button {
 
 <h3>Viagens</h3>
 <div id="listaViagens"></div>
-
 </div>
 
-<!-- LADO DIREITO -->
 <div class="card">
-
 <h3>Poltronas</h3>
 <div class="poltronas" id="poltronas"></div>
 
@@ -83,82 +96,174 @@ select, input, button {
 <option>Dinheiro</option>
 </select>
 
-<input type="text" placeholder="Seu nome">
+<input type="text" id="nome" placeholder="Seu nome">
 
 <button onclick="reservar()">Pagar e Reservar</button>
-
 </div>
 
 </div>
 
 <script>
-// 🔥 EXEMPLO DE DADOS (vem do ADMIN)
-const viagens = [
-    {
-        id: 1,
-        rota: "SRN → Teresina",
-        hora: "08:00",
-        dias: ["Seg", "Qua", "Sex"]
-    },
-    {
-        id: 2,
-        rota: "SRN → Petrolina",
-        hora: "14:00",
-        dias: ["Ter", "Qui", "Sab"]
-    }
-];
+
+// 🔥 CONFIG SUPABASE
+const supabase = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+// 🔗 PEGAR PARAMS
+const params = new URLSearchParams(location.search);
+const slug = params.get("slug");
+const app_id_param = params.get("app_id");
+
+let app_id = null;
+let viagemSelecionada = null;
+let poltronaSelecionada = null;
+
+// 📅 DIA ATUAL
+function diaHoje(){
+  const dias = ["Dom","Seg","Ter","Qua","Qui","Sex","Sab"];
+  return dias[new Date().getDay()];
+}
+
+// 🔥 CARREGAR APP
+async function carregarApp(){
+
+  if(app_id_param){
+    app_id = app_id_param;
+    carregarViagens();
+    return;
+  }
+
+  if(slug){
+    const { data } = await supabase
+      .from("apps")
+      .select("id")
+      .eq("slug", slug)
+      .single();
+
+    app_id = data.id;
+    carregarViagens();
+  }
+}
 
 // 🔥 CARREGAR VIAGENS
-const lista = document.getElementById("listaViagens");
+async function carregarViagens(){
 
-viagens.forEach(v => {
+  const hoje = diaHoje();
+
+  const { data } = await supabase
+    .from("viagens")
+    .select("*")
+    .eq("app_id", app_id)
+    .eq("ativo", true);
+
+  const lista = document.getElementById("listaViagens");
+  lista.innerHTML = "";
+
+  data.forEach(v => {
+
+    if(!v.dias.includes(hoje)) return;
+
     const div = document.createElement("div");
 
     div.innerHTML = `
-        <p><b>${v.rota}</b> - ${v.hora}</p>
-        <small>Dias: ${v.dias.join(", ")}</small>
-        <hr>
+      <p><b>${v.rota}</b> - ${v.hora}</p>
+      <small>Dias: ${v.dias}</small>
+      <hr>
     `;
 
     div.onclick = () => selecionarViagem(v.id);
 
     lista.appendChild(div);
-});
-
-// 🔥 GERAR POLTRONAS
-const poltronasDiv = document.getElementById("poltronas");
-
-let selecionada = null;
-
-for (let i = 1; i <= 20; i++) {
-    const btn = document.createElement("div");
-
-    btn.innerText = i;
-    btn.className = "poltrona livre";
-
-    btn.onclick = () => {
-        document.querySelectorAll(".poltrona").forEach(p => p.classList.remove("selecionado"));
-        btn.classList.add("selecionado");
-        selecionada = i;
-    };
-
-    poltronasDiv.appendChild(btn);
+  });
 }
 
 // 🔥 SELECIONAR VIAGEM
-function selecionarViagem(id) {
-    console.log("Viagem selecionada:", id);
+function selecionarViagem(id){
+  viagemSelecionada = id;
+  carregarPoltronas();
 }
 
-// 🔥 RESERVAR
-function reservar() {
-    if (!selecionada) {
-        alert("Selecione uma poltrona");
-        return;
+// 🚌 POLTRONAS ESTILO ÔNIBUS
+async function carregarPoltronas(){
+
+  const { data } = await supabase
+    .from("reservas")
+    .select("poltrona")
+    .eq("viagem_id", viagemSelecionada)
+    .eq("status","ativo");
+
+  const ocupadas = data.map(r => r.poltrona);
+
+  const div = document.getElementById("poltronas");
+  div.innerHTML = "";
+
+  let numero = 1;
+
+  for(let linha=0; linha<10; linha++){
+
+    const row = document.createElement("div");
+    row.className = "linha-onibus";
+
+    for(let pos=0; pos<5; pos++){
+
+      if(pos === 2){
+        const corredor = document.createElement("div");
+        corredor.className = "corredor";
+        corredor.innerText = "🚶";
+        row.appendChild(corredor);
+        continue;
+      }
+
+      const btn = document.createElement("div");
+      btn.innerText = numero;
+
+      if(ocupadas.includes(numero)){
+        btn.className = "poltrona ocupado";
+      }else{
+        btn.className = "poltrona livre";
+
+        btn.onclick = () => {
+          document.querySelectorAll(".poltrona").forEach(p => p.classList.remove("selecionado"));
+          btn.classList.add("selecionado");
+          poltronaSelecionada = numero;
+        };
+      }
+
+      row.appendChild(btn);
+      numero++;
     }
 
-    alert("Reserva feita! Poltrona: " + selecionada);
+    div.appendChild(row);
+  }
 }
+
+// 💾 RESERVAR
+async function reservar(){
+
+  const nome = document.getElementById("nome").value;
+
+  if(!viagemSelecionada) return alert("Escolha a viagem");
+  if(!poltronaSelecionada) return alert("Escolha a poltrona");
+  if(!nome) return alert("Digite seu nome");
+
+  await supabase.from("reservas").insert([{
+    viagem_id: viagemSelecionada,
+    poltrona: poltronaSelecionada,
+    nome,
+    app_id,
+    status: "ativo"
+  }]);
+
+  alert("Reserva feita!");
+
+  carregarPoltronas();
+}
+
+// 🚀 INIT
+carregarApp();
+
 </script>
 
 </body>
