@@ -5,7 +5,161 @@
 <title>Admin Passagens</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+<script type="module">
+import { supabase } from "../js/supabase.js";
+
+let app_id = null;
+
+// 🔐 VERIFICAR LOGIN
+async function verificarSessao(){
+  const { data:{ session } } = await supabase.auth.getSession();
+
+  if(!session){
+    window.location.href = "/auth/login.html";
+    return null;
+  }
+
+  return session.user.id;
+}
+
+// 🔥 CARREGAR USUÁRIO
+async function carregarUsuario(){
+  const userId = await verificarSessao();
+  if(!userId) return;
+
+  const { data: usuario } = await supabase
+    .from("usuarios")
+    .select("nome, app_id")
+    .eq("id", userId)
+    .single();
+
+  app_id = usuario.app_id;
+
+  document.getElementById("nome").innerText = usuario.nome;
+  document.getElementById("negocioId").innerText = app_id;
+
+  carregarLinkPublico();
+  carregarViagens();
+}
+
+// 🔗 LINK PUBLICO
+async function carregarLinkPublico(){
+  const { data } = await supabase
+    .from("apps")
+    .select("slug")
+    .eq("id", app_id)
+    .single();
+
+  const url = data?.slug
+    ? `${location.origin}/public/passagens/?slug=${data.slug}`
+    : `${location.origin}/public/passagens/?app_id=${app_id}`;
+
+  document.getElementById("linkPublico").innerText = url;
+}
+
+// 🔥 SALVAR VIAGEM
+window.salvar = async function(){
+  const rota = document.getElementById("rota").value;
+  const hora = document.getElementById("hora").value;
+
+  const dias = Array.from(document.querySelectorAll(".dia:checked"))
+    .map(d => d.value)
+    .join(",");
+
+  if(!rota || !hora || !dias){
+    alert("Preencha tudo");
+    return;
+  }
+
+  await supabase.from("viagens").insert([{
+    rota,
+    hora,
+    dias,
+    app_id
+  }]);
+
+  alert("Viagem cadastrada!");
+  limpar();
+  carregarViagens();
+}
+
+// 🔄 LISTAR VIAGENS
+async function carregarViagens(){
+  const { data } = await supabase
+    .from("viagens")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("hora");
+
+  const div = document.getElementById("lista");
+  div.innerHTML = "";
+
+  data.forEach(v => {
+    const el = document.createElement("div");
+
+    el.className = "viagem";
+
+    el.innerHTML = `
+      <b>${v.rota}</b> - ${v.hora}<br>
+      <small>${v.dias}</small><br>
+      Status: ${v.ativo ? "🟢 Ativo" : "🔴 Inativo"}
+      <br><br>
+      <button onclick="toggle('${v.id}', ${v.ativo})">
+        ${v.ativo ? "Desativar" : "Ativar"}
+      </button>
+      <button onclick="excluir('${v.id}')">Excluir</button>
+    `;
+
+    div.appendChild(el);
+  });
+}
+
+// 🔁 ATIVAR/DESATIVAR
+window.toggle = async function(id, ativo){
+  await supabase
+    .from("viagens")
+    .update({ ativo: !ativo })
+    .eq("id", id);
+
+  carregarViagens();
+}
+
+// ❌ EXCLUIR
+window.excluir = async function(id){
+  if(!confirm("Excluir viagem?")) return;
+
+  await supabase
+    .from("viagens")
+    .delete()
+    .eq("id", id);
+
+  carregarViagens();
+}
+
+// 🧹 LIMPAR
+function limpar(){
+  document.getElementById("rota").value = "";
+  document.getElementById("hora").value = "";
+  document.querySelectorAll(".dia").forEach(d => d.checked = false);
+}
+
+// 🔗 COPIAR LINK
+window.copiarLink = function(){
+  const texto = document.getElementById("linkPublico").innerText;
+
+  navigator.clipboard.writeText(texto);
+  alert("Link copiado!");
+}
+
+// 🚪 LOGOUT
+window.logout = async function(){
+  await supabase.auth.signOut();
+  window.location.href = "/auth/login.html";
+}
+
+// INIT
+carregarUsuario();
+</script>
 
 <style>
 body{
@@ -24,6 +178,8 @@ body{
 
 .container{
   padding:20px;
+  max-width:900px;
+  margin:auto;
 }
 
 .card{
@@ -33,7 +189,7 @@ body{
   margin-bottom:15px;
 }
 
-input, select, button{
+input, button{
   width:100%;
   padding:10px;
   margin-top:10px;
@@ -66,114 +222,42 @@ button{
 
 <div class="container">
 
+<div>
+Bem-vindo, <b id="nome"></b><br>
+<small>ID: <span id="negocioId"></span></small>
+</div>
+
 <div class="card">
 <h3>Cadastrar Viagem</h3>
 
 <input id="rota" placeholder="Ex: SRN → Teresina">
 <input id="hora" placeholder="Ex: 08:00">
 
-<select id="dias">
-  <option value="Seg,Ter,Qua,Qui,Sex">Seg a Sex</option>
-  <option value="Sab,Dom">Fim de semana</option>
-  <option value="Seg,Qua,Sex">Seg, Qua, Sex</option>
-</select>
+<div>
+<label><input type="checkbox" class="dia" value="Dom"> Dom</label>
+<label><input type="checkbox" class="dia" value="Seg"> Seg</label>
+<label><input type="checkbox" class="dia" value="Ter"> Ter</label>
+<label><input type="checkbox" class="dia" value="Qua"> Qua</label>
+<label><input type="checkbox" class="dia" value="Qui"> Qui</label>
+<label><input type="checkbox" class="dia" value="Sex"> Sex</label>
+<label><input type="checkbox" class="dia" value="Sab"> Sab</label>
+</div>
 
-<button onclick="salvar()">Salvar Viagem</button>
+<button onclick="salvar()">Salvar</button>
 </div>
 
 <div class="card">
-<h3>Viagens cadastradas</h3>
+<h3>Viagens</h3>
 <div id="lista"></div>
 </div>
 
+<div class="card">
+<h3>🌍 Página Pública</h3>
+<div id="linkPublico"></div>
+<button onclick="copiarLink()">Copiar link</button>
 </div>
 
-<script>
-// 🔥 CONFIG
-const supabase = supabase.createClient(
-  "SUA_URL",
-  "SUA_KEY"
-);
-
-// 🔥 CARREGAR VIAGENS
-async function carregar(){
-  const { data } = await supabase
-    .from("viagens")
-    .select("*")
-    .order("hora");
-
-  const div = document.getElementById("lista");
-  div.innerHTML = "";
-
-  data.forEach(v => {
-    const el = document.createElement("div");
-
-    el.className = "viagem";
-
-    el.innerHTML = `
-      <b>${v.rota}</b> - ${v.hora}<br>
-      <small>${v.dias}</small><br>
-      Status: ${v.ativo ? "🟢 Ativo" : "🔴 Inativo"}
-      <br><br>
-      <button onclick="toggle('${v.id}', ${v.ativo})">
-        ${v.ativo ? "Desativar" : "Ativar"}
-      </button>
-      <button onclick="excluir('${v.id}')">Excluir</button>
-    `;
-
-    div.appendChild(el);
-  });
-}
-
-// 🔥 SALVAR
-async function salvar(){
-  const rota = document.getElementById("rota").value;
-  const hora = document.getElementById("hora").value;
-  const dias = document.getElementById("dias").value;
-
-  if(!rota || !hora) return alert("Preencha tudo");
-
-  await supabase.from("viagens").insert([{
-    rota,
-    hora,
-    dias
-  }]);
-
-  alert("Salvo!");
-  carregar();
-}
-
-// 🔥 ATIVAR/DESATIVAR
-async function toggle(id, ativo){
-  await supabase
-    .from("viagens")
-    .update({ ativo: !ativo })
-    .eq("id", id);
-
-  carregar();
-}
-
-// 🔥 EXCLUIR
-async function excluir(id){
-  if(!confirm("Excluir viagem?")) return;
-
-  await supabase
-    .from("viagens")
-    .delete()
-    .eq("id", id);
-
-  carregar();
-}
-
-// 🔥 LOGOUT
-async function logout(){
-  await supabase.auth.signOut();
-  location.reload();
-}
-
-// INIT
-carregar();
-</script>
+</div>
 
 </body>
 </html>
