@@ -223,86 +223,6 @@ input,select{
 small{
   opacity:.75;
 }
-
-.reserva-agencia-box{
-  margin-top:14px;
-  padding:12px;
-  border-radius:12px;
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.06);
-}
-
-.mapa-poltronas{
-  display:grid;
-  gap:8px;
-  margin-top:12px;
-}
-
-.poltrona{
-  text-align:center;
-  padding:10px 6px;
-  border-radius:10px;
-  font-weight:bold;
-  border:1px solid rgba(255,255,255,.08);
-  user-select:none;
-}
-
-.poltrona.livre{
-  background:#0f172a;
-  color:#fff;
-  cursor:pointer;
-}
-
-.poltrona.livre:hover{
-  background:#1e293b;
-}
-
-.poltrona.selecionada{
-  background:#22c55e;
-  color:#fff;
-  cursor:pointer;
-}
-
-.poltrona.ocupada{
-  background:#7f1d1d;
-  color:#fff;
-  cursor:not-allowed;
-  opacity:.9;
-}
-
-.legenda-poltronas{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-top:10px;
-  font-size:13px;
-  opacity:.9;
-}
-
-.legenda-poltronas span{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-}
-
-.legenda-cor{
-  width:14px;
-  height:14px;
-  border-radius:4px;
-  display:inline-block;
-}
-
-.campos-duplos{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
-}
-
-@media(max-width:700px){
-  .campos-duplos{
-    grid-template-columns:1fr;
-  }
-}
 </style>
 </head>
 
@@ -384,28 +304,25 @@ small{
         <option value="">Selecione a viagem</option>
       </select>
 
-      <input type="date" id="dataReservaFiltro">
+      <button class="botao-azul" onclick="verReservas()">Ver Reservas</button>
 
       <button class="botao-azul" onclick="verReservas()">Ver Reservas</button>
 
-      <div class="reserva-agencia-box">
-        <div style="font-weight:bold;margin-bottom:6px;">Reserva manual na agência</div>
+<!-- 👇 COLE AQUI -->
+<hr style="margin:10px 0;opacity:.2">
 
-        <div class="campos-duplos">
-          <input id="nomeReservaAgencia" placeholder="Nome do cliente">
-          <input id="telefoneReservaAgencia" placeholder="Telefone">
-        </div>
+<input id="nomeAgencia" placeholder="Nome cliente (agência)">
 
-        <div class="legenda-poltronas">
-          <span><i class="legenda-cor" style="background:#0f172a;"></i> Livre</span>
-          <span><i class="legenda-cor" style="background:#22c55e;"></i> Selecionada</span>
-          <span><i class="legenda-cor" style="background:#7f1d1d;"></i> Ocupada</span>
-        </div>
+<div id="mapaPoltronas" style="
+display:grid;
+grid-template-columns:repeat(4,1fr);
+gap:8px;
+margin-top:10px;
+"></div>
 
-        <div id="mapaPoltronas" class="mapa-poltronas"></div>
-
-        <button class="botao-verde" onclick="reservarNaAgencia()">Salvar reserva na agência</button>
-      </div>
+<button class="botao-verde" onclick="reservarAgencia()">
+Reservar na Agência
+</button>
 
       <div id="msgReserva"></div>
       <div class="lista" id="listaReservas"></div>
@@ -447,11 +364,6 @@ small{
 import { supabase } from "../js/supabase.js";
 
 let app_id = null;
-let usuarioAtual = null;
-let veiculosCache = [];
-let viagensCache = [];
-let poltronaSelecionada = null;
-let reservasAtuais = [];
 
 function msg(id, texto, tipo="ok"){
   const el = document.getElementById(id);
@@ -484,719 +396,563 @@ function limparFormularioViagem(){
   document.getElementById("btnCancelarViagem").style.display = "none";
 }
 
-function limparFormularioReservaAgencia(){
-  document.getElementById("nomeReservaAgencia").value = "";
-  document.getElementById("telefoneReservaAgencia").value = "";
-  poltronaSelecionada = null;
-  atualizarMapaPoltronas();
-}
+async function verificarSessao(){
+  const { data:{ session } } = await supabase.auth.getSession();
 
-function nomeBaseReserva(nome){
-  return String(nome || "")
-    .replace(/\s*\(volta\)\s*$/i, "")
-    .trim()
-    .toLowerCase();
-}
-
-function statusReservaPorPagamento(statusPagamento){
-  const s = String(statusPagamento || "").toLowerCase();
-
-  if(s === "approved") return "confirmado";
-  if(s === "pending") return "pendente_pagamento";
-  if(s === "rejected") return "rejeitado";
-  if(s === "cancelled") return "cancelado";
-  return "pendente";
-}
-
-function normalizarNumeroPoltrona(valor){
-  const n = Number(valor);
-  if(Number.isFinite(n) && n > 0) return n;
-  return null;
-}
-
-function obterViagemSelecionada(){
-  const viagemId = document.getElementById("viagemReserva").value;
-  return viagensCache.find(v => String(v.id) === String(viagemId)) || null;
-}
-
-function obterVeiculoDaViagem(viagem){
-  if(!viagem) return null;
-  const veiculoId = viagem.veiculo_id || viagem.veiculoId || viagem.veiculo;
-  return veiculosCache.find(v => String(v.id) === String(veiculoId)) || null;
-}
-
-function obterTotalPoltronasDaViagem(){
-  const viagem = obterViagemSelecionada();
-  const veiculo = obterVeiculoDaViagem(viagem);
-
-  const total = Number(
-    veiculo?.poltronas ||
-    veiculo?.total_poltronas ||
-    viagem?.poltronas ||
-    0
-  );
-
-  return total > 0 ? total : 15;
-}
-
-function obterLayoutDaViagem(){
-  const viagem = obterViagemSelecionada();
-  const veiculo = obterVeiculoDaViagem(viagem);
-  return veiculo?.layout || viagem?.layout || "2-2";
-}
-
-function getGridColumnsPorLayout(layout){
-  if(layout === "1-1") return 2;
-  if(layout === "2-1") return 3;
-  return 4;
-}
-
-function getOcupadas(){
-  const set = new Set();
-  for(const r of reservasAtuais){
-    const st = String(r.status || "").toLowerCase();
-    const sp = String(r.status_pagamento || "").toLowerCase();
-    const ocupa = ["confirmado", "pendente", "pendente_pagamento"].includes(st) || ["approved", "pending"].includes(sp);
-    const p = normalizarNumeroPoltrona(r.poltrona);
-    if(ocupa && p) set.add(p);
+  if(!session){
+    window.location.href = "/auth/login.html";
+    return null;
   }
-  return set;
+
+  return session.user.id;
 }
 
-function atualizarMapaPoltronas(){
-  const mapa = document.getElementById("mapaPoltronas");
-  if(!mapa) return;
+async function carregarUsuario(){
+  const userId = await verificarSessao();
+  if(!userId) return;
 
-  const total = obterTotalPoltronasDaViagem();
-  const layout = obterLayoutDaViagem();
-  const cols = getGridColumnsPorLayout(layout);
-  const ocupadas = getOcupadas();
+  const { data: usuario, error } = await supabase
+    .from("usuarios")
+    .select("nome, app_id")
+    .eq("id", userId)
+    .single();
 
-  mapa.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  mapa.innerHTML = "";
-
-  if(!document.getElementById("viagemReserva").value){
-    mapa.innerHTML = `<div class="vazio">Selecione uma viagem para carregar as poltronas.</div>`;
+  if(error || !usuario){
+    alert("Não foi possível carregar os dados do usuário.");
     return;
   }
 
-  for(let i = 1; i <= total; i++){
-    const btn = document.createElement("div");
-    btn.textContent = i;
-    btn.className = "poltrona";
+  app_id = usuario.app_id;
 
-    if(ocupadas.has(i)){
-      btn.classList.add("ocupada");
-    }else if(poltronaSelecionada === i){
-      btn.classList.add("selecionada");
-      btn.onclick = () => {
-        poltronaSelecionada = null;
-        atualizarMapaPoltronas();
-      };
-    }else{
-      btn.classList.add("livre");
-      btn.onclick = () => {
-        poltronaSelecionada = i;
-        atualizarMapaPoltronas();
-      };
+  document.getElementById("nome").innerText = usuario.nome || "";
+  document.getElementById("negocioId").innerText = usuario.app_id || "";
+
+  await montarLinkPublico();
+  await carregarVeiculos();
+  await carregarViagens();
+}
+
+async function montarLinkPublico(){
+  if(!app_id) return;
+
+  const { data: appData, error } = await supabase
+    .from("apps")
+    .select("slug")
+    .eq("id", app_id)
+    .single();
+
+  const url = (error || !appData?.slug)
+    ? `${location.origin}/passagens/publica.html?app_id=${encodeURIComponent(app_id)}`
+    : `${location.origin}/passagens/publica.html?slug=${encodeURIComponent(appData.slug)}`;
+
+  document.getElementById("linkPublico").innerText = url;
+}
+
+window.copiarLinkPublico = async function(){
+  const url = document.getElementById("linkPublico").innerText;
+
+  try{
+    await navigator.clipboard.writeText(url);
+    alert("🔗 Link copiado com sucesso!\n\n" + url);
+  }catch{
+    prompt("Copie o link:", url);
+  }
+};
+
+window.abrirConfigPassagens = function(){
+  window.location.href = "https://www.ffsolucoes.com.br/passagens/config_site.html";
+};
+
+window.logout = async function(){
+  await supabase.auth.signOut();
+  window.location.href = "/auth/login.html";
+};
+
+window.cancelarEdicaoVeiculo = function(){
+  limparFormularioVeiculo();
+  msg("msgVeiculo", "");
+};
+
+window.cancelarEdicaoViagem = function(){
+  limparFormularioViagem();
+  msg("msgViagem", "");
+};
+
+window.salvarVeiculo = async function(){
+  msg("msgVeiculo", "");
+
+  const id = document.getElementById("veiculoEditId").value;
+  const nome = document.getElementById("nomeVeiculo").value.trim();
+  const tipo = document.getElementById("tipoVeiculo").value;
+  const total_poltronas = parseInt(document.getElementById("poltronasVeiculo").value || "0", 10);
+  const layout = document.getElementById("layoutVeiculo").value;
+
+  if(!nome) return msg("msgVeiculo", "Digite o nome do veículo.", "erro");
+  if(!total_poltronas) return msg("msgVeiculo", "Digite o total de poltronas.", "erro");
+  if(!app_id) return msg("msgVeiculo", "app_id não encontrado.", "erro");
+
+  if(id){
+    const { error } = await supabase
+      .from("veiculos_passagens")
+      .update({
+        nome,
+        tipo,
+        total_poltronas,
+        layout
+      })
+      .eq("id", id)
+      .eq("app_id", app_id);
+
+    if(error){
+      msg("msgVeiculo", "Erro ao atualizar veículo: " + error.message, "erro");
+      return;
     }
 
-    mapa.appendChild(btn);
-  }
-}
+    msg("msgVeiculo", "Veículo atualizado com sucesso.");
+  }else{
+    const { error } = await supabase
+      .from("veiculos_passagens")
+      .insert([{
+        nome,
+        tipo,
+        total_poltronas,
+        layout,
+        app_id
+      }]);
 
-function montarItemVeiculo(v){
-  const nome = v.nome || "Sem nome";
-  const tipo = v.tipo || "-";
-  const poltronas = v.poltronas ?? v.total_poltronas ?? "-";
-  const layout = v.layout || "-";
+    if(error){
+      msg("msgVeiculo", "Erro ao salvar veículo: " + error.message, "erro");
+      return;
+    }
 
-  return `
-    <div class="item">
-      <b>${nome}</b><br>
-      Tipo: ${tipo}<br>
-      Poltronas: ${poltronas}<br>
-      Layout: ${layout}
-      <div class="botoes-item">
-        <button class="botao-azul" onclick="editarVeiculo('${v.id}')">Editar</button>
-        <button class="botao-vermelho" onclick="excluirVeiculo('${v.id}')">Excluir</button>
-      </div>
-    </div>
-  `;
-}
-
-function montarItemViagem(v){
-  const rota = v.rota || "-";
-  const hora = v.hora || "-";
-  const valor = v.valor ?? "-";
-  const dias = v.dias || "-";
-  const veiculo = veiculosCache.find(x => String(x.id) === String(v.veiculo_id));
-  const nomeVeiculo = veiculo?.nome || "Sem veículo";
-
-  return `
-    <div class="item">
-      <b>${rota}</b><br>
-      Hora: ${hora}<br>
-      Valor: R$ ${Number(valor || 0).toFixed(2)}<br>
-      Dias: ${dias}<br>
-      Veículo: ${nomeVeiculo}
-      <div class="botoes-item">
-        <button class="botao-azul" onclick="editarViagem('${v.id}')">Editar</button>
-        <button class="botao-vermelho" onclick="excluirViagem('${v.id}')">Excluir</button>
-      </div>
-    </div>
-  `;
-}
-
-function preencherSelectVeiculos(){
-  const veiculoSelect = document.getElementById("veiculoSelect");
-  veiculoSelect.innerHTML = `<option value="">Selecione o veículo</option>`;
-
-  veiculosCache.forEach(v => {
-    veiculoSelect.innerHTML += `
-      <option value="${v.id}">
-        ${v.nome} - ${v.tipo} - ${v.poltronas || v.total_poltronas || 0} poltronas
-      </option>
-    `;
-  });
-}
-
-function preencherSelectViagens(){
-  const selects = [
-    document.getElementById("viagemReserva")
-  ];
-
-  selects.forEach(select => {
-    select.innerHTML = `<option value="">Selecione a viagem</option>`;
-    viagensCache.forEach(v => {
-      const veiculo = veiculosCache.find(x => String(x.id) === String(v.veiculo_id));
-      const poltronas = veiculo?.poltronas || veiculo?.total_poltronas || 15;
-      const layout = veiculo?.layout || "2-2";
-
-      select.innerHTML += `
-        <option value="${v.id}" data-poltronas="${poltronas}" data-layout="${layout}">
-          ${v.rota} - ${v.hora}
-        </option>
-      `;
-    });
-  });
-}
-
-async function carregarDadosUsuario(){
-  const { data: sessaoData, error: sessaoError } = await supabase.auth.getSession();
-  if(sessaoError) throw sessaoError;
-
-  const session = sessaoData?.session;
-  usuarioAtual = session?.user || null;
-
-  if(!usuarioAtual){
-    location.href = "login.html";
-    return false;
+    msg("msgVeiculo", "Veículo salvo com sucesso.");
   }
 
-  let usuarioDb = null;
+  limparFormularioVeiculo();
+  await carregarVeiculos();
+  await carregarViagens();
+};
 
-  let tentativa = await supabase
-    .from("usuarios")
+window.editarVeiculo = async function(id){
+  msg("msgVeiculo", "");
+
+  const { data, error } = await supabase
+    .from("veiculos_passagens")
     .select("*")
-    .eq("auth_id", usuarioAtual.id)
-    .maybeSingle();
+    .eq("id", id)
+    .eq("app_id", app_id)
+    .single();
 
-  if(!tentativa.error && tentativa.data){
-    usuarioDb = tentativa.data;
+  if(error || !data){
+    msg("msgVeiculo", "Erro ao carregar veículo.", "erro");
+    return;
   }
 
-  if(!usuarioDb){
-    tentativa = await supabase
-      .from("usuarios")
-      .select("*")
-      .eq("id", usuarioAtual.id)
-      .maybeSingle();
+  document.getElementById("veiculoEditId").value = data.id;
+  document.getElementById("nomeVeiculo").value = data.nome || "";
+  document.getElementById("tipoVeiculo").value = data.tipo || "van";
+  document.getElementById("poltronasVeiculo").value = data.total_poltronas || "";
+  document.getElementById("layoutVeiculo").value = data.layout || "2-2";
+  document.getElementById("btnSalvarVeiculo").innerText = "Atualizar Veículo";
+  document.getElementById("btnCancelarVeiculo").style.display = "block";
 
-    if(!tentativa.error && tentativa.data){
-      usuarioDb = tentativa.data;
-    }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+window.excluirVeiculo = async function(id){
+  msg("msgVeiculo", "");
+
+  const { data: viagens } = await supabase
+    .from("viagens_passagens")
+    .select("id")
+    .eq("veiculo_id", id)
+    .eq("app_id", app_id)
+    .limit(1);
+
+  if(viagens && viagens.length){
+    msg("msgVeiculo", "Esse veículo está vinculado a uma viagem. Exclua ou edite a viagem primeiro.", "erro");
+    return;
   }
 
-  if(!usuarioDb && usuarioAtual.email){
-    tentativa = await supabase
-      .from("usuarios")
-      .select("*")
-      .eq("email", usuarioAtual.email)
-      .maybeSingle();
+  if(!confirm("Tem certeza que deseja excluir este veículo?")) return;
 
-    if(!tentativa.error && tentativa.data){
-      usuarioDb = tentativa.data;
-    }
+  const { error } = await supabase
+    .from("veiculos_passagens")
+    .delete()
+    .eq("id", id)
+    .eq("app_id", app_id);
+
+  if(error){
+    msg("msgVeiculo", "Erro ao excluir veículo: " + error.message, "erro");
+    return;
   }
 
-  app_id = usuarioDb?.app_id || null;
-
-  document.getElementById("nome").innerText =
-    usuarioDb?.nome ||
-    usuarioAtual.user_metadata?.nome ||
-    usuarioAtual.email ||
-    "Usuário";
-
-  document.getElementById("negocioId").innerText = app_id || "-";
-
-  const origem = window.location.origin;
-  const linkPublico = `${origem}/passagens/?app_id=${encodeURIComponent(app_id || "")}`;
-  document.getElementById("linkPublico").innerText = linkPublico;
-
-  return !!app_id;
-}
+  msg("msgVeiculo", "Veículo excluído com sucesso.");
+  limparFormularioVeiculo();
+  await carregarVeiculos();
+};
 
 async function carregarVeiculos(){
+  const lista = document.getElementById("listaVeiculos");
+  const select = document.getElementById("veiculoSelect");
+
+  lista.innerHTML = "";
+  select.innerHTML = `<option value="">Selecione o veículo</option>`;
+
+  if(!app_id){
+    lista.innerHTML = `<div class="vazio">Negócio não identificado.</div>`;
+    return;
+  }
+
   const { data, error } = await supabase
-    .from("veiculos")
+    .from("veiculos_passagens")
     .select("*")
     .eq("app_id", app_id)
-    .order("created_at", { ascending:false });
+    .order("id", { ascending: false });
 
-  if(error) throw error;
+  if(error){
+    lista.innerHTML = `<div class="erro">Erro ao carregar veículos: ${error.message}</div>`;
+    return;
+  }
 
-  veiculosCache = Array.isArray(data) ? data : [];
-  preencherSelectVeiculos();
-
-  const lista = document.getElementById("listaVeiculos");
-  if(!veiculosCache.length){
+  if(!data || !data.length){
     lista.innerHTML = `<div class="vazio">Nenhum veículo cadastrado.</div>`;
     return;
   }
 
-  lista.innerHTML = veiculosCache.map(montarItemVeiculo).join("");
+  data.forEach(v => {
+    lista.innerHTML += `
+      <div class="item">
+        <b>${v.nome}</b><br>
+        Tipo: ${v.tipo || "-"}<br>
+        Poltronas: ${v.total_poltronas || 0}<br>
+        Layout: ${v.layout || "-"}
+        <div class="botoes-item">
+          <button class="botao-azul" onclick="editarVeiculo('${v.id}')">Editar</button>
+          <button class="botao-vermelho" onclick="excluirVeiculo('${v.id}')">Excluir</button>
+        </div>
+      </div>
+    `;
+
+    select.innerHTML += `<option value="${v.id}">${v.nome}</option>`;
+  });
 }
 
-async function carregarViagens(){
+window.salvarViagem = async function(){
+  msg("msgViagem", "");
+
+  const id = document.getElementById("viagemEditId").value;
+  const rota = document.getElementById("rota").value.trim();
+  const hora = document.getElementById("hora").value.trim();
+  const valor = document.getElementById("valor").value.trim();
+  const dias = document.getElementById("dias").value.trim();
+  const veiculo_id = document.getElementById("veiculoSelect").value;
+
+  if(!rota) return msg("msgViagem", "Digite a rota.", "erro");
+  if(!hora) return msg("msgViagem", "Digite a hora.", "erro");
+  if(!valor) return msg("msgViagem", "Digite o valor da passagem.", "erro");
+  if(!veiculo_id) return msg("msgViagem", "Selecione um veículo.", "erro");
+  if(!app_id) return msg("msgViagem", "app_id não encontrado.", "erro");
+
+  const payload = {
+    rota,
+    hora,
+    valor: Number(valor),
+    dias,
+    veiculo_id
+  };
+
+  if(id){
+    const { error } = await supabase
+      .from("viagens_passagens")
+      .update(payload)
+      .eq("id", id)
+      .eq("app_id", app_id);
+
+    if(error){
+      msg("msgViagem", "Erro ao atualizar viagem: " + error.message, "erro");
+      return;
+    }
+
+    msg("msgViagem", "Viagem atualizada com sucesso.");
+  }else{
+    const { error } = await supabase
+      .from("viagens_passagens")
+      .insert([{
+        ...payload,
+        app_id
+      }]);
+
+    if(error){
+      msg("msgViagem", "Erro ao salvar viagem: " + error.message, "erro");
+      return;
+    }
+
+    msg("msgViagem", "Viagem salva com sucesso.");
+  }
+
+  limparFormularioViagem();
+  await carregarViagens();
+};
+
+window.editarViagem = async function(id){
+  msg("msgViagem", "");
+
   const { data, error } = await supabase
-    .from("viagens")
+    .from("viagens_passagens")
+    .select("*")
+    .eq("id", id)
+    .eq("app_id", app_id)
+    .single();
+
+  if(error || !data){
+    msg("msgViagem", "Erro ao carregar viagem.", "erro");
+    return;
+  }
+
+  document.getElementById("viagemEditId").value = data.id;
+  document.getElementById("rota").value = data.rota || "";
+  document.getElementById("hora").value = data.hora || "";
+  document.getElementById("valor").value = data.valor ?? "";
+  document.getElementById("dias").value = data.dias || "";
+  document.getElementById("veiculoSelect").value = data.veiculo_id || "";
+  document.getElementById("btnSalvarViagem").innerText = "Atualizar Viagem";
+  document.getElementById("btnCancelarViagem").style.display = "block";
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+window.excluirViagem = async function(id){
+  msg("msgViagem", "");
+
+  const { data: reservas } = await supabase
+    .from("reservas_passagens")
+    .select("id")
+    .eq("viagem_id", id)
+    .limit(1);
+
+  if(reservas && reservas.length){
+    if(!confirm("Essa viagem já possui reservas. Deseja excluir mesmo assim?")) return;
+  }else{
+    if(!confirm("Tem certeza que deseja excluir esta viagem?")) return;
+  }
+
+  const { error } = await supabase
+    .from("viagens_passagens")
+    .delete()
+    .eq("id", id)
+    .eq("app_id", app_id);
+
+  if(error){
+    msg("msgViagem", "Erro ao excluir viagem: " + error.message, "erro");
+    return;
+  }
+
+  msg("msgViagem", "Viagem excluída com sucesso.");
+  limparFormularioViagem();
+  await carregarViagens();
+  document.getElementById("listaReservas").innerHTML = "";
+};
+
+async function carregarViagens(){
+  const lista = document.getElementById("listaViagens");
+  const select = document.getElementById("viagemReserva");
+
+  lista.innerHTML = "";
+  select.innerHTML = `<option value="">Selecione a viagem</option>`;
+
+  if(!app_id){
+    lista.innerHTML = `<div class="vazio">Negócio não identificado.</div>`;
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("viagens_passagens")
     .select("*")
     .eq("app_id", app_id)
-    .order("created_at", { ascending:false });
+    .order("id", { ascending: false });
 
-  if(error) throw error;
+  if(error){
+    lista.innerHTML = `<div class="erro">Erro ao carregar viagens: ${error.message}</div>`;
+    return;
+  }
 
-  viagensCache = Array.isArray(data) ? data : [];
-  preencherSelectViagens();
-
-  const lista = document.getElementById("listaViagens");
-  if(!viagensCache.length){
+  if(!data || !data.length){
     lista.innerHTML = `<div class="vazio">Nenhuma viagem cadastrada.</div>`;
     return;
   }
 
-  lista.innerHTML = viagensCache.map(montarItemViagem).join("");
-}
+  for (const v of data) {
+    let nomeVeiculo = "-";
 
-async function salvarVeiculo(){
-  try{
-    msg("msgVeiculo", "");
+    if(v.veiculo_id){
+      const { data: veiculo } = await supabase
+        .from("veiculos_passagens")
+        .select("nome")
+        .eq("id", v.veiculo_id)
+        .maybeSingle();
 
-    const editId = document.getElementById("veiculoEditId").value;
-    const nome = document.getElementById("nomeVeiculo").value.trim();
-    const tipo = document.getElementById("tipoVeiculo").value;
-    const poltronas = Number(document.getElementById("poltronasVeiculo").value || 0);
-    const layout = document.getElementById("layoutVeiculo").value;
-
-    if(!nome || !poltronas){
-      msg("msgVeiculo", "Preencha nome e total de poltronas.", "erro");
-      return;
+      nomeVeiculo = veiculo?.nome || "-";
     }
 
-    const payload = {
-      app_id,
-      nome,
-      tipo,
-      poltronas,
-      layout
-    };
-
-    let error = null;
-
-    if(editId){
-      ({ error } = await supabase
-        .from("veiculos")
-        .update(payload)
-        .eq("id", editId)
-        .eq("app_id", app_id));
-    }else{
-      ({ error } = await supabase
-        .from("veiculos")
-        .insert([payload]));
-    }
-
-    if(error) throw error;
-
-    limparFormularioVeiculo();
-    await carregarVeiculos();
-    await carregarViagens();
-    msg("msgVeiculo", editId ? "Veículo atualizado." : "Veículo cadastrado.");
-  }catch(e){
-    msg("msgVeiculo", e.message || "Erro ao salvar veículo.", "erro");
-  }
-}
-
-function editarVeiculo(id){
-  const v = veiculosCache.find(x => String(x.id) === String(id));
-  if(!v) return;
-
-  document.getElementById("veiculoEditId").value = v.id;
-  document.getElementById("nomeVeiculo").value = v.nome || "";
-  document.getElementById("tipoVeiculo").value = v.tipo || "van";
-  document.getElementById("poltronasVeiculo").value = v.poltronas || v.total_poltronas || "";
-  document.getElementById("layoutVeiculo").value = v.layout || "2-2";
-  document.getElementById("btnSalvarVeiculo").innerText = "Atualizar Veículo";
-  document.getElementById("btnCancelarVeiculo").style.display = "block";
-}
-
-function cancelarEdicaoVeiculo(){
-  limparFormularioVeiculo();
-}
-
-async function excluirVeiculo(id){
-  if(!confirm("Excluir este veículo?")) return;
-
-  try{
-    const { error } = await supabase
-      .from("veiculos")
-      .delete()
-      .eq("id", id)
-      .eq("app_id", app_id);
-
-    if(error) throw error;
-
-    await carregarVeiculos();
-    await carregarViagens();
-    msg("msgVeiculo", "Veículo excluído.");
-  }catch(e){
-    msg("msgVeiculo", e.message || "Erro ao excluir veículo.", "erro");
-  }
-}
-
-async function salvarViagem(){
-  try{
-    msg("msgViagem", "");
-
-    const editId = document.getElementById("viagemEditId").value;
-    const rota = document.getElementById("rota").value.trim();
-    const hora = document.getElementById("hora").value.trim();
-    const valor = Number(document.getElementById("valor").value || 0);
-    const dias = document.getElementById("dias").value.trim();
-    const veiculo_id = document.getElementById("veiculoSelect").value;
-
-    if(!rota || !hora || !valor || !veiculo_id){
-      msg("msgViagem", "Preencha rota, hora, valor e veículo.", "erro");
-      return;
-    }
-
-    const veiculo = veiculosCache.find(v => String(v.id) === String(veiculo_id));
-
-    const payload = {
-      app_id,
-      rota,
-      hora,
-      valor,
-      dias,
-      veiculo_id,
-      poltronas: veiculo?.poltronas || veiculo?.total_poltronas || null,
-      layout: veiculo?.layout || null
-    };
-
-    let error = null;
-
-    if(editId){
-      ({ error } = await supabase
-        .from("viagens")
-        .update(payload)
-        .eq("id", editId)
-        .eq("app_id", app_id));
-    }else{
-      ({ error } = await supabase
-        .from("viagens")
-        .insert([payload]));
-    }
-
-    if(error) throw error;
-
-    limparFormularioViagem();
-    await carregarViagens();
-    msg("msgViagem", editId ? "Viagem atualizada." : "Viagem cadastrada.");
-  }catch(e){
-    msg("msgViagem", e.message || "Erro ao salvar viagem.", "erro");
-  }
-}
-
-function editarViagem(id){
-  const v = viagensCache.find(x => String(x.id) === String(id));
-  if(!v) return;
-
-  document.getElementById("viagemEditId").value = v.id;
-  document.getElementById("rota").value = v.rota || "";
-  document.getElementById("hora").value = v.hora || "";
-  document.getElementById("valor").value = v.valor ?? "";
-  document.getElementById("dias").value = v.dias || "";
-  document.getElementById("veiculoSelect").value = v.veiculo_id || "";
-  document.getElementById("btnSalvarViagem").innerText = "Atualizar Viagem";
-  document.getElementById("btnCancelarViagem").style.display = "block";
-}
-
-function cancelarEdicaoViagem(){
-  limparFormularioViagem();
-}
-
-async function excluirViagem(id){
-  if(!confirm("Excluir esta viagem?")) return;
-
-  try{
-    const { error } = await supabase
-      .from("viagens")
-      .delete()
-      .eq("id", id)
-      .eq("app_id", app_id);
-
-    if(error) throw error;
-
-    await carregarViagens();
-    reservasAtuais = [];
-    atualizarMapaPoltronas();
-    msg("msgViagem", "Viagem excluída.");
-  }catch(e){
-    msg("msgViagem", e.message || "Erro ao excluir viagem.", "erro");
-  }
-}
-
-async function buscarReservasDaViagem(viagem_id, dataFiltro = ""){
-  let query = supabase
-    .from("reservas")
-    .select("*")
-    .eq("viagem_id", viagem_id)
-    .eq("app_id", app_id)
-    .order("created_at", { ascending:false });
-
-  if(dataFiltro){
-    query = query.eq("data_viagem", dataFiltro);
-  }
-
-  const { data, error } = await query;
-  if(error) throw error;
-  return Array.isArray(data) ? data : [];
-}
-
-async function verReservas(){
-  try{
-    msg("msgReserva", "Carregando...");
-
-    const viagem_id = document.getElementById("viagemReserva").value;
-    const data = document.getElementById("dataReservaFiltro").value;
-
-    if(!viagem_id){
-      msg("msgReserva", "Selecione uma viagem", "erro");
-      document.getElementById("listaReservas").innerHTML = "";
-      reservasAtuais = [];
-      atualizarMapaPoltronas();
-      return;
-    }
-
-    reservasAtuais = await buscarReservasDaViagem(viagem_id, data);
-
-    const lista = document.getElementById("listaReservas");
-
-    if(!reservasAtuais.length){
-      lista.innerHTML = `<div class="vazio">Nenhuma reserva</div>`;
-      msg("msgReserva", "");
-      atualizarMapaPoltronas();
-      return;
-    }
-
-    lista.innerHTML = reservasAtuais.map(r => {
-      const statusFinal = r.status || statusReservaPorPagamento(r.status_pagamento);
-      const origem = r.origem === "agencia" ? " (Agência)" : "";
-      return `
-        <div class="item">
-          👤 <b>${r.nome || "Cliente"}</b><br>
-          📞 ${r.telefone || "-"}<br>
-          📅 ${r.data_viagem || "-"}<br>
-          💺 Poltrona: ${r.poltrona || "-"}<br>
-          💰 Status: ${statusFinal}${origem}<br>
-          🕒 ${r.created_at ? new Date(r.created_at).toLocaleString("pt-BR") : "-"}
+    lista.innerHTML += `
+      <div class="item">
+        <b>${v.rota}</b><br>
+        Hora: ${v.hora || "-"}<br>
+        Valor: R$ ${Number(v.valor || 0).toFixed(2)}<br>
+        Dias: ${v.dias || "-"}<br>
+        Veículo: ${nomeVeiculo}
+        <div class="botoes-item">
+          <button class="botao-azul" onclick="editarViagem('${v.id}')">Editar</button>
+          <button class="botao-vermelho" onclick="excluirViagem('${v.id}')">Excluir</button>
         </div>
-      `;
-    }).join("");
+      </div>
+    `;
 
-    msg("msgReserva", "OK");
-    atualizarMapaPoltronas();
-  }catch(e){
-    msg("msgReserva", e.message || "Erro ao carregar reservas.", "erro");
+    select.innerHTML += `<option value="${v.id}">${v.rota} - ${v.hora || ""}</option>`;
   }
 }
 
-async function reservarNaAgencia(){
-  try{
-    msg("msgReserva", "");
-
-    const viagem_id = document.getElementById("viagemReserva").value;
-    const data_viagem = document.getElementById("dataReservaFiltro").value;
-    const nome = document.getElementById("nomeReservaAgencia").value.trim();
-    const telefone = document.getElementById("telefoneReservaAgencia").value.trim();
-
-    if(!viagem_id){
-      msg("msgReserva", "Selecione a viagem.", "erro");
-      return;
-    }
-
-    if(!data_viagem){
-      msg("msgReserva", "Selecione a data da reserva.", "erro");
-      return;
-    }
-
-    if(!nome){
-      msg("msgReserva", "Informe o nome do cliente.", "erro");
-      return;
-    }
-
-    if(!poltronaSelecionada){
-      msg("msgReserva", "Selecione uma poltrona.", "erro");
-      return;
-    }
-
-    const reservasDaData = await buscarReservasDaViagem(viagem_id, data_viagem);
-    const poltronaOcupada = reservasDaData.some(r => {
-      const p = normalizarNumeroPoltrona(r.poltrona);
-      const st = String(r.status || "").toLowerCase();
-      const sp = String(r.status_pagamento || "").toLowerCase();
-      const ocupa = ["confirmado", "pendente", "pendente_pagamento"].includes(st) || ["approved", "pending"].includes(sp);
-      return ocupa && p === poltronaSelecionada;
-    });
-
-    if(poltronaOcupada){
-      msg("msgReserva", "Essa poltrona já está ocupada para essa data.", "erro");
-      reservasAtuais = reservasDaData;
-      atualizarMapaPoltronas();
-      return;
-    }
-
-    const payload = {
-      app_id,
-      viagem_id,
-      data_viagem,
-      nome,
-      telefone,
-      poltrona: poltronaSelecionada,
-      status: "confirmado",
-      origem: "agencia",
-      status_pagamento: "approved",
-      metodo_pagamento: "agencia"
-    };
-
-    const { error } = await supabase
-      .from("reservas")
-      .insert([payload]);
-
-    if(error) throw error;
-
-    msg("msgReserva", "Reserva salva na agência.");
-    limparFormularioReservaAgencia();
-    await verReservas();
-  }catch(e){
-    msg("msgReserva", e.message || "Erro ao salvar reserva.", "erro");
-  }
-}
-
-function copiarLinkPublico(){
-  const texto = document.getElementById("linkPublico").innerText.trim();
-  navigator.clipboard.writeText(texto)
-    .then(() => alert("Link copiado."))
-    .catch(() => alert(texto));
-}
-
-function abrirConfigPassagens(){
-  window.open("https://www.ffsolucoes.com.br/passagens/config_site.html", "_blank");
-}
-
-async function logout(){
-  try{
-    await supabase.auth.signOut();
-  }catch(e){}
-  location.href = "login.html";
-}
-
-document.getElementById("viagemReserva").addEventListener("change", async () => {
-  poltronaSelecionada = null;
-  reservasAtuais = [];
-  atualizarMapaPoltronas();
+window.verReservas = async function(){
+  msg("msgReserva", "");
 
   const viagem_id = document.getElementById("viagemReserva").value;
-  const data = document.getElementById("dataReservaFiltro").value;
+  const lista = document.getElementById("listaReservas");
 
-  if(viagem_id){
-    try{
-      reservasAtuais = await buscarReservasDaViagem(viagem_id, data);
-    }catch(e){}
-  }
-
-  atualizarMapaPoltronas();
-});
-
-document.getElementById("dataReservaFiltro").addEventListener("change", async () => {
-  poltronaSelecionada = null;
-
-  const viagem_id = document.getElementById("viagemReserva").value;
-  const data = document.getElementById("dataReservaFiltro").value;
+  lista.innerHTML = "";
 
   if(!viagem_id){
-    atualizarMapaPoltronas();
+    msg("msgReserva", "Selecione uma viagem.", "erro");
     return;
   }
 
-  try{
-    reservasAtuais = await buscarReservasDaViagem(viagem_id, data);
-  }catch(e){
-    reservasAtuais = [];
+  const { data, error } = await supabase
+    .from("reservas_passagens")
+    .select("*")
+    .eq("viagem_id", viagem_id)
+    .order("poltrona", { ascending: true });
+
+  if(error){
+    msg("msgReserva", "Erro ao carregar reservas: " + error.message, "erro");
+    return;
   }
 
-  atualizarMapaPoltronas();
-});
+  if(!data || !data.length){
+    lista.innerHTML = `<div class="vazio">Nenhuma reserva encontrada.</div>`;
+    return;
+  }
 
-window.salvarVeiculo = salvarVeiculo;
-window.cancelarEdicaoVeiculo = cancelarEdicaoVeiculo;
-window.editarVeiculo = editarVeiculo;
-window.excluirVeiculo = excluirVeiculo;
-window.salvarViagem = salvarViagem;
-window.cancelarEdicaoViagem = cancelarEdicaoViagem;
-window.editarViagem = editarViagem;
-window.excluirViagem = excluirViagem;
-window.verReservas = verReservas;
-window.reservarNaAgencia = reservarNaAgencia;
-window.copiarLinkPublico = copiarLinkPublico;
-window.abrirConfigPassagens = abrirConfigPassagens;
-window.logout = logout;
+  data.forEach(r => {
+    lista.innerHTML += `
+      <div class="item">
+        <b>Poltrona ${r.poltrona}</b><br>
+        Nome: ${r.nome || "-"}<br>
+        Status: ${r.status || "-"}
+      </div>
+    `;
+  });
+};
 
-async function iniciar(){
+limparFormularioVeiculo();
+limparFormularioViagem();
+carregarUsuario();
+
+// 👇 COLE AQUI EM CIMA DO </script>
+
+let poltronaSelecionada = null;
+let reservasAtuais = [];
+
+function desenharPoltronas(total = 20){
+  const el = document.getElementById("mapaPoltronas");
+  if(!el) return;
+
+  let html = "";
+
+  for(let i=1;i<=total;i++){
+    const ocupada = reservasAtuais.some(r => Number(r.poltrona) === i);
+
+    html += `
+      <div onclick="${ocupada ? '' : `selecionarPoltrona(${i})`}"
+        id="pol_${i}"
+        style="
+          background:${ocupada ? '#ef4444' : '#0f172a'};
+          padding:10px;
+          border-radius:8px;
+          text-align:center;
+          cursor:${ocupada ? 'not-allowed' : 'pointer'};
+        ">
+        ${i}
+      </div>
+    `;
+  }
+
+  el.innerHTML = html;
+}
+
+function selecionarPoltrona(num){
+  poltronaSelecionada = num;
+
+  document.querySelectorAll("[id^='pol_']").forEach(el=>{
+    if(!el.style.cursor.includes("not-allowed")){
+      el.style.background = "#0f172a";
+    }
+  });
+
+  document.getElementById("pol_"+num).style.background = "#22c55e";
+}
+
+const verReservasOriginal = window.verReservas;
+
+window.verReservas = async function(){
+  await verReservasOriginal();
+
+  const viagem_id = document.getElementById("viagemReserva").value;
+
+  if(!viagem_id) return;
+
+  const { data } = await supabase
+    .from("reservas_passagens")
+    .select("poltrona")
+    .eq("viagem_id", viagem_id);
+
+  reservasAtuais = data || [];
+
+  desenharPoltronas(20);
+};
+
+window.reservarAgencia = async function(){
   try{
-    const ok = await carregarDadosUsuario();
-    if(!ok){
-      msg("msgVeiculo", "Não foi possível localizar o app_id do usuário.", "erro");
-      msg("msgViagem", "Não foi possível localizar o app_id do usuário.", "erro");
-      msg("msgReserva", "Não foi possível localizar o app_id do usuário.", "erro");
+    const nome = document.getElementById("nomeAgencia").value;
+    const viagem = document.getElementById("viagemReserva").value;
+
+    if(!nome || !viagem || !poltronaSelecionada){
+      msg("msgReserva","Preencha tudo","erro");
       return;
     }
 
-    await carregarVeiculos();
-    await carregarViagens();
+    const { error } = await supabase
+      .from("reservas_passagens")
+      .insert([{
+        nome,
+        viagem_id: viagem,
+        poltrona: poltronaSelecionada,
+        status: "confirmado",
+        origem: "agencia"
+      }]);
 
-    const hoje = new Date().toISOString().slice(0,10);
-    document.getElementById("dataReservaFiltro").value = hoje;
+    if(error) throw error;
 
-    atualizarMapaPoltronas();
-  }catch(e){
-    msg("msgVeiculo", e.message || "Erro ao iniciar painel.", "erro");
-    msg("msgViagem", e.message || "Erro ao iniciar painel.", "erro");
-    msg("msgReserva", e.message || "Erro ao iniciar painel.", "erro");
+    msg("msgReserva","Reserva feita na agência");
+
+    poltronaSelecionada = null;
+    document.getElementById("nomeAgencia").value = "";
+
+    verReservas();
   }
-}
-
-iniciar();
+  catch(e){
+    msg("msgReserva", e.message, "erro");
+  }
+};
 </script>
 
 </body>
