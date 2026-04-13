@@ -642,9 +642,21 @@ function limparFormularioViagem(){
 }
 
 function reservaEstaVencida(reserva){
-  if(!reserva) return false;
+  if(!reserva){
+    console.log("reservaEstaVencida: reserva vazia");
+    return false;
+  }
 
   const status = String(reserva.status || "").toLowerCase().trim();
+  const criadoEm = reserva.created_at;
+
+  console.log("Analisando reserva:", {
+    id: reserva.id,
+    status,
+    created_at: criadoEm,
+    data_viagem: reserva.data_viagem,
+    poltrona: reserva.poltrona
+  });
 
   const statusPagosOuDefinitivos = [
     "pago",
@@ -655,16 +667,23 @@ function reservaEstaVencida(reserva){
   ];
 
   if(statusPagosOuDefinitivos.includes(status)){
+    console.log("Reserva não vence porque está paga/finalizada:", reserva.id);
     return false;
   }
 
-  const criadoEm = reserva.created_at;
-  if(!criadoEm) return false;
+  if(!criadoEm){
+    console.log("Reserva sem created_at, não dá pra vencer:", reserva.id);
+    return false;
+  }
 
   const criado = new Date(criadoEm).getTime();
-  if(Number.isNaN(criado)) return false;
+  if(Number.isNaN(criado)){
+    console.log("created_at inválido:", reserva.id, criadoEm);
+    return false;
+  }
 
   const diffMin = (Date.now() - criado) / 1000 / 60;
+  console.log("Minutos passados:", reserva.id, diffMin);
 
   return diffMin >= 5;
 }
@@ -1121,9 +1140,11 @@ async function buscarTotalPoltronasDaViagem(viagem_id){
 }
 
 async function limparReservasPendentesVencidas(viagem_id, dataReserva){
+  console.log("Limpando pendentes:", { viagem_id, dataReserva });
+
   const { data, error } = await supabase
     .from("reservas_passagens")
-    .select("id, status, created_at, viagem_id, data_viagem")
+    .select("id, status, created_at, viagem_id, data_viagem, poltrona, nome")
     .eq("viagem_id", viagem_id)
     .eq("data_viagem", dataReserva);
 
@@ -1132,12 +1153,23 @@ async function limparReservasPendentesVencidas(viagem_id, dataReserva){
     return;
   }
 
-  if(!data || !data.length) return;
+  console.log("Reservas encontradas para limpeza:", data);
+
+  if(!data || !data.length){
+    console.log("Nenhuma reserva encontrada nessa viagem/data.");
+    return;
+  }
 
   const vencidas = data.filter(reservaEstaVencida);
   const idsVencidos = vencidas.map(r => r.id);
 
-  if(!idsVencidos.length) return;
+  console.log("Reservas vencidas encontradas:", vencidas);
+  console.log("IDs para apagar:", idsVencidos);
+
+  if(!idsVencidos.length){
+    console.log("Nenhuma pendente vencida para remover.");
+    return;
+  }
 
   const { error: deleteError } = await supabase
     .from("reservas_passagens")
@@ -1149,7 +1181,7 @@ async function limparReservasPendentesVencidas(viagem_id, dataReserva){
     return;
   }
 
-  console.log("Reservas pendentes removidas:", idsVencidos);
+  console.log("Reservas pendentes removidas com sucesso:", idsVencidos);
 }
 
 function pedidoAprovadoTemPoltronaNaData(pedido, viagem_id, dataReserva, poltrona){
