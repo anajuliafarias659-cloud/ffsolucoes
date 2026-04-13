@@ -226,7 +226,9 @@ button:hover{opacity:.95}
       <option value="cartao">Cartão / Mercado Pago</option>
     </select>
 
-    <input type="text" id="nome" placeholder="Seu nome">
+    <input type="text" id="nome" placeholder="Nome completo">
+<input type="text" id="cpfRg" placeholder="CPF ou RG">
+<input type="text" id="whatsapp" placeholder="WhatsApp">
 
     <button onclick="pagarEReservar()">Pagar e Reservar</button>
 
@@ -239,6 +241,12 @@ button:hover{opacity:.95}
       <textarea id="pixCopiaCola" class="pix-copia" readonly></textarea>
       <button onclick="copiarPix()">Copiar código PIX</button>
     </div>
+
+    <div id="comprovanteBox" class="pix-box" style="display:none;">
+  <h4 style="margin:0 0 10px 0;">Comprovante de Reserva</h4>
+  <div id="comprovanteVisual" style="font-size:14px;line-height:1.6;"></div>
+  <img id="qrReservaImg" alt="QR Code da Reserva" style="width:100%;max-width:260px;background:#fff;padding:10px;border-radius:12px;display:block;margin:10px auto;">
+</div>
 
     <a id="checkoutLink" class="link-btn hidden" target="_blank" rel="noopener">
       Abrir pagamento no Mercado Pago
@@ -270,6 +278,12 @@ function hojeLocalISO(){
   const off = d.getTimezoneOffset();
   const local = new Date(d.getTime() - off * 60000);
   return local.toISOString().slice(0, 10);
+}
+
+function gerarCodigoReserva(){
+  const parte1 = Date.now().toString().slice(-6);
+  const parte2 = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `FFP-${parte1}-${parte2}`;
 }
 
 function setMsg(texto, tipo = "ok"){
@@ -619,6 +633,9 @@ async function criarPedidoPassagem(){
   const dataIda = document.getElementById("dataIda").value;
   const dataVolta = document.getElementById("dataVolta").value;
   const formaPagamento = document.getElementById("formaPagamento").value;
+  const cpfRg = document.getElementById("cpfRg").value.trim();
+const whatsapp = document.getElementById("whatsapp").value.trim();
+const codigoReserva = gerarCodigoReserva();
 
   const valorBase = Number(viagemAtual?.valor || 0);
   const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
@@ -642,6 +659,9 @@ async function criarPedidoPassagem(){
       poltrona: poltronaSelecionada,
       valor_unitario: valorBase,
       valor_total: valorTotal
+      cliente_documento: cpfRg,
+cliente_whatsapp: whatsapp,
+codigo_embarque: codigoReserva,
     }]
   };
 
@@ -663,6 +683,9 @@ async function registrarReservaPendente(){
   const tipoViagem = document.getElementById("tipoViagem").value;
   const dataIda = document.getElementById("dataIda").value;
   const dataVolta = document.getElementById("dataVolta").value;
+  const cpfRg = document.getElementById("cpfRg").value.trim();
+const whatsapp = document.getElementById("whatsapp").value.trim();
+const codigoReserva = gerarCodigoReserva();
 
   const reservas = [{
     viagem_id: viagemSelecionada,
@@ -702,6 +725,15 @@ async function verificarStatusPagamentoPassagem(pedidoId){
       .single();
 
     if(error || !data) return;
+
+    if(statusPagamento === "approved"){
+  ...
+  await client
+    .from("reservas_passagens")
+    .update({ status: "pago" })
+    .eq("viagem_id", viagemSelecionada)
+    .eq("poltrona", poltronaSelecionada)
+    .eq("data_viagem", document.getElementById("dataIda").value);
 
     const statusPagamento = String(data.pagamento_status || "").toLowerCase();
 
@@ -750,6 +782,44 @@ async function verificarStatusPagamentoPassagem(pedidoId){
   }
 }
 
+function mostrarComprovanteReserva(){
+  const nome = document.getElementById("nome").value.trim();
+  const cpfRg = document.getElementById("cpfRg").value.trim();
+  const whatsapp = document.getElementById("whatsapp").value.trim();
+  const dataIda = document.getElementById("dataIda").value;
+  const tipoViagem = document.getElementById("tipoViagem").value;
+  const codigoReserva = gerarCodigoReserva();
+
+  const dadosReserva = {
+    codigo: codigoReserva,
+    nome,
+    documento: cpfRg,
+    whatsapp,
+    rota: viagemAtual?.rota || "",
+    hora: viagemAtual?.hora || "",
+    data: dataIda,
+    poltrona: poltronaSelecionada,
+    tipo: tipoViagem
+  };
+
+  const textoQR = JSON.stringify(dadosReserva);
+
+  document.getElementById("comprovanteBox").style.display = "block";
+  document.getElementById("comprovanteVisual").innerHTML = `
+    <b>Código:</b> ${codigoReserva}<br>
+    <b>Passageiro:</b> ${nome}<br>
+    <b>Documento:</b> ${cpfRg}<br>
+    <b>WhatsApp:</b> ${whatsapp}<br>
+    <b>Rota:</b> ${viagemAtual?.rota || ""}<br>
+    <b>Hora:</b> ${viagemAtual?.hora || ""}<br>
+    <b>Data:</b> ${dataIda}<br>
+    <b>Poltrona:</b> ${poltronaSelecionada}
+  `;
+
+  document.getElementById("qrReservaImg").src =
+    "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(textoQR);
+}
+
 function iniciarVerificacaoPixPassagem(pedidoId){
   if(verificadorPixPassagem){
     clearInterval(verificadorPixPassagem);
@@ -772,6 +842,12 @@ async function pagarEReservar(){
     const dataIda = document.getElementById("dataIda").value;
     const dataVolta = document.getElementById("dataVolta").value;
     const formaPagamento = document.getElementById("formaPagamento").value;
+    const cpfRg = document.getElementById("cpfRg").value.trim();
+const whatsapp = document.getElementById("whatsapp").value.trim();
+
+    if(!nome) return setMsg("Digite o nome completo.", "erro");
+if(!cpfRg) return setMsg("Digite o CPF ou RG.", "erro");
+if(!whatsapp) return setMsg("Digite o WhatsApp.", "erro");
 
     if(!viagemSelecionada) return setMsg("Selecione uma viagem.", "erro");
     if(!poltronaSelecionada) return setMsg("Selecione uma poltrona.", "erro");
