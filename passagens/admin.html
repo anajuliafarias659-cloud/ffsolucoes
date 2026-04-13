@@ -959,6 +959,11 @@ async function carregarUsuario(){
   }
 
   app_id = usuario.app_id;
+  await supabase
+  .from("pedidos")
+  .update({ status: "finalizada" })
+  .eq("app_id", app_id)
+  .is("status", null);
 
   document.getElementById("nome").innerText = usuario.nome || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
@@ -1381,15 +1386,18 @@ async function limparReservasPendentesVencidas(viagem_id, dataReserva){
 
 function pedidoAprovadoTemPoltronaNaData(pedido, viagem_id, dataReserva, poltrona){
   try{
+    const pagamentoStatus = String(pedido?.pagamento_status || "").toLowerCase().trim();
     const statusPedido = String(pedido?.status || "").toLowerCase().trim();
 
-// só considera pedido ativo mesmo
-const statusValidos = ["approved", "pago", "confirmado"];
+    // só pedido realmente aprovado e ainda ativo deve travar poltrona
+    if(pagamentoStatus !== "approved"){
+      return false;
+    }
 
-// se não estiver nesses, ignora
-if(!statusValidos.includes(statusPedido)){
-  return false;
-}
+    // pedidos encerrados ou cancelados não travam
+    if(["finalizada", "cancelada", "cancelled", "concluida", "embarcado"].includes(statusPedido)){
+      return false;
+    }
 
     const itens = Array.isArray(pedido?.itens) ? pedido.itens : [];
 
@@ -1434,8 +1442,7 @@ async function renderizarMapaPoltronasAdmin(viagem_id, dataReserva){
   .from("pedidos")
   .select("id, pagamento_status, status, itens")
   .eq("app_id", app_id)
-  .eq("pagamento_status", "approved")
-  .neq("status", "finalizada");
+  .eq("pagamento_status", "approved");
 
   const reservasValidas = (reservas || []).filter(r => !reservaEstaVencida(r));
   reservasMapaAtual = reservasValidas;
@@ -1569,8 +1576,7 @@ window.reservarPoltronaManual = async function(){
   .from("pedidos")
   .select("id, pagamento_status, status, itens")
   .eq("app_id", app_id)
-  .eq("pagamento_status", "approved")
-  .neq("status", "finalizada");
+  .eq("pagamento_status", "approved");
 
   const ocupadaPorPedido = (pedidosAprovados || []).some(p =>
     pedidoAprovadoTemPoltronaNaData(p, viagem_id, dataReserva, poltrona)
