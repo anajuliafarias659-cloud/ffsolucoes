@@ -262,6 +262,7 @@ let viagemSelecionada = null;
 let poltronaSelecionada = null;
 let viagemAtual = null;
 let viagensCache = [];
+let verificadorPixPassagem = null;
 
 function hojeLocalISO(){
   const d = new Date();
@@ -364,7 +365,7 @@ async function resolverAppId(){
       .from("apps")
       .select("id")
       .eq("slug", slug)
-      .single();
+      .maybeSingle();
 
     if(error || !data?.id){
       return false;
@@ -691,6 +692,63 @@ async function registrarReservaPendente(){
   }
 }
 
+async function verificarStatusPagamentoPassagem(pedidoId){
+  try{
+    const { data, error } = await client
+      .from("pedidos")
+      .select("pagamento_status, status")
+      .eq("id", pedidoId)
+      .single();
+
+    if(error || !data) return;
+
+    const statusPagamento = String(data.pagamento_status || "").toLowerCase();
+
+    if(statusPagamento === "approved"){
+      setMsg("✅ Pagamento confirmado com sucesso.");
+      document.getElementById("pixBox").style.display = "none";
+
+      if(verificadorPixPassagem){
+        clearInterval(verificadorPixPassagem);
+        verificadorPixPassagem = null;
+      }
+
+      poltronaSelecionada = null;
+      return;
+    }
+
+    if(statusPagamento === "pending"){
+      setMsg("⏳ PIX gerado. Aguardando pagamento...");
+      return;
+    }
+
+    if(statusPagamento === "rejected" || statusPagamento === "cancelled"){
+      setMsg("❌ Pagamento não aprovado.", "erro");
+
+      if(verificadorPixPassagem){
+        clearInterval(verificadorPixPassagem);
+        verificadorPixPassagem = null;
+      }
+
+      return;
+    }
+  }catch(e){
+    console.error("Erro verificar pagamento:", e);
+  }
+}
+
+function iniciarVerificacaoPixPassagem(pedidoId){
+  if(verificadorPixPassagem){
+    clearInterval(verificadorPixPassagem);
+  }
+
+  verificarStatusPagamentoPassagem(pedidoId);
+
+  verificadorPixPassagem = setInterval(() => {
+    verificarStatusPagamentoPassagem(pedidoId);
+  }, 5000);
+}
+
 async function pagarEReservar(){
   try{
     setMsg("");
@@ -752,64 +810,60 @@ async function pagarEReservar(){
     const itemTitulo = `Passagem ${viagemAtual?.rota || ""} ${viagemAtual?.hora || ""} Poltrona ${poltronaSelecionada}`;
 
     if(formaPagamento === "PIX"){
+      console.log("PIX payload:", {
+        appId: app_id,
+        pedidoId: pedidoId,
+        transaction_amount: valorTotal
+      });
 
-  // DEBUG (pode apagar depois)
-  console.log("PIX payload:", {
-    appId: app_id,
-    pedidoId: pedidoId,
-    transaction_amount: valorTotal
-  });
+      if(!app_id) return setMsg("Erro: app_id não encontrado", "erro");
+      if(!pedidoId) return setMsg("Erro: pedido não criado", "erro");
 
-  if(!app_id) return setMsg("Erro: app_id não encontrado", "erro");
-  if(!pedidoId) return setMsg("Erro: pedido não criado", "erro");
+      const res = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-loja", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appId: app_id,
+          pedidoId: pedidoId,
+          transaction_amount: Number(valorTotal),
+          valor: Number(valorTotal),
+          descricao: `Passagem ${viagemAtual?.rota || ""}`
+        })
+      });
 
-  const res = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-loja", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      appId: app_id,
-      pedidoId: pedidoId,
-      transaction_amount: Number(valorTotal),
-      valor: Number(valorTotal),
-      descricao: `Passagem ${viagemAtual?.rota || ""}`
-    })
-  });
+      const json = await res.json();
+      console.log("RETORNO PIX:", json);
 
-  const json = await res.json();
+      if(!res.ok){
+        throw new Error(json?.erro || json?.detalhes || "Erro ao gerar PIX.");
+      }
 
-  console.log("RETORNO PIX:", json);
+      const qrBase64 =
+        json?.qr_code_base64 ||
+        json?.qrCodeBase64 ||
+        json?.point_of_interaction?.transaction_data?.qr_code_base64 ||
+        "";
 
-  if(!res.ok){
-    throw new Error(json?.erro || json?.detalhes || "Erro ao gerar PIX.");
-  }
+      const copiaCola =
+        json?.qr_code ||
+        json?.copia_cola ||
+        json?.pix_copia_cola ||
+        json?.point_of_interaction?.transaction_data?.qr_code ||
+        "";
 
-  const qrBase64 =
-    json?.qr_code_base64 ||
-    json?.qrCodeBase64 ||
-    json?.point_of_interaction?.transaction_data?.qr_code_base64 ||
-    "";
+      document.getElementById("pixBox").style.display = "block";
+      document.getElementById("pixValor").innerHTML =
+        `Valor: <b>R$ ${valorTotal.toFixed(2)}</b>`;
 
-  const copiaCola =
-    json?.qr_code ||
-    json?.copia_cola ||
-    json?.pix_copia_cola ||
-    json?.point_of_interaction?.transaction_data?.qr_code ||
-    "";
+      if(qrBase64){
+        document.getElementById("pixQrImg").src = `data:image/png;base64,${qrBase64}`;
+      }
 
-  document.getElementById("pixBox").style.display = "block";
-  document.getElementById("pixValor").innerHTML =
-    `Valor: <b>R$ ${valorTotal.toFixed(2)}</b>`;
-
-  if(qrBase64){
-    document.getElementById("pixQrImg").src = `data:image/png;base64,${qrBase64}`;
-  }
-
-  document.getElementById("pixCopiaCola").value = copiaCola || "";
-
-  setMsg("PIX gerado com sucesso. Faça o pagamento.");
-  return;
-}
-      
+      document.getElementById("pixCopiaCola").value = copiaCola || "";
+      setMsg("PIX gerado com sucesso. Faça o pagamento para confirmar a reserva.");
+      iniciarVerificacaoPixPassagem(pedidoId);
+      return;
+    }
 
     if(formaPagamento === "cartao"){
       const res = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento-loja", {
