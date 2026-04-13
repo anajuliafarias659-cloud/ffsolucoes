@@ -235,7 +235,14 @@ button:hover{opacity:.95}
 <input type="file" id="fotoRg" accept="image/*" capture="environment">
 
 <label class="label">Selfie</label>
-<input type="file" id="selfie" accept="image/*" capture="user">
+
+<video id="videoSelfie" autoplay playsinline muted style="width:100%;border-radius:12px;display:none;margin-top:10px;"></video>
+<canvas id="canvasSelfie" style="display:none;"></canvas>
+
+<button type="button" id="btnAbrirSelfie" onclick="abrirCameraSelfie()">Abrir câmera frontal</button>
+<button type="button" id="btnCapturarSelfie" onclick="capturarSelfie()" style="display:none;">Capturar selfie</button>
+
+<img id="previewSelfie" style="width:100%;border-radius:12px;display:none;margin-top:10px;">
 
 <button onclick="pagarEReservar()">Pagar e Reservar</button>
 
@@ -280,6 +287,8 @@ let viagemAtual = null;
 let codigoReservaGlobal = null;
 let viagensCache = [];
 let verificadorPixPassagem = null;
+let streamSelfie = null;
+let selfieBlob = null;
 
 function hojeLocalISO(){
   const d = new Date();
@@ -422,6 +431,49 @@ async function carregarConfigLoja(){
   }
 
   return configLoja;
+}
+
+async function abrirCameraSelfie(){
+  try{
+    streamSelfie = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user" },
+      audio: false
+    });
+
+    const video = document.getElementById("videoSelfie");
+    video.srcObject = streamSelfie;
+    video.style.display = "block";
+
+    document.getElementById("btnCapturarSelfie").style.display = "block";
+  }catch(e){
+    console.error(e);
+    setMsg("Não foi possível abrir a câmera frontal.", "erro");
+  }
+
+function capturarSelfie(){
+  const video = document.getElementById("videoSelfie");
+  const canvas = document.getElementById("canvasSelfie");
+  const preview = document.getElementById("previewSelfie");
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  canvas.toBlob(blob => {
+    selfieBlob = blob;
+    preview.src = URL.createObjectURL(blob);
+    preview.style.display = "block";
+  }, "image/jpeg", 0.9);
+
+  if(streamSelfie){
+    streamSelfie.getTracks().forEach(t => t.stop());
+    streamSelfie = null;
+  }
+
+  video.style.display = "none";
+  document.getElementById("btnCapturarSelfie").style.display = "none";
 }
 
 async function carregarViagens(){
@@ -915,7 +967,17 @@ if(!whatsapp) return setMsg("Digite o WhatsApp.", "erro");
     codigoReservaGlobal = gerarCodigoReserva();
 
 const fotoRgFile = document.getElementById("fotoRg").files[0];
-const selfieFile = document.getElementById("selfie").files[0];
+
+let fotoRgUrl = "";
+let selfieUrl = "";
+
+if(fotoRgFile){
+  fotoRgUrl = await uploadImagem(fotoRgFile, "rg");
+}
+
+if(selfieBlob){
+  selfieUrl = await uploadImagem(selfieBlob, "selfie");
+}
 
 let fotoRgUrl = "";
 let selfieUrl = "";
