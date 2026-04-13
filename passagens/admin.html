@@ -799,16 +799,10 @@ window.salvarVeiculo = async function(){
 
   if(id){
     const { error } = await supabase
-  .from("reservas_passagens")
-  .insert([{
-    viagem_id,
-    poltrona,
-    nome: nome.trim(),
-    app_id,
-    data_viagem: dataReserva,
-    status: statusReserva,
-    created_at: new Date().toISOString()
-  }]);
+      .from("veiculos_passagens")
+      .update({ nome, tipo, total_poltronas, layout })
+      .eq("id", id)
+      .eq("app_id", app_id);
 
     if(error){
       msg("msgVeiculo", "Erro ao atualizar veículo: " + error.message, "erro");
@@ -1130,17 +1124,38 @@ async function buscarTotalPoltronasDaViagem(viagem_id){
 }
 
 async function limparReservasPendentesVencidas(viagem_id, dataReserva){
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("reservas_passagens")
-    .select("id, status, created_at, viagem_id, data_viagem, poltrona")
+    .select("id, status, created_at")
     .eq("viagem_id", viagem_id)
     .eq("data_viagem", dataReserva);
 
-  if(error || !data?.length) return;
+  if(!data?.length) return;
 
-  const idsVencidos = data
-    .filter(reservaEstaVencida)
-    .map(r => r.id);
+  const agora = Date.now();
+
+  const idsVencidos = data.filter(r => {
+    const status = String(r.status || "").toLowerCase();
+
+    // nunca apagar pagos
+    if(["pago","pago_agencia","approved"].includes(status)){
+      return false;
+    }
+
+    // sem data? mata direto
+    if(!r.created_at){
+      return true;
+    }
+
+    const criado = new Date(r.created_at).getTime();
+    if(Number.isNaN(criado)){
+      return true;
+    }
+
+    const diff = (agora - criado) / 1000 / 60;
+    return diff >= 5;
+
+  }).map(r => r.id);
 
   if(!idsVencidos.length) return;
 
@@ -1148,19 +1163,6 @@ async function limparReservasPendentesVencidas(viagem_id, dataReserva){
     .from("reservas_passagens")
     .delete()
     .in("id", idsVencidos);
-}
-
-  const { error: deleteError } = await supabase
-    .from("reservas_passagens")
-    .delete()
-    .in("id", idsVencidos);
-
-  if(deleteError){
-    console.error("Erro ao apagar reservas vencidas:", deleteError);
-    return;
-  }
-
-  console.log("Reservas pendentes removidas com sucesso:", idsVencidos);
 }
 
 function pedidoAprovadoTemPoltronaNaData(pedido, viagem_id, dataReserva, poltrona){
@@ -1350,13 +1352,14 @@ window.reservarPoltronaManual = async function(){
   const { error } = await supabase
     .from("reservas_passagens")
     .insert([{
-      viagem_id,
-      poltrona,
-      nome: nome.trim(),
-      app_id,
-      data_viagem: dataReserva,
-      status: statusReserva
-    }]);
+  viagem_id,
+  poltrona,
+  nome: nome.trim(),
+  app_id,
+  data_viagem: dataReserva,
+  status: statusReserva,
+  created_at: new Date().toISOString()
+}]);
 
   if(error){
     msg("msgReserva", "Erro ao criar reserva manual: " + error.message, "erro");
