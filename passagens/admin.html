@@ -1,6 +1,5 @@
 
 
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -76,28 +75,6 @@ body{
   font-weight:bold;
   min-width:120px;
   box-shadow:0 8px 18px rgba(220,38,38,.22);
-}
-
-.topo-botoes{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.instalar{
-  background:linear-gradient(135deg,var(--blue),var(--blue-2));
-  color:#fff;
-  border:none;
-  padding:10px 16px;
-  border-radius:12px;
-  cursor:pointer;
-  font-weight:bold;
-  min-width:140px;
-  box-shadow:0 8px 18px rgba(59,130,246,.22);
-}
-
-.instalar:hover{
-  transform:translateY(-1px);
 }
 
 .container{
@@ -448,18 +425,6 @@ small{
     padding:10px 4px;
     font-size:13px;
   }
-
-  .topo-botoes{
-  gap:8px;
-}
-
-.instalar,
-.sair{
-  min-width:auto;
-  padding:10px 12px;
-  font-size:14px;
-}
-
 }
 </style>
 </head>
@@ -468,13 +433,7 @@ small{
 
 <div class="topo">
   <h2>🚌 Painel Passagens</h2>
-
-  <div class="topo-botoes">
-    <button class="instalar" id="btnInstalarApp" onclick="instalarApp()">
-      📲 Instalar App
-    </button>
-    <button class="sair" onclick="logout()">Sair</button>
-  </div>
+  <button class="sair" onclick="logout()">Sair</button>
 </div>
 
 <div class="container">
@@ -595,14 +554,13 @@ small{
       </button>
     </div>
 
-</div>
+  </div>
 </div>
 
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
 let app_id = null;
-let ultimoMapaHTML = "";
 
 function hojeISO(){
   const d = new Date();
@@ -647,19 +605,30 @@ function reservaEstaVencida(reserva){
 
   const status = String(reserva.status || "").toLowerCase().trim();
 
-  const statusPagos = [
+  const statusDefinitivos = [
     "pago",
     "pago_agencia",
     "approved",
     "finalizada",
-    "embarcado"
+    "embarcado",
+    "concluida"
   ];
 
-  if(statusPagos.includes(status)){
+  if(statusDefinitivos.includes(status)){
     return false;
   }
 
-  // se não tem created_at, considera vencida
+  const statusPendentes = [
+    "pendente",
+    "pendente_pagamento",
+    "pendente_agencia",
+    "aguardando_pagamento"
+  ];
+
+  if(!statusPendentes.includes(status)){
+    return false;
+  }
+
   if(!reserva.created_at){
     return true;
   }
@@ -673,7 +642,6 @@ function reservaEstaVencida(reserva){
   return diffMin >= 5;
 }
 
-  
 window.abrirCardMobile = function(cardId){
   if(window.innerWidth > 700) return;
 
@@ -769,10 +737,6 @@ window.abrirConfigPassagens = function(){
 window.logout = async function(){
   await supabase.auth.signOut();
   window.location.href = "/auth/login.html";
-};
-
-window.instalarApp = function(){
-  alert("Botão de instalar preparado.\n\nDepois vamos ativar o PWA aqui.");
 };
 
 window.cancelarEdicaoVeiculo = function(){
@@ -1125,49 +1089,38 @@ async function buscarTotalPoltronasDaViagem(viagem_id){
 }
 
 async function limparReservasPendentesVencidas(viagem_id, dataReserva){
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("reservas_passagens")
     .select("id, status, created_at")
     .eq("viagem_id", viagem_id)
     .eq("data_viagem", dataReserva);
 
-  if(!data?.length) return;
+  if(error || !data?.length) return;
 
-  const agora = Date.now();
-
-  const idsVencidos = data.filter(r => {
-    const status = String(r.status || "").toLowerCase();
-
-    // nunca apagar pagos
-    if(["pago","pago_agencia","approved"].includes(status)){
-      return false;
-    }
-
-    // sem data? mata direto
-    if(!r.created_at){
-      return true;
-    }
-
-    const criado = new Date(r.created_at).getTime();
-    if(Number.isNaN(criado)){
-      return true;
-    }
-
-    const diff = (agora - criado) / 1000 / 60;
-    return diff >= 5;
-
-  }).map(r => r.id);
+  const idsVencidos = data
+    .filter(r => reservaEstaVencida(r))
+    .map(r => r.id);
 
   if(!idsVencidos.length) return;
 
-  await supabase
+  const { error: erroDelete } = await supabase
     .from("reservas_passagens")
     .delete()
     .in("id", idsVencidos);
+
+  if(erroDelete){
+    console.error("Erro ao limpar reservas vencidas:", erroDelete);
+  }
 }
 
 function pedidoAprovadoTemPoltronaNaData(pedido, viagem_id, dataReserva, poltrona){
   try{
+    const statusPedido = String(pedido?.status || "").toLowerCase().trim();
+
+    if(["finalizada", "cancelada", "cancelled", "concluida"].includes(statusPedido)){
+      return false;
+    }
+
     const itens = Array.isArray(pedido?.itens) ? pedido.itens : [];
 
     return itens.some(it => {
@@ -1185,16 +1138,12 @@ function pedidoAprovadoTemPoltronaNaData(pedido, viagem_id, dataReserva, poltron
 
 async function renderizarMapaPoltronasAdmin(viagem_id, dataReserva){
   const box = document.getElementById("mapaPoltronasAdmin");
-  if(!box) return;
+  box.innerHTML = "";
 
   const totalPoltronas = await buscarTotalPoltronasDaViagem(viagem_id);
 
   if(!totalPoltronas){
-    const htmlVazio = `<div class="vazio">Não foi possível identificar o total de poltronas.</div>`;
-    if(box.innerHTML !== htmlVazio){
-      box.innerHTML = htmlVazio;
-      ultimoMapaHTML = htmlVazio;
-    }
+    box.innerHTML = `<div class="vazio">Não foi possível identificar o total de poltronas.</div>`;
     return;
   }
 
@@ -1207,11 +1156,7 @@ async function renderizarMapaPoltronasAdmin(viagem_id, dataReserva){
     .eq("data_viagem", dataReserva);
 
   if(errorReservas){
-    const htmlErro = `<div class="erro">Erro ao montar mapa: ${errorReservas.message}</div>`;
-    if(box.innerHTML !== htmlErro){
-      box.innerHTML = htmlErro;
-      ultimoMapaHTML = htmlErro;
-    }
+    box.innerHTML = `<div class="erro">Erro ao montar mapa: ${errorReservas.message}</div>`;
     return;
   }
 
@@ -1249,12 +1194,12 @@ async function renderizarMapaPoltronasAdmin(viagem_id, dataReserva){
       classe = "poltrona-paga";
       texto = `${i}<small>Paga</small>`;
     }else if(reserva){
-      const status = String(reserva.status || "").toLowerCase().trim();
+      const status = String(reserva.status || "").toLowerCase();
 
-      if(status === "pago" || status === "pago_agencia" || status === "approved"){
+      if(status === "pago" || status === "pago_agencia"){
         classe = "poltrona-paga";
         texto = `${i}<small>Paga</small>`;
-      }else{
+      }else if(status.includes("pendente")){
         classe = "poltrona-pendente";
         texto = `${i}<small>Pendente</small>`;
       }
@@ -1264,11 +1209,7 @@ async function renderizarMapaPoltronasAdmin(viagem_id, dataReserva){
   }
 
   html += `</div>`;
-
-  if(html !== ultimoMapaHTML){
-    box.innerHTML = html;
-    ultimoMapaHTML = html;
-  }
+  box.innerHTML = html;
 }
 
 window.verReservasComData = async function(){
@@ -1278,6 +1219,8 @@ window.verReservasComData = async function(){
   const dataReserva = document.getElementById("dataReserva").value;
 
   document.getElementById("mapaPoltronasAdmin").innerHTML = "";
+  const detalhe = document.getElementById("detalhePassageiro");
+  if(detalhe) detalhe.innerHTML = "";
 
   if(!viagem_id){
     msg("msgReserva", "Selecione uma viagem.", "erro");
@@ -1288,6 +1231,8 @@ window.verReservasComData = async function(){
     msg("msgReserva", "Selecione a data.", "erro");
     return;
   }
+
+  await limparReservasPendentesVencidas(viagem_id, dataReserva);
 
   ultimoMapaHTML = "";
   await renderizarMapaPoltronasAdmin(viagem_id, dataReserva);
@@ -1346,10 +1291,11 @@ window.reservarPoltronaManual = async function(){
   }
 
   const { data: pedidosAprovados } = await supabase
-    .from("pedidos")
-    .select("id, pagamento_status, itens")
-    .eq("app_id", app_id)
-    .eq("pagamento_status", "approved");
+  .from("pedidos")
+  .select("id, pagamento_status, status, itens")
+  .eq("app_id", app_id)
+  .eq("pagamento_status", "approved")
+  .neq("status", "finalizada");
 
   const ocupadaPorPedido = (pedidosAprovados || []).some(p =>
     pedidoAprovadoTemPoltronaNaData(p, viagem_id, dataReserva, poltrona)
@@ -1366,14 +1312,13 @@ window.reservarPoltronaManual = async function(){
   const { error } = await supabase
     .from("reservas_passagens")
     .insert([{
-  viagem_id,
-  poltrona,
-  nome: nome.trim(),
-  app_id,
-  data_viagem: dataReserva,
-  status: statusReserva,
-  created_at: new Date().toISOString()
-}]);
+      viagem_id,
+      poltrona,
+      nome: nome.trim(),
+      app_id,
+      data_viagem: dataReserva,
+      status: statusReserva
+    }]);
 
   if(error){
     msg("msgReserva", "Erro ao criar reserva manual: " + error.message, "erro");
@@ -1383,16 +1328,6 @@ window.reservarPoltronaManual = async function(){
   msg("msgReserva", "Reserva manual criada com sucesso.");
   await verReservasComData();
 };
-
-setInterval(async () => {
-  const viagem_id = document.getElementById("viagemReserva")?.value;
-  const dataReserva = document.getElementById("dataReserva")?.value;
-
-  if(!viagem_id || !dataReserva) return;
-
-  await limparReservasPendentesVencidas(viagem_id, dataReserva);
-  await renderizarMapaPoltronasAdmin(viagem_id, dataReserva);
-}, 15000);
 
 limparFormularioVeiculo();
 limparFormularioViagem();
