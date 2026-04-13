@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -395,6 +396,7 @@ async function buscarPassageiroPorCodigo(codigo){
     const codigoTratado = extrairCodigoDoQr(codigo);
     ultimoCodigo = codigoTratado;
 
+    // 1) Primeiro tenta achar na tabela de reservas
     const { data: reservas, error } = await client
       .from("reservas_passagens")
       .select("*")
@@ -407,28 +409,133 @@ async function buscarPassageiroPorCodigo(codigo){
       return;
     }
 
-    if(!reservas || !reservas.length){
+    // Se encontrou reserva completa, mostra normal
+    if(reservas && reservas.length){
+      let html = `<div class="lista-registros">`;
+
+      for(const r of reservas){
+        let rota = "-";
+        let hora = "-";
+
+        if(r.viagem_id){
+          const { data: viagem } = await client
+            .from("viagens_passagens")
+            .select("rota,hora")
+            .eq("id", r.viagem_id)
+            .maybeSingle();
+
+          rota = viagem?.rota || "-";
+          hora = viagem?.hora || "-";
+        }
+
+        html += `
+          <div class="resultado">
+            <div class="info-box">
+              <div><b>Nome:</b> ${escapeHtml(r.nome || "-")}</div>
+              <div><b>Documento:</b> ${escapeHtml(r.cpf_rg || "-")}</div>
+              <div><b>WhatsApp:</b> ${escapeHtml(r.whatsapp || "-")}</div>
+              <div><b>Poltrona:</b> ${escapeHtml(r.poltrona || "-")}</div>
+              <div><b>Data da viagem:</b> ${escapeHtml(r.data_viagem || "-")}</div>
+              <div><b>Hora:</b> ${escapeHtml(hora)}</div>
+              <div><b>Rota:</b> ${escapeHtml(rota)}</div>
+              <div><b>Status:</b> ${badgeStatus(r.status)}</div>
+              <div><b>Código:</b> ${escapeHtml(r.codigo_embarque || "-")}</div>
+
+              <div class="linha-acoes">
+                <button class="btn-verde" onclick="marcarEmbarcado('${r.id}')">Confirmar embarque</button>
+                <button class="btn-cinza" onclick="window.print()">Imprimir tela</button>
+              </div>
+            </div>
+
+            <div class="fotos">
+              <div class="foto-card">
+                <h4>Documento</h4>
+                ${
+                  r.foto_rg
+                    ? `<img src="${r.foto_rg}" alt="Foto do documento">`
+                    : `<div class="msg info">Sem foto do documento</div>`
+                }
+              </div>
+
+              <div class="foto-card">
+                <h4>Selfie</h4>
+                ${
+                  r.selfie
+                    ? `<img src="${r.selfie}" alt="Selfie do passageiro">`
+                    : `<div class="msg info">Sem selfie</div>`
+                }
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      html += `</div>`;
+      box.innerHTML = html;
+      setMsg("Passageiro localizado com sucesso.", "ok");
+      return;
+    }
+
+    // 2) Se não achou em reservas, procura dentro de pedidos aprovados
+    const { data: pedidos, error: erroPedidos } = await client
+      .from("pedidos")
+      .select("id,status,pagamento_status,itens,nome,cpf,cpf_rg,whatsapp,foto_rg,selfie,created_at")
+      .eq("app_id", app_id)
+      .in("pagamento_status", ["approved", "pending"]);
+
+    if(erroPedidos){
+      box.innerHTML = `<div class="msg erro">Erro ao buscar pedidos: ${escapeHtml(erroPedidos.message)}</div>`;
+      return;
+    }
+
+    let achados = [];
+
+    for(const p of (pedidos || [])){
+      const itens = Array.isArray(p.itens) ? p.itens : [];
+
+      for(const item of itens){
+        if(String(item?.codigo_embarque || "").trim() === codigoTratado){
+          let rota = "-";
+          let hora = "-";
+
+          if(item?.viagem_id){
+            const { data: viagem } = await client
+              .from("viagens_passagens")
+              .select("rota,hora")
+              .eq("id", item.viagem_id)
+              .maybeSingle();
+
+            rota = viagem?.rota || "-";
+            hora = viagem?.hora || "-";
+          }
+
+          achados.push({
+            pedido_id: p.id,
+            status: p.pagamento_status || p.status || "approved",
+            nome: item?.nome || p?.nome || "-",
+            cpf_rg: item?.cpf_rg || item?.cpf || p?.cpf_rg || p?.cpf || "-",
+            whatsapp: item?.whatsapp || p?.whatsapp || "-",
+            poltrona: item?.poltrona || "-",
+            data_viagem: item?.data_ida || item?.data_viagem || item?.data_volta || "-",
+            rota,
+            hora,
+            codigo_embarque: item?.codigo_embarque || codigoTratado,
+            foto_rg: item?.foto_rg || p?.foto_rg || "",
+            selfie: item?.selfie || p?.selfie || "",
+            viagem_id: item?.viagem_id || null
+          });
+        }
+      }
+    }
+
+    if(!achados.length){
       box.innerHTML = `<div class="msg erro">Nenhum passageiro encontrado para o código ${escapeHtml(codigoTratado)}.</div>`;
       return;
     }
 
     let html = `<div class="lista-registros">`;
 
-    for(const r of reservas){
-      let rota = "-";
-      let hora = "-";
-
-      if(r.viagem_id){
-        const { data: viagem } = await client
-          .from("viagens_passagens")
-          .select("rota,hora")
-          .eq("id", r.viagem_id)
-          .maybeSingle();
-
-        rota = viagem?.rota || "-";
-        hora = viagem?.hora || "-";
-      }
-
+    for(const r of achados){
       html += `
         <div class="resultado">
           <div class="info-box">
@@ -437,14 +544,14 @@ async function buscarPassageiroPorCodigo(codigo){
             <div><b>WhatsApp:</b> ${escapeHtml(r.whatsapp || "-")}</div>
             <div><b>Poltrona:</b> ${escapeHtml(r.poltrona || "-")}</div>
             <div><b>Data da viagem:</b> ${escapeHtml(r.data_viagem || "-")}</div>
-            <div><b>Hora:</b> ${escapeHtml(hora)}</div>
-            <div><b>Rota:</b> ${escapeHtml(rota)}</div>
+            <div><b>Hora:</b> ${escapeHtml(r.hora || "-")}</div>
+            <div><b>Rota:</b> ${escapeHtml(r.rota || "-")}</div>
             <div><b>Status:</b> ${badgeStatus(r.status)}</div>
             <div><b>Código:</b> ${escapeHtml(r.codigo_embarque || "-")}</div>
 
             <div class="linha-acoes">
-              <button class="btn-verde" onclick="marcarEmbarcado('${r.id}')">Confirmar embarque</button>
               <button class="btn-cinza" onclick="window.print()">Imprimir tela</button>
+              <button class="btn-cinza" disabled>Sem reserva vinculada</button>
             </div>
           </div>
 
@@ -473,13 +580,15 @@ async function buscarPassageiroPorCodigo(codigo){
 
     html += `</div>`;
     box.innerHTML = html;
-    setMsg("Passageiro localizado com sucesso.", "ok");
+    setMsg("Passageiro localizado pelo pedido com sucesso.", "ok");
+
   }catch(e){
     console.error(e);
     document.getElementById("resultadoBusca").innerHTML =
       `<div class="msg erro">${escapeHtml(e.message || "Erro ao buscar passageiro.")}</div>`;
   }
 }
+
 
 carregarInfoApp();
 </script>
