@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Colaboradores | Passagens</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:linear-gradient(180deg,#020617 0%,#0f172a 100%);
+  color:#fff;
+}
+.topo{
+  padding:14px 16px;
+  background:#020617;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.topo h1{
+  margin:0;
+  font-size:20px;
+}
+.container{
+  max-width:1000px;
+  margin:auto;
+  padding:16px;
+}
+.card{
+  background:linear-gradient(180deg,#172033,#0f172a);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:18px;
+  padding:16px;
+  margin-bottom:16px;
+}
+input,select,button{
+  width:100%;
+  padding:12px 14px;
+  margin-top:10px;
+  border:none;
+  border-radius:12px;
+  font-size:15px;
+}
+input,select{
+  background:#fff;
+  color:#111827;
+}
+button{
+  background:#2563eb;
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+}
+button:hover{opacity:.95}
+.msg{
+  margin-top:12px;
+  padding:12px;
+  border-radius:12px;
+  font-size:14px;
+}
+.msg.ok{background:#14532d}
+.msg.erro{background:#7f1d1d}
+.msg.info{background:#1e3a8a}
+.lista{
+  display:grid;
+  gap:12px;
+  margin-top:14px;
+}
+.item{
+  background:#0b1220;
+  border-radius:14px;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.06);
+}
+.grid2{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+@media(max-width:700px){
+  .grid2{grid-template-columns:1fr;}
+}
+small{opacity:.8}
+</style>
+</head>
+<body>
+
+<div class="topo">
+  <h1>👥 Colaboradores | Passagens</h1>
+  <div id="infoAdmin"><small>Carregando...</small></div>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <h2 style="margin:0 0 10px 0;">Criar colaborador</h2>
+
+    <input type="text" id="nome" placeholder="Nome do colaborador">
+    <input type="email" id="email" placeholder="Email">
+    <input type="password" id="senha" placeholder="Senha">
+
+    <select id="cargo">
+      <option value="cobrador">Cobrador</option>
+      <option value="admin">Admin</option>
+      <option value="caixa">Caixa</option>
+      <option value="estoque">Estoque</option>
+    </select>
+
+    <button onclick="criarColaborador()">Criar colaborador</button>
+
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 10px 0;">Colaboradores do negócio</h2>
+    <div id="listaColaboradores" class="lista">
+      <div class="msg info">Carregando colaboradores...</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const client = window.supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let usuarioLogado = null;
+let app_id = null;
+
+function setMsg(texto, tipo="info"){
+  const box = document.getElementById("msg");
+  if(!texto){
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = `<div class="msg ${tipo}">${texto}</div>`;
+}
+
+function escapeHtml(texto){
+  return String(texto || "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+async function carregarUsuarioLogado(){
+  const { data: { session } } = await client.auth.getSession();
+
+  if(!session){
+    location.href = "/auth/login.html";
+    return false;
+  }
+
+  const { data: usuario, error } = await client
+    .from("usuarios")
+    .select("id,nome,email,app_id,tipo")
+    .eq("id", session.user.id)
+    .single();
+
+  if(error || !usuario){
+    document.getElementById("infoAdmin").innerHTML = "<small>Usuário não encontrado</small>";
+    setMsg("Não foi possível carregar o usuário logado.", "erro");
+    return false;
+  }
+
+  const tipo = String(usuario.tipo || "").toLowerCase().trim();
+
+  if(tipo !== "admin"){
+    document.getElementById("infoAdmin").innerHTML = "<small>Sem permissão</small>";
+    setMsg("Somente admin pode criar colaborador.", "erro");
+    return false;
+  }
+
+  usuarioLogado = usuario;
+  app_id = String(usuario.app_id || "").trim();
+
+  document.getElementById("infoAdmin").innerHTML =
+    `<small>${escapeHtml(usuario.nome)} • app_id: ${escapeHtml(app_id)}</small>`;
+
+  return true;
+}
+
+async function carregarColaboradores(){
+  const lista = document.getElementById("listaColaboradores");
+  lista.innerHTML = "";
+
+  if(!app_id){
+    lista.innerHTML = `<div class="msg erro">app_id não encontrado.</div>`;
+    return;
+  }
+
+  const { data, error } = await client
+    .from("usuarios")
+    .select("id,nome,email,tipo")
+    .eq("app_id", app_id)
+    .order("nome", { ascending: true });
+
+  if(error){
+    lista.innerHTML = `<div class="msg erro">Erro ao carregar colaboradores: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  if(!data || !data.length){
+    lista.innerHTML = `<div class="msg info">Nenhum colaborador cadastrado.</div>`;
+    return;
+  }
+
+  for(const u of data){
+    lista.innerHTML += `
+      <div class="item">
+        <div><b>Nome:</b> ${escapeHtml(u.nome || "-")}</div>
+        <div><b>Email:</b> ${escapeHtml(u.email || "-")}</div>
+        <div><b>Cargo:</b> ${escapeHtml(u.tipo || "-")}</div>
+      </div>
+    `;
+  }
+}
+
+async function criarColaborador(){
+  try{
+    setMsg("");
+
+    const nome = document.getElementById("nome").value.trim();
+    const email = document.getElementById("email").value.trim().toLowerCase();
+    const senha = document.getElementById("senha").value.trim();
+    const cargo = document.getElementById("cargo").value;
+
+    if(!nome) return setMsg("Digite o nome.", "erro");
+    if(!email) return setMsg("Digite o email.", "erro");
+    if(!senha || senha.length < 6) return setMsg("A senha precisa ter pelo menos 6 caracteres.", "erro");
+    if(!app_id) return setMsg("app_id do admin não encontrado.", "erro");
+
+    const res = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-colaborador-passagens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        nome,
+        email,
+        senha,
+        cargo,
+        app_id
+      })
+    });
+
+    const json = await res.json();
+
+    if(!res.ok){
+      throw new Error(json?.erro || "Erro ao criar colaborador.");
+    }
+
+    setMsg("Colaborador criado com sucesso.", "ok");
+
+    document.getElementById("nome").value = "";
+    document.getElementById("email").value = "";
+    document.getElementById("senha").value = "";
+    document.getElementById("cargo").value = "cobrador";
+
+    await carregarColaboradores();
+  }catch(e){
+    console.error(e);
+    setMsg(e.message || "Erro ao criar colaborador.", "erro");
+  }
+}
+
+(async function init(){
+  const ok = await carregarUsuarioLogado();
+  if(!ok) return;
+  await carregarColaboradores();
+})();
+</script>
+
+</body>
+</html>
