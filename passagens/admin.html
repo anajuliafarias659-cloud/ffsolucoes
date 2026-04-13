@@ -762,49 +762,93 @@ window.selecionarPoltronaAdmin = function(numero){
   mostrarDetalhePassageiro(reserva, numero, pago);
 };
   
-window.reagendarReservaSelecionada = async function(){
+window.reembolsarReservaSelecionada = async function(){
   try{
     msg("msgReserva", "");
 
-    if(!reservaSelecionadaAtual?.id){
+    if(!reservaSelecionadaAtual?.id && !pedidoSelecionadoAtual?.id){
       msg("msgReserva", "Selecione uma poltrona reservada primeiro.", "erro");
       return;
     }
 
-    const novaData = prompt("Digite a nova data da viagem (AAAA-MM-DD):", dataMapaAtual || "");
-    if(!novaData) return;
+    const confirmar = confirm(
+      "Deseja cancelar esta reserva e liberar a poltrona?\n\n" +
+      "OK = cancelar / reembolsar\n" +
+      "Cancelar = voltar"
+    );
 
-    const { data: conflito, error: erroConflito } = await supabase
-      .from("reservas_passagens")
-      .select("id, status, created_at")
-      .eq("viagem_id", reservaSelecionadaAtual.viagem_id)
-      .eq("data_viagem", novaData)
-      .eq("poltrona", reservaSelecionadaAtual.poltrona);
+    if(!confirmar) return;
 
-    if(erroConflito){
-      msg("msgReserva", "Erro ao verificar conflito: " + erroConflito.message, "erro");
-      return;
+    let codigo = reservaSelecionadaAtual?.codigo_embarque || null;
+
+    if(!codigo && pedidoSelecionadoAtual){
+      const itens = Array.isArray(pedidoSelecionadoAtual.itens) ? pedidoSelecionadoAtual.itens : [];
+      const item = itens.find(it =>
+        String(it?.viagem_id || "") === String(viagemMapaAtual) &&
+        Number(it?.poltrona) === Number(
+          reservaSelecionadaAtual?.poltrona ||
+          document.querySelector(".detalhe-passageiro h4")?.textContent?.replace(/\D/g, "") ||
+          0
+        ) &&
+        (
+          String(it?.data_ida || "") === String(dataMapaAtual) ||
+          String(it?.data_volta || "") === String(dataMapaAtual)
+        )
+      ) || null;
+
+      codigo = item?.codigo_embarque || null;
     }
 
-    const reservaAtiva = (conflito || []).find(r => !reservaEstaVencida(r));
-    if(reservaAtiva){
-      msg("msgReserva", "Essa poltrona já está ocupada na nova data.", "erro");
-      return;
+    if(reservaSelecionadaAtual?.id){
+      const { error } = await supabase
+        .from("reservas_passagens")
+        .update({
+          status: "cancelada"
+        })
+        .eq("id", reservaSelecionadaAtual.id)
+        .eq("app_id", app_id);
+
+      if(error){
+        msg("msgReserva", "Erro ao cancelar reserva: " + error.message, "erro");
+        return;
+      }
     }
 
-    const { error } = await supabase
-      .from("reservas_passagens")
-      .update({
-        data_viagem: novaData,
-        status: "reagendada"
-      })
-      .eq("id", reservaSelecionadaAtual.id)
-      .eq("app_id", app_id);
+    if(codigo){
+      const { data: pedidos, error: erroPedidos } = await supabase
+        .from("pedidos")
+        .select("id, status, itens")
+        .eq("app_id", app_id);
 
-    if(error){
-      msg("msgReserva", "Erro ao reagendar: " + error.message, "erro");
-      return;
+      if(!erroPedidos){
+        for(const pedido of pedidos || []){
+          const itens = Array.isArray(pedido.itens) ? pedido.itens : [];
+          const bate = itens.some(it => String(it?.codigo_embarque || "") === String(codigo));
+
+          if(bate){
+            await supabase
+              .from("pedidos")
+              .update({
+                status: "cancelada",
+                pagamento_status: "cancelled"
+              })
+              .eq("id", pedido.id)
+              .eq("app_id", app_id);
+          }
+        }
+      }
     }
+
+    msg("msgReserva", "Reserva cancelada e poltrona liberada.");
+    document.getElementById("detalhePassageiro").innerHTML = "";
+    reservaSelecionadaAtual = null;
+    pedidoSelecionadoAtual = null;
+
+    await verReservasComData();
+  }catch(e){
+    msg("msgReserva", e.message || "Erro ao cancelar reserva.", "erro");
+  }
+};
 
     msg("msgReserva", "Reserva reagendada com sucesso.");
     document.getElementById("dataReserva").value = novaData;
