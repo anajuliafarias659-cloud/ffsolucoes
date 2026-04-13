@@ -197,6 +197,9 @@ button:hover{opacity:.95}
       <option value="ida_volta">Ida e Volta</option>
     </select>
 
+    <div class="label">Data de ida</div>
+    <input type="date" id="dataIda">
+
     
     <div id="boxDataVolta" class="hidden">
       <div class="label">Data de volta</div>
@@ -633,11 +636,14 @@ async function carregarPoltronas(){
 }
 
 async function uploadImagem(file, pasta){
+  if(!file) return "";
+
   const nome = Date.now() + "-" + file.name;
+  const path = `${app_id}/${pasta}/${nome}`;
 
   const { data, error } = await client.storage
     .from("documentos")
-    .upload(`${pasta}/${nome}`, file);
+    .upload(path, file, { upsert: true });
 
   if(error) throw error;
 
@@ -659,31 +665,32 @@ async function criarPedidoPassagem(fotoRgUrl = "", selfieUrl = ""){
   const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
 
   const payloadPedido = {
-    app_id,
-    status: "aguardando_pagamento",
-    pagamento_status: "pending",
-    cliente_nome: nome,
-    cliente_documento: cpfRg,
-    cliente_whatsapp: whatsapp,
+  app_id,
+  status: "aguardando_pagamento",
+  pagamento_status: "pending",
+  cliente_nome: nome,
+  valor_total: valorTotal,
+  origem: "passagens",
+  forma_pagamento: formaPagamento,
+  itens: [{
+    tipo: "passagem",
+    tipo_viagem: tipoViagem,
+    viagem_id: viagemSelecionada,
+    rota: viagemAtual?.rota || "",
+    hora: viagemAtual?.hora || "",
+    data_ida: dataIda,
+    data_volta: tipoViagem === "ida_volta" ? dataVolta : null,
+    poltrona: poltronaSelecionada,
+    valor_unitario: valorBase,
     valor_total: valorTotal,
-    origem: "passagens",
-    forma_pagamento: formaPagamento,
-    itens: [{
-      tipo: "passagem",
-      tipo_viagem: tipoViagem,
-      viagem_id: viagemSelecionada,
-      rota: viagemAtual?.rota || "",
-      hora: viagemAtual?.hora || "",
-      data_ida: dataIda,
-      data_volta: tipoViagem === "ida_volta" ? dataVolta : null,
-      poltrona: poltronaSelecionada,
-      valor_unitario: valorBase,
-      valor_total: valorTotal,
-      codigo_embarque: codigoReservaGlobal,
-      foto_rg: fotoRgUrl,
-      selfie: selfieUrl
-    }]
-  };
+    codigo_embarque: codigoReservaGlobal,
+    foto_rg: fotoRgUrl,
+    selfie: selfieUrl,
+    cpf_rg: cpfRg,
+    whatsapp: whatsapp
+  }]
+};
+
 
   const { data, error } = await client
     .from("pedidos")
@@ -698,7 +705,7 @@ async function criarPedidoPassagem(fotoRgUrl = "", selfieUrl = ""){
   return data.id;
 }
 
-async function registrarReservaPendente(){
+async function registrarReservaPendente(fotoRgUrl = "", selfieUrl = ""){
   const nome = document.getElementById("nome").value.trim();
   const tipoViagem = document.getElementById("tipoViagem").value;
   const dataIda = document.getElementById("dataIda").value;
@@ -715,7 +722,9 @@ async function registrarReservaPendente(){
     status: "pendente_pagamento",
     codigo_embarque: codigoReservaGlobal,
     cpf_rg: cpfRg,
-    whatsapp: whatsapp
+    whatsapp: whatsapp,
+    foto_rg: fotoRgUrl,
+    selfie: selfieUrl
   }];
 
   if(tipoViagem === "ida_volta" && dataVolta){
@@ -728,7 +737,9 @@ async function registrarReservaPendente(){
       status: "pendente_pagamento",
       codigo_embarque: codigoReservaGlobal,
       cpf_rg: cpfRg,
-      whatsapp: whatsapp
+      whatsapp: whatsapp,
+      foto_rg: fotoRgUrl,
+      selfie: selfieUrl
     });
   }
 
@@ -762,12 +773,25 @@ async function verificarStatusPagamentoPassagem(pedidoId){
         verificadorPixPassagem = null;
       }
 
-      await client
-        .from("reservas_passagens")
-        .update({ status: "pago" })
-        .eq("viagem_id", viagemSelecionada)
-        .eq("poltrona", poltronaSelecionada)
-        .eq("data_viagem", document.getElementById("dataIda").value);
+      const dataIda = document.getElementById("dataIda").value;
+const tipoViagem = document.getElementById("tipoViagem").value;
+const dataVolta = document.getElementById("dataVolta").value;
+
+await client
+  .from("reservas_passagens")
+  .update({ status: "pago" })
+  .eq("viagem_id", viagemSelecionada)
+  .eq("poltrona", poltronaSelecionada)
+  .eq("data_viagem", dataIda);
+
+if(tipoViagem === "ida_volta" && dataVolta){
+  await client
+    .from("reservas_passagens")
+    .update({ status: "pago" })
+    .eq("viagem_id", viagemSelecionada)
+    .eq("poltrona", poltronaSelecionada)
+    .eq("data_viagem", dataVolta);
+}
 
       // 🔥 MOSTRA COMPROVANTE COM QR
       mostrarComprovanteReserva();
@@ -806,6 +830,7 @@ function mostrarComprovanteReserva(){
   const whatsapp = document.getElementById("whatsapp").value.trim();
   const dataIda = document.getElementById("dataIda").value;
   const tipoViagem = document.getElementById("tipoViagem").value;
+  const dataVolta = document.getElementById("dataVolta").value;
   const codigoReserva = codigoReservaGlobal;
 
   const dadosReserva = {
@@ -815,7 +840,8 @@ function mostrarComprovanteReserva(){
     whatsapp,
     rota: viagemAtual?.rota || "",
     hora: viagemAtual?.hora || "",
-    data: dataIda,
+    data_ida: dataIda,
+    data_volta: tipoViagem === "ida_volta" ? dataVolta : null,
     poltrona: poltronaSelecionada,
     tipo: tipoViagem
   };
@@ -830,8 +856,10 @@ function mostrarComprovanteReserva(){
     <b>WhatsApp:</b> ${whatsapp}<br>
     <b>Rota:</b> ${viagemAtual?.rota || ""}<br>
     <b>Hora:</b> ${viagemAtual?.hora || ""}<br>
-    <b>Data:</b> ${dataIda}<br>
-    <b>Poltrona:</b> ${poltronaSelecionada}
+    <b>Data ida:</b> ${dataIda}<br>
+    ${tipoViagem === "ida_volta" && dataVolta ? `<b>Data volta:</b> ${dataVolta}<br>` : ""}
+    <b>Poltrona:</b> ${poltronaSelecionada}<br>
+    <b>Tipo:</b> ${tipoViagem === "ida_volta" ? "Ida e Volta" : "Somente Ida"}
   `;
 
   document.getElementById("qrReservaImg").src =
@@ -872,7 +900,6 @@ if(!whatsapp) return setMsg("Digite o WhatsApp.", "erro");
     if(!dataIda) return setMsg("Escolha a data de ida.", "erro");
     if(tipoViagem === "ida_volta" && !dataVolta) return setMsg("Escolha a data de volta.", "erro");
     if(tipoViagem === "ida_volta" && dataVolta < dataIda) return setMsg("A data de volta não pode ser menor que a data de ida.", "erro");
-    if(!nome) return setMsg("Digite seu nome.", "erro");
     if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
     if(!configLoja) return setMsg("Configuração da loja não encontrada.", "erro");
     if(!viagemRodaNaData(viagemAtual, dataIda)){
@@ -928,7 +955,7 @@ if(selfieFile){
     }
 
     const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
-    await registrarReservaPendente();
+await registrarReservaPendente(fotoRgUrl, selfieUrl);
 
 
 
