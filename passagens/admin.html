@@ -137,6 +137,17 @@ input,select{
   background:#334155;
 }
 
+.botao-laranja{
+  background:#f59e0b;
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.botao-laranja:hover{
+  background:#d97706;
+}
+
 .botoes-form{
   display:grid;
   grid-template-columns:1fr;
@@ -304,24 +315,10 @@ small{
         <option value="">Selecione a viagem</option>
       </select>
 
+      <input type="date" id="dataReserva">
 
-      <button class="botao-azul" onclick="verReservas()">Ver Reservas</button>
-
-<!-- 👇 COLE AQUI -->
-<hr style="margin:10px 0;opacity:.2">
-
-<input id="nomeAgencia" placeholder="Nome cliente (agência)">
-
-<div id="mapaPoltronas" style="
-display:grid;
-grid-template-columns:repeat(4,1fr);
-gap:8px;
-margin-top:10px;
-"></div>
-
-<button class="botao-verde" onclick="reservarAgencia()">
-Reservar na Agência
-</button>
+      <button class="botao-azul" onclick="verReservasComData()">Ver Reservas</button>
+      <button class="botao-laranja" onclick="reservarPoltronaManual()">➕ Reservar Poltrona Manual</button>
 
       <div id="msgReserva"></div>
       <div class="lista" id="listaReservas"></div>
@@ -363,6 +360,13 @@ Reservar na Agência
 import { supabase } from "../js/supabase.js";
 
 let app_id = null;
+
+function hojeISO(){
+  const d = new Date();
+  const off = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - off * 60000);
+  return local.toISOString().slice(0, 10);
+}
 
 function msg(id, texto, tipo="ok"){
   const el = document.getElementById(id);
@@ -425,6 +429,7 @@ async function carregarUsuario(){
 
   document.getElementById("nome").innerText = usuario.nome || "";
   document.getElementById("negocioId").innerText = usuario.app_id || "";
+  document.getElementById("dataReserva").value = hojeISO();
 
   await montarLinkPublico();
   await carregarVeiculos();
@@ -438,7 +443,7 @@ async function montarLinkPublico(){
     .from("apps")
     .select("slug")
     .eq("id", app_id)
-    .single();
+    .maybeSingle();
 
   const url = (error || !appData?.slug)
     ? `${location.origin}/passagens/publica.html?app_id=${encodeURIComponent(app_id)}`
@@ -493,12 +498,7 @@ window.salvarVeiculo = async function(){
   if(id){
     const { error } = await supabase
       .from("veiculos_passagens")
-      .update({
-        nome,
-        tipo,
-        total_poltronas,
-        layout
-      })
+      .update({ nome, tipo, total_poltronas, layout })
       .eq("id", id)
       .eq("app_id", app_id);
 
@@ -511,13 +511,7 @@ window.salvarVeiculo = async function(){
   }else{
     const { error } = await supabase
       .from("veiculos_passagens")
-      .insert([{
-        nome,
-        tipo,
-        total_poltronas,
-        layout,
-        app_id
-      }]);
+      .insert([{ nome, tipo, total_poltronas, layout, app_id }]);
 
     if(error){
       msg("msgVeiculo", "Erro ao salvar veículo: " + error.message, "erro");
@@ -677,10 +671,7 @@ window.salvarViagem = async function(){
   }else{
     const { error } = await supabase
       .from("viagens_passagens")
-      .insert([{
-        ...payload,
-        app_id
-      }]);
+      .insert([{ ...payload, app_id }]);
 
     if(error){
       msg("msgViagem", "Erro ao salvar viagem: " + error.message, "erro");
@@ -781,7 +772,7 @@ async function carregarViagens(){
     return;
   }
 
-  for (const v of data) {
+  for(const v of data){
     let nomeVeiculo = "-";
 
     if(v.veiculo_id){
@@ -812,10 +803,11 @@ async function carregarViagens(){
   }
 }
 
-window.verReservas = async function(){
+window.verReservasComData = async function(){
   msg("msgReserva", "");
 
   const viagem_id = document.getElementById("viagemReserva").value;
+  const dataReserva = document.getElementById("dataReserva").value;
   const lista = document.getElementById("listaReservas");
 
   lista.innerHTML = "";
@@ -825,10 +817,16 @@ window.verReservas = async function(){
     return;
   }
 
+  if(!dataReserva){
+    msg("msgReserva", "Selecione a data da reserva.", "erro");
+    return;
+  }
+
   const { data, error } = await supabase
     .from("reservas_passagens")
     .select("*")
     .eq("viagem_id", viagem_id)
+    .eq("data_viagem", dataReserva)
     .order("poltrona", { ascending: true });
 
   if(error){
@@ -837,7 +835,7 @@ window.verReservas = async function(){
   }
 
   if(!data || !data.length){
-    lista.innerHTML = `<div class="vazio">Nenhuma reserva encontrada.</div>`;
+    lista.innerHTML = `<div class="vazio">Nenhuma reserva encontrada para essa data.</div>`;
     return;
   }
 
@@ -846,112 +844,88 @@ window.verReservas = async function(){
       <div class="item">
         <b>Poltrona ${r.poltrona}</b><br>
         Nome: ${r.nome || "-"}<br>
+        Data: ${r.data_viagem || "-"}<br>
         Status: ${r.status || "-"}
       </div>
     `;
   });
 };
 
+window.reservarPoltronaManual = async function(){
+  msg("msgReserva", "");
+
+  const viagem_id = document.getElementById("viagemReserva").value;
+  const dataReserva = document.getElementById("dataReserva").value;
+
+  if(!viagem_id){
+    msg("msgReserva", "Selecione uma viagem.", "erro");
+    return;
+  }
+
+  if(!dataReserva){
+    msg("msgReserva", "Selecione a data da reserva.", "erro");
+    return;
+  }
+
+  const nome = prompt("Nome do passageiro:");
+  if(!nome || !nome.trim()){
+    msg("msgReserva", "Reserva manual cancelada.", "erro");
+    return;
+  }
+
+  const poltronaTexto = prompt("Número da poltrona:");
+  const poltrona = Number(poltronaTexto);
+
+  if(!poltrona || poltrona <= 0){
+    msg("msgReserva", "Poltrona inválida.", "erro");
+    return;
+  }
+
+  const pagoDireto = confirm("Pagamento já foi feito direto na agência?\n\nOK = Sim\nCancelar = Não");
+
+  const { data: existente, error: erroBusca } = await supabase
+    .from("reservas_passagens")
+    .select("id")
+    .eq("viagem_id", viagem_id)
+    .eq("data_viagem", dataReserva)
+    .eq("poltrona", poltrona)
+    .limit(1);
+
+  if(erroBusca){
+    msg("msgReserva", "Erro ao verificar poltrona: " + erroBusca.message, "erro");
+    return;
+  }
+
+  if(existente && existente.length){
+    msg("msgReserva", "Essa poltrona já está reservada nessa data.", "erro");
+    return;
+  }
+
+  const statusReserva = pagoDireto ? "pago_agencia" : "pendente_agencia";
+
+  const { error } = await supabase
+    .from("reservas_passagens")
+    .insert([{
+      viagem_id,
+      poltrona,
+      nome: nome.trim(),
+      app_id,
+      data_viagem: dataReserva,
+      status: statusReserva
+    }]);
+
+  if(error){
+    msg("msgReserva", "Erro ao criar reserva manual: " + error.message, "erro");
+    return;
+  }
+
+  msg("msgReserva", "Reserva manual criada com sucesso.");
+  await verReservasComData();
+};
+
 limparFormularioVeiculo();
 limparFormularioViagem();
 carregarUsuario();
-
-// 👇 COLE AQUI EM CIMA DO </script>
-
-let poltronaSelecionada = null;
-let reservasAtuais = [];
-
-function desenharPoltronas(total = 20){
-  const el = document.getElementById("mapaPoltronas");
-  if(!el) return;
-
-  let html = "";
-
-  for(let i=1;i<=total;i++){
-    const ocupada = reservasAtuais.some(r => Number(r.poltrona) === i);
-
-    html += `
-      <div onclick="${ocupada ? '' : `selecionarPoltrona(${i})`}"
-        id="pol_${i}"
-        style="
-          background:${ocupada ? '#ef4444' : '#0f172a'};
-          padding:10px;
-          border-radius:8px;
-          text-align:center;
-          cursor:${ocupada ? 'not-allowed' : 'pointer'};
-        ">
-        ${i}
-      </div>
-    `;
-  }
-
-  el.innerHTML = html;
-}
-
-function selecionarPoltrona(num){
-  poltronaSelecionada = num;
-
-  document.querySelectorAll("[id^='pol_']").forEach(el=>{
-    if(!el.style.cursor.includes("not-allowed")){
-      el.style.background = "#0f172a";
-    }
-  });
-
-  document.getElementById("pol_"+num).style.background = "#22c55e";
-}
-
-const verReservasOriginal = window.verReservas;
-
-window.verReservas = async function(){
-  await verReservasOriginal();
-
-  const viagem_id = document.getElementById("viagemReserva").value;
-
-  if(!viagem_id) return;
-
-  const { data } = await supabase
-    .from("reservas_passagens")
-    .select("poltrona")
-    .eq("viagem_id", viagem_id);
-
-  reservasAtuais = data || [];
-
-  desenharPoltronas(20);
-};
-
-window.reservarAgencia = async function(){
-  try{
-    const nome = document.getElementById("nomeAgencia").value;
-    const viagem = document.getElementById("viagemReserva").value;
-
-    if(!nome || !viagem || !poltronaSelecionada){
-      msg("msgReserva","Preencha tudo","erro");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("reservas_passagens")
-      .insert([{
-        nome,
-        viagem_id: viagem,
-        poltrona: poltronaSelecionada,
-        status: "confirmado",
-        origem: "agencia"
-      }]);
-
-    if(error) throw error;
-
-    msg("msgReserva","Reserva feita na agência");
-
-    poltronaSelecionada = null;
-    document.getElementById("nomeAgencia").value = "";
-
-    verReservas();
-  }
-  catch(e){
-    msg("msgReserva", e.message, "erro");
-  }
-};
 </script>
 
 </body>
