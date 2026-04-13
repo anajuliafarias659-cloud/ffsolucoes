@@ -272,6 +272,7 @@ let configLoja = null;
 let viagemSelecionada = null;
 let poltronaSelecionada = null;
 let viagemAtual = null;
+let codigoReservaGlobal = null;
 let viagensCache = [];
 let verificadorPixPassagem = null;
 
@@ -741,40 +742,52 @@ async function verificarStatusPagamentoPassagem(pedidoId){
 
     if(error || !data) return;
 
-    if(statusPagamento === "approved"){
-  ...
-  await client
-    .from("reservas_passagens")
-    .update({ status: "pago" })
-    .eq("viagem_id", viagemSelecionada)
-    .eq("poltrona", poltronaSelecionada)
-    .eq("data_viagem", document.getElementById("dataIda").value);
-
     const statusPagamento = String(data.pagamento_status || "").toLowerCase();
 
     if(statusPagamento === "approved"){
-  setMsg("✅ Pagamento confirmado com sucesso.");
-  document.getElementById("pixBox").style.display = "none";
+      setMsg("✅ Pagamento confirmado com sucesso.");
+      document.getElementById("pixBox").style.display = "none";
 
-  if(verificadorPixPassagem){
-    clearInterval(verificadorPixPassagem);
-    verificadorPixPassagem = null;
+      if(verificadorPixPassagem){
+        clearInterval(verificadorPixPassagem);
+        verificadorPixPassagem = null;
+      }
+
+      await client
+        .from("reservas_passagens")
+        .update({ status: "pago" })
+        .eq("viagem_id", viagemSelecionada)
+        .eq("poltrona", poltronaSelecionada)
+        .eq("data_viagem", document.getElementById("dataIda").value);
+
+      // 🔥 MOSTRA COMPROVANTE COM QR
+      mostrarComprovanteReserva();
+
+      poltronaSelecionada = null;
+      await carregarPoltronas();
+
+      return;
+    }
+
+    if(statusPagamento === "pending"){
+      setMsg("⏳ PIX gerado. Aguardando pagamento...");
+      return;
+    }
+
+    if(statusPagamento === "rejected" || statusPagamento === "cancelled"){
+      setMsg("❌ Pagamento não aprovado.", "erro");
+
+      if(verificadorPixPassagem){
+        clearInterval(verificadorPixPassagem);
+        verificadorPixPassagem = null;
+      }
+
+      return;
+    }
+
+  }catch(e){
+    console.error("Erro verificar pagamento:", e);
   }
-
-  // 🔥 ATUALIZA RESERVA PARA PAGO
-  await client
-    .from("reservas_passagens")
-    .update({ status: "pago" })
-    .eq("viagem_id", viagemSelecionada)
-    .eq("poltrona", poltronaSelecionada)
-    .eq("data_viagem", document.getElementById("dataIda").value);
-
-  poltronaSelecionada = null;
-
-  // 🔥 força refresh leve (opcional)
-  await carregarPoltronas();
-
-  return;
 }
 
     if(statusPagamento === "pending"){
