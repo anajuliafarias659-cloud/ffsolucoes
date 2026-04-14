@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -189,7 +190,6 @@ small{opacity:.8}
           <button class="btn-verde" onclick="iniciarScanner()">Abrir câmera</button>
           <button class="btn-vermelho" onclick="pararScanner()">Parar câmera</button>
         </div>
-        <button class="btn-azul" onclick="reabrirCamera()">🔄 Ler outro QR</button>
       </div>
 
       <div>
@@ -341,9 +341,10 @@ async function iniciarScanner(){
       if(!ok) return;
     }
 
-    document.getElementById("reader").style.display = "block";
-
     if(scannerRodando) return;
+
+    // 🔥 GARANTE QUE A CÂMERA VOLTE A APARECER
+    document.getElementById("reader").style.display = "block";
 
     setMsg("Abrindo câmera...", "info");
 
@@ -356,25 +357,21 @@ async function iniciarScanner(){
         qrbox: { width: 250, height: 250 }
       },
       async (decodedText) => {
-        const codigo = extrairCodigoDoQr(decodedText);
-        if(!codigo) return;
+  const codigo = extrairCodigoDoQr(decodedText);
+  if(!codigo) return;
 
-        if(ultimoCodigo === codigo) return;
-        ultimoCodigo = codigo;
+  if(ultimoCodigo === codigo) return;
+  ultimoCodigo = codigo;
 
-        document.getElementById("ultimoQrLido").value = codigo;
+  document.getElementById("ultimoQrLido").value = codigo;
+  setMsg("QR lido com sucesso.", "ok");
 
-        await pararScanner();
-        document.getElementById("reader").style.display = "none";
+  // 👇 AQUI É O LUGAR CERTO
+  await pararScanner();
+  document.getElementById("reader").style.display = "none";
 
-        setMsg("✅ QR lido com sucesso.", "ok");
-
-        if(navigator.vibrate){
-          navigator.vibrate(200);
-        }
-
-        await buscarPassageiroPorCodigo(codigo);
-      },
+  await buscarPassageiroPorCodigo(codigo);
+},
       () => {}
     );
 
@@ -398,12 +395,6 @@ async function pararScanner(){
     console.error(e);
   }
 }
-
-window.reabrirCamera = async function(){
-  document.getElementById("reader").style.display = "block";
-  ultimoCodigo = null;
-  await iniciarScanner();
-};
 
 async function buscarCodigoManual(){
   const codigo = document.getElementById("codigoManual").value.trim();
@@ -540,7 +531,7 @@ async function buscarPassageiroPorCodigo(codigo){
 
     const { data: pedidos, error: erroPedidos } = await client
       .from("pedidos")
-      .select("id,status,pagamento_status,itens,cliente_nome,created_at")
+      .select("id,status,pagamento_status,itens,nome,cpf,cpf_rg,whatsapp,foto_rg,selfie,created_at")
       .eq("app_id", app_id)
       .in("pagamento_status", ["approved", "pending"]);
 
@@ -573,16 +564,16 @@ async function buscarPassageiroPorCodigo(codigo){
           achados.push({
             pedido_id: p.id,
             status: p.pagamento_status || p.status || "approved",
-            nome: item?.nome || p?.cliente_nome || "-",
-            cpf_rg: item?.cpf_rg || item?.cpf || "-",
-            whatsapp: item?.whatsapp || "-",
+            nome: item?.nome || p?.nome || "-",
+            cpf_rg: item?.cpf_rg || item?.cpf || p?.cpf_rg || p?.cpf || "-",
+            whatsapp: item?.whatsapp || p?.whatsapp || "-",
             poltrona: item?.poltrona || "-",
             data_viagem: item?.data_ida || item?.data_viagem || item?.data_volta || "-",
             rota,
             hora,
             codigo_embarque: item?.codigo_embarque || codigoTratado,
-            foto_rg: item?.foto_rg || "",
-            selfie: item?.selfie || "",
+            foto_rg: item?.foto_rg || p?.foto_rg || "",
+            selfie: item?.selfie || p?.selfie || "",
             viagem_id: item?.viagem_id || null
           });
         }
