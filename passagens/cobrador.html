@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -27,10 +26,16 @@ body{
   display:flex;
   justify-content:space-between;
   align-items:center;
+  gap:10px;
 }
 .topo h1{
   margin:0;
   font-size:20px;
+}
+.topo-acoes{
+  display:flex;
+  align-items:center;
+  gap:10px;
 }
 .container{
   max-width:1000px;
@@ -80,6 +85,7 @@ button{
   overflow:hidden;
   border-radius:14px;
   background:#000;
+  min-height:260px;
 }
 .msg{
   margin-top:12px;
@@ -149,6 +155,14 @@ small{opacity:.8}
   .grid2,.resultado,.linha-acoes{
     grid-template-columns:1fr;
   }
+  .topo{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+  .topo-acoes{
+    width:100%;
+    justify-content:space-between;
+  }
 }
 </style>
 </head>
@@ -156,7 +170,11 @@ small{opacity:.8}
 
 <div class="topo">
   <h1>🚌 Cobrador | Scanner de Passagem</h1>
-  <div id="appInfo"><small>Carregando...</small></div>
+
+  <div class="topo-acoes">
+    <div id="appInfo"><small>Carregando...</small></div>
+    <button class="btn-vermelho" style="width:auto;margin:0;padding:10px 14px;" onclick="logout()">Sair</button>
+  </div>
 </div>
 
 <div class="container">
@@ -202,13 +220,8 @@ const client = window.supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-const params = new URLSearchParams(location.search);
-const appIdUrl = params.get("app_id");
-const slug = params.get("slug");
-
-const APP_ID_STORAGE_KEY = "ff_passagens_app_id";
-
 let app_id = null;
+let usuarioLogado = null;
 let scanner = null;
 let scannerRodando = false;
 let ultimoCodigo = null;
@@ -245,79 +258,66 @@ function badgeStatus(status){
   return `<span class="badge outro">${escapeHtml(status || "-")}</span>`;
 }
 
-async function resolverAppId(){
+async function carregarUsuarioLogado(){
   try{
-    // 1) prioridade: app_id direto na URL
-    if(appIdUrl){
-      app_id = String(appIdUrl).trim();
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
 
-      if(app_id){
-        localStorage.setItem(APP_ID_STORAGE_KEY, app_id);
-        return true;
-      }
+    if(sessionError){
+      document.getElementById("appInfo").innerHTML = "<small>Erro de sessão</small>";
+      setMsg("Erro ao validar sessão: " + sessionError.message, "erro");
+      return false;
     }
 
-    // 2) prioridade: slug na URL
-    if(slug){
-      const slugTratado = String(slug).trim();
-
-      const { data, error } = await client
-        .from("apps")
-        .select("id,nome,slug")
-        .eq("slug", slugTratado)
-        .maybeSingle();
-
-      if(!error && data?.id){
-        app_id = String(data.id).trim();
-        localStorage.setItem(APP_ID_STORAGE_KEY, app_id);
-        return true;
-      }
+    if(!session){
+      window.location.href = "/auth/login.html";
+      return false;
     }
 
-    // 3) fallback: app_id salvo no navegador
-    const appIdSalvo = String(localStorage.getItem(APP_ID_STORAGE_KEY) || "").trim();
-    if(appIdSalvo){
-      app_id = appIdSalvo;
-      return true;
+    const { data: usuario, error } = await client
+      .from("usuarios")
+      .select("id,nome,email,app_id,tipo")
+      .eq("id", session.user.id)
+      .single();
+
+    if(error || !usuario){
+      document.getElementById("appInfo").innerHTML = "<small>Usuário não encontrado</small>";
+      setMsg("Não foi possível carregar o usuário logado.", "erro");
+      return false;
     }
 
-    return false;
+    const tipo = String(usuario.tipo || "").toLowerCase().trim();
+
+    if(!["admin","cobrador"].includes(tipo)){
+      document.getElementById("appInfo").innerHTML = "<small>Sem permissão</small>";
+      setMsg("Esse usuário não tem permissão para acessar o cobrador.", "erro");
+      return false;
+    }
+
+    usuarioLogado = usuario;
+    app_id = String(usuario.app_id || "").trim();
+
+    if(!app_id){
+      document.getElementById("appInfo").innerHTML = "<small>app_id não encontrado</small>";
+      setMsg("O usuário logado não está vinculado a nenhum negócio.", "erro");
+      return false;
+    }
+
+    const { data: config } = await client
+      .from("config_site")
+      .select("nome_site")
+      .eq("app_id", app_id)
+      .maybeSingle();
+
+    document.getElementById("appInfo").innerHTML =
+      `<small>${escapeHtml(usuario.nome || "")} • ${escapeHtml(config?.nome_site || "FF Transporte")}</small>`;
+
+    return true;
   }catch(e){
-    console.error("Erro ao resolver app_id:", e);
+    console.error(e);
+    document.getElementById("appInfo").innerHTML = "<small>Erro</small>";
+    setMsg(e.message || "Erro ao carregar usuário logado.", "erro");
     return false;
   }
-}
-
-async function carregarInfoApp(){
-  const ok = await resolverAppId();
-
-  if(!ok || !app_id){
-    document.getElementById("appInfo").innerHTML = "<small>Negócio não identificado</small>";
-    setMsg("Abra uma vez com ?app_id=... ou ?slug=... para salvar automático neste aparelho.", "erro");
-    return false;
-  }
-
-  const appIdTratado = String(app_id).trim();
-
-  const { data: config, error } = await client
-    .from("config_site")
-    .select("nome_site")
-    .eq("app_id", appIdTratado)
-    .maybeSingle();
-
-  if(error){
-    document.getElementById("appInfo").innerHTML = `<small>app_id: ${escapeHtml(appIdTratado)}</small>`;
-    setMsg("Erro ao carregar dados do negócio: " + error.message, "erro");
-    return false;
-  }
-
-  app_id = appIdTratado;
-  localStorage.setItem(APP_ID_STORAGE_KEY, app_id);
-
-  document.getElementById("appInfo").innerHTML =
-    `<small>${escapeHtml(config?.nome_site || "FF Transporte")} • app_id: ${escapeHtml(app_id)}</small>`;
-
-  return true;
 }
 
 function extrairCodigoDoQr(texto){
@@ -326,8 +326,8 @@ function extrairCodigoDoQr(texto){
 
   try{
     const obj = JSON.parse(bruto);
-    if(obj?.codigo) return String(obj.codigo).trim();
     if(obj?.codigo_embarque) return String(obj.codigo_embarque).trim();
+    if(obj?.codigo) return String(obj.codigo).trim();
   }catch(e){}
 
   return bruto;
@@ -335,6 +335,11 @@ function extrairCodigoDoQr(texto){
 
 async function iniciarScanner(){
   try{
+    if(!app_id){
+      const ok = await carregarUsuarioLogado();
+      if(!ok) return;
+    }
+
     if(scannerRodando) return;
 
     setMsg("Abrindo câmera...", "info");
@@ -389,12 +394,18 @@ async function buscarCodigoManual(){
     setMsg("Digite um código.", "erro");
     return;
   }
+
   document.getElementById("ultimoQrLido").value = codigo;
   await buscarPassageiroPorCodigo(codigo);
 }
 
 async function marcarEmbarcado(idReserva){
   try{
+    if(!app_id){
+      const ok = await carregarUsuarioLogado();
+      if(!ok) return;
+    }
+
     const { error } = await client
       .from("reservas_passagens")
       .update({ status: "embarcado" })
@@ -425,14 +436,13 @@ async function buscarPassageiroPorCodigo(codigo){
     box.innerHTML = `<div class="msg info">Buscando passageiro...</div>`;
 
     if(!app_id){
-      const ok = await carregarInfoApp();
+      const ok = await carregarUsuarioLogado();
       if(!ok) return;
     }
 
     const codigoTratado = extrairCodigoDoQr(codigo);
     ultimoCodigo = codigoTratado;
 
-    // 1) Primeiro tenta achar na tabela de reservas
     const { data: reservas, error } = await client
       .from("reservas_passagens")
       .select("*")
@@ -445,7 +455,6 @@ async function buscarPassageiroPorCodigo(codigo){
       return;
     }
 
-    // Se encontrou reserva completa, mostra normal
     if(reservas && reservas.length){
       let html = `<div class="lista-registros">`;
 
@@ -512,7 +521,6 @@ async function buscarPassageiroPorCodigo(codigo){
       return;
     }
 
-    // 2) Se não achou em reservas, procura dentro de pedidos aprovados
     const { data: pedidos, error: erroPedidos } = await client
       .from("pedidos")
       .select("id,status,pagamento_status,itens,nome,cpf,cpf_rg,whatsapp,foto_rg,selfie,created_at")
@@ -625,8 +633,18 @@ async function buscarPassageiroPorCodigo(codigo){
   }
 }
 
+window.logout = async function(){
+  try{
+    await pararScanner();
+  }catch(e){}
 
-carregarInfoApp();
+  await client.auth.signOut();
+  window.location.href = "/auth/login.html";
+};
+
+(async function init(){
+  await carregarUsuarioLogado();
+})();
 </script>
 
 </body>
