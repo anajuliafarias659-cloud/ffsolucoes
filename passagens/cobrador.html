@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -81,12 +80,18 @@ button{
   grid-template-columns:1fr 1fr;
   gap:12px;
 }
+#readerWrap{
+  width:100%;
+}
 #reader{
   width:100%;
   overflow:hidden;
   border-radius:14px;
   background:#000;
   min-height:260px;
+}
+#readerWrap.oculto{
+  display:none;
 }
 .msg{
   margin-top:12px;
@@ -185,7 +190,10 @@ small{opacity:.8}
 
     <div class="grid2">
       <div>
-        <div id="reader"></div>
+        <div id="readerWrap">
+          <div id="reader"></div>
+        </div>
+
         <div class="linha-acoes">
           <button class="btn-verde" onclick="iniciarScanner()">Abrir câmera</button>
           <button class="btn-vermelho" onclick="pararScanner()">Parar câmera</button>
@@ -226,6 +234,7 @@ let usuarioLogado = null;
 let scanner = null;
 let scannerRodando = false;
 let ultimoCodigo = null;
+let processandoLeitura = false;
 
 function setMsg(texto, tipo="info"){
   const box = document.getElementById("msg");
@@ -257,6 +266,16 @@ function badgeStatus(status){
     return `<span class="badge cancelado">${escapeHtml(status || "Cancelado")}</span>`;
   }
   return `<span class="badge outro">${escapeHtml(status || "-")}</span>`;
+}
+
+function mostrarCamera(){
+  const wrap = document.getElementById("readerWrap");
+  if(wrap) wrap.classList.remove("oculto");
+}
+
+function esconderCamera(){
+  const wrap = document.getElementById("readerWrap");
+  if(wrap) wrap.classList.add("oculto");
 }
 
 async function carregarUsuarioLogado(){
@@ -343,9 +362,7 @@ async function iniciarScanner(){
 
     if(scannerRodando) return;
 
-    // 🔥 GARANTE QUE A CÂMERA VOLTE A APARECER
-    document.getElementById("reader").style.display = "block";
-
+    mostrarCamera();
     setMsg("Abrindo câmera...", "info");
 
     scanner = new Html5Qrcode("reader");
@@ -357,21 +374,31 @@ async function iniciarScanner(){
         qrbox: { width: 250, height: 250 }
       },
       async (decodedText) => {
-  const codigo = extrairCodigoDoQr(decodedText);
-  if(!codigo) return;
+        try{
+          if(processandoLeitura) return;
 
-  if(ultimoCodigo === codigo) return;
-  ultimoCodigo = codigo;
+          const codigo = extrairCodigoDoQr(decodedText);
+          if(!codigo) return;
+          if(ultimoCodigo === codigo) return;
 
-  document.getElementById("ultimoQrLido").value = codigo;
-  setMsg("QR lido com sucesso.", "ok");
+          processandoLeitura = true;
+          ultimoCodigo = codigo;
 
-  // 👇 AQUI É O LUGAR CERTO
-  await pararScanner();
-  document.getElementById("reader").style.display = "none";
+          document.getElementById("ultimoQrLido").value = codigo;
+          setMsg("QR lido com sucesso. Buscando passageiro...", "ok");
 
-  await buscarPassageiroPorCodigo(codigo);
-},
+          await buscarPassageiroPorCodigo(codigo);
+
+          await pararScanner(false);
+          esconderCamera();
+          setMsg("QR lido com sucesso.", "ok");
+        }catch(e){
+          console.error(e);
+          setMsg(e.message || "Erro ao ler QR.", "erro");
+        }finally{
+          processandoLeitura = false;
+        }
+      },
       () => {}
     );
 
@@ -383,16 +410,22 @@ async function iniciarScanner(){
   }
 }
 
-async function pararScanner(){
+async function pararScanner(mostrarMensagem = true){
   try{
     if(scanner && scannerRodando){
       await scanner.stop();
       await scanner.clear();
-      scannerRodando = false;
-      setMsg("Câmera parada.", "info");
     }
   }catch(e){
     console.error(e);
+  }finally{
+    scanner = null;
+    scannerRodando = false;
+    processandoLeitura = false;
+
+    if(mostrarMensagem){
+      setMsg("Câmera parada.", "info");
+    }
   }
 }
 
@@ -643,7 +676,7 @@ async function buscarPassageiroPorCodigo(codigo){
 
 window.logout = async function(){
   try{
-    await pararScanner();
+    await pararScanner(false);
   }catch(e){}
 
   await client.auth.signOut();
