@@ -381,7 +381,6 @@ let codigoReservaGlobal = null;
 let viagensCache = [];
 let verificadorPixPassagem = null;
 let streamSelfie = null;
-let pedidoPixAtual = null;
 let selfieBlob = null;
 let ultimoTextoRecibo = "";
 let telaAtual = "viagens";
@@ -392,32 +391,6 @@ function hojeLocalISO(){
   const off = d.getTimezoneOffset();
   const local = new Date(d.getTime() - off * 60000);
   return local.toISOString().slice(0, 10);
-}
-
-function agoraLocal(){
-  return new Date();
-}
-
-function montarDataHoraLocal(dataISO, horaStr){
-  if(!dataISO || !horaStr) return null;
-
-  const [ano, mes, dia] = dataISO.split("-").map(Number);
-  const partesHora = String(horaStr).trim().split(":");
-  const hora = Number(partesHora[0] || 0);
-  const minuto = Number(partesHora[1] || 0);
-
-  return new Date(ano, mes - 1, dia, hora, minuto, 0, 0);
-}
-
-function viagemExpiradaParaData(viagem, dataISO){
-  if(!viagem || !dataISO || !viagem.hora) return false;
-
-  const agora = agoraLocal();
-  const saida = montarDataHoraLocal(dataISO, viagem.hora);
-
-  if(!saida || isNaN(saida.getTime())) return false;
-
-  return agora >= saida;
 }
 
 function gerarCodigoReserva(){
@@ -444,7 +417,6 @@ function salvarEstadoParcial(extra = {}){
     viagemSelecionada,
     poltronaSelecionada,
     codigoReservaGlobal,
-    pedidoPixAtual,
     tipoViagem: document.getElementById("tipoViagem")?.value || "ida",
     dataIda: document.getElementById("dataIda")?.value || "",
     dataVolta: document.getElementById("dataVolta")?.value || "",
@@ -722,10 +694,7 @@ async function renderizarListaViagens(){
   }
 
   const viagensFiltradas = dataIda
-    ? viagensCache.filter(v =>
-        viagemRodaNaData(v, dataIda) &&
-        !viagemExpiradaParaData(v, dataIda)
-      )
+    ? viagensCache.filter(v => viagemRodaNaData(v, dataIda))
     : viagensCache;
 
   if(!viagensFiltradas.length){
@@ -786,14 +755,6 @@ async function selecionarViagem(id, manterTela = false){
   }
 
   const dataIda = document.getElementById("dataIda").value;
-
-  if(dataIda && viagemExpiradaParaData(viagem, dataIda)){
-    setMsg(`Essa viagem de hoje às ${viagem.hora} já saiu e não pode mais ser vendida.`, "erro");
-    limparSelecaoViagem();
-    await renderizarListaViagens();
-    return;
-  }
-
   if(dataIda && !viagemRodaNaData(viagem, dataIda)){
     setMsg(`Essa viagem não roda na data escolhida. Dias disponíveis: ${viagem.dias || "-"}.`, "erro");
     limparSelecaoViagem();
@@ -1068,8 +1029,6 @@ async function verificarStatusPagamentoPassagem(pedidoId){
         verificadorPixPassagem = null;
       }
 
-      pedidoPixAtual = null;
-
       const dataIda = document.getElementById("dataIda").value;
       const tipoViagem = document.getElementById("tipoViagem").value;
       const dataVolta = document.getElementById("dataVolta").value;
@@ -1091,7 +1050,6 @@ async function verificarStatusPagamentoPassagem(pedidoId){
       }
 
       mostrarComprovanteReserva();
-      salvarEstadoParcial({ pedidoPixAtual: null, telaAtual: "comprovante" });
       poltronaSelecionada = null;
       await carregarPoltronas();
       return;
@@ -1244,10 +1202,6 @@ async function pagarEReservar(){
       return setMsg(`Essa viagem não roda na data de ida escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
     }
 
-    if(viagemExpiradaParaData(viagemAtual, dataIda)){
-      return setMsg(`Essa viagem de hoje às ${viagemAtual?.hora || ""} já saiu e não aceita mais venda.`, "erro");
-    }
-
     if(tipoViagem === "ida_volta" && dataVolta && !viagemRodaNaData(viagemAtual, dataVolta)){
       return setMsg(`Essa viagem não roda na data de volta escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
     }
@@ -1297,7 +1251,6 @@ async function pagarEReservar(){
     }
 
     const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
-    pedidoPixAtual = pedidoId;
     await registrarReservaPendente(fotoRgUrl, selfieUrl);
 
     const itemTitulo = `Passagem ${viagemAtual?.rota || ""} ${viagemAtual?.hora || ""} Poltrona ${poltronaSelecionada}`;
@@ -1344,7 +1297,7 @@ async function pagarEReservar(){
 
       document.getElementById("pixCopiaCola").value = copiaCola || "";
       setMsg("PIX gerado com sucesso. Faça o pagamento para confirmar a reserva.");
-      salvarEstadoParcial({ pedidoPixAtual: pedidoId, telaAtual: "poltronas" });
+      salvarEstadoParcial();
       iniciarVerificacaoPixPassagem(pedidoId);
       return;
     }
@@ -1383,12 +1336,9 @@ async function pagarEReservar(){
       const a = document.getElementById("checkoutLink");
       a.href = link;
       a.classList.remove("hidden");
-
       setMsg("Pagamento criado. Clique no botão abaixo para abrir o Mercado Pago.");
-
       salvarEstadoParcial();
-
-      window.location.href = link;
+      window.open(link, "_blank");
       return;
     }
 
@@ -1438,8 +1388,6 @@ function novaCompra(){
     clearInterval(verificadorPixPassagem);
     verificadorPixPassagem = null;
   }
-
-  pedidoPixAtual = null;
 
   document.getElementById("nome").value = "";
   document.getElementById("cpfRg").value = "";
@@ -1496,7 +1444,6 @@ async function restaurarEstadoSalvo(){
 
     codigoReservaGlobal = estado.codigoReservaGlobal || null;
     ultimoTextoRecibo = estado.ultimoTextoRecibo || "";
-    pedidoPixAtual = estado.pedidoPixAtual || null;
 
     if(estado.viagemSelecionada){
       await selecionarViagem(estado.viagemSelecionada, true);
@@ -1576,24 +1523,7 @@ async function restaurarEstadoSalvo(){
 
   restaurandoEstado = false;
   salvarEstadoParcial();
-
-  const estadoAtual = getEstadoSalvo();
-
-  if(pedidoPixAtual && estadoAtual.pixBoxDisplay === "block"){
-    iniciarVerificacaoPixPassagem(pedidoPixAtual);
-  }
 }
-
-["tipoViagem","formaPagamento","nome","cpfRg","whatsapp"].forEach(id => {
-  const el = document.getElementById(id);
-  if(!el) return;
-  el.addEventListener("input", () => salvarEstadoParcial());
-  el.addEventListener("change", () => salvarEstadoParcial());
-});
-
-window.addEventListener("beforeunload", () => {
-  salvarEstadoParcial();
-});
 
 document.getElementById("dataIda").value = hojeLocalISO();
 document.getElementById("dataVolta").value = hojeLocalISO();
@@ -1624,6 +1554,17 @@ document.getElementById("dataVolta").addEventListener("change", () => {
     valorBox.innerHTML = `Valor da passagem: <b>R$ ${calcularValorTotal().toFixed(2)}</b>`;
   }
 
+  salvarEstadoParcial();
+});
+
+["tipoViagem","formaPagamento","nome","cpfRg","whatsapp"].forEach(id => {
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener("input", () => salvarEstadoParcial());
+  el.addEventListener("change", () => salvarEstadoParcial());
+});
+
+window.addEventListener("beforeunload", () => {
   salvarEstadoParcial();
 });
 
