@@ -321,6 +321,7 @@ button:hover{opacity:.95}
     <img id="previewSelfie" style="width:100%;border-radius:12px;display:none;margin-top:10px;">
 
     <button onclick="pagarEReservar()">Pagar e Reservar</button>
+    <button type="button" onclick="forcarVerificacao()" style="background:#22c55e;">Já paguei</button>
 
     <div id="mensagem"></div>
 
@@ -370,7 +371,7 @@ const params = new URLSearchParams(location.search);
 const app_id_url = params.get("app_id");
 const slug = params.get("slug");
 
-const STORAGE_KEY = "ff_passagens_tela_fixa_v1";
+const STORAGE_KEY = "ff_passagens_tela_fixa_v2";
 
 let app_id = null;
 let configLoja = null;
@@ -381,6 +382,7 @@ let codigoReservaGlobal = null;
 let viagensCache = [];
 let verificadorPixPassagem = null;
 let streamSelfie = null;
+let pedidoPixAtual = null;
 let selfieBlob = null;
 let ultimoTextoRecibo = "";
 let telaAtual = "viagens";
@@ -391,6 +393,32 @@ function hojeLocalISO(){
   const off = d.getTimezoneOffset();
   const local = new Date(d.getTime() - off * 60000);
   return local.toISOString().slice(0, 10);
+}
+
+function agoraLocal(){
+  return new Date();
+}
+
+function montarDataHoraLocal(dataISO, horaStr){
+  if(!dataISO || !horaStr) return null;
+
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const partesHora = String(horaStr).trim().split(":");
+  const hora = Number(partesHora[0] || 0);
+  const minuto = Number(partesHora[1] || 0);
+
+  return new Date(ano, mes - 1, dia, hora, minuto, 0, 0);
+}
+
+function viagemExpiradaParaData(viagem, dataISO){
+  if(!viagem || !dataISO || !viagem.hora) return false;
+
+  const agora = agoraLocal();
+  const saida = montarDataHoraLocal(dataISO, viagem.hora);
+
+  if(!saida || isNaN(saida.getTime())) return false;
+
+  return agora >= saida;
 }
 
 function gerarCodigoReserva(){
@@ -417,6 +445,7 @@ function salvarEstadoParcial(extra = {}){
     viagemSelecionada,
     poltronaSelecionada,
     codigoReservaGlobal,
+    pedidoPixAtual,
     tipoViagem: document.getElementById("tipoViagem")?.value || "ida",
     dataIda: document.getElementById("dataIda")?.value || "",
     dataVolta: document.getElementById("dataVolta")?.value || "",
@@ -481,15 +510,9 @@ function mostrarTela(nome){
   document.getElementById("telaPoltronas").classList.add("hidden");
   document.getElementById("telaComprovante").classList.add("hidden");
 
-  if(nome === "viagens"){
-    document.getElementById("telaViagens").classList.remove("hidden");
-  }
-  if(nome === "poltronas"){
-    document.getElementById("telaPoltronas").classList.remove("hidden");
-  }
-  if(nome === "comprovante"){
-    document.getElementById("telaComprovante").classList.remove("hidden");
-  }
+  if(nome === "viagens") document.getElementById("telaViagens").classList.remove("hidden");
+  if(nome === "poltronas") document.getElementById("telaPoltronas").classList.remove("hidden");
+  if(nome === "comprovante") document.getElementById("telaComprovante").classList.remove("hidden");
 
   if(!restaurandoEstado){
     salvarEstadoParcial();
@@ -513,7 +536,10 @@ function atualizarCamposData(){
   }
 
   salvarEstadoParcial();
-  renderizarListaViagens();
+
+  if(!restaurandoEstado){
+    renderizarListaViagens();
+  }
 }
 
 function nomeDiaSemana(dataISO){
@@ -542,10 +568,7 @@ function viagemRodaNaData(viagem, dataISO){
     .map(v => normalizarDia(v))
     .filter(Boolean);
 
-  if(!diasViagem.length){
-    return true;
-  }
-
+  if(!diasViagem.length) return true;
   return diasViagem.includes(diaEscolhido);
 }
 
@@ -568,9 +591,7 @@ async function resolverAppId(){
       .eq("slug", slug)
       .maybeSingle();
 
-    if(error || !data?.id){
-      return false;
-    }
+    if(error || !data?.id) return false;
 
     app_id = data.id;
     return true;
@@ -677,7 +698,6 @@ async function carregarViagens(){
   }
 
   viagensCache = data || [];
-  await renderizarListaViagens();
 }
 
 async function renderizarListaViagens(){
@@ -686,7 +706,10 @@ async function renderizarListaViagens(){
   const estado = getEstadoSalvo();
 
   lista.innerHTML = "";
-  limparSelecaoViagem();
+
+  if(!restaurandoEstado){
+    limparSelecaoViagem();
+  }
 
   if(!viagensCache.length){
     lista.innerHTML = `<div class="vazio">Nenhuma viagem cadastrada.</div>`;
@@ -694,7 +717,10 @@ async function renderizarListaViagens(){
   }
 
   const viagensFiltradas = dataIda
-    ? viagensCache.filter(v => viagemRodaNaData(v, dataIda))
+    ? viagensCache.filter(v =>
+        viagemRodaNaData(v, dataIda) &&
+        !viagemExpiradaParaData(v, dataIda)
+      )
     : viagensCache;
 
   if(!viagensFiltradas.length){
@@ -734,8 +760,10 @@ async function renderizarListaViagens(){
 
 async function selecionarViagem(id, manterTela = false){
   viagemSelecionada = id;
-  poltronaSelecionada = null;
-  limparPagamentoUI();
+  if(!restaurandoEstado){
+    poltronaSelecionada = null;
+    limparPagamentoUI();
+  }
   setMsg("");
 
   document.querySelectorAll(".item-viagem").forEach(el => {
@@ -755,9 +783,21 @@ async function selecionarViagem(id, manterTela = false){
   }
 
   const dataIda = document.getElementById("dataIda").value;
+
+  if(dataIda && viagemExpiradaParaData(viagem, dataIda)){
+    setMsg(`Essa viagem de hoje às ${viagem.hora} já saiu e não pode mais ser vendida.`, "erro");
+    if(!restaurandoEstado){
+      limparSelecaoViagem();
+      await renderizarListaViagens();
+    }
+    return;
+  }
+
   if(dataIda && !viagemRodaNaData(viagem, dataIda)){
     setMsg(`Essa viagem não roda na data escolhida. Dias disponíveis: ${viagem.dias || "-"}.`, "erro");
-    limparSelecaoViagem();
+    if(!restaurandoEstado){
+      limparSelecaoViagem();
+    }
     return;
   }
 
@@ -773,8 +813,9 @@ async function selecionarViagem(id, manterTela = false){
     valorBox.classList.remove("hidden");
     valorBox.innerHTML = `Valor da passagem: <b>R$ ${valorTotal.toFixed(2)}</b>`;
   } else {
-    valorBox.classList.add("hidden");
-    valorBox.innerHTML = "";
+    valueBox = document.getElementById("valorViagem");
+    valueBox.classList.add("hidden");
+    valueBox.innerHTML = "";
   }
 
   await carregarPoltronas();
@@ -797,9 +838,7 @@ async function carregarPoltronas(){
     .eq("id", viagemSelecionada)
     .single();
 
-  if(!viagem?.veiculo_id){
-    return;
-  }
+  if(!viagem?.veiculo_id) return;
 
   const { data: veiculo } = await client
     .from("veiculos_passagens")
@@ -1029,6 +1068,8 @@ async function verificarStatusPagamentoPassagem(pedidoId){
         verificadorPixPassagem = null;
       }
 
+      pedidoPixAtual = null;
+
       const dataIda = document.getElementById("dataIda").value;
       const tipoViagem = document.getElementById("tipoViagem").value;
       const dataVolta = document.getElementById("dataVolta").value;
@@ -1050,6 +1091,7 @@ async function verificarStatusPagamentoPassagem(pedidoId){
       }
 
       mostrarComprovanteReserva();
+      salvarEstadoParcial({ pedidoPixAtual: null, telaAtual: "comprovante" });
       poltronaSelecionada = null;
       await carregarPoltronas();
       return;
@@ -1067,8 +1109,6 @@ async function verificarStatusPagamentoPassagem(pedidoId){
         clearInterval(verificadorPixPassagem);
         verificadorPixPassagem = null;
       }
-
-      return;
     }
   }catch(e){
     console.error("Erro verificar pagamento:", e);
@@ -1174,6 +1214,16 @@ function iniciarVerificacaoPixPassagem(pedidoId){
   }, 5000);
 }
 
+function forcarVerificacao(){
+  const estado = getEstadoSalvo();
+  const pedido = pedidoPixAtual || estado.pedidoPixAtual;
+  if(pedido){
+    verificarStatusPagamentoPassagem(pedido);
+  }else{
+    setMsg("Nenhum pagamento pendente para verificar.", "erro");
+  }
+}
+
 async function pagarEReservar(){
   try{
     setMsg("");
@@ -1200,6 +1250,10 @@ async function pagarEReservar(){
 
     if(!viagemRodaNaData(viagemAtual, dataIda)){
       return setMsg(`Essa viagem não roda na data de ida escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
+    }
+
+    if(viagemExpiradaParaData(viagemAtual, dataIda)){
+      return setMsg(`Essa viagem de hoje às ${viagemAtual?.hora || ""} já saiu e não aceita mais venda.`, "erro");
     }
 
     if(tipoViagem === "ida_volta" && dataVolta && !viagemRodaNaData(viagemAtual, dataVolta)){
@@ -1251,6 +1305,7 @@ async function pagarEReservar(){
     }
 
     const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
+    pedidoPixAtual = pedidoId;
     await registrarReservaPendente(fotoRgUrl, selfieUrl);
 
     const itemTitulo = `Passagem ${viagemAtual?.rota || ""} ${viagemAtual?.hora || ""} Poltrona ${poltronaSelecionada}`;
@@ -1296,8 +1351,8 @@ async function pagarEReservar(){
       }
 
       document.getElementById("pixCopiaCola").value = copiaCola || "";
-      setMsg("PIX gerado com sucesso. Faça o pagamento para confirmar a reserva.");
-      salvarEstadoParcial();
+      setMsg("PIX gerado com sucesso. Faça o pagamento e depois volte aqui.");
+      salvarEstadoParcial({ pedidoPixAtual: pedidoId, telaAtual: "poltronas" });
       iniciarVerificacaoPixPassagem(pedidoId);
       return;
     }
@@ -1336,8 +1391,10 @@ async function pagarEReservar(){
       const a = document.getElementById("checkoutLink");
       a.href = link;
       a.classList.remove("hidden");
-      setMsg("Pagamento criado. Clique no botão abaixo para abrir o Mercado Pago.");
-      salvarEstadoParcial();
+
+      setMsg("Pagamento criado. Abra o link, pague e depois volte aqui.");
+      salvarEstadoParcial({ pedidoPixAtual: pedidoId, telaAtual: "poltronas" });
+
       window.open(link, "_blank");
       return;
     }
@@ -1388,6 +1445,8 @@ function novaCompra(){
     clearInterval(verificadorPixPassagem);
     verificadorPixPassagem = null;
   }
+
+  pedidoPixAtual = null;
 
   document.getElementById("nome").value = "";
   document.getElementById("cpfRg").value = "";
@@ -1444,6 +1503,7 @@ async function restaurarEstadoSalvo(){
 
     codigoReservaGlobal = estado.codigoReservaGlobal || null;
     ultimoTextoRecibo = estado.ultimoTextoRecibo || "";
+    pedidoPixAtual = estado.pedidoPixAtual || null;
 
     if(estado.viagemSelecionada){
       await selecionarViagem(estado.viagemSelecionada, true);
@@ -1521,12 +1581,36 @@ async function restaurarEstadoSalvo(){
     mostrarTela("viagens");
   }
 
+  const estadoAtual = getEstadoSalvo();
+
+  if(pedidoPixAtual && estadoAtual.pixBoxDisplay === "block"){
+    iniciarVerificacaoPixPassagem(pedidoPixAtual);
+  }
+
   restaurandoEstado = false;
   salvarEstadoParcial();
 }
 
-document.getElementById("dataIda").value = hojeLocalISO();
-document.getElementById("dataVolta").value = hojeLocalISO();
+["tipoViagem","formaPagamento","nome","cpfRg","whatsapp"].forEach(id => {
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener("input", () => salvarEstadoParcial());
+  el.addEventListener("change", () => salvarEstadoParcial());
+});
+
+window.addEventListener("beforeunload", () => {
+  salvarEstadoParcial();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible"){
+    const estado = getEstadoSalvo();
+    const pedido = pedidoPixAtual || estado.pedidoPixAtual;
+    if(pedido){
+      iniciarVerificacaoPixPassagem(pedido);
+    }
+  }
+});
 
 document.getElementById("dataIda").addEventListener("change", async () => {
   setMsg("");
@@ -1557,22 +1641,29 @@ document.getElementById("dataVolta").addEventListener("change", () => {
   salvarEstadoParcial();
 });
 
-["tipoViagem","formaPagamento","nome","cpfRg","whatsapp"].forEach(id => {
-  const el = document.getElementById(id);
-  if(!el) return;
-  el.addEventListener("input", () => salvarEstadoParcial());
-  el.addEventListener("change", () => salvarEstadoParcial());
-});
-
-window.addEventListener("beforeunload", () => {
-  salvarEstadoParcial();
-});
-
 (async function init(){
-  atualizarCamposData();
+  restaurandoEstado = true;
+
+  document.getElementById("dataIda").value = hojeLocalISO();
+  document.getElementById("dataVolta").value = hojeLocalISO();
+
   mostrarTela("viagens");
-  await carregarViagens();
+
+  const ok = await resolverAppId();
+  if(ok){
+    await carregarConfigLoja();
+    await carregarViagens();
+  }else{
+    document.getElementById("listaViagens").innerHTML = `<div class="vazio">Negócio não identificado.</div>`;
+    restaurandoEstado = false;
+    return;
+  }
+
   await restaurarEstadoSalvo();
+
+  if(!viagemSelecionada){
+    await renderizarListaViagens();
+  }
 })();
 </script>
 
