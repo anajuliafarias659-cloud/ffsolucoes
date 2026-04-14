@@ -13,6 +13,7 @@ const supabase = createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+// SLUG
 function gerarSlugBase(texto){
   return String(texto || "")
     .toLowerCase()
@@ -28,27 +29,21 @@ async function gerarSlugUnico(nome){
   let i = 1;
 
   while(true){
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("apps")
       .select("id")
       .eq("slug", slug)
       .maybeSingle();
 
-    if (error) throw error;
-    if (!data) return slug;
+    if(!data) return slug;
 
     slug = `${base}-${i++}`;
   }
 }
 
-function montarLink(slug, tipo){
-  if(tipo === "passagens"){
-    return `${location.origin}/public/passagens/?slug=${slug}`;
-  }
-  return `${location.origin}/loj/${slug}`;
-}
-
+// CRIAR CONTA 30 DIAS
 window.criarConta = async () => {
+
   const nome = document.getElementById("nomeNegocio").value.trim();
   const tipo = document.getElementById("tipoNegocio").value;
   const email = document.getElementById("usuarioAdmin").value.trim().toLowerCase();
@@ -69,6 +64,7 @@ window.criarConta = async () => {
   botao.textContent = "Criando...";
 
   try {
+
     // AUTH
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
@@ -76,12 +72,13 @@ window.criarConta = async () => {
     });
 
     if (authError) throw authError;
+    const userId = authData.user.id;
 
-    const userId = authData?.user?.id;
-    if (!userId) {
-      throw new Error("Usuário não retornado pelo Auth.");
-    }
+    // 🔥 VENCIMENTO 30 DIAS
+    const vencimento = new Date();
+    vencimento.setDate(vencimento.getDate() + 30);
 
+    // SLUG
     const slug = await gerarSlugUnico(nome);
 
     // APP
@@ -93,6 +90,7 @@ window.criarConta = async () => {
         sistema: tipo,
         slug,
         plano: "ativo",
+        data_expiracao: vencimento.toISOString(),
         ativo: true
       })
       .select()
@@ -110,81 +108,68 @@ window.criarConta = async () => {
         tipo: "admin",
         sistema: tipo,
         app_id: app.id,
-        ativo: true
+        ativo: true,
+        data_expiracao: vencimento.toISOString()
       });
 
     if (usuarioError) throw usuarioError;
 
-    // CONFIG SITE
-    const { error: configError } = await supabase
-      .from("config_site")
-      .insert({
-        app_id: app.id,
-        nome_site: nome,
-        tema_site: "padrao",
-        modo_venda: "whatsapp",
-        modo_exibicao: "aberta",
-        loja_fechada: false
-      });
+    // CONFIG
+    await supabase.from("config_site").insert({
+      app_id: app.id,
+      nome_site: nome,
+      tema_site: "padrao",
+      modo_venda: "whatsapp",
+      modo_exibicao: "aberta",
+      loja_fechada: false
+    });
 
-    if (configError) throw configError;
+    // TIPOS
 
-    // GÁS
     if (tipo === "gas") {
-      const { error } = await supabase.from("lojas_gas").insert({
+      await supabase.from("lojas_gas").insert({
         app_id: app.id,
         nome_loja: nome,
         raio_entrega_km: 8,
         taxa_por_km: 2.5,
         ativa: true
       });
-      if (error) throw error;
     }
 
-    // BORRACHARIA
     if (tipo === "borracharia") {
-      const { error } = await supabase.from("borracheiros").insert({
+      await supabase.from("borracheiros").insert({
         user_id: userId,
         nome: nome,
         ativo: true
       });
-      if (error) throw error;
     }
 
-    // PASSAGENS
     if (tipo === "passagens") {
-      const { error: configPassagensError } = await supabase
-        .from("config_passagens")
-        .insert({
-          app_id: app.id,
-          nome_empresa: nome,
-          total_poltronas: 20,
-          valor_base: 0,
-          ativa: true
-        });
+      await supabase.from("config_passagens").insert({
+        app_id: app.id,
+        nome_empresa: nome,
+        total_poltronas: 20,
+        valor_base: 0,
+        ativa: true
+      });
 
-      if (configPassagensError) throw configPassagensError;
-
-      const { error: viagemError } = await supabase
-        .from("viagens")
-        .insert({
-          rota: "Cidade A → Cidade B",
-          hora: "08:00",
-          dias: "Seg,Qua,Sex",
-          app_id: app.id,
-          ativo: true
-        });
-
-      if (viagemError) throw viagemError;
+      // ⚠️ se sua tabela viagens der erro, comenta isso
+      await supabase.from("viagens").insert({
+        rota: "Cidade A → Cidade B",
+        hora: "08:00",
+        dias: "Seg,Qua,Sex",
+        app_id: app.id,
+        ativo: true
+      });
     }
 
-    alert("Conta criada com sucesso!");
+    alert("Conta criada! Válida por 30 dias.");
 
     window.location.href = "https://www.ffsolucoes.com.br/auth/login.html";
 
   } catch (err) {
-    console.error("ERRO COMPLETO:", err);
-    alert("Erro ao criar conta: " + (err.message || JSON.stringify(err)));
+    console.error(err);
+    alert(err.message || "Erro ao criar conta");
   }
 
   botao.disabled = false;
@@ -193,8 +178,6 @@ window.criarConta = async () => {
 </script>
 
 <style>
-*{box-sizing:border-box}
-
 body{
   margin:0;
   min-height:100vh;
@@ -202,9 +185,8 @@ body{
   justify-content:center;
   align-items:center;
   background:#020617;
-  font-family:Arial, sans-serif;
+  font-family:Arial;
   color:#fff;
-  padding:20px;
 }
 
 .box{
@@ -213,20 +195,6 @@ body{
   background:#0f172a;
   padding:30px;
   border-radius:20px;
-  box-shadow:0 10px 30px rgba(0,0,0,.35);
-}
-
-h2{
-  margin:0 0 10px;
-  font-size:26px;
-  text-align:center;
-}
-
-.sub{
-  margin:0 0 20px;
-  text-align:center;
-  color:#94a3b8;
-  font-size:14px;
 }
 
 input,select,button{
@@ -235,42 +203,25 @@ input,select,button{
   margin-top:10px;
   border-radius:12px;
   border:none;
-  font-size:15px;
 }
 
 input,select{
   background:#111827;
   color:#fff;
-  outline:none;
-}
-
-input::placeholder{
-  color:#94a3b8;
 }
 
 button{
   background:#22c55e;
-  color:#fff;
   font-weight:bold;
   cursor:pointer;
-  transition:.2s;
-}
-
-button:hover{
-  opacity:.95;
-}
-
-button:disabled{
-  opacity:.7;
-  cursor:not-allowed;
 }
 </style>
 </head>
+
 <body>
 
 <div class="box">
   <h2>✅ Cadastro de Conta</h2>
-  <p class="sub">Crie uma conta já válida no sistema</p>
 
   <input id="nomeNegocio" placeholder="Nome do negócio">
 
