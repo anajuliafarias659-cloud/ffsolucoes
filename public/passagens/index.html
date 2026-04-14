@@ -393,6 +393,32 @@ function hojeLocalISO(){
   return local.toISOString().slice(0, 10);
 }
 
+function agoraLocal(){
+  return new Date();
+}
+
+function montarDataHoraLocal(dataISO, horaStr){
+  if(!dataISO || !horaStr) return null;
+
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const partesHora = String(horaStr).trim().split(":");
+  const hora = Number(partesHora[0] || 0);
+  const minuto = Number(partesHora[1] || 0);
+
+  return new Date(ano, mes - 1, dia, hora, minuto, 0, 0);
+}
+
+function viagemExpiradaParaData(viagem, dataISO){
+  if(!viagem || !dataISO || !viagem.hora) return false;
+
+  const agora = agoraLocal();
+  const saida = montarDataHoraLocal(dataISO, viagem.hora);
+
+  if(!saida || isNaN(saida.getTime())) return false;
+
+  return agora >= saida;
+}
+
 function gerarCodigoReserva(){
   const parte1 = Date.now().toString().slice(-6);
   const parte2 = Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -694,8 +720,11 @@ async function renderizarListaViagens(){
   }
 
   const viagensFiltradas = dataIda
-    ? viagensCache.filter(v => viagemRodaNaData(v, dataIda))
-    : viagensCache;
+  ? viagensCache.filter(v =>
+      viagemRodaNaData(v, dataIda) &&
+      !viagemExpiradaParaData(v, dataIda)
+    )
+  : viagensCache;
 
   if(!viagensFiltradas.length){
     lista.innerHTML = `<div class="vazio">Nenhuma viagem disponível para a data escolhida.</div>`;
@@ -756,6 +785,12 @@ async function selecionarViagem(id, manterTela = false){
 
   const dataIda = document.getElementById("dataIda").value;
   if(dataIda && !viagemRodaNaData(viagem, dataIda)){
+    if(dataIda && viagemExpiradaParaData(viagem, dataIda)){
+  setMsg(`Essa viagem de hoje às ${viagem.hora} já saiu e não pode mais ser vendida.`, "erro");
+  limparSelecaoViagem();
+  await renderizarListaViagens();
+  return;
+}
     setMsg(`Essa viagem não roda na data escolhida. Dias disponíveis: ${viagem.dias || "-"}.`, "erro");
     limparSelecaoViagem();
     return;
@@ -1201,7 +1236,9 @@ async function pagarEReservar(){
     if(!viagemRodaNaData(viagemAtual, dataIda)){
       return setMsg(`Essa viagem não roda na data de ida escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
     }
-
+if(viagemExpiradaParaData(viagemAtual, dataIda)){
+  return setMsg(`Essa viagem de hoje às ${viagemAtual?.hora || ""} já saiu e não aceita mais venda.`, "erro");
+}
     if(tipoViagem === "ida_volta" && dataVolta && !viagemRodaNaData(viagemAtual, dataVolta)){
       return setMsg(`Essa viagem não roda na data de volta escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
     }
