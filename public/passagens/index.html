@@ -351,11 +351,12 @@ button:hover{opacity:.95}
       <textarea id="textoRecibo" class="recibo-texto" readonly></textarea>
 
       <div class="botoes-comprovante">
-        <button onclick="copiarRecibo()">Copiar recibo</button>
-        <button onclick="baixarPDFRecibo()">Baixar PDF do recibo</button>
-        <a id="btnWhatsRecibo" class="link-btn" target="_blank" rel="noopener">Enviar recibo no WhatsApp</a>
-        <button onclick="novaCompra()">Nova compra</button>
-      </div>
+  <button onclick="copiarRecibo()">Copiar recibo</button>
+  <button onclick="baixarPDFRecibo()">Baixar PDF do recibo</button>
+  <button onclick="compartilharReciboComQR()">Compartilhar recibo com QR</button>
+  <a id="btnWhatsRecibo" class="link-btn" target="_blank" rel="noopener">Enviar texto no WhatsApp</a>
+  <button onclick="novaCompra()">Nova compra</button>
+</div>
     </div>
   </div>
 
@@ -1115,13 +1116,141 @@ async function verificarStatusPagamentoPassagem(pedidoId){
   }
 }
 
+function formatarDataPadrao(dataISO){
+  if(!dataISO) return "";
+
+  const partes = String(dataISO).split("-");
+  if(partes.length === 3){
+    const [ano, mes, dia] = partes;
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  return dataISO;
+}
+
+function dataURLToBlob(dataURL){
+  const arr = dataURL.split(",");
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+
+  while(n--){
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+
+  return new Blob([u8arr], { type: mime });
+}
+
+async function gerarImagemReciboComQR(){
+  const texto = document.getElementById("textoRecibo").value || "";
+  const qrSrc = document.getElementById("qrReservaImg").src || "";
+
+  if(!texto){
+    throw new Error("Recibo vazio.");
+  }
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const largura = 900;
+  const altura = 1300;
+  canvas.width = largura;
+  canvas.height = altura;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, largura, altura);
+
+  ctx.fillStyle = "#111111";
+  ctx.font = "bold 34px Arial";
+  ctx.fillText("FF TRANSPORTE", 40, 60);
+
+  ctx.font = "24px Arial";
+  ctx.fillText("Comprovante de Reserva", 40, 105);
+
+  const qrImg = new Image();
+  qrImg.crossOrigin = "anonymous";
+
+  await new Promise((resolve, reject) => {
+    qrImg.onload = resolve;
+    qrImg.onerror = reject;
+    qrImg.src = qrSrc;
+  });
+
+  ctx.drawImage(qrImg, largura - 300, 40, 220, 220);
+
+  ctx.font = "22px Arial";
+  ctx.fillStyle = "#222222";
+
+  const linhas = texto.split("\n");
+  let y = 300;
+  const x = 40;
+  const maxWidth = largura - 80;
+
+  function quebrarLinha(str, larguraMax){
+    const palavras = String(str).split(" ");
+    const saida = [];
+    let linha = "";
+
+    for(const palavra of palavras){
+      const teste = linha ? `${linha} ${palavra}` : palavra;
+      if(ctx.measureText(teste).width > larguraMax){
+        if(linha) saida.push(linha);
+        linha = palavra;
+      }else{
+        linha = teste;
+      }
+    }
+
+    if(linha) saida.push(linha);
+    return saida.length ? saida : [""];
+  }
+
+  for(const linha of linhas){
+    const partes = quebrarLinha(linha, maxWidth);
+    for(const parte of partes){
+      ctx.fillText(parte, x, y);
+      y += 34;
+    }
+  }
+
+  return canvas.toDataURL("image/png");
+}
+
+async function compartilharReciboComQR(){
+  try{
+    const dataUrl = await gerarImagemReciboComQR();
+    const blob = dataURLToBlob(dataUrl);
+    const arquivo = new File(
+      [blob],
+      `recibo-${codigoReservaGlobal || "passagem"}.png`,
+      { type: "image/png" }
+    );
+
+    if(navigator.canShare && navigator.canShare({ files: [arquivo] })){
+      await navigator.share({
+        title: "Recibo da passagem",
+        text: "Segue o recibo da passagem com QR Code.",
+        files: [arquivo]
+      });
+      return;
+    }
+
+    await navigator.clipboard.writeText(document.getElementById("textoRecibo").value || "");
+    alert("Seu aparelho não suporta compartilhamento de arquivo. O texto do recibo foi copiado.");
+  }catch(e){
+    console.error(e);
+    alert("Não foi possível compartilhar o recibo com QR.");
+  }
+}
+
 function montarTextoRecibo(){
   const nome = document.getElementById("nome").value.trim();
   const cpfRg = document.getElementById("cpfRg").value.trim();
   const whatsapp = document.getElementById("whatsapp").value.trim();
-  const dataIda = document.getElementById("dataIda").value;
+  const dataIda = formatarDataPadrao(document.getElementById("dataIda").value);
   const tipoViagem = document.getElementById("tipoViagem").value;
-  const dataVolta = document.getElementById("dataVolta").value;
+  const dataVolta = formatarDataPadrao(document.getElementById("dataVolta").value);
   const valorTotal = calcularValorTotal();
 
   return (
@@ -1147,9 +1276,9 @@ function mostrarComprovanteReserva(){
   const nome = document.getElementById("nome").value.trim();
   const cpfRg = document.getElementById("cpfRg").value.trim();
   const whatsapp = document.getElementById("whatsapp").value.trim();
-  const dataIda = document.getElementById("dataIda").value;
+  const dataIda = formatarDataPadrao(document.getElementById("dataIda").value);
   const tipoViagem = document.getElementById("tipoViagem").value;
-  const dataVolta = document.getElementById("dataVolta").value;
+  const dataVolta = formatarDataPadrao(document.getElementById("dataVolta").value);
   const codigoReserva = codigoReservaGlobal;
   const valorTotal = calcularValorTotal();
 
@@ -1423,21 +1552,38 @@ function copiarRecibo(){
     .catch(() => alert("Não foi possível copiar o recibo."));
 }
 
-function baixarPDFRecibo(){
+async function baixarPDFRecibo(){
   const txt = document.getElementById("textoRecibo").value || "";
+  const qrSrc = document.getElementById("qrReservaImg").src || "";
+
   if(!txt){
     alert("Recibo vazio.");
     return;
   }
 
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const linhas = doc.splitTextToSize(txt, 180);
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(12);
-  doc.text(linhas, 15, 20);
-  doc.save(`recibo-${codigoReservaGlobal || "passagem"}.pdf`);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("FF TRANSPORTE - COMPROVANTE", 15, 20);
+
+    if(qrSrc){
+      doc.addImage(qrSrc, "PNG", 145, 15, 45, 45);
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(12);
+
+    const linhas = doc.splitTextToSize(txt, 120);
+    doc.text(linhas, 15, 35);
+
+    doc.save(`recibo-${codigoReservaGlobal || "passagem"}.pdf`);
+  }catch(e){
+    console.error(e);
+    alert("Não foi possível gerar o PDF com QR.");
+  }
 }
 
 function novaCompra(){
