@@ -271,6 +271,19 @@ button:hover{opacity:.95}
 
     <div id="infoViagem" class="info-viagem"></div>
     <div id="valorViagem" class="valor-box hidden"></div>
+    <div id="boxTrecho" class="hidden">
+  <div class="label">Origem do trecho</div>
+  <select id="origemTrechoPublico" onchange="aoTrocarTrechoPublico()">
+    <option value="">Selecione a origem</option>
+  </select>
+
+  <div class="label">Destino do trecho</div>
+  <select id="destinoTrechoPublico" onchange="aoTrocarTrechoPublico()">
+    <option value="">Selecione o destino</option>
+  </select>
+
+  <div id="resumoTrechoPublico" class="valor-box hidden"></div>
+</div>
 
     <select id="formaPagamento">
   <option value="">Forma de pagamento</option>
@@ -389,6 +402,10 @@ let selfieBlob = null;
 let ultimoTextoRecibo = "";
 let telaAtual = "viagens";
 let restaurandoEstado = false;
+let paradasPublicas = [];
+let precosTrechosPublicos = [];
+let origemTrechoSelecionada = null;
+let destinoTrechoSelecionado = null;
 
 function hojeLocalISO(){
   const d = new Date();
@@ -576,7 +593,16 @@ function viagemRodaNaData(viagem, dataISO){
 
 function calcularValorTotal(){
   const tipoViagem = document.getElementById("tipoViagem").value;
-  const valorBase = Number(viagemAtual?.valor || 0);
+
+  let valorBase = Number(viagemAtual?.valor || 0);
+
+  if(origemTrechoSelecionada && destinoTrechoSelecionado){
+    const valorTrecho = getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado);
+    if(valorTrecho > 0){
+      valorBase = valorTrecho;
+    }
+  }
+
   return tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
 }
 
@@ -673,6 +699,136 @@ function capturarSelfie(){
   document.getElementById("btnCapturarSelfie").style.display = "none";
 }
 
+function trechosConflitam(origemA, destinoA, origemB, destinoB){
+  origemA = Number(origemA || 0);
+  destinoA = Number(destinoA || 0);
+  origemB = Number(origemB || 0);
+  destinoB = Number(destinoB || 0);
+
+  if(!origemA || !destinoA || !origemB || !destinoB) return true;
+  return origemA < destinoB && destinoA > origemB;
+}
+
+function preencherSelectTrechosPublicos(){
+  const origem = document.getElementById("origemTrechoPublico");
+  const destino = document.getElementById("destinoTrechoPublico");
+
+  origem.innerHTML = `<option value="">Selecione a origem</option>`;
+  destino.innerHTML = `<option value="">Selecione o destino</option>`;
+
+  paradasPublicas
+    .slice()
+    .sort((a,b) => Number(a.ordem) - Number(b.ordem))
+    .forEach(p => {
+      origem.innerHTML += `<option value="${p.ordem}">${p.ordem} - ${p.cidade}</option>`;
+      destino.innerHTML += `<option value="${p.ordem}">${p.ordem} - ${p.cidade}</option>`;
+    });
+}
+
+function getTextoTrechoPublico(origem, destino){
+  const o = paradasPublicas.find(p => Number(p.ordem) === Number(origem));
+  const d = paradasPublicas.find(p => Number(p.ordem) === Number(destino));
+  if(!o || !d) return "Viagem inteira";
+  return `${o.cidade} → ${d.cidade}`;
+}
+
+function getPrecoTrechoPublico(origem, destino){
+  const item = precosTrechosPublicos.find(p =>
+    Number(p.origem_ordem) === Number(origem) &&
+    Number(p.destino_ordem) === Number(destino)
+  );
+  return item ? Number(item.valor || 0) : 0;
+}
+
+async function carregarTrechosDaViagemPublica(viagemId){
+  paradasPublicas = [];
+  precosTrechosPublicos = [];
+  origemTrechoSelecionada = null;
+  destinoTrechoSelecionado = null;
+
+  document.getElementById("boxTrecho").classList.add("hidden");
+  document.getElementById("resumoTrechoPublico").classList.add("hidden");
+  document.getElementById("resumoTrechoPublico").innerHTML = "";
+
+  if(!viagemId) return;
+
+  const { data: paradas, error: erroParadas } = await client
+    .from("viagens_paradas")
+    .select("*")
+    .eq("app_id", app_id)
+    .eq("viagem_id", viagemId)
+    .order("ordem", { ascending:true });
+
+  if(erroParadas){
+    console.error("Erro ao carregar paradas:", erroParadas);
+    return;
+  }
+
+  paradasPublicas = paradas || [];
+
+  if(!paradasPublicas.length){
+    return;
+  }
+
+  const { data: precos, error: erroPrecos } = await client
+    .from("viagens_precos_trechos")
+    .select("*")
+    .eq("app_id", app_id)
+    .eq("viagem_id", viagemId)
+    .order("origem_ordem", { ascending:true });
+
+  if(erroPrecos){
+    console.error("Erro ao carregar preços por trecho:", erroPrecos);
+    return;
+  }
+
+  precosTrechosPublicos = precos || [];
+
+  document.getElementById("boxTrecho").classList.remove("hidden");
+  preencherSelectTrechosPublicos();
+}
+
+window.aoTrocarTrechoPublico = async function(){
+  origemTrechoSelecionada = document.getElementById("origemTrechoPublico").value || null;
+  destinoTrechoSelecionado = document.getElementById("destinoTrechoPublico").value || null;
+
+  const resumo = document.getElementById("resumoTrechoPublico");
+
+  if(!origemTrechoSelecionada || !destinoTrechoSelecionado){
+    resumo.classList.add("hidden");
+    resumo.innerHTML = "";
+    document.getElementById("valorViagem").classList.add("hidden");
+    document.getElementById("valorViagem").innerHTML = "";
+    await carregarPoltronas();
+    return;
+  }
+
+  if(Number(origemTrechoSelecionada) >= Number(destinoTrechoSelecionado)){
+    resumo.classList.remove("hidden");
+    resumo.innerHTML = "O destino precisa ser depois da origem.";
+    document.getElementById("valorViagem").classList.add("hidden");
+    document.getElementById("valorViagem").innerHTML = "";
+    await carregarPoltronas();
+    return;
+  }
+
+  const texto = getTextoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado);
+  const valorTrecho = getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado);
+
+  resumo.classList.remove("hidden");
+  resumo.innerHTML = `
+    <b>Trecho:</b> ${texto}<br>
+    <b>Valor do trecho:</b> ${valorTrecho > 0 ? "R$ " + valorTrecho.toFixed(2) : "não cadastrado"}
+  `;
+
+  const tipoViagem = document.getElementById("tipoViagem").value;
+  const valorTotal = tipoViagem === "ida_volta" ? valorTrecho * 2 : valorTrecho;
+
+  document.getElementById("valorViagem").classList.remove("hidden");
+  document.getElementById("valorViagem").innerHTML = `Valor da passagem: <b>R$ ${Number(valorTotal || 0).toFixed(2)}</b>`;
+
+  await carregarPoltronas();
+};
 async function carregarViagens(){
   const lista = document.getElementById("listaViagens");
   lista.innerHTML = "";
@@ -804,21 +960,24 @@ async function selecionarViagem(id, manterTela = false){
   }
 
   viagemAtual = viagem;
+  await carregarTrechosDaViagemPublica(id);
 
   document.getElementById("infoViagem").innerHTML =
     `<b>${viagem.rota || ""}</b> - ${viagem.hora || ""}`;
 
   const valorBox = document.getElementById("valorViagem");
-  const valorTotal = calcularValorTotal();
+const valorTotal = calcularValorTotal();
 
-  if(viagem.valor !== null && viagem.valor !== undefined && viagem.valor !== ""){
-    valorBox.classList.remove("hidden");
-    valorBox.innerHTML = `Valor da passagem: <b>R$ ${valorTotal.toFixed(2)}</b>`;
-  } else {
-    valueBox = document.getElementById("valorViagem");
-    valueBox.classList.add("hidden");
-    valueBox.innerHTML = "";
-  }
+if(paradasPublicas.length){
+  valorBox.classList.add("hidden");
+  valorBox.innerHTML = "";
+}else if(viagem.valor !== null && viagem.valor !== undefined && viagem.valor !== ""){
+  valorBox.classList.remove("hidden");
+  valorBox.innerHTML = `Valor da passagem: <b>R$ ${valorTotal.toFixed(2)}</b>`;
+}else{
+  valorBox.classList.add("hidden");
+  valorBox.innerHTML = "";
+}
 
   await carregarPoltronas();
 
@@ -853,7 +1012,7 @@ async function carregarPoltronas(){
 
   let query = client
     .from("reservas_passagens")
-    .select("poltrona, status, data_viagem")
+    .select("*")
     .eq("viagem_id", viagemSelecionada);
 
   if(dataIda){
@@ -865,7 +1024,21 @@ async function carregarPoltronas(){
   const ocupadas = (reservas || [])
     .filter(r => {
       const status = String(r.status || "").toLowerCase().trim();
-      return status !== "cancelado" && status !== "cancelada";
+      if(status === "cancelado" || status === "cancelada") return false;
+
+      if(!origemTrechoSelecionada || !destinoTrechoSelecionado) return true;
+
+      const origemReserva = Number(r.origem_ordem || 0);
+      const destinoReserva = Number(r.destino_ordem || 0);
+
+      if(!origemReserva || !destinoReserva) return true;
+
+      return trechosConflitam(
+        origemTrechoSelecionada,
+        destinoTrechoSelecionado,
+        origemReserva,
+        destinoReserva
+      );
     })
     .map(r => Number(r.poltrona));
 
@@ -958,6 +1131,10 @@ async function criarPedidoPassagem(fotoRgUrl = "", selfieUrl = ""){
   const formaPagamento = document.getElementById("formaPagamento").value;
   const cpfRg = document.getElementById("cpfRg").value.trim();
   const whatsapp = document.getElementById("whatsapp").value.trim();
+  origem: origemTrechoSelecionada ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || null) : null,
+destino: destinoTrechoSelecionado ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || null) : null,
+origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
+destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
 
   const valorBase = Number(viagemAtual?.valor || 0);
   const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
@@ -979,7 +1156,9 @@ async function criarPedidoPassagem(fotoRgUrl = "", selfieUrl = ""){
       data_ida: dataIda,
       data_volta: tipoViagem === "ida_volta" ? dataVolta : null,
       poltrona: poltronaSelecionada,
-      valor_unitario: valorBase,
+      valor_unitario: origemTrechoSelecionada && destinoTrechoSelecionado
+  ? Number(getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado) || 0)
+  : valorBase,
       valor_total: valorTotal,
       codigo_embarque: codigoReservaGlobal,
       foto_rg: fotoRgUrl,
@@ -1009,7 +1188,13 @@ async function registrarReservaPendente(fotoRgUrl = "", selfieUrl = ""){
   const dataVolta = document.getElementById("dataVolta").value;
   const cpfRg = document.getElementById("cpfRg").value.trim();
   const whatsapp = document.getElementById("whatsapp").value.trim();
-
+origem: origemTrechoSelecionada ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || null) : null,
+destino: destinoTrechoSelecionado ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || null) : null,
+origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
+destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
+valor_trecho: origemTrechoSelecionada && destinoTrechoSelecionado
+  ? Number(getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado) || 0)
+  : null,
   const reservas = [{
     viagem_id: viagemSelecionada,
     poltrona: poltronaSelecionada,
@@ -1377,6 +1562,20 @@ async function pagarEReservar(){
     if(tipoViagem === "ida_volta" && dataVolta < dataIda) return setMsg("A data de volta não pode ser menor que a data de ida.", "erro");
     if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
     if(!configLoja) return setMsg("Configuração da loja não encontrada.", "erro");
+    if(paradasPublicas.length){
+  if(!origemTrechoSelecionada || !destinoTrechoSelecionado){
+    return setMsg("Selecione origem e destino do trecho.", "erro");
+  }
+
+  if(Number(origemTrechoSelecionada) >= Number(destinoTrechoSelecionado)){
+    return setMsg("O destino precisa ser depois da origem.", "erro");
+  }
+
+  const valorTrecho = getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado);
+  if(!valorTrecho || valorTrecho <= 0){
+    return setMsg("Esse trecho não tem preço cadastrado.", "erro");
+  }
+}
 
     if(!viagemRodaNaData(viagemAtual, dataIda)){
       return setMsg(`Essa viagem não roda na data de ida escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
@@ -1489,6 +1688,67 @@ if(formaPagamento === "embarque"){
   return;
 }
 
+if(formaPagamento === "embarque"){
+  const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
+  pedidoPixAtual = pedidoId;
+
+  const reservas = [{
+    viagem_id: viagemSelecionada,
+    poltrona: poltronaSelecionada,
+    nome,
+    app_id,
+    data_viagem: dataIda,
+    status: "reservado",
+    codigo_embarque: codigoReservaGlobal,
+    cpf_rg: cpfRg,
+    whatsapp: whatsapp,
+    foto_rg: fotoRgUrl,
+    selfie: selfieUrl,
+    origem: origemTrechoSelecionada ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || null) : null,
+    destino: destinoTrechoSelecionado ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || null) : null,
+    origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
+    destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
+    valor_trecho: origemTrechoSelecionada && destinoTrechoSelecionado
+      ? Number(getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado) || 0)
+      : null
+  }];
+
+  if(tipoViagem === "ida_volta" && dataVolta){
+    reservas.push({
+      viagem_id: viagemSelecionada,
+      poltrona: poltronaSelecionada,
+      nome: `${nome} (volta)`,
+      app_id,
+      data_viagem: dataVolta,
+      status: "reservado",
+      codigo_embarque: codigoReservaGlobal,
+      cpf_rg: cpfRg,
+      whatsapp: whatsapp,
+      foto_rg: fotoRgUrl,
+      selfie: selfieUrl,
+      origem: origemTrechoSelecionada ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || null) : null,
+      destino: destinoTrechoSelecionado ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || null) : null,
+      origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
+      destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
+      valor_trecho: origemTrechoSelecionada && destinoTrechoSelecionado
+        ? Number(getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado) || 0)
+        : null
+    });
+  }
+
+  const { error } = await client
+    .from("reservas_passagens")
+    .insert(reservas);
+
+  if(error){
+    throw new Error(error.message);
+  }
+
+  setMsg("✅ Reserva feita! Pagamento no embarque.");
+  mostrarComprovanteReserva();
+  await carregarPoltronas();
+  return;
+}
     if(formaPagamento === "PIX"){
       const res = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-loja", {
         method: "POST",
