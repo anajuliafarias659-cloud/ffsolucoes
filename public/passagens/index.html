@@ -1562,20 +1562,6 @@ async function pagarEReservar(){
     if(tipoViagem === "ida_volta" && dataVolta < dataIda) return setMsg("A data de volta não pode ser menor que a data de ida.", "erro");
     if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
     if(!configLoja) return setMsg("Configuração da loja não encontrada.", "erro");
-    if(paradasPublicas.length){
-  if(!origemTrechoSelecionada || !destinoTrechoSelecionado){
-    return setMsg("Selecione origem e destino do trecho.", "erro");
-  }
-
-  if(Number(origemTrechoSelecionada) >= Number(destinoTrechoSelecionado)){
-    return setMsg("O destino precisa ser depois da origem.", "erro");
-  }
-
-  const valorTrecho = getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado);
-  if(!valorTrecho || valorTrecho <= 0){
-    return setMsg("Esse trecho não tem preço cadastrado.", "erro");
-  }
-}
 
     if(!viagemRodaNaData(viagemAtual, dataIda)){
       return setMsg(`Essa viagem não roda na data de ida escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
@@ -1589,7 +1575,26 @@ async function pagarEReservar(){
       return setMsg(`Essa viagem não roda na data de volta escolhida. Dias disponíveis: ${viagemAtual?.dias || "-"}.`, "erro");
     }
 
-    const valorBase = Number(viagemAtual?.valor || 0);
+    if(paradasPublicas.length){
+      if(!origemTrechoSelecionada || !destinoTrechoSelecionado){
+        return setMsg("Selecione origem e destino do trecho.", "erro");
+      }
+
+      if(Number(origemTrechoSelecionada) >= Number(destinoTrechoSelecionado)){
+        return setMsg("O destino precisa ser depois da origem.", "erro");
+      }
+
+      const valorTrechoTeste = getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado);
+      if(!valorTrechoTeste || valorTrechoTeste <= 0){
+        return setMsg("Esse trecho não tem preço cadastrado.", "erro");
+      }
+    }
+
+    const valorBaseOriginal = Number(viagemAtual?.valor || 0);
+    const valorBase = (origemTrechoSelecionada && destinoTrechoSelecionado)
+      ? Number(getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado) || 0)
+      : valorBaseOriginal;
+
     const valorTotal = tipoViagem === "ida_volta" ? valorBase * 2 : valorBase;
 
     codigoReservaGlobal = gerarCodigoReserva();
@@ -1607,6 +1612,14 @@ async function pagarEReservar(){
       selfieUrl = await uploadImagem(selfieBlob, "selfie");
     }
 
+    const origemCidade = origemTrechoSelecionada
+      ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || null)
+      : null;
+
+    const destinoCidade = destinoTrechoSelecionado
+      ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || null)
+      : null;
+
     if(configLoja.modo_venda === "whatsapp"){
       const texto = encodeURIComponent(
         `Olá! Quero comprar uma passagem.\n` +
@@ -1615,6 +1628,8 @@ async function pagarEReservar(){
         `${tipoViagem === "ida_volta" ? `Data volta: ${dataVolta}\n` : ""}` +
         `Viagem: ${viagemAtual?.rota || ""}\n` +
         `Hora: ${viagemAtual?.hora || ""}\n` +
+        `${origemCidade ? `Origem: ${origemCidade}\n` : ""}` +
+        `${destinoCidade ? `Destino: ${destinoCidade}\n` : ""}` +
         `Poltrona: ${poltronaSelecionada}\n` +
         `Nome: ${nome}\n` +
         `Valor: R$ ${valorTotal.toFixed(2)}`
@@ -1633,122 +1648,72 @@ async function pagarEReservar(){
       return setMsg("Modo de venda inválido na configuração da loja.", "erro");
     }
 
+    if(formaPagamento === "embarque"){
+      const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
+      pedidoPixAtual = pedidoId;
+
+      const reservas = [{
+        viagem_id: viagemSelecionada,
+        poltrona: poltronaSelecionada,
+        nome,
+        app_id,
+        data_viagem: dataIda,
+        status: "reservado",
+        codigo_embarque: codigoReservaGlobal,
+        cpf_rg: cpfRg,
+        whatsapp: whatsapp,
+        foto_rg: fotoRgUrl,
+        selfie: selfieUrl,
+        origem: origemCidade,
+        destino: destinoCidade,
+        origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
+        destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
+        valor_trecho: origemTrechoSelecionada && destinoTrechoSelecionado ? valorBase : null
+      }];
+
+      if(tipoViagem === "ida_volta" && dataVolta){
+        reservas.push({
+          viagem_id: viagemSelecionada,
+          poltrona: poltronaSelecionada,
+          nome: `${nome} (volta)`,
+          app_id,
+          data_viagem: dataVolta,
+          status: "reservado",
+          codigo_embarque: codigoReservaGlobal,
+          cpf_rg: cpfRg,
+          whatsapp: whatsapp,
+          foto_rg: fotoRgUrl,
+          selfie: selfieUrl,
+          origem: origemCidade,
+          destino: destinoCidade,
+          origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
+          destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
+          valor_trecho: origemTrechoSelecionada && destinoTrechoSelecionado ? valorBase : null
+        });
+      }
+
+      const { error } = await client
+        .from("reservas_passagens")
+        .insert(reservas);
+
+      if(error){
+        throw new Error(error.message || "Erro ao registrar reserva no embarque.");
+      }
+
+      setMsg("✅ Reserva feita! Pagamento no embarque.");
+      mostrarComprovanteReserva();
+      await carregarPoltronas();
+      return;
+    }
+
     const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
     pedidoPixAtual = pedidoId;
     await registrarReservaPendente(fotoRgUrl, selfieUrl);
 
-    const itemTitulo = `Passagem ${viagemAtual?.rota || ""} ${viagemAtual?.hora || ""} Poltrona ${poltronaSelecionada}`;
-   
-    // PAGAR NO EMBARQUE
-if(formaPagamento === "embarque"){
-  const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
-  pedidoPixAtual = pedidoId;
+    const itemTitulo = origemCidade && destinoCidade
+      ? `Passagem ${origemCidade} → ${destinoCidade} ${viagemAtual?.hora || ""} Poltrona ${poltronaSelecionada}`
+      : `Passagem ${viagemAtual?.rota || ""} ${viagemAtual?.hora || ""} Poltrona ${poltronaSelecionada}`;
 
-  const reservas = [{
-    viagem_id: viagemSelecionada,
-    poltrona: poltronaSelecionada,
-    nome,
-    app_id,
-    data_viagem: dataIda,
-    status: "reservado",
-    codigo_embarque: codigoReservaGlobal,
-    cpf_rg: cpfRg,
-    whatsapp: whatsapp,
-    foto_rg: fotoRgUrl,
-    selfie: selfieUrl
-  }];
-
-  if(tipoViagem === "ida_volta" && dataVolta){
-    reservas.push({
-      viagem_id: viagemSelecionada,
-      poltrona: poltronaSelecionada,
-      nome: `${nome} (volta)`,
-      app_id,
-      data_viagem: dataVolta,
-      status: "reservado",
-      codigo_embarque: codigoReservaGlobal,
-      cpf_rg: cpfRg,
-      whatsapp: whatsapp,
-      foto_rg: fotoRgUrl,
-      selfie: selfieUrl
-    });
-  }
-
-  const { error } = await client
-    .from("reservas_passagens")
-    .insert(reservas);
-
-  if(error){
-    throw new Error(error.message);
-  }
-
-  setMsg("✅ Reserva feita! Pagamento será no embarque.");
-  mostrarComprovanteReserva();
-  await carregarPoltronas();
-  return;
-}
-
-if(formaPagamento === "embarque"){
-  const pedidoId = await criarPedidoPassagem(fotoRgUrl, selfieUrl);
-  pedidoPixAtual = pedidoId;
-
-  const reservas = [{
-    viagem_id: viagemSelecionada,
-    poltrona: poltronaSelecionada,
-    nome,
-    app_id,
-    data_viagem: dataIda,
-    status: "reservado",
-    codigo_embarque: codigoReservaGlobal,
-    cpf_rg: cpfRg,
-    whatsapp: whatsapp,
-    foto_rg: fotoRgUrl,
-    selfie: selfieUrl,
-    origem: origemTrechoSelecionada ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || null) : null,
-    destino: destinoTrechoSelecionado ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || null) : null,
-    origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
-    destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
-    valor_trecho: origemTrechoSelecionada && destinoTrechoSelecionado
-      ? Number(getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado) || 0)
-      : null
-  }];
-
-  if(tipoViagem === "ida_volta" && dataVolta){
-    reservas.push({
-      viagem_id: viagemSelecionada,
-      poltrona: poltronaSelecionada,
-      nome: `${nome} (volta)`,
-      app_id,
-      data_viagem: dataVolta,
-      status: "reservado",
-      codigo_embarque: codigoReservaGlobal,
-      cpf_rg: cpfRg,
-      whatsapp: whatsapp,
-      foto_rg: fotoRgUrl,
-      selfie: selfieUrl,
-      origem: origemTrechoSelecionada ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || null) : null,
-      destino: destinoTrechoSelecionado ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || null) : null,
-      origem_ordem: origemTrechoSelecionada ? Number(origemTrechoSelecionada) : null,
-      destino_ordem: destinoTrechoSelecionado ? Number(destinoTrechoSelecionado) : null,
-      valor_trecho: origemTrechoSelecionada && destinoTrechoSelecionado
-        ? Number(getPrecoTrechoPublico(origemTrechoSelecionada, destinoTrechoSelecionado) || 0)
-        : null
-    });
-  }
-
-  const { error } = await client
-    .from("reservas_passagens")
-    .insert(reservas);
-
-  if(error){
-    throw new Error(error.message);
-  }
-
-  setMsg("✅ Reserva feita! Pagamento no embarque.");
-  mostrarComprovanteReserva();
-  await carregarPoltronas();
-  return;
-}
     if(formaPagamento === "PIX"){
       const res = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-loja", {
         method: "POST",
@@ -1758,7 +1723,9 @@ if(formaPagamento === "embarque"){
           pedidoId: pedidoId,
           transaction_amount: Number(valorTotal),
           valor: Number(valorTotal),
-          descricao: `Passagem ${viagemAtual?.rota || ""}`
+          descricao: origemCidade && destinoCidade
+            ? `Passagem ${origemCidade} -> ${destinoCidade}`
+            : `Passagem ${viagemAtual?.rota || ""}`
         })
       });
 
@@ -1844,7 +1811,6 @@ if(formaPagamento === "embarque"){
     setMsg(e.message || "Erro ao processar pagamento.", "erro");
   }
 }
-
 
 function copiarPix(){
   const txt = document.getElementById("pixCopiaCola").value || "";
