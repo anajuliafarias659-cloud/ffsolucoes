@@ -264,6 +264,8 @@ small{opacity:.8}
       </div>
 
       <div>
+        <label>Data do embarque</label>
+<input type="date" id="dataOperacaoCobrador">
         <label>Ou digite / cole o código do embarque</label>
         <input type="text" id="codigoManual" placeholder="Ex: FFP-123456-ABCDEF">
 
@@ -311,6 +313,57 @@ function escapeHtml(texto){
     .replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;")
     .replace(/'/g,"&#039;");
+}
+
+function nomeDiaSemana(dataISO){
+  if(!dataISO) return "";
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  const dias = ["Dom","Seg","Ter","Qua","Qui","Sex","Sab"];
+  return dias[data.getDay()];
+}
+
+function normalizarDia(txt){
+  return String(txt || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .slice(0,3);
+}
+
+function viagemRodaNaData(viagem, dataISO){
+  if(!viagem || !dataISO) return false;
+
+  const diaEscolhido = normalizarDia(nomeDiaSemana(dataISO));
+  const diasViagem = String(viagem.dias || "")
+    .split(",")
+    .map(v => normalizarDia(v))
+    .filter(Boolean);
+
+  if(!diasViagem.length) return true;
+  return diasViagem.includes(diaEscolhido);
+}
+
+function montarDataHoraLocal(dataISO, horaStr){
+  if(!dataISO || !horaStr) return null;
+
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const partesHora = String(horaStr).trim().split(":");
+  const hora = Number(partesHora[0] || 0);
+  const minuto = Number(partesHora[1] || 0);
+
+  return new Date(ano, mes - 1, dia, hora, minuto, 0, 0);
+}
+
+function viagemExpiradaParaData(viagem, dataISO){
+  if(!viagem || !dataISO || !viagem.hora) return false;
+
+  const agora = new Date();
+  const saida = montarDataHoraLocal(dataISO, viagem.hora);
+
+  if(!saida || isNaN(saida.getTime())) return false;
+  return agora >= saida;
 }
 
 function badgeStatus(status){
@@ -538,7 +591,7 @@ async function carregarViagensCobrador(){
 
   const { data, error } = await client
     .from("viagens_passagens")
-    .select("id, rota, hora")
+    .select("id, rota, hora, dias")
     .eq("app_id", app_id)
     .order("id", { ascending:false });
 
@@ -685,11 +738,21 @@ async function carregarPoltronasVendaManual(){
     return;
   }
 
-  const { data: veiculo } = await client
-    .from("veiculos_passagens")
-    .select("total_poltronas")
-    .eq("id", viagem.veiculo_id)
-    .maybeSingle();
+  const { data: viagem } = await client
+  .from("viagens_passagens")
+  .select("veiculo_id, rota, hora, dias")
+  .eq("id", viagemId)
+  .maybeSingle();
+
+  if(!viagemRodaNaData(viagem, dataViagem)){
+  setMsg(`Essa viagem não roda nessa data. Dias disponíveis: ${viagem?.dias || "-"}.`, "erro");
+  return;
+}
+
+if(viagemExpiradaParaData(viagem, dataViagem)){
+  setMsg(`Essa viagem de hoje às ${viagem?.hora || ""} já saiu e não aceita mais venda.`, "erro");
+  return;
+}
 
   const totalPoltronas = Number(veiculo?.total_poltronas || 0);
   if(!totalPoltronas){
@@ -750,6 +813,25 @@ async function venderPassagemManual(){
     if(!cpfRg) return setMsg("Digite o documento.", "erro");
     if(!poltrona) return setMsg("Selecione a poltrona.", "erro");
     if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
+
+    const { data: viagemInfo, error: erroViagemInfo } = await client
+  .from("viagens_passagens")
+  .select("id, rota, hora, dias")
+  .eq("id", viagemId)
+  .eq("app_id", app_id)
+  .single();
+
+if(erroViagemInfo || !viagemInfo){
+  return setMsg("Não foi possível validar a viagem.", "erro");
+}
+
+if(!viagemRodaNaData(viagemInfo, dataViagem)){
+  return setMsg(`Essa viagem não roda nessa data. Dias disponíveis: ${viagemInfo?.dias || "-"}.`, "erro");
+}
+
+if(viagemExpiradaParaData(viagemInfo, dataViagem)){
+  return setMsg(`Essa viagem de hoje às ${viagemInfo?.hora || ""} já saiu e não aceita mais venda.`, "erro");
+}
 
     if(paradasVendaManual.length){
       if(!origem || !destino) return setMsg("Selecione origem e destino.", "erro");
@@ -1155,7 +1237,9 @@ window.logout = async function(){
 (async function init(){
   const ok = await carregarUsuarioLogado();
   if(ok){
-    document.getElementById("dataVendaManual").value = new Date().toISOString().slice(0,10);
+    const hoje = new Date().toISOString().slice(0,10);
+    document.getElementById("dataVendaManual").value = hoje;
+    document.getElementById("dataOperacaoCobrador").value = hoje;
     await carregarViagensCobrador();
   }
 })();
