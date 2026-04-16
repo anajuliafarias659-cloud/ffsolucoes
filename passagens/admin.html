@@ -705,6 +705,9 @@ let reservaSelecionadaAtual = null;
 let pedidoSelecionadoAtual = null;
 let paradasAtuais = [];
 let precosTrechosAtuais = [];
+let modoReagendamento = false;
+let reservaOriginalReagendamento = null;
+let pedidoOriginalReagendamento = null;
 
 function hojeISO(){
   const d = new Date();
@@ -800,6 +803,23 @@ function preencherSelectParadas(selectId, placeholder){
     });
 }
 
+function getDiasSelecionados(){
+  return Array.from(document.querySelectorAll(".diaSemana:checked"))
+    .map(el => el.value)
+    .join(", ");
+}
+
+function setDiasSelecionados(diasTexto = ""){
+  const diasMarcados = String(diasTexto)
+    .split(",")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  document.querySelectorAll(".diaSemana").forEach(el => {
+    el.checked = diasMarcados.includes(el.value);
+  });
+}
+
 function limparFormularioVeiculo(){
   document.getElementById("veiculoEditId").value = "";
   document.getElementById("nomeVeiculo").value = "";
@@ -810,13 +830,34 @@ function limparFormularioVeiculo(){
   document.getElementById("btnCancelarVeiculo").style.display = "none";
 }
 
+function getDiasSelecionados(){
+  return [...document.querySelectorAll(".diaSemana:checked")]
+    .map(el => el.value)
+    .join(",");
+}
+
+function marcarDiasSelecionados(diasTexto){
+  const dias = String(diasTexto || "")
+    .split(",")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  document.querySelectorAll(".diaSemana").forEach(el => {
+    el.checked = dias.includes(el.value);
+  });
+}
+
 function limparFormularioViagem(){
   document.getElementById("viagemEditId").value = "";
   document.getElementById("rota").value = "";
   document.getElementById("hora").value = "";
   document.getElementById("valor").value = "";
-  document.getElementById("dias").value = "";
   document.getElementById("veiculoSelect").value = "";
+
+  document.querySelectorAll(".diaSemana").forEach(el => {
+    el.checked = false;
+  });
+
   document.getElementById("btnSalvarViagem").innerText = "Salvar Viagem";
   document.getElementById("btnCancelarViagem").style.display = "none";
 }
@@ -1135,6 +1176,92 @@ if(pagoPorPedido || ["pago","pago_agencia","approved"].includes(status)){
   `;
 }
 
+window.confirmarReagendamento = async function(){
+  try{
+    msg("msgReserva", "");
+
+    if(!modoReagendamento || !reservaOriginalReagendamento){
+      msg("msgReserva", "Nenhum reagendamento em andamento.", "erro");
+      return;
+    }
+
+    const viagem_id = document.getElementById("viagemReserva").value;
+    const data_viagem = document.getElementById("dataReserva").value;
+    const origem_ordem = document.getElementById("origemReserva").value || null;
+    const destino_ordem = document.getElementById("destinoReserva").value || null;
+
+    if(!viagem_id) return msg("msgReserva", "Selecione a viagem.", "erro");
+    if(!data_viagem) return msg("msgReserva", "Selecione a nova data.", "erro");
+
+    if(!reservaSelecionadaAtual?.poltrona && !window.poltronaNovaReagendamento){
+      msg("msgReserva", "Selecione a nova poltrona no mapa.", "erro");
+      return;
+    }
+
+    const novaPoltrona = window.poltronaNovaReagendamento;
+    if(!novaPoltrona){
+      msg("msgReserva", "Selecione a nova poltrona antes de confirmar.", "erro");
+      return;
+    }
+
+    const mesmaPoltronaMesmoDia =
+      String(reservaOriginalReagendamento.data_viagem || "") === String(data_viagem) &&
+      Number(reservaOriginalReagendamento.poltrona) === Number(novaPoltrona) &&
+      String(reservaOriginalReagendamento.viagem_id || "") === String(viagem_id);
+
+    if(mesmaPoltronaMesmoDia){
+      msg("msgReserva", "Escolha outra data ou outra poltrona para reagendar.", "erro");
+      return;
+    }
+
+    const { error: erroNova } = await supabase
+      .from("reservas_passagens")
+      .insert([{
+        app_id,
+        viagem_id,
+        poltrona: Number(novaPoltrona),
+        nome: reservaOriginalReagendamento.nome,
+        cpf_rg: reservaOriginalReagendamento.cpf_rg,
+        whatsapp: reservaOriginalReagendamento.whatsapp,
+        data_viagem,
+        status: "pago_agencia",
+        codigo_embarque: `REAG-${Date.now()}`,
+        origem_venda: reservaOriginalReagendamento.origem_venda || "admin",
+        foto_rg: reservaOriginalReagendamento.foto_rg || null,
+        selfie: reservaOriginalReagendamento.selfie || null,
+        origem_ordem: origem_ordem ? Number(origem_ordem) : null,
+        destino_ordem: destino_ordem ? Number(destino_ordem) : null,
+        valor_trecho: reservaOriginalReagendamento.valor_trecho || null
+      }]);
+
+    if(erroNova){
+      msg("msgReserva", "Erro ao criar nova reserva: " + erroNova.message, "erro");
+      return;
+    }
+
+    const { error: erroAntiga } = await supabase
+      .from("reservas_passagens")
+      .update({ status: "reagendada" })
+      .eq("id", reservaOriginalReagendamento.id)
+      .eq("app_id", app_id);
+
+    if(erroAntiga){
+      msg("msgReserva", "Nova reserva criada, mas não consegui marcar a antiga como reagendada: " + erroAntiga.message, "erro");
+      return;
+    }
+
+    modoReagendamento = false;
+    reservaOriginalReagendamento = null;
+    pedidoOriginalReagendamento = null;
+    window.poltronaNovaReagendamento = null;
+
+    msg("msgReserva", "Reagendamento concluído com sucesso.");
+    document.getElementById("detalhePassageiro").innerHTML = "";
+    await verReservasComData();
+  }catch(e){
+    msg("msgReserva", e.message || "Erro ao confirmar reagendamento.", "erro");
+  }
+};
 window.selecionarPoltronaAdmin = function(numero){
   const origemSel = document.getElementById("origemReserva")?.value || null;
   const destinoSel = document.getElementById("destinoReserva")?.value || null;
@@ -1173,6 +1300,25 @@ if(poltronaEl){
   }
 };
 
+if(modoReagendamento){
+  const reservaExistente = reservasMapaAtual.find(r =>
+    Number(r.poltrona) === Number(numero) &&
+    reservaConflitaNoTrecho(r, origemSel, destinoSel)
+  );
+
+  const pedidoExistente = buscarPedidoDaPoltrona(
+    viagemMapaAtual,
+    dataMapaAtual,
+    numero,
+    origemSel,
+    destinoSel
+  );
+
+  if(!reservaExistente && !pedidoExistente){
+    window.poltronaNovaReagendamento = numero;
+    msg("msgReserva", `Nova poltrona selecionada para reagendamento: ${numero}. Agora clique em confirmar reagendamento.`);
+  }
+}
 window.reembolsarReservaSelecionada = async function(){
   try{
     msg("msgReserva", "");
@@ -1250,14 +1396,18 @@ window.reagendarReservaSelecionada = async function(){
       return;
     }
 
-    let origem_ordem = null;
-    let destino_ordem = null;
-    let novaData = "";
+    let origem_ordem = "";
+    let destino_ordem = "";
+    let dataOriginal = "";
+
+    modoReagendamento = true;
+    reservaOriginalReagendamento = reservaSelecionadaAtual || null;
+    pedidoOriginalReagendamento = pedidoSelecionadoAtual || null;
 
     if(reservaSelecionadaAtual){
       origem_ordem = reservaSelecionadaAtual.origem_ordem || "";
       destino_ordem = reservaSelecionadaAtual.destino_ordem || "";
-      novaData = reservaSelecionadaAtual.data_viagem || "";
+      dataOriginal = reservaSelecionadaAtual.data_viagem || "";
     }else if(pedidoSelecionadoAtual){
       const itens = Array.isArray(pedidoSelecionadoAtual.itens) ? pedidoSelecionadoAtual.itens : [];
       const item = itens.find(it =>
@@ -1270,16 +1420,16 @@ window.reagendarReservaSelecionada = async function(){
 
       origem_ordem = item?.origem_ordem || "";
       destino_ordem = item?.destino_ordem || "";
-      novaData = item?.data_ida || item?.data_viagem || item?.data_volta || "";
+      dataOriginal = item?.data_ida || item?.data_viagem || item?.data_volta || "";
     }
 
-    document.getElementById("dataReserva").value = novaData || "";
+    document.getElementById("dataReserva").value = dataOriginal || "";
     document.getElementById("origemReserva").value = origem_ordem || "";
     document.getElementById("destinoReserva").value = destino_ordem || "";
 
     atualizarResumoTrechoReserva();
 
-    msg("msgReserva", "Data e trecho carregados. Agora altere a data se quiser, escolha outra poltrona e clique em vender / reservar manual.");
+    msg("msgReserva", "Modo reagendamento ativado. Escolha nova data, veja o mapa e clique na nova poltrona. Depois confirme o reagendamento.");
   }catch(e){
     msg("msgReserva", e.message || "Erro ao preparar reagendamento.", "erro");
   }
@@ -1538,7 +1688,7 @@ window.salvarViagem = async function(){
   const rota = document.getElementById("rota").value.trim();
   const hora = document.getElementById("hora").value.trim();
   const valor = document.getElementById("valor").value.trim();
-  const dias = document.getElementById("dias").value.trim();
+  const dias = getDiasSelecionados();
   const veiculo_id = document.getElementById("veiculoSelect").value;
 
   if(!rota) return msg("msgViagem", "Digite a rota.", "erro");
@@ -1587,7 +1737,7 @@ window.editarViagem = async function(id){
   document.getElementById("rota").value = data.rota || "";
   document.getElementById("hora").value = data.hora || "";
   document.getElementById("valor").value = data.valor ?? "";
-  document.getElementById("dias").value = data.dias || "";
+  marcarDiasSelecionados(data.dias || "");
   document.getElementById("veiculoSelect").value = data.veiculo_id || "";
   document.getElementById("btnSalvarViagem").innerText = "Atualizar Viagem";
   document.getElementById("btnCancelarViagem").style.display = "block";
