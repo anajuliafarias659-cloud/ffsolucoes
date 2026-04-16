@@ -607,11 +607,13 @@ small{opacity:.78}
   <option value="leito">Leito</option>
 </select>
 
-        <select id="layoutVeiculo">
-          <option value="2-2">Ônibus (2-2)</option>
-          <option value="2-1">Van (2-1)</option>
-          <option value="1-1">Van pequena (1-1)</option>
-        </select>
+<textarea id="configPoltronas" placeholder="Ex: 1-8:leito, 9-46:semi_leito" style="width:100%;padding:12px 14px;margin-top:10px;border-radius:12px;border:none;font-size:15px;min-height:90px;"></textarea>
+
+<select id="layoutVeiculo">
+  <option value="2-2">Ônibus (2-2)</option>
+  <option value="2-1">Van (2-1)</option>
+  <option value="1-1">Van pequena (1-1)</option>
+</select>
 
         <div class="botoes-form">
           <button id="btnSalvarVeiculo" class="botao-verde" onclick="salvarVeiculo()">Salvar Veículo</button>
@@ -806,6 +808,42 @@ function toNumber(v){
   return Number.isFinite(n) ? n : 0;
 }
 
+function montarConfigPoltronas(texto, totalPoltronas, tipoPadrao="padrao"){
+  const config = [];
+
+  for(let i = 1; i <= totalPoltronas; i++){
+    config.push({ numero: i, tipo: tipoPadrao });
+  }
+
+  const partes = String(texto || "")
+    .split(",")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  for(const parte of partes){
+    const [faixa, tipo] = parte.split(":").map(x => x.trim());
+    if(!faixa || !tipo) continue;
+
+    if(faixa.includes("-")){
+      const [inicio, fim] = faixa.split("-").map(n => parseInt(n.trim(), 10));
+      if(Number.isFinite(inicio) && Number.isFinite(fim)){
+        for(let i = inicio; i <= fim; i++){
+          const item = config.find(p => p.numero === i);
+          if(item) item.tipo = tipo;
+        }
+      }
+    }else{
+      const numero = parseInt(faixa, 10);
+      if(Number.isFinite(numero)){
+        const item = config.find(p => p.numero === numero);
+        if(item) item.tipo = tipo;
+      }
+    }
+  }
+
+  return config;
+}
+
 function trechosConflitam(origemA, destinoA, origemB, destinoB){
   origemA = Number(origemA || 0);
   destinoA = Number(destinoA || 0);
@@ -879,6 +917,8 @@ function limparFormularioVeiculo(){
   document.getElementById("nomeVeiculo").value = "";
   document.getElementById("tipoVeiculo").value = "van";
   document.getElementById("poltronasVeiculo").value = "";
+  document.getElementById("tipoPoltrona").value = "padrao";
+  document.getElementById("configPoltronas").value = "";
   document.getElementById("layoutVeiculo").value = "2-2";
   document.getElementById("btnSalvarVeiculo").innerText = "Salvar Veículo";
   document.getElementById("btnCancelarVeiculo").style.display = "none";
@@ -1631,6 +1671,8 @@ window.salvarVeiculo = async function(){
   const total_poltronas = parseInt(document.getElementById("poltronasVeiculo").value || "0", 10);
   const layout = document.getElementById("layoutVeiculo").value;
   const tipo_poltrona = document.getElementById("tipoPoltrona").value;
+  const configPoltronasTexto = document.getElementById("configPoltronas").value.trim();
+  const poltronas_config = montarConfigPoltronas(configPoltronasTexto, total_poltronas, tipo_poltrona);
 
   if(!nome) return msg("msgVeiculo", "Digite o nome do veículo.", "erro");
   if(!total_poltronas) return msg("msgVeiculo", "Digite o total de poltronas.", "erro");
@@ -1639,7 +1681,7 @@ window.salvarVeiculo = async function(){
   if(id){
     const { error } = await supabase
       .from("veiculos_passagens")
-      .update({ nome, tipo, total_poltronas, layout })
+      .update({ nome, tipo, total_poltronas, layout, tipo_poltrona, poltronas_config })
       .eq("id", id)
       .eq("app_id", app_id);
 
@@ -1648,7 +1690,7 @@ window.salvarVeiculo = async function(){
   }else{
     const { error } = await supabase
       .from("veiculos_passagens")
-      .insert([{ nome, tipo, total_poltronas, layout, app_id }]);
+      .insert([{ nome, tipo, total_poltronas, layout, tipo_poltrona, poltronas_config, app_id }]);
 
     if(error) return msg("msgVeiculo", "Erro ao salvar veículo: " + error.message, "erro");
     msg("msgVeiculo", "Veículo salvo com sucesso.");
@@ -1676,6 +1718,8 @@ window.editarVeiculo = async function(id){
   document.getElementById("tipoVeiculo").value = data.tipo || "van";
   document.getElementById("poltronasVeiculo").value = data.total_poltronas || "";
   document.getElementById("layoutVeiculo").value = data.layout || "2-2";
+  document.getElementById("tipoPoltrona").value = data.tipo_poltrona || "padrao";
+  document.getElementById("configPoltronas").value = "";
   document.getElementById("btnSalvarVeiculo").innerText = "Atualizar Veículo";
   document.getElementById("btnCancelarVeiculo").style.display = "block";
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1739,19 +1783,22 @@ async function carregarVeiculos(){
   }
 
   data.forEach(v => {
-    lista.innerHTML += `
-      <div class="item">
-        <b>${escapeHtml(v.nome)}</b><br>
-        Tipo: ${escapeHtml(v.tipo || "-")}<br>
-Poltronas: ${Number(v.total_poltronas || 0)}<br>
-Layout: ${escapeHtml(v.layout || "-")}<br>
-Poltrona: ${escapeHtml(v.tipo_poltrona || "padrão")}
-        <div class="botoes-item">
-          <button class="botao-azul" onclick="editarVeiculo('${v.id}')">Editar</button>
-          <button class="botao-vermelho" onclick="excluirVeiculo('${v.id}')">Excluir</button>
-        </div>
+  const temMisto = Array.isArray(v.poltronas_config) && v.poltronas_config.length > 0;
+
+  lista.innerHTML += `
+    <div class="item">
+      <b>${escapeHtml(v.nome)}</b><br>
+      Tipo: ${escapeHtml(v.tipo || "-")}<br>
+      Poltronas: ${Number(v.total_poltronas || 0)}<br>
+      Layout: ${escapeHtml(v.layout || "-")}<br>
+      Poltrona padrão: ${escapeHtml(v.tipo_poltrona || "padrão")}<br>
+      Configuração especial: ${temMisto ? "Sim" : "Não"}
+      <div class="botoes-item">
+        <button class="botao-azul" onclick="editarVeiculo('${v.id}')">Editar</button>
+        <button class="botao-vermelho" onclick="excluirVeiculo('${v.id}')">Excluir</button>
       </div>
-    `;
+    </div>
+  `;
     select.innerHTML += `<option value="${v.id}">${escapeHtml(v.nome)}</option>`;
   });
 }
