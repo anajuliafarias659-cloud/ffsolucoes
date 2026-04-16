@@ -1,3 +1,6 @@
+
+
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -771,6 +774,9 @@ small{opacity:.78}
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
 <script type="module">
 import { supabase } from "../js/supabase.js";
 
@@ -1244,8 +1250,8 @@ function mostrarDetalhePassageiro(reserva, numeroPoltrona, pagoPorPedido = false
       <div><b>Status:</b> Paga</div>
 <div><b>Origem da venda:</b> ${origemVenda}</div>
 <div><b>Código:</b> ${escapeHtml(codigoPedido)}</div>
-    <div><b>Tipo:</b> ${reserva.tipo_poltrona || "-"}</div>
-<div><b>Valor:</b> R$ ${Number(reserva.valor_cobrado || 0).toFixed(2)}</div>
+    <div><b>Tipo:</b> -</div>
+<div><b>Valor:</b> R$ 0.00</div>
 
       <div class="detalhe-fotos">
         ${
@@ -2519,37 +2525,169 @@ window.verReservasComData = async function(){
   );
 };
 
+async function gerarPdfPassagemAdmin(dados){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  const qrTexto = JSON.stringify({
+    codigo_embarque: dados.codigo,
+    nome: dados.nome,
+    poltrona: dados.poltrona,
+    data_viagem: dados.data_viagem
+  });
+
+  const qrDataUrl = await QRCode.toDataURL(qrTexto, { width: 220, margin: 1 });
+
+  doc.setFontSize(18);
+  doc.text("Comprovante de Embarque", 20, 20);
+
+  doc.setFontSize(12);
+  doc.text(`Código: ${dados.codigo}`, 20, 35);
+  doc.text(`Nome: ${dados.nome}`, 20, 45);
+  doc.text(`Documento: ${dados.documento || "-"}`, 20, 55);
+  doc.text(`WhatsApp: ${dados.whatsapp || "-"}`, 20, 65);
+  doc.text(`Data: ${dados.data_viagem}`, 20, 75);
+  doc.text(`Origem: ${dados.origem || "-"}`, 20, 85);
+  doc.text(`Destino: ${dados.destino || "-"}`, 20, 95);
+  doc.text(`Poltrona: ${dados.poltrona}`, 20, 105);
+  doc.text(`Tipo: ${dados.tipo_poltrona || "-"}`, 20, 115);
+  doc.text(`Valor: R$ ${Number(dados.valor_cobrado || 0).toFixed(2)}`, 20, 125);
+
+  doc.addImage(qrDataUrl, "PNG", 130, 35, 55, 55);
+
+  doc.save(`passagem-${dados.codigo}.pdf`);
+}
+
 window.reservarPoltronaManual = async function(){
   try{
     msg("msgReserva", "");
 
     const viagem_id = document.getElementById("viagemReserva").value;
-    const dataReserva = document.getElementById("dataReserva").value;
-    const origemSel = document.getElementById("origemReserva").value || null;
-    const destinoSel = document.getElementById("destinoReserva").value || null;
-    const poltrona = window.poltronaSelecionada;
-
-    if(!poltrona){
-      return msg("msgReserva", "Selecione uma poltrona no mapa.", "erro");
-    }
+    const data_viagem = document.getElementById("dataReserva").value;
+    const origem = document.getElementById("origemReserva").value || null;
+    const destino = document.getElementById("destinoReserva").value || null;
+    const poltrona = window.poltronaSelecionada || null;
 
     if(!viagem_id) return msg("msgReserva", "Selecione a viagem.", "erro");
-    if(!dataReserva) return msg("msgReserva", "Selecione a data.", "erro");
+    if(!data_viagem) return msg("msgReserva", "Selecione a data.", "erro");
+    if(!poltrona) return msg("msgReserva", "Clique em uma poltrona livre no mapa.", "erro");
+
+    if(paradasAtuais.length){
+      if(!origem || !destino){
+        return msg("msgReserva", "Selecione origem e destino.", "erro");
+      }
+      if(Number(origem) >= Number(destino)){
+        return msg("msgReserva", "O destino precisa ser depois da origem.", "erro");
+      }
+    }
+
+    const reservaExistente = reservasMapaAtual.find(r =>
+      Number(r.poltrona) === Number(poltrona) &&
+      reservaConflitaNoTrecho(r, origem, destino)
+    );
+
+    const pedidoExistente = buscarPedidoDaPoltrona(
+      viagem_id,
+      data_viagem,
+      poltrona,
+      origem,
+      destino
+    );
+
+    if(reservaExistente || pedidoExistente){
+      return msg("msgReserva", "Essa poltrona não está livre para esse trecho.", "erro");
+    }
+
+    const nome = prompt("Nome do passageiro:");
+    if(!nome) return;
+
+    const documento = prompt("Documento (CPF/RG):") || "";
+    const whatsapp = prompt("WhatsApp:") || "";
 
     const veiculo = await buscarVeiculoDaViagem(viagem_id);
     const tipoPoltrona = getTipoPoltronaDoVeiculo(veiculo, poltrona);
 
     let valorCobrado = 0;
-
-    if(origemSel && destinoSel){
-      valorCobrado = getPrecoTrecho(origemSel, destinoSel, tipoPoltrona);
+    if(origem && destino){
+      valorCobrado = getPrecoTrecho(origem, destino, tipoPoltrona);
     }
-
     if(!valorCobrado){
       valorCobrado = await getPrecoViagemPorTipo(viagem_id, tipoPoltrona);
     }
 
-    // resto da função...
+    const pagoDireto = confirm("Pagamento já foi feito na agência?\n\nOK = Sim\nCancelar = Deixar pendente");
+    const statusReserva = pagoDireto ? "pago_agencia" : "pendente_agencia";
+
+    let forma_pagamento_agencia = null;
+    if(pagoDireto){
+      const forma = prompt("Forma de pagamento:\nDigite: dinheiro, pix ou cartao") || "";
+      forma_pagamento_agencia = forma.trim().toLowerCase();
+
+      if(!["dinheiro", "pix", "cartao"].includes(forma_pagamento_agencia)){
+        return msg("msgReserva", "Forma de pagamento inválida. Use dinheiro, pix ou cartao.", "erro");
+      }
+    }
+
+    const confirmar = confirm(
+      `Confirmar venda?\n\n` +
+      `Nome: ${nome}\n` +
+      `Poltrona: ${poltrona}\n` +
+      `Tipo: ${tipoPoltrona}\n` +
+      `Valor: R$ ${Number(valorCobrado || 0).toFixed(2)}`
+    );
+    if(!confirmar) return;
+
+    const codigo = "FFP-" + Date.now();
+
+    const origemObj = paradasAtuais.find(p => Number(p.ordem) === Number(origem));
+    const destinoObj = paradasAtuais.find(p => Number(p.ordem) === Number(destino));
+
+    const { error } = await supabase
+      .from("reservas_passagens")
+      .insert([{
+        app_id,
+        viagem_id,
+        poltrona: Number(poltrona),
+        nome: nome.trim(),
+        cpf_rg: documento.trim(),
+        whatsapp: whatsapp.trim(),
+        data_viagem,
+        status: statusReserva,
+        codigo_embarque: codigo,
+        origem_venda: "admin",
+        forma_pagamento_agencia: forma_pagamento_agencia || null,
+        tipo_poltrona: tipoPoltrona,
+        origem: origemObj?.cidade || null,
+        destino: destinoObj?.cidade || null,
+        origem_ordem: origem ? Number(origem) : null,
+        destino_ordem: destino ? Number(destino) : null,
+        valor_trecho: valorCobrado || null,
+        valor_cobrado: valorCobrado || null
+      }]);
+
+    if(error){
+      return msg("msgReserva", "Erro ao salvar: " + error.message, "erro");
+    }
+
+    msg(
+      "msgReserva",
+      `Venda criada com sucesso. Código: ${codigo} | Valor: R$ ${Number(valorCobrado || 0).toFixed(2)}`
+    );
+
+    await verReservasComData();
+    await gerarPdfPassagemAdmin({
+      codigo,
+      nome: nome.trim(),
+      documento: documento.trim(),
+      whatsapp: whatsapp.trim(),
+      poltrona: Number(poltrona),
+      tipo_poltrona: tipoPoltrona,
+      valor_cobrado: Number(valorCobrado || 0),
+      data_viagem,
+      origem: origemObj?.cidade || "Origem",
+      destino: destinoObj?.cidade || "Destino"
+    });
+
   }catch(e){
     msg("msgReserva", e.message || "Erro ao vender / reservar.", "erro");
   }
