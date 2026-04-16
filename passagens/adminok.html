@@ -825,6 +825,25 @@ function getTipoPoltronaDoVeiculo(veiculo, numeroPoltrona){
   return item?.tipo || veiculo?.tipo_poltrona || "padrao";
 }
 
+async function buscarVeiculoDaViagem(viagem_id){
+  const { data: viagem } = await supabase
+    .from("viagens_passagens")
+    .select("veiculo_id")
+    .eq("id", viagem_id)
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!viagem?.veiculo_id) return null;
+
+  const { data: veiculo } = await supabase
+    .from("veiculos_passagens")
+    .select("*")
+    .eq("id", viagem.veiculo_id)
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  return veiculo || null;
+}
 function montarConfigPoltronas(texto, totalPoltronas, tipoPadrao="padrao"){
   const config = [];
 
@@ -883,6 +902,12 @@ function getPrecoTrecho(origem, destino, tipoPoltrona="padrao"){
     Number(p.destino_ordem) === Number(destino)
   );
 
+  function getPrecoTrecho(origem, destino, tipoPoltrona="padrao"){
+  const item = precosTrechosAtuais.find(p =>
+    Number(p.origem_ordem) === Number(origem) &&
+    Number(p.destino_ordem) === Number(destino)
+  );
+
   if(!item) return 0;
 
   if(tipoPoltrona === "leito"){
@@ -894,6 +919,27 @@ function getPrecoTrecho(origem, destino, tipoPoltrona="padrao"){
   }
 
   return Number(item.valor || 0);
+}
+
+async function getPrecoViagemPorTipo(viagem_id, tipoPoltrona="padrao"){
+  const { data: viagem } = await supabase
+    .from("viagens_passagens")
+    .select("valor, valor_semi_leito, valor_leito")
+    .eq("id", viagem_id)
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!viagem) return 0;
+
+  if(tipoPoltrona === "leito"){
+    return Number(viagem.valor_leito || viagem.valor || 0);
+  }
+
+  if(tipoPoltrona === "semi_leito"){
+    return Number(viagem.valor_semi_leito || viagem.valor || 0);
+  }
+
+  return Number(viagem.valor || 0);
 }
 
 function atualizarResumoTrechoReserva(){
@@ -2271,7 +2317,9 @@ const valor_leito = document.getElementById("valorTrechoLeito").value.trim();
   if(!viagem_id) return msg("msgTrechos", "Selecione a viagem.", "erro");
   if(!origem_ordem || !destino_ordem) return msg("msgTrechos", "Selecione origem e destino.", "erro");
   if(origem_ordem >= destino_ordem) return msg("msgTrechos", "O destino precisa ser depois da origem.", "erro");
-  if(!valor) return msg("msgTrechos", "Digite o valor do trecho.", "erro");
+  if(!valor && !valor_semi_leito && !valor_leito){
+  return msg("msgTrechos", "Digite pelo menos um valor do trecho.", "erro");
+}
 
   const origemObj = paradasAtuais.find(p => Number(p.ordem) === origem_ordem);
   const destinoObj = paradasAtuais.find(p => Number(p.ordem) === destino_ordem);
@@ -2335,11 +2383,12 @@ window.editarPrecoTrecho = async function(id){
   if(error || !data) return msg("msgTrechos", "Erro ao carregar preço.", "erro");
 
   document.getElementById("precoTrechoEditId").value = data.id;
-  document.getElementById("origemTrecho").value = data.origem_ordem || "";
-  document.getElementById("destinoTrecho").value = data.destino_ordem || "";
-  document.getElementById("valorTrecho").value = data.valor ?? "";
-  document.getElementById("btnCancelarPrecoTrecho").style.display = "block";
-};
+document.getElementById("origemTrecho").value = data.origem_ordem || "";
+document.getElementById("destinoTrecho").value = data.destino_ordem || "";
+document.getElementById("valorTrecho").value = data.valor ?? "";
+document.getElementById("valorTrechoSemiLeito").value = data.valor_semi_leito ?? "";
+document.getElementById("valorTrechoLeito").value = data.valor_leito ?? "";
+document.getElementById("btnCancelarPrecoTrecho").style.display = "block";
 
 window.excluirPrecoTrecho = async function(id){
   if(!confirm("Excluir esse preço de trecho?")) return;
