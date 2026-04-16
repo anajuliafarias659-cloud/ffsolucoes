@@ -770,6 +770,7 @@ small{opacity:.78}
   <select id="vmFormaPagamento" onchange="aoTrocarFormaPagamentoVendaManual()">
     <option value="">Forma de pagamento</option>
     <option value="dinheiro">Dinheiro</option>
+    <option value="embarque">Pagamento no dia do embarque</option>
     <option value="pix">PIX</option>
     <option value="cartao">Cartão</option>
   </select>
@@ -2607,13 +2608,16 @@ async function gerarPdfPassagemAdmin(dados){
     format: [80, 180]
   });
 
+  const statusTexto = dados.status || "Pendente";
+
   const qrTexto = JSON.stringify({
     codigo_embarque: dados.codigo,
     nome: dados.nome,
     poltrona: dados.poltrona,
     data_viagem: dados.data_viagem,
     origem: dados.origem,
-    destino: dados.destino
+    destino: dados.destino,
+    status: statusTexto
   });
 
   const qrDataUrl = await QRCode.toDataURL(qrTexto, {
@@ -2623,69 +2627,63 @@ async function gerarPdfPassagemAdmin(dados){
 
   doc.setDrawColor(0);
   doc.setFillColor(255, 255, 255);
-
-  doc.roundedRect(5, 5, 70, 170, 3, 3, "S");
+  doc.roundedRect(4, 4, 72, 172, 3, 3, "S");
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
-  doc.text("PASSAGEM DE EMBARQUE", 40, 12, { align: "center" });
+  doc.text(String(dados.empresa || "FF Transporte"), 40, 12, { align: "center" });
 
-  doc.addImage(qrDataUrl, "PNG", 24, 16, 32, 32);
+  doc.setFontSize(10);
+  doc.text("COMPROVANTE DE EMBARQUE", 40, 18, { align: "center" });
+
+  doc.setLineWidth(0.3);
+  doc.line(8, 22, 72, 22);
+
+  let y = 28;
+  const addLinha = (rotulo, valor) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(`${rotulo}:`, 8, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(String(valor || "-"), 26, y, { maxWidth: 44 });
+    y += 7;
+  };
+
+  addLinha("Código", dados.codigo);
+  addLinha("Nome", dados.nome);
+  addLinha("Doc", dados.documento || "-");
+  addLinha("Whats", dados.whatsapp || "-");
+  addLinha("Data", dados.data_viagem || "-");
+  addLinha("Origem", dados.origem || "-");
+  addLinha("Destino", dados.destino || "-");
+  addLinha("Poltrona", dados.poltrona || "-");
+  addLinha("Tipo", dados.tipo_poltrona || "-");
+  addLinha("Valor", `R$ ${Number(dados.valor_cobrado || 0).toFixed(2)}`);
+  addLinha("Status", statusTexto);
+
+  doc.line(8, y, 72, y);
+  y += 4;
+
+  doc.addImage(qrDataUrl, "PNG", 20, y, 40, 40);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
-  doc.text("Apresente este QR no embarque", 40, 52, { align: "center" });
+  doc.text("Apresente este QR no embarque", 40, y + 46, { align: "center" });
 
-  doc.line(10, 56, 70, 56);
+  doc.autoPrint();
 
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "bold");
-  doc.text("Código", 10, 62);
-  doc.text("Poltrona", 50, 62);
+  const blobUrl = doc.output("bloburl");
+  const printWindow = window.open(blobUrl, "_blank");
 
-  doc.setFont("helvetica", "normal");
-  doc.text(String(dados.codigo || "-"), 10, 67);
-  doc.text(String(dados.poltrona || "-"), 50, 67);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Passageiro", 10, 75);
-  doc.text("Documento", 10, 87);
-
-  doc.setFont("helvetica", "normal");
-  doc.text(String(dados.nome || "-"), 10, 80);
-  doc.text(String(dados.documento || "-"), 10, 92);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Origem", 10, 102);
-  doc.text("Destino", 10, 114);
-
-  doc.setFont("helvetica", "normal");
-  doc.text(String(dados.origem || "-"), 10, 107);
-  doc.text(String(dados.destino || "-"), 10, 119);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Data", 10, 129);
-  doc.text("Tipo", 50, 129);
-
-  doc.setFont("helvetica", "normal");
-  doc.text(String(dados.data_viagem || "-"), 10, 134);
-  doc.text(String(dados.tipo_poltrona || "-"), 50, 134);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("WhatsApp", 10, 144);
-  doc.text("Valor", 50, 144);
-
-  doc.setFont("helvetica", "normal");
-  doc.text(String(dados.whatsapp || "-"), 10, 149);
-  doc.text(`R$ ${Number(dados.valor_cobrado || 0).toFixed(2)}`, 50, 149);
-
-  doc.line(10, 156, 70, 156);
-
-  doc.setFontSize(8);
-  doc.text("Emitido pelo sistema FF Transporte", 40, 162, { align: "center" });
-  doc.text("Válido somente para esta viagem", 40, 167, { align: "center" });
-
-  doc.save(`passagem-${dados.codigo}.pdf`);
+  if(printWindow){
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
+  }else{
+    alert("Não consegui abrir a janela de impressão. Verifique se o navegador bloqueou pop-up.");
+  }
 }
 
 window.reservarPoltronaManual = async function(){
@@ -2856,18 +2854,28 @@ troco: forma_pagamento_agencia === "dinheiro" ? Number((valorRecebido - valorVen
 
     fecharPainelVendaManual();
     await verReservasComData();
+    const statusComprovante =
+  forma_pagamento_agencia === "dinheiro" ||
+  forma_pagamento_agencia === "pix" ||
+  forma_pagamento_agencia === "cartao"
+    ? "Pago"
+    : forma_pagamento_agencia === "embarque"
+      ? "Pagamento no dia do embarque"
+      : "Pendente";
     await gerarPdfPassagemAdmin({
-      codigo,
-      nome,
-      documento,
-      whatsapp,
-      poltrona,
-      tipo_poltrona: tipoPoltrona,
-      valor_cobrado: Number(valorCobrado || 0),
-      data_viagem,
-      origem: origemObj?.cidade || "Origem",
-      destino: destinoObj?.cidade || "Destino"
-    });
+  empresa: document.getElementById("nome").innerText || "FF Transporte",
+  codigo,
+  nome,
+  documento,
+  whatsapp,
+  poltrona,
+  tipo_poltrona: tipoPoltrona,
+  valor_cobrado: Number(valorCobrado || 0),
+  data_viagem,
+  origem: origemObj?.cidade || "Origem",
+  destino: destinoObj?.cidade || "Destino",
+  status: statusComprovante
+});
   }catch(e){
     msg("msgReserva", e.message || "Erro ao concluir venda.", "erro");
   }
@@ -2920,7 +2928,9 @@ window.concluirVendaManual = async function(){
         cpf_rg: documento,
         whatsapp,
         data_viagem,
-        status: "pago_agencia",
+        status: forma_pagamento_agencia === "embarque"
+  ? "pendente_agencia"
+  : "pago_agencia",
         codigo_embarque: codigo,
         origem_venda: "admin",
         forma_pagamento_agencia,
