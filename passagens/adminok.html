@@ -2696,11 +2696,35 @@ doc.text("PASSAGEM DE EMBARQUE", 40, 16, { align: "center" });
 window.reservarPoltronaManual = async function(){
   msg("msgReserva", "");
 
-  
+  const viagem_id = document.getElementById("viagemReserva").value;
+  const data_viagem = document.getElementById("dataReserva").value;
+  const origem = document.getElementById("origemReserva").value || null;
+  const destino = document.getElementById("destinoReserva").value || null;
+
+  const poltrona = Number(window.poltronaSelecionada || 0);
+
+  if(!viagem_id) return msg("msgReserva", "Selecione uma viagem.", "erro");
+  if(!data_viagem) return msg("msgReserva", "Selecione a data.", "erro");
+  if(!poltrona) return msg("msgReserva", "Clique em uma poltrona no mapa primeiro.", "erro");
+
+  if(paradasAtuais.length){
+    if(!origem || !destino){
+      return msg("msgReserva", "Selecione origem e destino para vender por trecho.", "erro");
     }
     if(Number(origem) >= Number(destino)){
       return msg("msgReserva", "O destino precisa ser depois da origem.", "erro");
     }
+  }
+
+  const veiculo = await buscarVeiculoDaViagem(viagem_id);
+  const tipoPoltrona = getTipoPoltronaDoVeiculo(veiculo, poltrona);
+
+  let valorCobrado = 0;
+  if(origem && destino){
+    valorCobrado = getPrecoTrecho(origem, destino, tipoPoltrona);
+  }
+  if(!valorCobrado){
+    valorCobrado = await getPrecoViagemPorTipo(viagem_id, tipoPoltrona);
   }
 
   const reservaExistente = reservasMapaAtual.find(r =>
@@ -2720,17 +2744,18 @@ window.reservarPoltronaManual = async function(){
     return msg("msgReserva", "Essa poltrona não está livre para esse trecho.", "erro");
   }
 
-  
-
+  document.getElementById("vmNome").value = "";
+  document.getElementById("vmDocumento").value = "";
+  document.getElementById("vmWhatsapp").value = "";
   document.getElementById("vmPoltrona").value = poltrona;
-document.getElementById("vmTipoPoltrona").value = tipoPoltrona;
-document.getElementById("vmValor").value = `R$ ${Number(valorCobrado || 0).toFixed(2)}`;
-document.getElementById("vmFormaPagamento").value = "";
-document.getElementById("vmValorRecebido").value = "";
-document.getElementById("vmTroco").value = "";
-document.getElementById("vmConfirmacaoRecebimento").checked = false;
-document.getElementById("boxDinheiroVendaManual").style.display = "none";
-document.getElementById("painelVendaManual").style.display = "block";
+  document.getElementById("vmTipoPoltrona").value = tipoPoltrona;
+  document.getElementById("vmValor").value = `R$ ${Number(valorCobrado || 0).toFixed(2)}`;
+  document.getElementById("vmFormaPagamento").value = "";
+  document.getElementById("vmValorRecebido").value = "";
+  document.getElementById("vmTroco").value = "";
+  document.getElementById("vmConfirmacaoRecebimento").checked = false;
+  document.getElementById("boxDinheiroVendaManual").style.display = "none";
+  document.getElementById("painelVendaManual").style.display = "block";
 };
 
 window.concluirVendaManual = async function(){
@@ -2783,33 +2808,8 @@ if(forma_pagamento_agencia === "dinheiro"){
       valorCobrado = await getPrecoViagemPorTipo(viagem_id, tipoPoltrona);
     }
 
-    const codigo = "FFP-" + Date.now();
-
-    const origemObj = paradasAtuais.find(p => Number(p.ordem) === Number(origem));
-    const destinoObj = paradasAtuais.find(p => Number(p.ordem) === Number(destino));
-
-    let mensagemConfirmacao = 
-  `Confirma a venda?\n\n` +
-  `Passageiro: ${nome}\n` +
-  `Poltrona: ${poltrona}\n` +
-  `Tipo: ${tipoPoltrona}\n` +
-  `Valor: R$ ${Number(valorCobrado || 0).toFixed(2)}\n` +
-  `Pagamento: ${forma_pagamento_agencia}`;
-
-if(forma_pagamento_agencia === "dinheiro"){
-  const troco = valorRecebido - valorVenda;
-  mensagemConfirmacao +=
-    `\nRecebido: R$ ${valorRecebido.toFixed(2)}` +
-    `\nTroco: R$ ${troco.toFixed(2)}`;
-}
-
-const confirmarVenda = confirm(mensagemConfirmacao);
-if(!confirmarVenda) return;
-
-
-    const { error } = await supabase
-  .from("reservas_passagens")
-  .insert([{
+  
+ 
     app_id,
     viagem_id,
     poltrona,
@@ -2871,37 +2871,7 @@ await gerarPdfPassagemAdmin({
 
        
     
-    const codigo = "FFP-" + Date.now();
-
-    const origemObj = paradasAtuais.find(p => Number(p.ordem) === Number(origem));
-    const destinoObj = paradasAtuais.find(p => Number(p.ordem) === Number(destino));
-
-    const { error } = await supabase
-      .from("reservas_passagens")
-      .insert([{
-        app_id,
-        viagem_id,
-        poltrona,
-        nome,
-        cpf_rg: documento,
-        whatsapp,
-        data_viagem,
-        status: "pago_agencia",
-        codigo_embarque: codigo,
-        origem_venda: "admin",
-        forma_pagamento_agencia,
-        tipo_poltrona: tipoPoltrona,
-        origem: origemObj?.cidade || null,
-        destino: destinoObj?.cidade || null,
-        origem_ordem: origem ? Number(origem) : null,
-        destino_ordem: destino ? Number(destino) : null,
-        valor_trecho: valorCobrado || null,
-        valor_cobrado: valorCobrado || null
-      }]);
-
-    if(error){
-      return msg("msgReserva", "Erro ao salvar venda: " + error.message, "erro");
-    }
+    
 
     msg("msgReserva", `Venda concluída. Código: ${codigo} | Valor: R$ ${Number(valorCobrado || 0).toFixed(2)}`);
 
