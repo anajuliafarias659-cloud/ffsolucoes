@@ -1,6 +1,3 @@
-
-
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -634,7 +631,12 @@ small{opacity:.78}
 
         <input id="rota" placeholder="Ex: São Raimundo Nonato → São Paulo">
         <input id="hora" placeholder="08:00">
-        <input id="valor" type="number" step="0.01" placeholder="Valor base da viagem">
+        <div class="subgrid">
+  <input id="valor" type="number" step="0.01" placeholder="Valor base padrão">
+  <input id="valorSemiLeito" type="number" step="0.01" placeholder="Valor semi-leito">
+</div>
+
+<input id="valorLeito" type="number" step="0.01" placeholder="Valor leito">
         <div id="diasSemanaBox" style="margin-top:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
   <label style="display:flex;align-items:center;gap:6px;background:#0f172a;padding:10px;border-radius:10px;">
     <input type="checkbox" value="Seg" class="diaSemana" style="width:auto;margin:0;"> Seg
@@ -705,7 +707,12 @@ small{opacity:.78}
           <select id="destinoTrecho"></select>
         </div>
 
-        <input id="valorTrecho" type="number" step="0.01" placeholder="Valor do trecho">
+        <div class="subgrid">
+  <input id="valorTrecho" type="number" step="0.01" placeholder="Valor padrão do trecho">
+  <input id="valorTrechoSemiLeito" type="number" step="0.01" placeholder="Valor semi-leito">
+</div>
+
+<input id="valorTrechoLeito" type="number" step="0.01" placeholder="Valor leito">
 
         <div class="botoes-form">
           <button class="botao-laranja" onclick="salvarPrecoTrecho()">Salvar preço do trecho</button>
@@ -808,6 +815,12 @@ function toNumber(v){
   return Number.isFinite(n) ? n : 0;
 }
 
+function getTipoPoltronaDoVeiculo(veiculo, numeroPoltrona){
+  const config = Array.isArray(veiculo?.poltronas_config) ? veiculo.poltronas_config : [];
+  const item = config.find(p => Number(p.numero) === Number(numeroPoltrona));
+  return item?.tipo || veiculo?.tipo_poltrona || "padrao";
+}
+
 function montarConfigPoltronas(texto, totalPoltronas, tipoPadrao="padrao"){
   const config = [];
 
@@ -861,12 +874,23 @@ function getTextoTrecho(origem, destino){
   return `${o.cidade} → ${d.cidade}`;
 }
 
-function getPrecoTrecho(origem, destino){
+function getPrecoTrecho(origem, destino, tipoPoltrona="padrao"){
   const item = precosTrechosAtuais.find(p =>
     Number(p.origem_ordem) === Number(origem) &&
     Number(p.destino_ordem) === Number(destino)
   );
-  return item ? Number(item.valor || 0) : 0;
+
+  if(!item) return 0;
+
+  if(tipoPoltrona === "leito"){
+    return Number(item.valor_leito || item.valor || 0);
+  }
+
+  if(tipoPoltrona === "semi_leito"){
+    return Number(item.valor_semi_leito || item.valor || 0);
+  }
+
+  return Number(item.valor || 0);
 }
 
 function atualizarResumoTrechoReserva(){
@@ -890,11 +914,21 @@ function atualizarResumoTrechoReserva(){
   }
 
   const texto = getTextoTrecho(origem, destino);
-  const preco = getPrecoTrecho(origem, destino);
-  box.innerHTML = `
-    <b>Trecho selecionado:</b> ${escapeHtml(texto)}<br>
-    <b>Valor cadastrado:</b> ${preco > 0 ? "R$ " + preco.toFixed(2) : "não cadastrado"}
-  `;
+  const item = precosTrechosAtuais.find(p =>
+  Number(p.origem_ordem) === Number(origem) &&
+  Number(p.destino_ordem) === Number(destino)
+);
+
+const precoPadrao = Number(item?.valor || 0);
+const precoSemi = Number(item?.valor_semi_leito || 0);
+const precoLeito = Number(item?.valor_leito || 0);
+
+box.innerHTML = `
+  <b>Trecho selecionado:</b> ${escapeHtml(texto)}<br>
+  <b>Padrão:</b> ${precoPadrao > 0 ? "R$ " + precoPadrao.toFixed(2) : "não cadastrado"}<br>
+  <b>Semi-leito:</b> ${precoSemi > 0 ? "R$ " + precoSemi.toFixed(2) : "não cadastrado"}<br>
+  <b>Leito:</b> ${precoLeito > 0 ? "R$ " + precoLeito.toFixed(2) : "não cadastrado"}
+`;
 }
 
 function preencherSelectParadas(selectId, placeholder){
@@ -946,6 +980,8 @@ function limparFormularioViagem(){
   document.getElementById("rota").value = "";
   document.getElementById("hora").value = "";
   document.getElementById("valor").value = "";
+  document.getElementById("valorSemiLeito").value = "";
+  document.getElementById("valorLeito").value = "";
   document.getElementById("veiculoSelect").value = "";
 
   document.querySelectorAll(".diaSemana").forEach(el => {
@@ -968,6 +1004,8 @@ function limparFormularioPrecoTrecho(){
   document.getElementById("origemTrecho").value = "";
   document.getElementById("destinoTrecho").value = "";
   document.getElementById("valorTrecho").value = "";
+  document.getElementById("valorTrechoSemiLeito").value = "";
+  document.getElementById("valorTrechoLeito").value = "";
   document.getElementById("btnCancelarPrecoTrecho").style.display = "none";
 }
 
@@ -1810,6 +1848,8 @@ window.salvarViagem = async function(){
   const rota = document.getElementById("rota").value.trim();
   const hora = document.getElementById("hora").value.trim();
   const valor = document.getElementById("valor").value.trim();
+  const valor_semi_leito = document.getElementById("valorSemiLeito").value.trim();
+  const valor_leito = document.getElementById("valorLeito").value.trim();
   const dias = getDiasSelecionados();
   const veiculo_id = document.getElementById("veiculoSelect").value;
 
@@ -1819,7 +1859,15 @@ window.salvarViagem = async function(){
   if(!veiculo_id) return msg("msgViagem", "Selecione um veículo.", "erro");
   if(!app_id) return msg("msgViagem", "app_id não encontrado.", "erro");
 
-  const payload = { rota, hora, valor:Number(valor), dias, veiculo_id };
+  const payload = {
+  rota,
+  hora,
+  valor: valor ? Number(valor) : null,
+  valor_semi_leito: valor_semi_leito ? Number(valor_semi_leito) : null,
+  valor_leito: valor_leito ? Number(valor_leito) : null,
+  dias,
+  veiculo_id
+};
 
   if(id){
     const { error } = await supabase
@@ -1856,11 +1904,13 @@ window.editarViagem = async function(id){
   if(error || !data) return msg("msgViagem", "Erro ao carregar viagem.", "erro");
 
   document.getElementById("viagemEditId").value = data.id;
-  document.getElementById("rota").value = data.rota || "";
-  document.getElementById("hora").value = data.hora || "";
-  document.getElementById("valor").value = data.valor ?? "";
-  marcarDiasSelecionados(data.dias || "");
-  document.getElementById("veiculoSelect").value = data.veiculo_id || "";
+document.getElementById("rota").value = data.rota || "";
+document.getElementById("hora").value = data.hora || "";
+document.getElementById("valor").value = data.valor ?? "";
+document.getElementById("valorSemiLeito").value = data.valor_semi_leito ?? "";
+document.getElementById("valorLeito").value = data.valor_leito ?? "";
+marcarDiasSelecionados(data.dias || "");
+document.getElementById("veiculoSelect").value = data.veiculo_id || "";
   document.getElementById("btnSalvarViagem").innerText = "Atualizar Viagem";
   document.getElementById("btnCancelarViagem").style.display = "block";
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1945,7 +1995,9 @@ async function carregarViagens(){
       <div class="item">
         <b>${escapeHtml(v.rota)}</b><br>
         Hora: ${escapeHtml(v.hora || "-")}<br>
-        Valor base: R$ ${Number(v.valor || 0).toFixed(2)}<br>
+        Valor padrão: R$ ${Number(v.valor || 0).toFixed(2)}<br>
+Semi-leito: R$ ${Number(v.valor_semi_leito || 0).toFixed(2)}<br>
+Leito: R$ ${Number(v.valor_leito || 0).toFixed(2)}<br>
         Dias: ${escapeHtml(v.dias || "-")}<br>
         Veículo: ${escapeHtml(nomeVeiculo)}
         <div class="botoes-item">
