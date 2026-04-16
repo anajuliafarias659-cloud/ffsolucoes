@@ -533,36 +533,39 @@ async function buscarCodigoManual(){
 }
 
 async function marcarEmbarcado(idReserva){
+  abrirModalConfirmacao(
+    "Confirmar embarque",
+    "Deseja realmente marcar este passageiro como <b>EMBARCADO</b>?",
+    async () => {
+      try{
+        if(!app_id){
+          const ok = await carregarUsuarioLogado();
+          if(!ok) return;
+        }
 
-  const confirmar = confirm("Confirmar embarque do passageiro?\n\nApós isso ele será marcado como EMBARCADO.");
+        const { error } = await client
+          .from("reservas_passagens")
+          .update({ status: "embarcado" })
+          .eq("id", idReserva)
+          .eq("app_id", app_id);
 
-  if(!confirmar) return;
+        if(error){
+          setMsg("Erro ao marcar embarque: " + error.message, "erro");
+          return;
+        }
 
-  try{
-    if(!app_id){
-      const ok = await carregarUsuarioLogado();
-      if(!ok) return;
-    }
+        setMsg("Passageiro marcado como embarcado.", "ok");
 
-    const { error } = await client
-      .from("reservas_passagens")
-      .update({ status: "embarcado" })
-      .eq("id", idReserva)
-      .eq("app_id", app_id);
-
-    if(error){
-      setMsg("Erro ao marcar embarque: " + error.message, "erro");
-      return;
-    }
-
-    setMsg("Passageiro marcado como embarcado.", "ok");
-
-    if(ultimoCodigo){
-      await buscarPassageiroPorCodigo(ultimoCodigo);
-    }
-  }catch(e){
-    setMsg(e.message || "Erro ao marcar embarque.", "erro");
-  }
+        if(ultimoCodigo){
+          await buscarPassageiroPorCodigo(ultimoCodigo);
+        }
+      }catch(e){
+        setMsg(e.message || "Erro ao marcar embarque.", "erro");
+      }
+    },
+    "Confirmar embarque",
+    "btn-verde"
+  );
 }
 
 window.marcarEmbarcado = marcarEmbarcado;
@@ -950,79 +953,82 @@ if(viagemExpiradaParaData(viagemInfo, dataViagem)){
 window.venderPassagemManual = venderPassagemManual;
 
 async function receberPagamentoReserva(idReserva, formaPagamento){
+  abrirModalConfirmacao(
+    "Confirmar recebimento",
+    `Deseja realmente confirmar o recebimento em <b>${String(formaPagamento || "").toUpperCase()}</b>?`,
+    async () => {
+      try{
+        const { data: reserva, error } = await client
+          .from("reservas_passagens")
+          .select("*")
+          .eq("id", idReserva)
+          .eq("app_id", app_id)
+          .single();
 
-  const confirmar = confirm(`Confirmar recebimento em ${formaPagamento.toUpperCase()}?\n\nEssa ação não poderá ser desfeita.`);
+        if(error || !reserva){
+          setMsg("Reserva não encontrada.", "erro");
+          return;
+        }
 
-  if(!confirmar) return;
+        const { error: erroReserva } = await client
+          .from("reservas_passagens")
+          .update({ status: "pago_agencia" })
+          .eq("id", idReserva)
+          .eq("app_id", app_id);
 
-  try{
-    const { data: reserva, error } = await client
-      .from("reservas_passagens")
-      .select("*")
-      .eq("id", idReserva)
-      .eq("app_id", app_id)
-      .single();
+        if(erroReserva){
+          setMsg("Erro ao atualizar reserva: " + erroReserva.message, "erro");
+          return;
+        }
 
-    if(error || !reserva){
-      setMsg("Reserva não encontrada.", "erro");
-      return;
-    }
+        const { data: viagem } = await client
+          .from("viagens_passagens")
+          .select("rota,hora")
+          .eq("id", reserva.viagem_id)
+          .maybeSingle();
 
-    const { error: erroReserva } = await client
-      .from("reservas_passagens")
-      .update({ status: "pago_agencia" })
-      .eq("id", idReserva)
-      .eq("app_id", app_id);
+        await client
+          .from("pedidos")
+          .insert([{
+            app_id,
+            status: "pago",
+            pagamento_status: "approved",
+            cliente_nome: reserva.nome,
+            valor_total: Number(reserva.valor_trecho || 0),
+            origem: "cobrador",
+            forma_pagamento: formaPagamento,
+            itens: [{
+              tipo: "passagem",
+              viagem_id: reserva.viagem_id,
+              rota: viagem?.rota || "",
+              hora: viagem?.hora || "",
+              data_ida: reserva.data_viagem,
+              poltrona: reserva.poltrona,
+              valor_unitario: Number(reserva.valor_trecho || 0),
+              valor_total: Number(reserva.valor_trecho || 0),
+              codigo_embarque: reserva.codigo_embarque,
+              cpf_rg: reserva.cpf_rg,
+              whatsapp: reserva.whatsapp,
+              origem: reserva.origem || null,
+              destino: reserva.destino || null,
+              origem_ordem: reserva.origem_ordem || null,
+              destino_ordem: reserva.destino_ordem || null
+            }]
+          }]);
 
-    if(erroReserva){
-      setMsg("Erro ao atualizar reserva: " + erroReserva.message, "erro");
-      return;
-    }
+        setMsg("Pagamento recebido com sucesso.", "ok");
 
-    const { data: viagem } = await client
-      .from("viagens_passagens")
-      .select("rota,hora")
-      .eq("id", reserva.viagem_id)
-      .maybeSingle();
-
-    await client
-      .from("pedidos")
-      .insert([{
-        app_id,
-        status: "pago",
-        pagamento_status: "approved",
-        cliente_nome: reserva.nome,
-        valor_total: Number(reserva.valor_trecho || 0),
-        origem: "cobrador",
-        forma_pagamento: formaPagamento,
-        itens: [{
-          tipo: "passagem",
-          viagem_id: reserva.viagem_id,
-          rota: viagem?.rota || "",
-          hora: viagem?.hora || "",
-          data_ida: reserva.data_viagem,
-          poltrona: reserva.poltrona,
-          valor_unitario: Number(reserva.valor_trecho || 0),
-          valor_total: Number(reserva.valor_trecho || 0),
-          codigo_embarque: reserva.codigo_embarque,
-          cpf_rg: reserva.cpf_rg,
-          whatsapp: reserva.whatsapp,
-          origem: reserva.origem || null,
-          destino: reserva.destino || null,
-          origem_ordem: reserva.origem_ordem || null,
-          destino_ordem: reserva.destino_ordem || null
-        }]
-      }]);
-
-    setMsg("Pagamento recebido com sucesso.", "ok");
-
-    if(ultimoCodigo){
-      await buscarPassageiroPorCodigo(ultimoCodigo);
-    }
-  }catch(e){
-    console.error(e);
-    setMsg(e.message || "Erro ao receber pagamento.", "erro");
-  }
+        if(ultimoCodigo){
+          await buscarPassageiroPorCodigo(ultimoCodigo);
+        }
+      }catch(e){
+        console.error(e);
+        setMsg(e.message || "Erro ao receber pagamento.", "erro");
+      }
+    },
+    "Confirmar pagamento",
+    "btn-azul"
+  );
 }
 
 window.receberPagamentoReserva = receberPagamentoReserva;
@@ -1252,6 +1258,47 @@ ${
   }
 }
 
+let callbackConfirmacao = null;
+
+function abrirModalConfirmacao(titulo, texto, onConfirm, textoBotao = "Confirmar", classeBotao = "btn-verde"){
+  const modal = document.getElementById("modalConfirmacao");
+  const tituloEl = document.getElementById("modalConfirmacaoTitulo");
+  const textoEl = document.getElementById("modalConfirmacaoTexto");
+  const btn = document.getElementById("btnConfirmarModalAcao");
+
+  tituloEl.textContent = titulo || "Confirmar ação";
+  textoEl.innerHTML = texto || "Tem certeza?";
+  btn.textContent = textoBotao || "Confirmar";
+  btn.className = classeBotao || "btn-verde";
+
+  callbackConfirmacao = onConfirm;
+  modal.style.display = "flex";
+
+  if(navigator.vibrate){
+    navigator.vibrate(80);
+  }
+}
+
+function fecharModalConfirmacao(){
+  const modal = document.getElementById("modalConfirmacao");
+  modal.style.display = "none";
+  callbackConfirmacao = null;
+}
+
+document.addEventListener("click", function(e){
+  if(e.target && e.target.id === "btnConfirmarModalAcao"){
+    const acao = callbackConfirmacao;
+    fecharModalConfirmacao();
+    if(typeof acao === "function"){
+      acao();
+    }
+  }
+
+  if(e.target && e.target.id === "modalConfirmacao"){
+    fecharModalConfirmacao();
+  }
+});
+
 window.logout = async function(){
   try{
     await pararScanner();
@@ -1271,6 +1318,19 @@ window.logout = async function(){
   }
 })();
 </script>
+<div id="modalConfirmacao" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;align-items:center;justify-content:center;padding:16px;">
+  <div style="width:100%;max-width:420px;background:linear-gradient(180deg,#172033,#0f172a);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:18px;box-shadow:0 18px 40px rgba(0,0,0,.35);">
+    <h3 id="modalConfirmacaoTitulo" style="margin:0 0 10px 0;font-size:20px;">Confirmar ação</h3>
+    <div id="modalConfirmacaoTexto" style="font-size:15px;line-height:1.5;opacity:.95;">
+      Tem certeza?
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;">
+      <button type="button" class="btn-cinza" onclick="fecharModalConfirmacao()">Cancelar</button>
+      <button type="button" id="btnConfirmarModalAcao" class="btn-verde">Confirmar</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
