@@ -811,133 +811,155 @@ async function carregarPoltronasVendaManual(){
 window.carregarPoltronasVendaManual = carregarPoltronasVendaManual;
 
 async function venderPassagemManual(){
-  try{
-    const viagemId = document.getElementById("viagemVendaManual").value;
-    const dataViagem = document.getElementById("dataVendaManual").value;
-    const origem = document.getElementById("origemVendaManual").value;
-    const destino = document.getElementById("destinoVendaManual").value;
-    const poltrona = document.getElementById("poltronaVendaManual").value;
-    const nome = document.getElementById("nomeVendaManual").value.trim();
-    const cpfRg = document.getElementById("cpfRgVendaManual").value.trim();
-    const whatsapp = document.getElementById("whatsappVendaManual").value.trim();
-    const formaPagamento = document.getElementById("formaPagamentoVendaManual").value;
+  const viagemId = document.getElementById("viagemVendaManual").value;
+  const dataViagem = document.getElementById("dataVendaManual").value;
+  const origem = document.getElementById("origemVendaManual").value;
+  const destino = document.getElementById("destinoVendaManual").value;
+  const poltrona = document.getElementById("poltronaVendaManual").value;
+  const nome = document.getElementById("nomeVendaManual").value.trim();
+  const cpfRg = document.getElementById("cpfRgVendaManual").value.trim();
+  const whatsapp = document.getElementById("whatsappVendaManual").value.trim();
+  const formaPagamento = document.getElementById("formaPagamentoVendaManual").value;
 
-    if(!viagemId) return setMsg("Selecione a viagem.", "erro");
-    if(!dataViagem) return setMsg("Selecione a data.", "erro");
-    if(!nome) return setMsg("Digite o nome do passageiro.", "erro");
-    if(!cpfRg) return setMsg("Digite o documento.", "erro");
-    if(!poltrona) return setMsg("Selecione a poltrona.", "erro");
-    if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
+  if(!viagemId) return setMsg("Selecione a viagem.", "erro");
+  if(!dataViagem) return setMsg("Selecione a data.", "erro");
+  if(!nome) return setMsg("Digite o nome do passageiro.", "erro");
+  if(!cpfRg) return setMsg("Digite o documento.", "erro");
+  if(!poltrona) return setMsg("Selecione a poltrona.", "erro");
+  if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
 
-    const { data: viagemInfo, error: erroViagemInfo } = await client
-  .from("viagens_passagens")
-  .select("id, rota, hora, dias")
-  .eq("id", viagemId)
-  .eq("app_id", app_id)
-  .single();
+  const textoTrecho = origem && destino
+    ? getTextoTrechoVendaManual(origem, destino)
+    : "Viagem inteira";
 
-if(erroViagemInfo || !viagemInfo){
-  return setMsg("Não foi possível validar a viagem.", "erro");
-}
+  const valorTrechoPreview = origem && destino
+    ? Number(getPrecoTrechoVendaManual(origem, destino) || 0)
+    : 0;
 
-if(!viagemRodaNaData(viagemInfo, dataViagem)){
-  return setMsg(`Essa viagem não roda nessa data. Dias disponíveis: ${viagemInfo?.dias || "-"}.`, "erro");
-}
+  abrirModalConfirmacao(
+    "Confirmar venda no embarque",
+    `
+      <b>Passageiro:</b> ${escapeHtml(nome)}<br>
+      <b>Forma de pagamento:</b> ${escapeHtml(String(formaPagamento).toUpperCase())}<br>
+      <b>Poltrona:</b> ${escapeHtml(poltrona)}<br>
+      <b>Trecho:</b> ${escapeHtml(textoTrecho)}<br>
+      <b>Valor:</b> ${valorTrechoPreview > 0 ? "R$ " + valorTrechoPreview.toFixed(2) : "não cadastrado"}
+    `,
+    async () => {
+      try{
+        const { data: viagemInfo, error: erroViagemInfo } = await client
+          .from("viagens_passagens")
+          .select("id, rota, hora, dias")
+          .eq("id", viagemId)
+          .eq("app_id", app_id)
+          .single();
 
-if(viagemExpiradaParaData(viagemInfo, dataViagem)){
-  return setMsg(`Essa viagem de hoje às ${viagemInfo?.hora || ""} já saiu e não aceita mais venda.`, "erro");
-}
+        if(erroViagemInfo || !viagemInfo){
+          return setMsg("Não foi possível validar a viagem.", "erro");
+        }
 
-    if(paradasVendaManual.length){
-      if(!origem || !destino) return setMsg("Selecione origem e destino.", "erro");
-      if(Number(origem) >= Number(destino)) return setMsg("O destino precisa ser depois da origem.", "erro");
-    }
+        if(!viagemRodaNaData(viagemInfo, dataViagem)){
+          return setMsg(`Essa viagem não roda nessa data. Dias disponíveis: ${viagemInfo?.dias || "-"}.`, "erro");
+        }
 
-    const codigo = gerarCodigoReservaManual();
-    const origemCidade = origem ? (paradasVendaManual.find(p => Number(p.ordem) === Number(origem))?.cidade || null) : null;
-    const destinoCidade = destino ? (paradasVendaManual.find(p => Number(p.ordem) === Number(destino))?.cidade || null) : null;
-    const valorTrecho = origem && destino ? Number(getPrecoTrechoVendaManual(origem, destino) || 0) : 0;
+        if(viagemExpiradaParaData(viagemInfo, dataViagem)){
+          return setMsg(`Essa viagem de hoje às ${viagemInfo?.hora || ""} já saiu e não aceita mais venda.`, "erro");
+        }
 
-    const statusReserva = "pago_agencia";
-    const pagamentoStatus = "approved";
+        if(paradasVendaManual.length){
+          if(!origem || !destino) return setMsg("Selecione origem e destino.", "erro");
+          if(Number(origem) >= Number(destino)) return setMsg("O destino precisa ser depois da origem.", "erro");
+        }
 
-    const { error: erroReserva } = await client
-      .from("reservas_passagens")
-      .insert([{
-        app_id,
-        viagem_id: viagemId,
-        poltrona: Number(poltrona),
-        nome,
-        cpf_rg: cpfRg,
-        whatsapp,
-        data_viagem: dataViagem,
-        status: statusReserva,
-        codigo_embarque: codigo,
-        origem: origemCidade,
-        destino: destinoCidade,
-        origem_ordem: origem ? Number(origem) : null,
-        destino_ordem: destino ? Number(destino) : null,
-        valor_trecho: valorTrecho || null
-      }]);
+        const codigo = gerarCodigoReservaManual();
+        const origemCidade = origem ? (paradasVendaManual.find(p => Number(p.ordem) === Number(origem))?.cidade || null) : null;
+        const destinoCidade = destino ? (paradasVendaManual.find(p => Number(p.ordem) === Number(destino))?.cidade || null) : null;
+        const valorTrecho = origem && destino ? Number(getPrecoTrechoVendaManual(origem, destino) || 0) : 0;
 
-    if(erroReserva){
-      throw new Error(erroReserva.message || "Erro ao salvar reserva.");
-    }
+        const statusReserva = "pago_agencia";
+        const pagamentoStatus = "approved";
 
-    const { data: viagem } = await client
-      .from("viagens_passagens")
-      .select("rota,hora")
-      .eq("id", viagemId)
-      .maybeSingle();
+        const { error: erroReserva } = await client
+          .from("reservas_passagens")
+          .insert([{
+            app_id,
+            viagem_id: viagemId,
+            poltrona: Number(poltrona),
+            nome,
+            cpf_rg: cpfRg,
+            whatsapp,
+            data_viagem: dataViagem,
+            status: statusReserva,
+            codigo_embarque: codigo,
+            origem: origemCidade,
+            destino: destinoCidade,
+            origem_ordem: origem ? Number(origem) : null,
+            destino_ordem: destino ? Number(destino) : null,
+            valor_trecho: valorTrecho || null
+          }]);
 
-    const valorTotal = valorTrecho || 0;
+        if(erroReserva){
+          throw new Error(erroReserva.message || "Erro ao salvar reserva.");
+        }
 
-    const { error: erroPedido } = await client
-      .from("pedidos")
-      .insert([{
-        app_id,
-        status: "pago",
-        pagamento_status: pagamentoStatus,
-        cliente_nome: nome,
-        valor_total: valorTotal,
-        origem: "cobrador",
-        forma_pagamento: formaPagamento,
-        itens: [{
-          tipo: "passagem",
-          viagem_id: viagemId,
-          rota: viagem?.rota || "",
-          hora: viagem?.hora || "",
-          data_ida: dataViagem,
-          poltrona: Number(poltrona),
-          valor_unitario: valorTotal,
-          valor_total: valorTotal,
-          codigo_embarque: codigo,
-          cpf_rg: cpfRg,
-          whatsapp,
-          origem: origemCidade,
-          destino: destinoCidade,
-          origem_ordem: origem ? Number(origem) : null,
-          destino_ordem: destino ? Number(destino) : null
-        }]
-      }]);
+        const { data: viagem } = await client
+          .from("viagens_passagens")
+          .select("rota,hora")
+          .eq("id", viagemId)
+          .maybeSingle();
 
-    if(erroPedido){
-      throw new Error(erroPedido.message || "Erro ao salvar pedido.");
-    }
+        const valorTotal = valorTrecho || 0;
 
-    setMsg("Passagem vendida com sucesso no embarque.", "ok");
+        const { error: erroPedido } = await client
+          .from("pedidos")
+          .insert([{
+            app_id,
+            status: "pago",
+            pagamento_status: pagamentoStatus,
+            cliente_nome: nome,
+            valor_total: valorTotal,
+            origem: "cobrador",
+            forma_pagamento: formaPagamento,
+            itens: [{
+              tipo: "passagem",
+              viagem_id: viagemId,
+              rota: viagem?.rota || "",
+              hora: viagem?.hora || "",
+              data_ida: dataViagem,
+              poltrona: Number(poltrona),
+              valor_unitario: valorTotal,
+              valor_total: valorTotal,
+              codigo_embarque: codigo,
+              cpf_rg: cpfRg,
+              whatsapp,
+              origem: origemCidade,
+              destino: destinoCidade,
+              origem_ordem: origem ? Number(origem) : null,
+              destino_ordem: destino ? Number(destino) : null
+            }]
+          }]);
 
-    document.getElementById("nomeVendaManual").value = "";
-    document.getElementById("cpfRgVendaManual").value = "";
-    document.getElementById("whatsappVendaManual").value = "";
-    document.getElementById("poltronaVendaManual").value = "";
-    document.getElementById("formaPagamentoVendaManual").value = "";
+        if(erroPedido){
+          throw new Error(erroPedido.message || "Erro ao salvar pedido.");
+        }
 
-    await carregarPoltronasVendaManual();
-  }catch(e){
-    console.error(e);
-    setMsg(e.message || "Erro ao vender passagem.", "erro");
-  }
+        setMsg("Passagem vendida com sucesso no embarque.", "ok");
+
+        document.getElementById("nomeVendaManual").value = "";
+        document.getElementById("cpfRgVendaManual").value = "";
+        document.getElementById("whatsappVendaManual").value = "";
+        document.getElementById("poltronaVendaManual").value = "";
+        document.getElementById("formaPagamentoVendaManual").value = "";
+
+        await carregarPoltronasVendaManual();
+      }catch(e){
+        console.error(e);
+        setMsg(e.message || "Erro ao vender passagem.", "erro");
+      }
+    },
+    "Confirmar venda",
+    "btn-verde"
+  );
 }
 
 window.venderPassagemManual = venderPassagemManual;
