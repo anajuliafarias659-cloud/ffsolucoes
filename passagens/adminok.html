@@ -2844,46 +2844,55 @@ window.concluirVendaManual = async function(){
     const destinoObj = paradasAtuais.find(p => Number(p.ordem) === Number(destino));
 
     const { error } = await supabase
-      .from("reservas_passagens")
-      .insert([{
-        app_id,
-        viagem_id,
-        poltrona,
-        nome,
-        cpf_rg: documento,
-        whatsapp,
-        data_viagem,
-        status: forma_pagamento_agencia === "embarque"
-  ? "Pendente (cobrar no embarque)"
-  : "Pago"
-        codigo_embarque: codigo,
-        origem_venda: "admin",
-        forma_pagamento_agencia,
-        tipo_poltrona: tipoPoltrona,
-        origem: origemObj?.cidade || null,
-        destino: destinoObj?.cidade || null,
-        origem_ordem: origem ? Number(origem) : null,
-        destino_ordem: destino ? Number(destino) : null,
-        valor_trecho: valorCobrado || null,
-        valor_cobrado: valorCobrado || null
-      }]);
+  .from("reservas_passagens")
+  .insert([{
+    app_id,
+    viagem_id,
+    poltrona,
+    nome,
+    cpf_rg: documento,
+    whatsapp,
+    data_viagem,
+    status: forma_pagamento_agencia === "embarque"
+      ? "pendente_agencia"
+      : "pago_agencia",
+    codigo_embarque: codigo,
+    origem_venda: "admin",
+    forma_pagamento_agencia,
+    tipo_poltrona: tipoPoltrona,
+    origem: origemObj?.cidade || null,
+    destino: destinoObj?.cidade || null,
+    origem_ordem: origem ? Number(origem) : null,
+    destino_ordem: destino ? Number(destino) : null,
+    valor_trecho: valorCobrado || null,
+    valor_cobrado: valorCobrado || null,
+    valor_recebido: forma_pagamento_agencia === "dinheiro" ? valorRecebido : null,
+    troco: forma_pagamento_agencia === "dinheiro"
+      ? Number((valorRecebido - valorVenda).toFixed(2))
+      : null
+  }]);
 
     if(error){
-      return msg("msgReserva", "Erro ao salvar venda: " + error.message, "erro");
-    }
+  return msg("msgReserva", "Erro ao salvar venda: " + error.message, "erro");
+}
 
-    msg("msgReserva", `Venda concluída. Código: ${codigo} | Valor: R$ ${Number(valorCobrado || 0).toFixed(2)}`);
+msg("msgReserva", `Venda concluída. Código: ${codigo} | Valor: R$ ${Number(valorCobrado || 0).toFixed(2)}`);
 
-    let statusComprovante = "Pendente";
+fecharPainelVendaManual();
+await verReservasComData();
 
-if(forma_pagamento_agencia === "dinheiro" || 
-   forma_pagamento_agencia === "pix" || 
-   forma_pagamento_agencia === "cartao"){
+let statusComprovante = "Pendente";
+
+if(
+  forma_pagamento_agencia === "dinheiro" ||
+  forma_pagamento_agencia === "pix" ||
+  forma_pagamento_agencia === "cartao"
+){
   statusComprovante = "Pago";
 }
 
 if(forma_pagamento_agencia === "embarque"){
-  statusComprovante = "Pagamento no dia do embarque";
+  statusComprovante = "Pendente";
 }
 
 await gerarPdfPassagemAdmin({
@@ -2898,9 +2907,7 @@ await gerarPdfPassagemAdmin({
   data_viagem,
   origem: origemObj?.cidade || "Origem",
   destino: destinoObj?.cidade || "Destino",
-  status: forma_pagamento_agencia === "embarque"
-  ? "Pendente"
-  : "Pago"
+  status: statusComprovante,
   forma_pagamento: forma_pagamento_agencia
 });
   }catch(e){
