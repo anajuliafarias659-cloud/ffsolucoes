@@ -1,6 +1,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -217,43 +218,43 @@ small{opacity:.8}
     <div class="grid2">
       <div>
         <label>Viagem</label>
-        <select id="viagemVendaManual" onchange="aoTrocarViagemVendaManual()">
+        <select id="viagemVendaManual" onchange="aoTrocarViagemVendaManual(); salvarRascunhoVendaManual()">
           <option value="">Selecione a viagem</option>
         </select>
 
         <label>Data da viagem</label>
-        <input type="date" id="dataVendaManual">
+        <input type="date" id="dataVendaManual" onchange="salvarRascunhoVendaManual()">
 
         <label>Origem</label>
-        <select id="origemVendaManual" onchange="aoTrocarTrechoVendaManual()">
+        <select id="origemVendaManual" onchange="aoTrocarTrechoVendaManual(); salvarRascunhoVendaManual()">
           <option value="">Selecione a origem</option>
         </select>
 
         <label>Destino</label>
-        <select id="destinoVendaManual" onchange="aoTrocarTrechoVendaManual()">
+        <select id="destinoVendaManual" onchange="aoTrocarTrechoVendaManual(); salvarRascunhoVendaManual()">
           <option value="">Selecione o destino</option>
         </select>
 
         <div id="resumoVendaManual" class="msg info">Selecione viagem, origem e destino.</div>
 
         <label>Poltrona</label>
-        <select id="poltronaVendaManual">
+        <select id="poltronaVendaManual" onchange="salvarRascunhoVendaManual()">
           <option value="">Selecione a poltrona</option>
         </select>
       </div>
 
       <div>
         <label>Nome do passageiro</label>
-        <input type="text" id="nomeVendaManual" placeholder="Nome completo">
+        <input type="text" id="nomeVendaManual" placeholder="Nome completo" oninput="salvarRascunhoVendaManual()">
 
         <label>Documento</label>
-        <input type="text" id="cpfRgVendaManual" placeholder="CPF ou RG">
+        <input type="text" id="cpfRgVendaManual" placeholder="CPF ou RG" oninput="salvarRascunhoVendaManual()">
 
         <label>WhatsApp</label>
-        <input type="text" id="whatsappVendaManual" placeholder="WhatsApp">
+        <input type="text" id="whatsappVendaManual" placeholder="WhatsApp" oninput="salvarRascunhoVendaManual()">
 
         <label>Forma de pagamento</label>
-        <select id="formaPagamentoVendaManual">
+        <select id="formaPagamentoVendaManual" onchange="salvarRascunhoVendaManual()">
           <option value="">Selecione</option>
           <option value="dinheiro">Dinheiro</option>
           <option value="pix">PIX</option>
@@ -317,6 +318,81 @@ let ultimoCodigo = null;
 let viagensCobrador = [];
 let paradasVendaManual = [];
 let precosTrechosVendaManual = [];
+const RASCUNHO_VENDA_KEY = "ff_cobrador_venda_manual";
+
+function salvarRascunhoVendaManual(){
+  const payload = {
+    viagemId: document.getElementById("viagemVendaManual")?.value || "",
+    dataViagem: document.getElementById("dataVendaManual")?.value || "",
+    origem: document.getElementById("origemVendaManual")?.value || "",
+    destino: document.getElementById("destinoVendaManual")?.value || "",
+    poltrona: document.getElementById("poltronaVendaManual")?.value || "",
+    nome: document.getElementById("nomeVendaManual")?.value || "",
+    cpfRg: document.getElementById("cpfRgVendaManual")?.value || "",
+    whatsapp: document.getElementById("whatsappVendaManual")?.value || "",
+    formaPagamento: document.getElementById("formaPagamentoVendaManual")?.value || ""
+  };
+
+  localStorage.setItem(RASCUNHO_VENDA_KEY, JSON.stringify(payload));
+}
+
+function limparRascunhoVendaManual(){
+  localStorage.removeItem(RASCUNHO_VENDA_KEY);
+}
+
+async function restaurarRascunhoVendaManual(){
+  try{
+    const bruto = localStorage.getItem(RASCUNHO_VENDA_KEY);
+    if(!bruto) return;
+
+    const r = JSON.parse(bruto);
+    if(!r) return;
+
+    if(r.dataViagem){
+      document.getElementById("dataVendaManual").value = r.dataViagem;
+    }
+
+    if(r.nome){
+      document.getElementById("nomeVendaManual").value = r.nome;
+    }
+
+    if(r.cpfRg){
+      document.getElementById("cpfRgVendaManual").value = r.cpfRg;
+    }
+
+    if(r.whatsapp){
+      document.getElementById("whatsappVendaManual").value = r.whatsapp;
+    }
+
+    if(r.formaPagamento){
+      document.getElementById("formaPagamentoVendaManual").value = r.formaPagamento;
+    }
+
+    if(r.viagemId){
+      document.getElementById("viagemVendaManual").value = r.viagemId;
+      await aoTrocarViagemVendaManual();
+    }
+
+    if(r.origem){
+      document.getElementById("origemVendaManual").value = r.origem;
+    }
+
+    if(r.destino){
+      document.getElementById("destinoVendaManual").value = r.destino;
+      aoTrocarTrechoVendaManual();
+    }
+
+    if(r.viagemId && r.dataViagem){
+      await carregarPoltronasVendaManual();
+    }
+
+    if(r.poltrona){
+      document.getElementById("poltronaVendaManual").value = r.poltrona;
+    }
+  }catch(e){
+    console.error("Erro ao restaurar rascunho da venda manual:", e);
+  }
+}
 
 function setMsg(texto, tipo="info"){
   const box = document.getElementById("msg");
@@ -614,6 +690,12 @@ function trechosConflitam(origemA, destinoA, origemB, destinoB){
   return origemA < destinoB && destinoA > origemB;
 }
 
+function getTipoPoltronaDoVeiculo(veiculo, numeroPoltrona){
+  const config = Array.isArray(veiculo?.poltronas_config) ? veiculo.poltronas_config : [];
+  const item = config.find(p => Number(p.numero) === Number(numeroPoltrona));
+  return item?.tipo || veiculo?.tipo_poltrona || "padrao";
+}
+
 async function carregarViagensCobrador(){
   if(!app_id) return;
 
@@ -786,10 +868,10 @@ async function carregarPoltronasVendaManual(){
   }
 
   const { data: veiculo, error: erroVeiculo } = await client
-    .from("veiculos_passagens")
-    .select("total_poltronas")
-    .eq("id", viagem.veiculo_id)
-    .maybeSingle();
+  .from("veiculos_passagens")
+  .select("total_poltronas, poltronas_config, tipo_poltrona")
+  .eq("id", viagem.veiculo_id)
+  .maybeSingle();
 
   if(erroVeiculo || !veiculo){
     setMsg("Veículo não encontrado.", "erro");
@@ -829,11 +911,18 @@ async function carregarPoltronasVendaManual(){
     });
 
     if(!ocupado){
-      selectPoltrona.innerHTML += `<option value="${i}">Poltrona ${i}</option>`;
-    }
+  const tipo = getTipoPoltronaDoVeiculo(veiculo, i);
+  const tipoLabel =
+    tipo === "leito" ? "Leito" :
+    tipo === "semi_leito" ? "Semi-Leito" :
+    "Padrão";
+
+  selectPoltrona.innerHTML += `<option value="${i}">Poltrona ${i} • ${tipoLabel}</option>`;
+}
   }
 
   setMsg("Poltronas livres carregadas.", "ok");
+  salvarRascunhoVendaManual();
 }
 
 window.carregarPoltronasVendaManual = carregarPoltronasVendaManual;
@@ -974,6 +1063,7 @@ async function venderPassagemManual(){
         }
 
         setMsg("Passagem vendida com sucesso no embarque.", "ok");
+        limparRascunhoVendaManual();
         document.getElementById("cardVendaManual").classList.remove("ativo");
 document.getElementById("cardVendaManual").classList.add("recolhido");
 
@@ -1147,7 +1237,8 @@ async function buscarPassageiroPorCodigo(codigo){
 </div>
 
 ${
-  String(r.status || "").toLowerCase().trim() === "reservado"
+  ["reservado","pendente_agencia","pendente","pendente_pagamento","aguardando_pagamento"]
+    .includes(String(r.status || "").toLowerCase().trim())
     ? `
       <div class="linha-acoes">
         <button class="btn-verde" onclick="receberPagamentoReserva('${r.id}','dinheiro')">Receber em dinheiro</button>
@@ -1155,7 +1246,7 @@ ${
       </div>
       <div class="linha-acoes">
         <button class="btn-cinza" onclick="receberPagamentoReserva('${r.id}','cartao')">Receber no cartão</button>
-        <button class="btn-cinza" disabled>Aguardando pagamento</button>
+        <button class="btn-cinza" disabled>Pendente de recebimento</button>
       </div>
     `
     : ""
@@ -1379,9 +1470,15 @@ async function abrirCardQr(){
   const ok = await carregarUsuarioLogado();
   if(ok){
     const hoje = new Date().toISOString().slice(0,10);
-    document.getElementById("dataVendaManual").value = hoje;
     document.getElementById("dataOperacaoCobrador").value = hoje;
+
     await carregarViagensCobrador();
+    await restaurarRascunhoVendaManual();
+
+    if(!document.getElementById("dataVendaManual").value){
+      document.getElementById("dataVendaManual").value = hoje;
+      salvarRascunhoVendaManual();
+    }
   }
 })();
 </script>
