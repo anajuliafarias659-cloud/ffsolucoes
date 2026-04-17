@@ -927,6 +927,57 @@ function montarConfigPoltronas(texto, totalPoltronas, tipoPadrao="padrao"){
   return config;
 }
 
+function nomeDiaSemana(dataISO){
+  if(!dataISO) return "";
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  const dias = ["Dom","Seg","Ter","Qua","Qui","Sex","Sab"];
+  return dias[data.getDay()];
+}
+
+function normalizarDia(txt){
+  return String(txt || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .slice(0,3);
+}
+
+function viagemRodaNaData(viagem, dataISO){
+  if(!viagem || !dataISO) return false;
+
+  const diaEscolhido = normalizarDia(nomeDiaSemana(dataISO));
+  const diasViagem = String(viagem.dias || "")
+    .split(",")
+    .map(v => normalizarDia(v))
+    .filter(Boolean);
+
+  if(!diasViagem.length) return true;
+  return diasViagem.includes(diaEscolhido);
+}
+
+function montarDataHoraLocal(dataISO, horaStr){
+  if(!dataISO || !horaStr) return null;
+
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const partesHora = String(horaStr).trim().split(":");
+  const hora = Number(partesHora[0] || 0);
+  const minuto = Number(partesHora[1] || 0);
+
+  return new Date(ano, mes - 1, dia, hora, minuto, 0, 0);
+}
+
+function viagemExpiradaParaData(viagem, dataISO){
+  if(!viagem || !dataISO || !viagem.hora) return false;
+
+  const agora = new Date();
+  const saida = montarDataHoraLocal(dataISO, viagem.hora);
+
+  if(!saida || isNaN(saida.getTime())) return false;
+  return agora >= saida;
+}
+
 function trechosConflitam(origemA, destinoA, origemB, destinoB){
   origemA = Number(origemA || 0);
   destinoA = Number(destinoA || 0);
@@ -2787,6 +2838,25 @@ window.reservarPoltronaManual = async function(){
     return msg("msgReserva", "Essa poltrona não está livre para esse trecho.", "erro");
   }
 
+  const { data: viagemInfo, error: erroViagemInfo } = await supabase
+  .from("viagens_passagens")
+  .select("id, rota, hora, dias")
+  .eq("id", viagem_id)
+  .eq("app_id", app_id)
+  .maybeSingle();
+
+if(erroViagemInfo || !viagemInfo){
+  return msg("msgReserva", "Não foi possível validar a viagem.", "erro");
+}
+
+if(!viagemRodaNaData(viagemInfo, data_viagem)){
+  return msg("msgReserva", `Essa viagem não roda nessa data. Dias disponíveis: ${viagemInfo?.dias || "-"}.`, "erro");
+}
+
+if(viagemExpiradaParaData(viagemInfo, data_viagem)){
+  return msg("msgReserva", `Essa viagem de hoje às ${viagemInfo?.hora || ""} já saiu e não aceita mais venda.`, "erro");
+}
+
   const veiculo = await buscarVeiculoDaViagem(viagem_id);
   const tipoPoltrona = getTipoPoltronaDoVeiculo(veiculo, poltrona);
 
@@ -2830,6 +2900,24 @@ window.concluirVendaManual = async function(){
     if(!poltrona) return msg("msgReserva", "Selecione uma poltrona.", "erro");
     if(!nome) return msg("msgReserva", "Digite o nome do passageiro.", "erro");
     if(!forma_pagamento_agencia) return msg("msgReserva", "Selecione a forma de pagamento.", "erro");
+    const { data: viagemInfo, error: erroViagemInfo } = await supabase
+  .from("viagens_passagens")
+  .select("id, rota, hora, dias")
+  .eq("id", viagem_id)
+  .eq("app_id", app_id)
+  .maybeSingle();
+
+if(erroViagemInfo || !viagemInfo){
+  return msg("msgReserva", "Não foi possível validar a viagem.", "erro");
+}
+
+if(!viagemRodaNaData(viagemInfo, data_viagem)){
+  return msg("msgReserva", `Essa viagem não roda nessa data. Dias disponíveis: ${viagemInfo?.dias || "-"}.`, "erro");
+}
+
+if(viagemExpiradaParaData(viagemInfo, data_viagem)){
+  return msg("msgReserva", `Essa viagem de hoje às ${viagemInfo?.hora || ""} já saiu e não aceita mais venda.`, "erro");
+}
 
     const veiculo = await buscarVeiculoDaViagem(viagem_id);
     const tipoPoltrona = getTipoPoltronaDoVeiculo(veiculo, poltrona);
