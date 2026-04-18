@@ -576,6 +576,14 @@ async function enviarAvaliacao(codigo) {
     return;
   }
 
+  el("notaAvaliacao").value = "5";
+  el("comentarioAvaliacao").value = "";
+  el("msgAvaliacao").textContent = "Avaliação enviada com sucesso!";
+  el("areaAvaliacao").classList.add("oculto");
+
+  consultarChamado(codigo);
+}
+
  
 async function enviarCodigoTelefone() {
   const telefone = normalizarTelefoneBr(el("cliente_telefone").value);
@@ -905,60 +913,47 @@ validado_em: new Date().toISOString(),
       const codigo = (codigoManual || el("codigoConsulta").value).trim().toUpperCase();
       if (!codigo) return;
 
-      const { data, error } = await supabase
-        .from("chamados_borracharia")
-        .select(`
-  id,
-  cliente_nome,
-  cliente_telefone,
-  tipo_veiculo,
-  problema,
-  observacoes,
-  endereco_texto,
-  latitude,
-  longitude,
-  status,
-  valor_estimado,
-  valor_final,
-  forma_pagamento,
-  codigo_acompanhamento,
-  created_at,
-  aceito_em,
-  finalizado_em,
-  borracheiro_id,
-  avaliacao,
-  foto_solicitante
-`)
-        .eq("codigo_acompanhamento", codigo)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+     const { data, error } = await supabase
+  .from("chamados_borracharia")
+  .select(`
+    id,
+    cliente_nome,
+    cliente_telefone,
+    tipo_veiculo,
+    problema,
+    observacoes,
+    endereco_texto,
+    latitude,
+    longitude,
+    status,
+    valor_estimado,
+    valor_final,
+    forma_pagamento,
+    codigo_acompanhamento,
+    created_at,
+    aceito_em,
+    finalizado_em,
+    borracheiro_id,
+    avaliacao,
+    foto_solicitante
+  `)
+  .eq("codigo_acompanhamento", codigo)
+  .order("created_at", { ascending: false })
+  .limit(1)
+  .maybeSingle();
 
-      if (error || !data) {
-        el("resultadoConsulta").style.display = "block";
-        el("statusBox").className = "status-box cancelado";
-        el("statusBox").textContent = "CHAMADO NÃO ENCONTRADO";
-        el("infoChamado").innerHTML = "Verifique o código e tente novamente.";
-        mostrarModoNormal();
-        limparChamadoSalvo();
-        if (intervalConsulta) clearInterval(intervalConsulta);
-        return;
-      }
+el("btnSolicitar").disabled = false;
+el("btnSolicitar").textContent = "Solicitar atendimento";
 
-      let nomeBorracheiro = "-";
+if (error) {
+  console.error(error);
+  mostrarMensagem("Erro ao solicitar atendimento.");
+  return;
+}
 
-      if (data.borracheiro_id) {
-        const { data: borr, error: erroBorr } = await supabase
-          .from("borracheiros")
-          .select("nome")
-          .eq("id", data.borracheiro_id)
-          .maybeSingle();
-
-        if (!erroBorr && borr?.nome) {
-          nomeBorracheiro = borr.nome;
-        }
-      }
-
+if (data?.id) {
+  iniciarRastreamento(data.id);
+}
       const statusBruto = String(data.status || "aguardando").trim().toLowerCase();
 
 let status = statusBruto;
@@ -1087,18 +1082,6 @@ if (btnInstalar) {
   });
 }
 
-async function uploadFoto(arquivo, codigo) {
-  const ext = (arquivo.name.split(".").pop() || "jpg");
-  const nome = `chamados/${codigo}_${Date.now()}.${ext}`;
-
-  const { error } = await supabase.storage
-    .from("borracharia")
-    .upload(nome, arquivo);
-
-  if (error) {
-    console.error(error);
-    return null;
-  }
 
   const { data } = supabase.storage
     .from("borracharia")
@@ -1107,28 +1090,6 @@ async function uploadFoto(arquivo, codigo) {
   return data.publicUrl;
 }
 
-function iniciarRastreamento(chamadoId) {
-  if (!navigator.geolocation) return;
-
-  if (watchId) navigator.geolocation.clearWatch(watchId);
-
-  watchId = navigator.geolocation.watchPosition(async (pos) => {
-    const lat = pos.coords.latitude;
-    const lon = pos.coords.longitude;
-
-    await supabase
-      .from("chamados_borracharia")
-      .update({
-        ultima_latitude: lat,
-        ultima_longitude: lon,
-        ultima_localizacao_em: new Date().toISOString()
-      })
-      .eq("id", chamadoId);
-
-  }, () => {}, {
-    enableHighAccuracy: true
-  });
-}
 window.addEventListener("appinstalled", () => {
   deferredPrompt = null;
   if (btnInstalar) btnInstalar.style.display = "none";
