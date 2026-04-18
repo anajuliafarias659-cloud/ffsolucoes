@@ -687,6 +687,88 @@ if (!mesaId) {
   history.back();
 }
 
+let loteLocal = [];
+
+function salvarLoteLocal(){
+  localStorage.setItem(`mesa_lote_${APP_ID}_${mesaId}`, JSON.stringify(loteLocal));
+}
+
+function carregarLoteLocal(){
+  try{
+    loteLocal = JSON.parse(localStorage.getItem(`mesa_lote_${APP_ID}_${mesaId}`) || "[]");
+  }catch{
+    loteLocal = [];
+  }
+}
+
+function limparLoteLocal(){
+  loteLocal = [];
+  localStorage.removeItem(`mesa_lote_${APP_ID}_${mesaId}`);
+}
+
+function renderizarLoteLocal(){
+  const div = document.getElementById("pedido");
+  div.innerHTML = "";
+  let total = 0;
+  let qtd = 0;
+
+  if (!loteLocal.length){
+    div.innerHTML = `<div class="msg-vazio">Nenhum item nesta comanda.</div>`;
+    atualizarTotaisLote(0);
+    atualizarFabPedido(0);
+    return;
+  }
+
+  loteLocal.forEach((i, index) => {
+    total += Number(i.preco || 0) * Number(i.quantidade || 0);
+    qtd += Number(i.quantidade || 0);
+
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `
+      <img class="thumb-item" src="${i.imagem || 'https://via.placeholder.com/600x600?text=Produto'}" alt="${i.nome_produto}">
+      <div class="item-centro">
+        <strong>${i.nome_produto}</strong>
+        <small style="color:#b45309;font-weight:bold;">Não enviado</small>
+        <div class="linha-preco">${formatarMoeda(Number(i.preco || 0) * Number(i.quantidade || 0))}</div>
+        <div class="item-acoes">
+          <button class="btn-menor">−</button>
+          <div class="qtd-badge">${i.quantidade}</div>
+          <button class="btn-maior">+</button>
+          <button class="btn-remover">Remover</button>
+        </div>
+      </div>
+    `;
+
+    const botoes = item.querySelectorAll("button");
+    botoes[0].onclick = () => {
+      if (loteLocal[index].quantidade <= 1) {
+        loteLocal.splice(index, 1);
+      } else {
+        loteLocal[index].quantidade--;
+      }
+      salvarLoteLocal();
+      renderizarLoteLocal();
+    };
+
+    botoes[1].onclick = () => {
+      loteLocal[index].quantidade++;
+      salvarLoteLocal();
+      renderizarLoteLocal();
+    };
+
+    botoes[2].onclick = () => {
+      loteLocal.splice(index, 1);
+      salvarLoteLocal();
+      renderizarLoteLocal();
+    };
+
+    div.appendChild(item);
+  });
+
+  atualizarTotaisLote(total);
+  atualizarFabPedido(qtd);
+}
 async function aguardarSessao(){
   while(!window.APP_ID){
     await new Promise(r => setTimeout(r, 100));
@@ -1222,35 +1304,39 @@ async function buscarOuCriarComanda(){
 }
 
 async function addProduto(produtoId){
-  const comanda = await buscarOuCriarComanda();
-  if (!comanda) return;
+  const clienteNome = document.getElementById("clienteNome").value.trim();
+  const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
+
+  if (!clienteNome) {
+    alert("Preencha ao menos o nome do cliente/responsável.");
+    document.getElementById("clienteNome").focus();
+    return;
+  }
 
   const produto = produtosCache.find(p => String(p.id) === String(produtoId));
   if (!produto) return;
 
-  const clienteNome = document.getElementById("clienteNome").value.trim();
-  const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
+  const idx = loteLocal.findIndex(i => String(i.produto_id) === String(produto.id));
 
-  const { error } = await sb
-    .from("pedido_itens")
-    .insert({
-      app_id: APP_ID,
-      pedido_id: comanda.id,
+  if (idx >= 0) {
+    loteLocal[idx].quantidade += 1;
+  } else {
+    loteLocal.push({
       produto_id: produto.id,
       nome_produto: produto.nome,
       preco: Number(produto.preco || 0),
       quantidade: 1,
-      status: "rascunho",
       cliente_nome: clienteNome,
       cliente_telefone: clienteTelefone,
-      responsavel_nome: clienteNome
+      responsavel_nome: clienteNome,
+      imagem: obterImagemProduto(produto)
     });
-
-  if (error) {
-    console.error(error);
-    alert("Erro ao adicionar produto.");
-    return;
   }
+
+  salvarLoteLocal();
+  abrirPedidoFlutuante();
+  renderizarLoteLocal();
+}
 
   const { data: pedidoAtualizado } = await sb
     .from("pedidos")
@@ -1545,42 +1631,42 @@ async function sincronizarMesaComPedidos(){
 }
 
 document.getElementById("btnEnviar").onclick = async () => {
-  const comanda = await buscarOuCriarComanda();
-  if (!comanda) return;
+  const clienteNome = document.getElementById("clienteNome").value.trim();
+  const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
 
-  const { data: itensRascunho, error: erroItens } = await sb
-    .from("pedido_itens")
-    .select("id")
-    .eq("pedido_id", comanda.id)
-    .in("status", ["rascunho", "aberto"]);
-
-  if (erroItens) {
-    console.error(erroItens);
-    alert("Erro ao validar itens.");
+  if (!clienteNome) {
+    alert("Preencha ao menos o nome do cliente/responsável.");
+    document.getElementById("clienteNome").focus();
     return;
   }
 
-  if (!itensRascunho || itensRascunho.length === 0) {
+  if (!loteLocal.length) {
     alert("Não há itens novos para enviar.");
     return;
   }
 
-  const clienteNome = document.getElementById("clienteNome").value.trim();
-  const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
+  const comanda = await buscarOuCriarComanda();
+  if (!comanda) return;
 
-  const { error: erroEnviarItens } = await sb
+  const itensInsert = loteLocal.map(item => ({
+    app_id: APP_ID,
+    pedido_id: comanda.id,
+    produto_id: item.produto_id,
+    nome_produto: item.nome_produto,
+    preco: Number(item.preco || 0),
+    quantidade: Number(item.quantidade || 0),
+    status: "novo",
+    cliente_nome: clienteNome || null,
+    cliente_telefone: clienteTelefone || null,
+    responsavel_nome: clienteNome || null
+  }));
+
+  const { error: erroItens } = await sb
     .from("pedido_itens")
-    .update({
-      status: "novo",
-      cliente_nome: clienteNome || null,
-      cliente_telefone: clienteTelefone || null,
-      responsavel_nome: clienteNome || null
-    })
-    .eq("pedido_id", comanda.id)
-    .in("status", ["rascunho", "aberto"]);
+    .insert(itensInsert);
 
-  if (erroEnviarItens) {
-    console.error(erroEnviarItens);
+  if (erroItens) {
+    console.error(erroItens);
     alert("Erro ao enviar itens.");
     return;
   }
@@ -1606,6 +1692,8 @@ document.getElementById("btnEnviar").onclick = async () => {
 
   if (atualizado) pedidoAtual = atualizado;
 
+  limparLoteLocal();
+
   await atualizarMesaStatus({
     ocupada:true,
     pedir_conta:false,
@@ -1617,47 +1705,7 @@ document.getElementById("btnEnviar").onclick = async () => {
   alert("Pedido enviado com sucesso.");
   fecharPedidoFlutuante();
   await sincronizarMesaComPedidos();
-};
-
-document.getElementById("btnConta").onclick = async () => {
-  const totalMesa = await calcularTotalGeralMesa();
-
-  if (totalMesa <= 0) {
-    alert("Não há valores pendentes nesta mesa.");
-    return;
-  }
-
-  const comanda = await buscarOuCriarComanda();
-  if (!comanda) return;
-
-  const { data: atualizada, error:errorUpdate } = await sb
-    .from("pedidos")
-    .update({ status:"conta_solicitada" })
-    .eq("id", comanda.id)
-    .eq("app_id", APP_ID)
-    .select()
-    .maybeSingle();
-
-  if (errorUpdate) {
-    console.error(errorUpdate);
-    alert("Erro ao pedir conta.");
-    return;
-  }
-
-  if (atualizada) pedidoAtual = atualizada;
-
-  await atualizarMesaStatus({
-    ocupada:true,
-    pedir_conta:true,
-    status:"conta_solicitada",
-    cliente_nome:document.getElementById("clienteNome").value.trim() || null,
-    cliente_celular:document.getElementById("clienteTelefone").value.trim() || null
-  });
-
-  alert("Conta solicitada.");
-  fecharPedidoFlutuante();
-  await sincronizarMesaComPedidos();
-};
+}
 
 document.getElementById("btnTogglePedido").onclick = fecharPedidoFlutuante;
 document.getElementById("busca").oninput = aplicarFiltros;
@@ -1671,6 +1719,9 @@ window.togglePedidoFlutuante = togglePedidoFlutuante;
 
 async function iniciarSistema(){
   await aguardarSessao();
+
+  carregarLoteLocal();
+  renderizarLoteLocal();
 
   const okMesa = await carregarMesa();
   if (!okMesa) return;
