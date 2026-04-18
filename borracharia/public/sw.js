@@ -1,4 +1,4 @@
-const CACHE_NAME = "ff-borracharia-v3";
+const CACHE_NAME = "ff-borracharia-v6";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
