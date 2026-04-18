@@ -517,10 +517,9 @@ let pedidosCache = [];
 let pausadoAutoRefresh = false;
 let estadoAvisosAnterior = {
   pedidosAtivos: new Set(),
-  ultimoNovoMesaPorPedido: {}
+  novosMesaPorPedido: {}
 };
 let primeiraCargaPedidos = true;
-let audioLiberado = false;
 
 const listaPedidos = document.getElementById("listaPedidos");
 const listaHistorico = document.getElementById("listaHistorico");
@@ -547,47 +546,6 @@ function liberarAudio(){
     .catch((err) => {
       console.warn("Áudio ainda bloqueado:", err);
     });
-}
-
-function gerarEstadoAvisos(lista){
-  const pedidosAtivos = new Set();
-  const ultimoNovoMesaPorPedido = {};
-
-  (Array.isArray(lista) ? lista : []).forEach(p => {
-    const status = statusEfetivo(p);
-    if (["historico", "cancelado"].includes(status)) return;
-
-    const idPedido = String(p.id || "");
-    pedidosAtivos.add(idPedido);
-
-    if (pedidoEhMesa(p)) {
-      const { novos } = separarItensMesa(p);
-
-      let ultimaChave = "";
-
-      if (novos.length) {
-        const ordenados = [...novos].sort((a, b) => {
-          const da = parseDataBrasil(a.created_at)?.getTime() || 0;
-          const db = parseDataBrasil(b.created_at)?.getTime() || 0;
-          return db - da;
-        });
-
-        const ultimo = ordenados[0];
-
-        ultimaChave =
-          String(ultimo?.id || "") ||
-          String(ultimo?.created_at || "") ||
-          `${novos.length}`;
-      }
-
-      ultimoNovoMesaPorPedido[idPedido] = ultimaChave;
-    }
-  });
-
-  return {
-    pedidosAtivos,
-    ultimoNovoMesaPorPedido
-  };
 }
 
 function tocarSomNovoPedido(){
@@ -850,6 +808,12 @@ function separarItensMesa(p){
   const antigos = itens.filter(i => i.impresso === true);
 
   return { novos, antigos };
+}
+
+function contarNovosItensMesa(p){
+  if (!pedidoEhMesa(p)) return 0;
+  const { novos } = separarItensMesa(p);
+  return novos.length;
 }
 
 function agruparItensPorSetor(itens){
@@ -1378,43 +1342,62 @@ async function carregarPedidos(){
     itens_normalizados: normalizarItensPedido(p, itensPorPedido[p.id] || [])
   }));
 
-  renderizarPedidos();
+      renderizarPedidos();
 
-  const estadoAvisosAtual = gerarEstadoAvisos(pedidosCache);
+  const pedidosAtivosAtuais = pedidosCache.filter(p => {
+    const s = statusEfetivo(p);
+    return !["historico", "cancelado"].includes(s);
+  });
 
-if (!primeiraCargaPedidos) {
-  let temNovidade = false;
+  const idsAtivosAtuais = new Set(
+    pedidosAtivosAtuais.map(p => String(p.id))
+  );
 
-  // novo pedido
-  for (const id of estadoAvisosAtual.pedidosAtivos) {
-    if (!estadoAvisosAnterior.pedidosAtivos.has(id)) {
-      temNovidade = true;
-      console.log("Novo pedido detectado:", id);
-      break;
+  const novosMesaPorPedidoAtual = {};
+
+  pedidosAtivosAtuais.forEach(p => {
+    if (pedidoEhMesa(p)) {
+      novosMesaPorPedidoAtual[String(p.id)] = contarNovosItensMesa(p);
     }
-  }
+  });
 
-  // novo item na mesa
-  if (!temNovidade) {
-    for (const id in estadoAvisosAtual.ultimoNovoMesaPorPedido) {
-      const atual = String(estadoAvisosAtual.ultimoNovoMesaPorPedido[id] || "");
-      const anterior = String(estadoAvisosAnterior.ultimoNovoMesaPorPedido[id] || "");
+  if (!primeiraCargaPedidos) {
+    let deveAvisar = false;
 
-      if (atual && atual !== anterior) {
-        temNovidade = true;
-        console.log("Novo item de mesa:", id);
+    // 1) Pedido novo de qualquer tipo
+    for (const id of idsAtivosAtuais) {
+      if (!estadoAvisosAnterior.pedidosAtivos.has(id)) {
+        deveAvisar = true;
+        console.log("Novo pedido detectado:", id);
         break;
       }
     }
+
+    // 2) Mesmo pedido de mesa, mas com novos itens adicionados
+    if (!deveAvisar) {
+      for (const pedidoId in novosMesaPorPedidoAtual) {
+        const atual = Number(novosMesaPorPedidoAtual[pedidoId] || 0);
+        const anterior = Number(estadoAvisosAnterior.novosMesaPorPedido[pedidoId] || 0);
+
+        if (atual > anterior) {
+          deveAvisar = true;
+          console.log("Novos itens detectados na mesa:", pedidoId, "antes:", anterior, "agora:", atual);
+          break;
+        }
+      }
+    }
+
+    if (deveAvisar) {
+      tocarSomNovoPedido();
+    }
   }
 
-  if (temNovidade) {
-    tocarSomNovoPedido();
-  }
-}
+  estadoAvisosAnterior = {
+    pedidosAtivos: idsAtivosAtuais,
+    novosMesaPorPedido: novosMesaPorPedidoAtual
+  };
 
-estadoAvisosAnterior = estadoAvisosAtual;
-primeiraCargaPedidos = false;
+  primeiraCargaPedidos = false;
 
 window.marcarPago = async function(id){
   const { error } = await supabase
