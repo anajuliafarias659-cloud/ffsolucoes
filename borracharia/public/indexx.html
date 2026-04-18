@@ -374,7 +374,20 @@
 
         <div class="full">
   <label>Selfie com o veículo</label>
-  <input id="fotoSolicitante" type="file" accept="image/*" capture="environment">
+  <div class="full">
+  <label>Foto do veículo</label>
+
+  <video id="camera" autoplay playsinline style="width:100%;border-radius:10px;display:none;"></video>
+
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <img id="previewFoto" style="width:100%;border-radius:10px;margin-top:8px;display:none;">
+
+  <button type="button" id="btnAbrirCamera">Abrir câmera</button>
+  <button type="button" id="btnCapturar" style="display:none;">Tirar foto</button>
+
+  <div class="muted">Tire uma foto do veículo no local.</div>
+</div>
   <div class="muted">Tire uma foto mostrando o veículo no local.</div>
 </div>
 
@@ -569,6 +582,59 @@ function salvarClienteLocal(nome, telefone) {
       return R * c;
     }
 
+    let streamCamera = null;
+let fotoBlob = null;
+
+async function abrirCamera() {
+  try {
+    streamCamera = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false
+    });
+
+    const video = el("camera");
+    video.srcObject = streamCamera;
+    video.style.display = "block";
+
+    el("btnCapturar").style.display = "block";
+
+  } catch (err) {
+    alert("Não foi possível acessar a câmera.");
+    console.error(err);
+  }
+}
+
+function capturarFoto() {
+  const video = el("camera");
+  const canvas = el("canvas");
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0);
+
+  canvas.toBlob((blob) => {
+    fotoBlob = blob;
+
+    const preview = el("previewFoto");
+    preview.src = URL.createObjectURL(blob);
+    preview.style.display = "block";
+
+    pararCamera();
+  }, "image/jpeg", 0.8);
+}
+
+function pararCamera() {
+  if (streamCamera) {
+    streamCamera.getTracks().forEach(track => track.stop());
+    streamCamera = null;
+  }
+
+  el("camera").style.display = "none";
+  el("btnCapturar").style.display = "none";
+}
+
 async function enviarAvaliacao(codigo) {
   const btn = el("btnEnviarAvaliacao");
   btn.disabled = true;
@@ -600,13 +666,12 @@ consultarChamado(codigo);
 }
 
  
- async function uploadFoto(arquivo, codigo) {
-  const ext = (arquivo.name.split(".").pop() || "jpg");
-  const nome = `chamados/${codigo}_${Date.now()}.${ext}`;
+ async function uploadFoto(blob, codigo) {
+  const nome = `chamados/${codigo}_${Date.now()}.jpg`;
 
   const { error } = await supabase.storage
     .from("borracharia")
-    .upload(nome, arquivo);
+    .upload(nome, blob);
 
   if (error) {
     console.error(error);
@@ -729,7 +794,10 @@ function iniciarRastreamento(chamadoId) {
       const problema = el("problema").value;
       const observacoes = el("observacoes").value.trim();
       const endereco_texto = el("endereco_texto").value.trim();
-      const fotoArquivo = el("fotoSolicitante").files?.[0] || null;
+      if (!fotoBlob) {
+  mostrarMensagem("Tire a foto do veículo.");
+  return;
+}
       const latitude = el("latitude").value ? Number(el("latitude").value) : null;
       const longitude = el("longitude").value ? Number(el("longitude").value) : null;
 
@@ -980,6 +1048,9 @@ el("btnEnviarAvaliacao").addEventListener("click", () => {
   if (!codigo) return;
   enviarAvaliacao(codigo);
 })
+
+el("btnAbrirCamera").addEventListener("click", abrirCamera);
+el("btnCapturar").addEventListener("click", capturarFoto);
 
 carregarClienteSalvo();
 verificarChamadoSalvoAoAbrir();
