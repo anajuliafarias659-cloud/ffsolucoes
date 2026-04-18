@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -514,7 +515,10 @@ const supabase = createClient(
 let app_id = null;
 let pedidosCache = [];
 let pausadoAutoRefresh = false;
-let assinaturaAvisosAnterior = new Set();
+let estadoAvisosAnterior = {
+  pedidosAtivos: new Set(),
+  ultimoNovoMesaPorPedido: {}
+};
 let primeiraCargaPedidos = true;
 let audioLiberado = false;
 
@@ -543,6 +547,47 @@ function liberarAudio(){
     .catch((err) => {
       console.warn("Áudio ainda bloqueado:", err);
     });
+}
+
+function gerarEstadoAvisos(lista){
+  const pedidosAtivos = new Set();
+  const ultimoNovoMesaPorPedido = {};
+
+  (Array.isArray(lista) ? lista : []).forEach(p => {
+    const status = statusEfetivo(p);
+    if (["historico", "cancelado"].includes(status)) return;
+
+    const idPedido = String(p.id || "");
+    pedidosAtivos.add(idPedido);
+
+    if (pedidoEhMesa(p)) {
+      const { novos } = separarItensMesa(p);
+
+      let ultimaChave = "";
+
+      if (novos.length) {
+        const ordenados = [...novos].sort((a, b) => {
+          const da = parseDataBrasil(a.created_at)?.getTime() || 0;
+          const db = parseDataBrasil(b.created_at)?.getTime() || 0;
+          return db - da;
+        });
+
+        const ultimo = ordenados[0];
+
+        ultimaChave =
+          String(ultimo?.id || "") ||
+          String(ultimo?.created_at || "") ||
+          `${novos.length}`;
+      }
+
+      ultimoNovoMesaPorPedido[idPedido] = ultimaChave;
+    }
+  });
+
+  return {
+    pedidosAtivos,
+    ultimoNovoMesaPorPedido
+  };
 }
 
 function tocarSomNovoPedido(){
@@ -951,43 +996,6 @@ function ordenarPedidos(lista){
   });
 }
 
-function gerarAssinaturasAviso(lista){
-  const assinaturas = new Set();
-
-  (Array.isArray(lista) ? lista : []).forEach(p => {
-    const status = statusEfetivo(p);
-    if (["historico", "cancelado"].includes(status)) return;
-
-    const idPedido = String(p.id || "");
-    assinaturas.add(`pedido:${idPedido}`);
-
-    if (pedidoEhMesa(p)) {
-      const { novos } = separarItensMesa(p);
-
-      if (novos.length) {
-        const idsNovos = novos
-          .map(i => String(i.id || ""))
-          .filter(Boolean)
-          .sort()
-          .join(",");
-
-        if (idsNovos) {
-          assinaturas.add(`mesa-novos:${idPedido}:${idsNovos}`);
-        } else {
-          const ultimaDataNovo = novos
-            .map(i => i.created_at || "")
-            .sort()
-            .slice(-1)[0] || "";
-
-          assinaturas.add(`mesa-novos:${idPedido}:qtd=${novos.length}:data=${ultimaDataNovo}`);
-        }
-      }
-    }
-  });
-
-  return assinaturas;
-}
-
 function renderizarPedidos(){
   listaPedidos.innerHTML = "";
   listaHistorico.innerHTML = "";
@@ -1372,27 +1380,41 @@ async function carregarPedidos(){
 
   renderizarPedidos();
 
-  const assinaturaAvisosAtual = gerarAssinaturasAviso(pedidosCache);
+  const estadoAvisosAtual = gerarEstadoAvisos(pedidosCache);
 
-  if(!primeiraCargaPedidos){
-    let temNovidade = false;
+if (!primeiraCargaPedidos) {
+  let temNovidade = false;
 
-    for(const assinatura of assinaturaAvisosAtual){
-      if(!assinaturaAvisosAnterior.has(assinatura)){
-        temNovidade = true;
-        break;
-      }
-    }
-
-    if(temNovidade){
-      console.log("NOVO PEDIDO OU NOVO ITEM DE MESA DETECTADO");
-      tocarSomNovoPedido();
+  // novo pedido
+  for (const id of estadoAvisosAtual.pedidosAtivos) {
+    if (!estadoAvisosAnterior.pedidosAtivos.has(id)) {
+      temNovidade = true;
+      console.log("Novo pedido detectado:", id);
+      break;
     }
   }
 
-  assinaturaAvisosAnterior = assinaturaAvisosAtual;
-  primeiraCargaPedidos = false;
+  // novo item na mesa
+  if (!temNovidade) {
+    for (const id in estadoAvisosAtual.ultimoNovoMesaPorPedido) {
+      const atual = String(estadoAvisosAtual.ultimoNovoMesaPorPedido[id] || "");
+      const anterior = String(estadoAvisosAnterior.ultimoNovoMesaPorPedido[id] || "");
+
+      if (atual && atual !== anterior) {
+        temNovidade = true;
+        console.log("Novo item de mesa:", id);
+        break;
+      }
+    }
+  }
+
+  if (temNovidade) {
+    tocarSomNovoPedido();
+  }
 }
+
+estadoAvisosAnterior = estadoAvisosAtual;
+primeiraCargaPedidos = false;
 
 window.marcarPago = async function(id){
   const { error } = await supabase
