@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -456,6 +457,38 @@ function statusConta(status){
   return s === "conta_solicitada" || s === "pedir_conta";
 }
 
+function pedidoFoiEnviado(p){
+  if (!p) return false;
+
+  if (p.enviado === true) return true;
+
+  const s = normalizarStatus(p.status);
+
+  return [
+    "novo",
+    "pago",
+    "aceito",
+    "historico",
+    "cancelado"
+  ].includes(s);
+}
+
+function pedidoFoiEnviado(p){
+  if (!p) return false;
+
+  if (p.enviado === true) return true;
+
+  const s = normalizarStatus(p.status);
+
+  return [
+    "novo",
+    "pago",
+    "aceito",
+    "historico",
+    "cancelado"
+  ].includes(s);
+}
+
 function formatarHoraBR(dataIso){
   if (!dataIso) return "";
   try{
@@ -633,12 +666,13 @@ async function carregarMesas(){
     }
 
     const { data: pedidos, error: erroPedidos } = await sb
-      .from("pedidos")
-      .select("id,mesa_id,status,created_at,origem,cliente_id,cliente_nome,cliente_telefone,total")
-      .eq("app_id", app_id)
-      .eq("origem", "mesa")
-      .not("mesa_id","is",null)
-      .order("created_at",{ ascending:false });
+  .from("pedidos")
+  .select("id,mesa_id,status,created_at,origem,cliente_id,cliente_nome,cliente_telefone,total,enviado")
+  .eq("app_id", app_id)
+  .eq("origem", "mesa")
+  .not("mesa_id","is",null)
+  .or("enviado.eq.true,status.in.(novo,pago,aceito,historico,cancelado)")
+  .order("created_at",{ ascending:false });
 
     if (erroPedidos) {
       console.error("Erro ao carregar pedidos:", erroPedidos);
@@ -646,10 +680,12 @@ async function carregarMesas(){
     }
 
     const todosPedidosPorMesa = {};
-    (pedidos || []).forEach(p => {
-      if (!todosPedidosPorMesa[p.mesa_id]) todosPedidosPorMesa[p.mesa_id] = [];
-      todosPedidosPorMesa[p.mesa_id].push(p);
-    });
+(pedidos || [])
+  .filter(pedidoFoiEnviado)
+  .forEach(p => {
+    if (!todosPedidosPorMesa[p.mesa_id]) todosPedidosPorMesa[p.mesa_id] = [];
+    todosPedidosPorMesa[p.mesa_id].push(p);
+  });
 
     const idsAtuais = new Set();
     const mesasTratadas = [];
