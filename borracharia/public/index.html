@@ -179,6 +179,7 @@
       font-weight:700;
     }
 
+   
     input,select,textarea,button{
       width:100%;
       border:none;
@@ -337,6 +338,7 @@
           <input id="cliente_telefone" placeholder="Ex: 88999999999" />
         </div>
 
+      
         <div>
           <label>Veículo</label>
           <select id="tipo_veiculo">
@@ -369,6 +371,36 @@
           <label>Endereço / referência</label>
           <input id="endereco_texto" placeholder="Ex: BR 020, próximo ao posto X" />
         </div>
+
+        <div class="full">
+<div class="full">
+  <label>Foto do veículo</label>
+
+  <div class="card" style="padding:10px">
+
+    <video id="camera" autoplay playsinline
+      style="width:100%;border-radius:10px;display:none;">
+    </video>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <img id="previewFoto"
+      style="width:100%;border-radius:10px;margin-top:8px;display:none;">
+
+    <button type="button" id="btnAbrirCamera">
+      📷 Abrir câmera
+    </button>
+
+    <button type="button" id="btnCapturar" style="display:none;">
+      📸 Tirar foto
+    </button>
+
+    <div class="muted" style="margin-top:6px">
+      Tire uma foto do veículo no local.
+    </div>
+
+  </div>
+</div>
 
         <div class="full">
           <button id="btnLocalizacao" type="button">Pegar minha localização</button>
@@ -448,17 +480,61 @@
       "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
     );
 
-    const el = (id) => document.getElementById(id);
-    let intervalConsulta = null;
+const el = (id) => document.getElementById(id);
+let intervalConsulta = null;
+let watchId = null;
 
-    function limparMensagem() {
-      el("msgSolicitacao").textContent = "";
-    }
+function normalizarTelefoneBr(valor) {
+  return String(valor || "").replace(/\D/g, "");
+}
 
-    function mostrarMensagem(msg, cor = "#fca5a5") {
-      el("msgSolicitacao").style.color = cor;
-      el("msgSolicitacao").textContent = msg;
-    }
+function limparValidacaoLocal() {
+  localStorage.removeItem("ff_borracharia_validado");
+  localStorage.removeItem("ff_borracharia_telefone");
+  telefoneValidado = false;
+  telefoneValidadoNumero = "";
+}
+
+
+function mostrarMensagem(msg, cor = "#fca5a5") {
+  el("msgSolicitacao").style.color = cor;
+  el("msgSolicitacao").textContent = msg;
+}
+
+function limparMensagem() {
+  el("msgSolicitacao").textContent = "";
+}
+    
+let telefoneValidado = false;
+let telefoneValidadoNumero = "";
+
+
+function carregarClienteSalvo() {
+  const nomeSalvo = localStorage.getItem("ff_borracharia_nome") || "";
+  const telefoneSalvo = localStorage.getItem("ff_borracharia_telefone") || "";
+  const validadoSalvo = localStorage.getItem("ff_borracharia_validado") === "true";
+
+  if (nomeSalvo && el("cliente_nome")) {
+    el("cliente_nome").value = nomeSalvo;
+  }
+
+  if (telefoneSalvo && el("cliente_telefone")) {
+    el("cliente_telefone").value = telefoneSalvo;
+  }
+
+  telefoneValidado = validadoSalvo && !!telefoneSalvo;
+  telefoneValidadoNumero = telefoneSalvo;
+}
+
+function salvarClienteLocal(nome, telefone) {
+  localStorage.setItem("ff_borracharia_nome", nome);
+  localStorage.setItem("ff_borracharia_telefone", telefone);
+  localStorage.setItem("ff_borracharia_validado", "true");
+
+  telefoneValidado = true;
+  telefoneValidadoNumero = telefone;
+}
+
 
     function traduzirStatus(status) {
   const s = String(status || "").trim().toLowerCase();
@@ -517,6 +593,59 @@
       return R * c;
     }
 
+    let streamCamera = null;
+let fotoBlob = null;
+
+async function abrirCamera() {
+  try {
+    streamCamera = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false
+    });
+
+    const video = el("camera");
+    video.srcObject = streamCamera;
+    video.style.display = "block";
+
+    el("btnCapturar").style.display = "block";
+
+  } catch (err) {
+    alert("Não foi possível acessar a câmera.");
+    console.error(err);
+  }
+}
+
+function capturarFoto() {
+  const video = el("camera");
+  const canvas = el("canvas");
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0);
+
+  canvas.toBlob((blob) => {
+    fotoBlob = blob;
+
+    const preview = el("previewFoto");
+    preview.src = URL.createObjectURL(blob);
+    preview.style.display = "block";
+
+    pararCamera();
+  }, "image/jpeg", 0.8);
+}
+
+function pararCamera() {
+  if (streamCamera) {
+    streamCamera.getTracks().forEach(track => track.stop());
+    streamCamera = null;
+  }
+
+  el("camera").style.display = "none";
+  el("btnCapturar").style.display = "none";
+}
+
 async function enviarAvaliacao(codigo) {
   const btn = el("btnEnviarAvaliacao");
   btn.disabled = true;
@@ -533,24 +662,89 @@ async function enviarAvaliacao(codigo) {
     })
     .eq("codigo_acompanhamento", codigo);
 
-  if (error) {
-    el("msgAvaliacao").textContent = "Erro ao enviar avaliação.";
-    btn.disabled = false;
-    btn.textContent = "Enviar avaliação";
-    return;
-  }
-
-  // limpa campos
-  el("notaAvaliacao").value = "5";
-  el("comentarioAvaliacao").value = "";
-
-  el("msgAvaliacao").textContent = "Avaliação enviada com sucesso!";
-  el("areaAvaliacao").classList.add("oculto");
-
-  consultarChamado(codigo);
+ if (error) {
+  el("msgAvaliacao").textContent = "Erro ao enviar avaliação.";
+  btn.disabled = false;
+  btn.textContent = "Enviar avaliação";
+  return;
 }
 
-  
+el("notaAvaliacao").value = "5";
+el("comentarioAvaliacao").value = "";
+el("msgAvaliacao").textContent = "Avaliação enviada com sucesso!";
+el("areaAvaliacao").classList.add("oculto");
+consultarChamado(codigo);
+}
+
+ 
+ async function uploadFoto(blob, codigo) {
+  const codigoLimpo = String(codigo || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9_-]/g, "");
+
+  const nomeArquivo = `${codigoLimpo}_${Date.now()}.jpg`.replace(/\s+/g, "");
+  const caminho = `chamados/${nomeArquivo}`;
+
+  const { error } = await supabase.storage
+    .from("borracharia")
+    .upload(caminho, blob, {
+      contentType: "image/jpeg",
+      upsert: false
+    });
+
+  if (error) {
+    console.error("Erro upload foto:", error);
+    return null;
+  }
+
+  const { data } = supabase.storage
+    .from("borracharia")
+    .getPublicUrl(caminho);
+
+  return data?.publicUrl || null;
+}
+
+  const { error } = await supabase.storage
+    .from("borracharia")
+    .upload(nome, blob);
+
+  if (error) {
+    console.error(error);
+    return null;
+  }
+
+  const { data } = supabase.storage
+    .from("borracharia")
+    .getPublicUrl(nome);
+
+  return data.publicUrl;
+}
+
+function iniciarRastreamento(chamadoId) {
+  if (!navigator.geolocation) return;
+
+  if (watchId) navigator.geolocation.clearWatch(watchId);
+
+  watchId = navigator.geolocation.watchPosition(async (pos) => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+
+    await supabase
+      .from("chamados_borracharia")
+      .update({
+        ultima_latitude: lat,
+        ultima_longitude: lon,
+        ultima_localizacao_em: new Date().toISOString()
+      })
+      .eq("id", chamadoId);
+
+  }, () => {}, {
+    enableHighAccuracy: true
+  });
+}
+
+
    
    async function buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude) {
   const { data, error } = await supabase
@@ -636,6 +830,10 @@ async function enviarAvaliacao(codigo) {
       const problema = el("problema").value;
       const observacoes = el("observacoes").value.trim();
       const endereco_texto = el("endereco_texto").value.trim();
+      if (!fotoBlob) {
+  mostrarMensagem("Tire a foto do veículo.");
+  return;
+}
       const latitude = el("latitude").value ? Number(el("latitude").value) : null;
       const longitude = el("longitude").value ? Number(el("longitude").value) : null;
 
@@ -644,49 +842,66 @@ async function enviarAvaliacao(codigo) {
   return;
 }
 
-// precisa de localização OU endereço
-if (!endereco_texto && (latitude === null || longitude === null)) {
-  mostrarMensagem("Informe a localização pelo GPS ou digite uma referência.");
+
+const telefoneNormalizado = normalizarTelefoneBr(cliente_telefone);
+
+if (!telefoneNormalizado || telefoneNormalizado.length < 10) {
+  mostrarMensagem("Digite um telefone válido com DDD.");
   return;
 }
 
-// 🔥 ESSA LINHA É O SEGREDO (não pode faltar)
-if (latitude === null || longitude === null) {
-  mostrarMensagem("Permita a localização para buscar borracharias próximas.");
+if (!telefoneValidado || telefoneValidadoNumero !== telefoneNormalizado) {
+  salvarClienteLocal(cliente_nome, telefoneNormalizado);
+}
+
+if (!fotoBlob) {
+  mostrarMensagem("Tire uma foto do veículo.");
   return;
 }
 
-      el("btnSolicitar").disabled = true;
-el("btnSolicitar").textContent = "Enviando...";
+const codigoGerado = `FF-${Date.now()}`;
 
-      const disponibilidade = await buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude);
+let fotoUrl = null;
 
-      if (disponibilidade.erro || disponibilidade.lista.length === 0) {
-        el("btnSolicitar").disabled = false;
-        el("btnSolicitar").textContent = "Solicitar atendimento";
-        mostrarMensagem(disponibilidade.mensagem || "Nenhuma borracharia disponível.");
-        return;
-      }
+try {
+  fotoUrl = await uploadFoto(fotoBlob, codigoGerado);
+} catch (e) {
+  console.error(e);
+  mostrarMensagem("Erro ao enviar foto.");
+  return;
+}
 
+if (!fotoUrl) {
+  mostrarMensagem("Erro ao gerar URL da foto.");
+  return;
+}
 
-      const { data, error } = await supabase
-        .from("chamados_borracharia")
-        .insert([{
-          cliente_nome,
-          cliente_telefone,
-          tipo_veiculo,
-          problema,
-          observacoes,
-          endereco_texto,
-          latitude,
-          longitude,
-          status: "aguardando",
-          forma_pagamento: "indefinido",
-          valor_estimado: 0,
-          valor_final: 0
-        }])
-        .select()
-        .single();
+const { data, error } = await supabase
+  .from("chamados_borracharia")
+  .insert([{
+    cliente_nome,
+    cliente_telefone,
+    tipo_veiculo,
+    problema,
+    observacoes,
+    endereco_texto,
+    latitude,
+    longitude,
+    telefone_validado: true,
+    canal_validacao: "local",
+    validado_em: new Date().toISOString(),
+    foto_solicitante: fotoUrl,
+    ultima_latitude: latitude,
+    ultima_longitude: longitude,
+    ultima_localizacao_em: new Date().toISOString(),
+    codigo_acompanhamento: codigoGerado,
+    status: "aguardando",
+    forma_pagamento: "indefinido",
+    valor_estimado: 0,
+    valor_final: 0
+  }])
+  .select()
+  .single();
 
       el("btnSolicitar").disabled = false;
       el("btnSolicitar").textContent = "Solicitar atendimento";
@@ -713,59 +928,47 @@ el("btnSolicitar").textContent = "Enviando...";
       const codigo = (codigoManual || el("codigoConsulta").value).trim().toUpperCase();
       if (!codigo) return;
 
-      const { data, error } = await supabase
-        .from("chamados_borracharia")
-        .select(`
-  id,
-  cliente_nome,
-  cliente_telefone,
-  tipo_veiculo,
-  problema,
-  observacoes,
-  endereco_texto,
-  latitude,
-  longitude,
-  status,
-  valor_estimado,
-  valor_final,
-  forma_pagamento,
-  codigo_acompanhamento,
-  created_at,
-  aceito_em,
-  finalizado_em,
-  borracheiro_id,
-  avaliacao
-`)
-        .eq("codigo_acompanhamento", codigo)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+     const { data, error } = await supabase
+  .from("chamados_borracharia")
+  .select(`
+    id,
+    cliente_nome,
+    cliente_telefone,
+    tipo_veiculo,
+    problema,
+    observacoes,
+    endereco_texto,
+    latitude,
+    longitude,
+    status,
+    valor_estimado,
+    valor_final,
+    forma_pagamento,
+    codigo_acompanhamento,
+    created_at,
+    aceito_em,
+    finalizado_em,
+    borracheiro_id,
+    avaliacao,
+    foto_solicitante
+  `)
+  .eq("codigo_acompanhamento", codigo)
+  .order("created_at", { ascending: false })
+  .limit(1)
+  .maybeSingle();
 
-      if (error || !data) {
-        el("resultadoConsulta").style.display = "block";
-        el("statusBox").className = "status-box cancelado";
-        el("statusBox").textContent = "CHAMADO NÃO ENCONTRADO";
-        el("infoChamado").innerHTML = "Verifique o código e tente novamente.";
-        mostrarModoNormal();
-        limparChamadoSalvo();
-        if (intervalConsulta) clearInterval(intervalConsulta);
-        return;
-      }
+el("btnSolicitar").disabled = false;
+el("btnSolicitar").textContent = "Solicitar atendimento";
 
-      let nomeBorracheiro = "-";
+if (error) {
+  console.error(error);
+  mostrarMensagem("Erro ao solicitar atendimento.");
+  return;
+}
 
-      if (data.borracheiro_id) {
-        const { data: borr, error: erroBorr } = await supabase
-          .from("borracheiros")
-          .select("nome")
-          .eq("id", data.borracheiro_id)
-          .maybeSingle();
-
-        if (!erroBorr && borr?.nome) {
-          nomeBorracheiro = borr.nome;
-        }
-      }
-
+if (data?.id) {
+  iniciarRastreamento(data.id);
+}
       const statusBruto = String(data.status || "aguardando").trim().toLowerCase();
 
 let status = statusBruto;
@@ -783,6 +986,18 @@ const classe = ["aguardando","aceito","em_andamento","finalizado","cancelado"].i
       el("statusBox").className = "status-box " + classe;
       el("statusBox").textContent = traduzirStatus(status).toUpperCase();
 
+      let nomeBorracheiro = "-";
+
+if (data.borracheiro_id) {
+  const { data: borr } = await supabase
+    .from("borracheiros")
+    .select("nome")
+    .eq("id", data.borracheiro_id)
+    .maybeSingle();
+
+  if (borr?.nome) nomeBorracheiro = borr.nome;
+}
+
       el("infoChamado").innerHTML = `
         <div><strong>Cliente:</strong> ${data.cliente_nome || "-"}</div>
         <div><strong>Telefone:</strong> ${data.cliente_telefone || "-"}</div>
@@ -796,6 +1011,15 @@ const classe = ["aguardando","aceito","em_andamento","finalizado","cancelado"].i
         <div><strong>Pagamento:</strong> ${data.forma_pagamento || "-"}</div>
         <div class="linha"></div>
         <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
+       ${data.foto_solicitante ? `
+  <div class="linha"></div>
+  <div><strong>Foto enviada:</strong></div>
+  <img
+    src="${data.foto_solicitante}"
+    style="width:100%;border-radius:10px;margin-top:8px;"
+    onerror="this.style.display='none'"
+  >
+` : ""}
       `;
 
       // controle da avaliação
@@ -845,16 +1069,31 @@ if (statusAindaAtivo(status)) {
     el("btnSolicitar").addEventListener("click", solicitarAtendimento);
     el("btnConsultar").addEventListener("click", () => consultarChamado());
 
+   
+
+el("cliente_telefone").addEventListener("input", () => {
+  limparValidacaoLocal();
+});
+
+el("cliente_nome").addEventListener("input", () => {
+  localStorage.setItem("ff_borracharia_nome", el("cliente_nome").value.trim());
+});
+
 el("btnEnviarAvaliacao").addEventListener("click", () => {
   const codigo = el("codigoConsulta").value.trim();
   if (!codigo) return;
   enviarAvaliacao(codigo);
-});
-    verificarChamadoSalvoAoAbrir();
+})
+
+el("btnAbrirCamera").addEventListener("click", abrirCamera);
+el("btnCapturar").addEventListener("click", capturarFoto);
+
+carregarClienteSalvo();
+verificarChamadoSalvoAoAbrir();
   </script>
 
   <script>
-document.addEventListener("DOMContentLoaded", () => {
+   document.addEventListener("DOMContentLoaded", () => {
 
 let deferredPrompt = null;
 const btnInstalar = document.querySelector(".btn-instalar");
@@ -879,7 +1118,8 @@ if (btnInstalar) {
   });
 }
 
-window.addEventListener("appinstalled", () => {
+
+ window.addEventListener("appinstalled", () => {
   deferredPrompt = null;
   if (btnInstalar) btnInstalar.style.display = "none";
 });
