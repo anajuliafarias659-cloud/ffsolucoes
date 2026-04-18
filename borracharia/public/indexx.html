@@ -481,6 +481,7 @@
     let intervalConsulta = null;
     let telefoneValidado = false;
 let telefoneValidadoNumero = "";
+let watchId = null;
 
     function limparMensagem() {
       el("msgSolicitacao").textContent = "";
@@ -670,7 +671,48 @@ async function validarCodigoTelefone() {
   consultarChamado(codigo);
 }
 
-  
+  async function uploadFoto(arquivo, codigo) {
+  const ext = (arquivo.name.split(".").pop() || "jpg");
+  const nome = `chamados/${codigo}_${Date.now()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from("borracharia")
+    .upload(nome, arquivo);
+
+  if (error) {
+    console.error(error);
+    return null;
+  }
+
+  const { data } = supabase.storage
+    .from("borracharia")
+    .getPublicUrl(nome);
+
+  return data.publicUrl;
+}
+
+function iniciarRastreamento(chamadoId) {
+  if (!navigator.geolocation) return;
+
+  if (watchId) navigator.geolocation.clearWatch(watchId);
+
+  watchId = navigator.geolocation.watchPosition(async (pos) => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+
+    await supabase
+      .from("chamados_borracharia")
+      .update({
+        ultima_latitude: lat,
+        ultima_longitude: lon,
+        ultima_localizacao_em: new Date().toISOString()
+      })
+      .eq("id", chamadoId);
+
+  }, () => {}, {
+    enableHighAccuracy: true
+  });
+}
    
    async function buscarBorracheirosDisponiveisDentroDoRaio(latitude, longitude) {
   const { data, error } = await supabase
@@ -762,6 +804,16 @@ async function validarCodigoTelefone() {
 
       if (!cliente_nome || !cliente_telefone) {
   mostrarMensagem("Preencha nome e telefone.");
+  return;
+}
+
+if (data?.id) {
+  iniciarRastreamento(data.id);
+}
+
+if (error) {
+  console.error(error);
+  mostrarMensagem("Erro ao solicitar atendimento.");
   return;
 }
 
@@ -872,6 +924,7 @@ validado_em: new Date().toISOString(),
       const { data, error } = await supabase
         .from("chamados_borracharia")
         .select(`
+  .select(`
   id,
   cliente_nome,
   cliente_telefone,
@@ -890,7 +943,8 @@ validado_em: new Date().toISOString(),
   aceito_em,
   finalizado_em,
   borracheiro_id,
-  avaliacao
+  avaliacao,
+  foto_solicitante
 `)
         .eq("codigo_acompanhamento", codigo)
         .order("created_at", { ascending: false })
@@ -1025,8 +1079,7 @@ el("btnEnviarAvaliacao").addEventListener("click", () => {
   </script>
 
   <script>
-    let watchId = null;
-document.addEventListener("DOMContentLoaded", () => {
+   document.addEventListener("DOMContentLoaded", () => {
 
 let deferredPrompt = null;
 const btnInstalar = document.querySelector(".btn-instalar");
