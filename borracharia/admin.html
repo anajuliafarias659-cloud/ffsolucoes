@@ -508,6 +508,7 @@
     let intervalLista = null;
     let idsChamadosJaVistos = new Set();
     let primeiraCargaChamados = true;
+    let chamadoAbertoId = null;
 
     const audioNovoPedido = new Audio("https://www.soundjay.com/buttons/sounds/beep-07a.mp3");
     audioNovoPedido.preload = "auto";
@@ -806,75 +807,79 @@
     }
 
     async function listarChamados(){
-      if(!perfilBorracheiro?.id) return;
+  if(chamadoAbertoId){
+    return;
+  }
 
-      const filtro = el("filtroStatus").value;
-      const filtroOr = montarFiltroLista(filtro);
+  if(!perfilBorracheiro?.id) return;
 
-      let query = supabase
-  .from("chamados_borracharia")
-  .select(`
-    id,
-    cliente_nome,
-    cliente_telefone,
-    tipo_veiculo,
-    problema,
-    observacoes,
-    endereco_texto,
-    latitude,
-    longitude,
-    ultima_latitude,
-    ultima_longitude,
-    foto_solicitante,
-    status,
-    valor_estimado,
-    valor_final,
-    forma_pagamento,
-    codigo_acompanhamento,
-    created_at,
-    aceito_em,
-    finalizado_em,
-    borracheiro_id
-  `)
-  .order("created_at", { ascending:false });
+  const filtro = el("filtroStatus").value;
+  const filtroOr = montarFiltroLista(filtro);
 
-      if(filtroOr){
-        query = query.or(filtroOr);
-      }
+  let query = supabase
+    .from("chamados_borracharia")
+    .select(`
+      id,
+      cliente_nome,
+      cliente_telefone,
+      tipo_veiculo,
+      problema,
+      observacoes,
+      endereco_texto,
+      latitude,
+      longitude,
+      ultima_latitude,
+      ultima_longitude,
+      foto_solicitante,
+      status,
+      valor_estimado,
+      valor_final,
+      forma_pagamento,
+      codigo_acompanhamento,
+      created_at,
+      aceito_em,
+      finalizado_em,
+      borracheiro_id
+    `)
+    .order("created_at", { ascending:false });
 
-      const { data, error } = await query;
+  if(filtroOr){
+    query = query.or(filtroOr);
+  }
 
-      if(error){
-        console.error(error);
-        return;
-      }
+  const { data, error } = await query;
 
-      const lista = data || [];
+  if(error){
+    console.error(error);
+    return;
+  }
 
-      const aguardandoSemBorracheiro = lista.filter(item =>
-        item.status === "aguardando" && !item.borracheiro_id
-      );
+  const lista = data || [];
 
-      const idsAtuais = new Set(aguardandoSemBorracheiro.map(item => String(item.id)));
+  const aguardandoSemBorracheiro = lista.filter(item =>
+    item.status === "aguardando" && !item.borracheiro_id
+  );
 
-      let chegouNovoPedido = false;
+  const idsAtuais = new Set(aguardandoSemBorracheiro.map(item => String(item.id)));
 
-      for(const id of idsAtuais){
-        if(!idsChamadosJaVistos.has(id)){
-          chegouNovoPedido = true;
-          break;
-        }
-      }
+  let chegouNovoPedido = false;
 
-      if(!primeiraCargaChamados && chegouNovoPedido){
-        tocarSomNovoPedido();
-      }
-
-      idsChamadosJaVistos = idsAtuais;
-      primeiraCargaChamados = false;
-
-      renderChamados(lista);
+  for(const id of idsAtuais){
+    if(!idsChamadosJaVistos.has(id)){
+      chegouNovoPedido = true;
+      break;
     }
+  }
+
+  if(!primeiraCargaChamados && chegouNovoPedido){
+    tocarSomNovoPedido();
+  }
+
+  idsChamadosJaVistos = idsAtuais;
+  primeiraCargaChamados = false;
+
+  renderChamados(lista);
+}
 
 
 window.toggleChamado = function(id){
@@ -887,10 +892,14 @@ window.toggleChamado = function(id){
     c.classList.remove("aberto");
   });
 
-  if(!estavaAberto){
-    card.classList.add("aberto");
+  if(estavaAberto){
+    chamadoAbertoId = null;
+    return;
   }
-}
+
+  card.classList.add("aberto");
+  chamadoAbertoId = id;
+};
 
 function renderChamados(lista){
   const box = el("listaChamados");
@@ -899,6 +908,20 @@ function renderChamados(lista){
     box.innerHTML = `<div class="vazio">Nenhum chamado encontrado.</div>`;
     return;
   }
+
+  box.innerHTML = lista.map(item => {
+    // seu map normal...
+  }).join("");
+
+  if(chamadoAbertoId){
+    const cardAberto = document.getElementById(`card-${chamadoAbertoId}`);
+    if(cardAberto){
+      cardAberto.classList.add("aberto");
+    }else{
+      chamadoAbertoId = null;
+    }
+  }
+}
 
   box.innerHTML = lista.map(item => {
     const status = item.status || "aguardando";
@@ -1011,7 +1034,8 @@ function renderChamados(lista){
     `;
   }).join("");
 }
-   
+    
+
     window.aceitarChamado = async function(id){
       if(!perfilBorracheiro){
         alert("Perfil do borracheiro não carregado.");
