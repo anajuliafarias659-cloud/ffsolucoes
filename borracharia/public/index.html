@@ -984,191 +984,183 @@ const { data, error } = await supabase
       consultarChamado(codigo);
     }
 
-    async function consultarChamado(codigoManual = null) {
-      const codigo = (codigoManual || el("codigoConsulta").value).trim().toUpperCase();
-      if (!codigo) return;
+   
 
-     const { data, error } = await supabase
-  .from("chamados_borracharia")
-  .select(`
-    id,
-    cliente_nome,
-    cliente_telefone,
-    tipo_veiculo,
-    problema,
-    observacoes,
-    endereco_texto,
-    latitude,
-    longitude,
-    status,
-    valor_estimado,
-    valor_final,
-    forma_pagamento,
-    codigo_acompanhamento,
-    created_at,
-    aceito_em,
-    finalizado_em,
-    borracheiro_id,
-    avaliacao,
-    foto_solicitante,
-    pix_copia_cola,
-    pix_status
-  `)
-  .eq("codigo_acompanhamento", codigo)
-  .order("created_at", { ascending: false })
-  .limit(1)
-  .maybeSingle();
+async function consultarChamado(codigoManual = null) {
+  const codigo = (codigoManual || el("codigoConsulta").value).trim().toUpperCase();
+  if (!codigo) return;
 
-if (el("btnSolicitar")) {
-  el("btnSolicitar").disabled = false;
-  el("btnSolicitar").textContent = "Solicitar atendimento";
-}
-
-if (error) {
-  console.error(error);
-  mostrarMensagem("Erro ao solicitar atendimento.");
-  return;
-}
-
-if (data?.id) {
-  iniciarRastreamento(data.id);
-}
-
-let fotoUrlCorrigida = "";
-
-if (data?.foto_solicitante) {
-  const caminhoFoto = String(data.foto_solicitante).trim();
-
-  if (caminhoFoto.startsWith("http")) {
-    fotoUrlCorrigida = caminhoFoto;
-  } else {
-    const { data: pub } = supabase.storage
-  .from("borracharia")
-  .getPublicUrl(caminhoFoto);
-
-fotoUrlCorrigida = encodeURI(pub?.publicUrl || "");
-  }
-}
-
-console.log("FOTO VINDA DO BANCO:", data?.foto_solicitante);
-console.log("URL FINAL DA FOTO:", fotoUrlCorrigida);
-const statusBruto = String(data.status || "aguardando").trim().toLowerCase();
-
-let status = String(data.status || "aguardando")
-  .toLowerCase()
-  .trim()
-  .replace(/\s+/g, "_");
-
-if (status.includes("final")) status = "finalizado";
-if (status.includes("conclu")) status = "finalizado";
-if (status.includes("aceit")) status = "aceito";
-if (status.includes("andamento")) status = "em_andamento";
-if (status.includes("cancel")) status = "cancelado";
-
-      el("resultadoConsulta").style.display = "block";
-      el("statusBox").className = "status-box " + classe;
-      el("statusBox").textContent = traduzirStatus(status).toUpperCase();
-
-      let nomeBorracheiro = "-";
-
-if (data.borracheiro_id) {
-  const { data: borr } = await supabase
-    .from("borracheiros")
-    .select("nome")
-    .eq("id", data.borracheiro_id)
+  const { data, error } = await supabase
+    .from("chamados_borracharia")
+    .select(`
+      id,
+      cliente_nome,
+      cliente_telefone,
+      tipo_veiculo,
+      problema,
+      observacoes,
+      endereco_texto,
+      latitude,
+      longitude,
+      status,
+      valor_estimado,
+      valor_final,
+      forma_pagamento,
+      codigo_acompanhamento,
+      created_at,
+      aceito_em,
+      finalizado_em,
+      borracheiro_id,
+      avaliacao,
+      foto_solicitante,
+      pix_copia_cola,
+      pix_status
+    `)
+    .eq("codigo_acompanhamento", codigo)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
-  if (borr?.nome) nomeBorracheiro = borr.nome;
-}
+  if (error) {
+    console.error(error);
+    mostrarMensagem("Erro ao consultar chamado.");
+    return;
+  }
 
-const pixStatusNormalizado = String(data.pix_status || "")
-  .trim()
-  .toLowerCase();
-  
-      el("infoChamado").innerHTML = `
-  <div><strong>Cliente:</strong> ${data.cliente_nome || "-"}</div>
-  <div><strong>Telefone:</strong> ${data.cliente_telefone || "-"}</div>
-  <div><strong>Veículo:</strong> ${data.tipo_veiculo || "-"}</div>
-  <div><strong>Problema:</strong> ${data.problema || "-"}</div>
-  <div><strong>Referência:</strong> ${data.endereco_texto || "-"}</div>
-  <div><strong>Observações:</strong> ${data.observacoes || "-"}</div>
-  <div><strong>Borracheiro:</strong> ${nomeBorracheiro}</div>
-  <div><strong>Taxa de deslocamento:</strong> R$ ${Number(data.valor_estimado || 0).toFixed(2)}</div>
-  <div><strong>Valor final no local:</strong> R$ ${Number(data.valor_final || 0).toFixed(2)}</div>
-  <div><strong>Pagamento do serviço:</strong> ${data.forma_pagamento || "-"}</div>
+  if (!data) return;
 
-  ${data.pix_copia_cola ? `
-  <div class="linha"></div>
-  <div class="pixCard">
-    <div class="pixTitulo">PIX da taxa de deslocamento</div>
-    <div>
-  <strong>Status do PIX:</strong> 
-  <span style="color:${pixStatusNormalizado === 'pago' ? '#22c55e' : '#fbbf24'}">
-    ${pixStatusNormalizado === "pago" ? "PAGO" : "PENDENTE"}
-  </span>
-</div>
-    <div class="pixValor">R$ ${Number(data.valor_estimado || 0).toFixed(2)}</div>
-    <button type="button" id="btnCopiarPix" class="btnCopiarPix">Copiar PIX</button>
-    <div id="msgPix" class="msgPix"></div>
-  </div>
-` : ""}
+  if (data.id) {
+    iniciarRastreamento(data.id);
+  }
 
-  <div class="linha"></div>
-  <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
+  // ================= FOTO =================
+  let fotoUrlCorrigida = "";
 
-  ${fotoUrlCorrigida ? `
-    <div class="linha"></div>
-    <div><strong>Foto enviada:</strong></div>
-    <img
-      src="${fotoUrlCorrigida}"
-      style="width:100%;border-radius:10px;margin-top:8px;"
-      onerror="this.style.display='none'"
-    >
-  ` : ""}
-`;
+  if (data.foto_solicitante) {
+    const caminhoFoto = String(data.foto_solicitante).trim();
 
-const btnCopiarPix = document.getElementById("btnCopiarPix");
-if (btnCopiarPix && data?.pix_copia_cola) {
-  btnCopiarPix.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(data.pix_copia_cola);
-      const msgPix = document.getElementById("msgPix");
-      if (msgPix) msgPix.textContent = "PIX copiado com sucesso.";
-    } catch (e) {
-      const msgPix = document.getElementById("msgPix");
-      if (msgPix) msgPix.textContent = "Não foi possível copiar automaticamente.";
+    if (caminhoFoto.startsWith("http")) {
+      fotoUrlCorrigida = caminhoFoto;
+    } else {
+      const { data: pub } = supabase.storage
+        .from("borracharia")
+        .getPublicUrl(caminhoFoto);
+
+      fotoUrlCorrigida = encodeURI(pub?.publicUrl || "");
     }
-  };
-}
+  }
 
-      // controle da avaliação
-// controle da avaliação
-if (status.includes("finalizado")) {
-  if (data.avaliacao === null || data.avaliacao === undefined) {
-    el("areaAvaliacao").classList.remove("oculto");
+  // ================= STATUS CORRIGIDO =================
+  let status = String(data.status || "aguardando")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "_");
+
+  if (status.includes("final")) status = "finalizado";
+  if (status.includes("conclu")) status = "finalizado";
+  if (status.includes("aceit")) status = "aceito";
+  if (status.includes("andamento")) status = "em_andamento";
+  if (status.includes("cancel")) status = "cancelado";
+
+  const classe = ["aguardando","aceito","em_andamento","finalizado","cancelado"].includes(status)
+    ? status
+    : "aguardando";
+
+  el("resultadoConsulta").style.display = "block";
+  el("statusBox").className = "status-box " + classe;
+  el("statusBox").textContent = traduzirStatus(status).toUpperCase();
+
+  // ================= BORRACHEIRO =================
+  let nomeBorracheiro = "-";
+
+  if (data.borracheiro_id) {
+    const { data: borr } = await supabase
+      .from("borracheiros")
+      .select("nome")
+      .eq("id", data.borracheiro_id)
+      .maybeSingle();
+
+    if (borr?.nome) nomeBorracheiro = borr.nome;
+  }
+
+  // ================= PIX =================
+  const pixStatusNormalizado = String(data.pix_status || "")
+    .trim()
+    .toLowerCase();
+
+  // ================= HTML =================
+  el("infoChamado").innerHTML = `
+    <div><strong>Cliente:</strong> ${data.cliente_nome || "-"}</div>
+    <div><strong>Telefone:</strong> ${data.cliente_telefone || "-"}</div>
+    <div><strong>Veículo:</strong> ${data.tipo_veiculo || "-"}</div>
+    <div><strong>Problema:</strong> ${data.problema || "-"}</div>
+    <div><strong>Referência:</strong> ${data.endereco_texto || "-"}</div>
+    <div><strong>Observações:</strong> ${data.observacoes || "-"}</div>
+    <div><strong>Borracheiro:</strong> ${nomeBorracheiro}</div>
+    <div><strong>Taxa de deslocamento:</strong> R$ ${Number(data.valor_estimado || 0).toFixed(2)}</div>
+    <div><strong>Valor final no local:</strong> R$ ${Number(data.valor_final || 0).toFixed(2)}</div>
+    <div><strong>Pagamento do serviço:</strong> ${data.forma_pagamento || "-"}</div>
+
+    ${data.pix_copia_cola ? `
+      <div class="linha"></div>
+      <div class="pixCard">
+        <div class="pixTitulo">PIX da taxa de deslocamento</div>
+        <div>
+          <strong>Status do PIX:</strong> 
+          <span style="color:${pixStatusNormalizado === 'pago' ? '#22c55e' : '#fbbf24'}">
+            ${pixStatusNormalizado === "pago" ? "PAGO" : "PENDENTE"}
+          </span>
+        </div>
+        <div class="pixValor">R$ ${Number(data.valor_estimado || 0).toFixed(2)}</div>
+        <button type="button" id="btnCopiarPix" class="btnCopiarPix">Copiar PIX</button>
+        <div id="msgPix" class="msgPix"></div>
+      </div>
+    ` : ""}
+
+    <div class="linha"></div>
+    <div><strong>Código:</strong> ${data.codigo_acompanhamento || "-"}</div>
+
+    ${fotoUrlCorrigida ? `
+      <div class="linha"></div>
+      <div><strong>Foto enviada:</strong></div>
+      <img src="${fotoUrlCorrigida}" style="width:100%;border-radius:10px;margin-top:8px;">
+    ` : ""}
+  `;
+
+  // ================= BOTÃO PIX =================
+  const btnCopiarPix = document.getElementById("btnCopiarPix");
+  if (btnCopiarPix && data?.pix_copia_cola) {
+    btnCopiarPix.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(data.pix_copia_cola);
+        const msgPix = document.getElementById("msgPix");
+        if (msgPix) msgPix.textContent = "PIX copiado com sucesso.";
+      } catch (e) {
+        const msgPix = document.getElementById("msgPix");
+        if (msgPix) msgPix.textContent = "Erro ao copiar.";
+      }
+    };
+  }
+
+  // ================= AVALIAÇÃO =================
+  if (status === "finalizado") {
+    if (data.avaliacao == null) {
+      el("areaAvaliacao").classList.remove("oculto");
+    } else {
+      el("areaAvaliacao").classList.add("oculto");
+    }
   } else {
     el("areaAvaliacao").classList.add("oculto");
   }
-} else {
-  el("areaAvaliacao").classList.add("oculto");
-}
 
-// controle de tela
-if (statusAindaAtivo(status)) {
-  mostrarModoSomenteConsulta(codigo);
-  salvarChamadoSalvo(codigo);
-} else {
-  mostrarModoNormal();
-  limparChamadoSalvo();
-}
+  // ================= AUTO ATUALIZA =================
+  if (intervalConsulta) clearInterval(intervalConsulta);
 
-      if (intervalConsulta) clearInterval(intervalConsulta);
-
-if (statusAindaAtivo(status)) {
-  intervalConsulta = setInterval(() => {
-    consultarChamado(codigo);
-  }, 5000);
-}
+  if (["aguardando","aceito","em_andamento"].includes(status)) {
+    intervalConsulta = setInterval(() => {
+      consultarChamado(codigo);
+    }, 5000);
+  }
 }
 
     async function verificarChamadoSalvoAoAbrir() {
