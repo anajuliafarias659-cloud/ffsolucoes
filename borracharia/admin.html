@@ -22,6 +22,27 @@
   margin-top:10px;
 }
 
+.topResumoFinanceiro{
+  padding:10px;
+  border-radius:12px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  margin-bottom:8px;
+  text-align:right;
+}
+
+.topResumoLabel{
+  font-size:11px;
+  color:#94a3b8;
+  margin-bottom:4px;
+}
+
+.topResumoValor{
+  font-size:20px;
+  font-weight:800;
+  color:#fbbf24;
+}
+
 .verFotoBtn{
   margin-top:10px;
   padding:12px;
@@ -718,12 +739,20 @@ body{
 <!-- TOPO FIXO DIREITO -->
 <div class="top-fixed-right" id="topFixedRight" style="display:none;">
   <div class="card-top-acoes">
-    <div class="linha-botoes">
-      <button id="btnTopoCompartilhar" class="btn-top-mini btn-compartilhar" type="button">Compartilhar</button>
-    </div>
-    <div class="linha-botoes">
-      <button id="btnTopoSair" class="btn-top-mini btn-sair-top" type="button">Sair</button>
-    </div>
+  <div id="topResumoFinanceiro" class="topResumoFinanceiro">
+    <div class="topResumoLabel">Cobrança do sistema</div>
+    <div id="topValorSistema" class="topResumoValor">R$ 0,00</div>
+  </div>
+
+  <div class="linha-botoes">
+    <button id="btnCopiarCobrancaSistema" class="btn-top-mini btn-copiar" type="button">Copiar cobrança</button>
+    <button id="btnTopoCompartilhar" class="btn-top-mini btn-compartilhar" type="button">Compartilhar</button>
+  </div>
+
+  <div class="linha-botoes">
+    <button id="btnTopoSair" class="btn-top-mini btn-sair-top" type="button">Sair</button>
+  </div>
+</div>
   </div>
 </div>
   <div class="wrap">
@@ -871,6 +900,10 @@ body{
 
       const el = (id) => document.getElementById(id);
     const LINK_PUBLICO_BORRACHARIA = "https://www.ffsolucoes.com.br/borracharia/public";
+
+    const CHAVE_PIX_SISTEMA = "89981452698";
+const PERCENTUAL_SISTEMA = 10; // exemplo: 10%
+let totalCobrancaSistema = 0;
 
     let userLogado = null;
     let perfilBorracheiro = null;
@@ -1246,10 +1279,32 @@ borracheiro_id
     tocarSomNovoPedido();
   }
 
+function calcularCobrancaSistema(lista){
+  const chamadosDoBorracheiro = (lista || []).filter(item =>
+    item.borracheiro_id === perfilBorracheiro?.id &&
+    ["aceito", "em_andamento", "finalizado"].includes(item.status)
+  );
+
+  const totalBase = chamadosDoBorracheiro.reduce((acc, item) => {
+    return acc + Number(item.valor_estimado || 0);
+  }, 0);
+
+  totalCobrancaSistema = totalBase * (PERCENTUAL_SISTEMA / 100);
+
+  const elValor = document.getElementById("topValorSistema");
+  if(elValor){
+    elValor.textContent = totalCobrancaSistema.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL"
+    });
+  }
+}
+
   idsChamadosJaVistos = idsAtuais;
   primeiraCargaChamados = false;
 
-  
+calcularCobrancaSistema(lista);
+
   renderChamados(lista);
 }
 
@@ -1533,6 +1588,24 @@ if(!pixCopiaCola){
 
       await listarChamados();
     }
+
+    async function copiarCobrancaSistema(){
+  const texto = [
+    "Cobrança do sistema FF Borracharia",
+    `Borracharia: ${perfilBorracheiro?.nome || "-"}`,
+    `Valor total: ${totalCobrancaSistema.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`,
+    `Chave PIX: ${CHAVE_PIX_SISTEMA}`
+  ].join("\n");
+
+  try{
+    await navigator.clipboard.writeText(texto);
+    setMsg("msgCompartilhar", "Cobrança copiada com sucesso.");
+  }catch(error){
+    console.error(error);
+    setMsg("msgCompartilhar", "Não foi possível copiar a cobrança.", "#fca5a5");
+  }
+}
+
 async function sairPainel(){
   try{
     await supabase.auth.signOut();
