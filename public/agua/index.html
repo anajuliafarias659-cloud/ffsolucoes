@@ -71,6 +71,59 @@
       border-bottom:1px solid var(--line);
     }
 
+    .mini-galeria{
+  position:absolute;
+  right:10px;
+  bottom:10px;
+  display:flex;
+  gap:6px;
+  z-index:2;
+}
+
+.mini-thumb{
+  width:34px;
+  height:34px;
+  border-radius:10px;
+  object-fit:cover;
+  border:2px solid rgba(255,255,255,.85);
+  background:#fff;
+  cursor:pointer;
+  box-shadow:0 4px 10px rgba(2,6,23,.12);
+}
+
+.mini-thumb.ativa{
+  border-color:var(--primary);
+}
+
+.variacoes-card{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.btn-var{
+  border:none;
+  border-radius:999px;
+  padding:8px 12px;
+  background:#f8fafc;
+  border:1px solid var(--line);
+  cursor:pointer;
+  font-size:12px;
+  font-weight:bold;
+  color:#334155;
+}
+
+.btn-var.ativa{
+  background:var(--primary);
+  color:#fff;
+  border-color:var(--primary);
+}
+
+.btn-var:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+
     .topo-wrap{
       display:flex;
       align-items:center;
@@ -881,14 +934,62 @@ const heroTags = document.getElementById("heroTags");
       return "whatsapp";
     }
 
-    function obterImagemProduto(produto){
-      try{
-        const imgs = JSON.parse(produto.imagens || "[]");
-        return imgs[0] || "";
-      }catch{
-        return "";
-      }
-    }
+    function obterImagensProduto(produto){
+  try{
+    const imgs = JSON.parse(produto.imagens || "[]");
+    return Array.isArray(imgs) ? imgs.filter(Boolean).slice(0, 3) : [];
+  }catch{
+    return [];
+  }
+}
+
+function obterImagemProduto(produto){
+  const imgs = obterImagensProduto(produto);
+  return imgs[0] || "";
+}
+
+function obterVariacoesProduto(produto){
+  try{
+    const variacoes = JSON.parse(produto.variacoes || "[]");
+    return Array.isArray(variacoes) ? variacoes : [];
+  }catch{
+    return [];
+  }
+}
+
+function obterPrecoVariacao(produto, variacao){
+  if(variacao?.preco !== null && variacao?.preco !== undefined && variacao?.preco !== ""){
+    return Number(variacao.preco || 0);
+  }
+  return Number(produto?.preco || 0);
+}
+
+function obterVariacaoPadrao(produto){
+  const variacoes = obterVariacoesProduto(produto);
+
+  if(!variacoes.length) return null;
+
+  const disponivel = variacoes.find(v => Number(v.estoque || 0) > 0);
+  return disponivel || variacoes[0];
+}
+
+function obterTextoVariacao(v){
+  const tipo = String(v?.tipo || "").trim();
+  const valor = String(v?.valor || "").trim();
+
+  if(tipo && valor) return `${tipo}: ${valor}`;
+  if(valor) return valor;
+  if(tipo) return tipo;
+  return "Variação";
+}
+
+function obterPrecoInicialProduto(produto){
+  const variacaoPadrao = obterVariacaoPadrao(produto);
+  if(variacaoPadrao){
+    return obterPrecoVariacao(produto, variacaoPadrao);
+  }
+  return Number(produto.preco || 0);
+}
 
     function horaParaMinutos(hora){
       if(!hora || !String(hora).includes(":")) return null;
@@ -1089,13 +1190,21 @@ heroTags.innerHTML = tags
       const temTexto = configLoja.banner_descricao && configLoja.banner_descricao.trim() !== "";
 
       if(!temImagem && !temTexto){
-        bannerArea.innerHTML = `<div class="banner-texto">${configLoja.nome_site || "Sua loja"}</div>`;
-      }else{
-        bannerArea.innerHTML = `
-          ${temImagem ? `<img src="${configLoja.banner_url}" alt="Banner">` : ""}
-          <div class="banner-texto">${temTexto ? configLoja.banner_descricao : (configLoja.nome_site || "Sua loja")}</div>
-        `;
-      }
+  bannerArea.innerHTML = `<div class="banner-texto"></div>`;
+}else if(temImagem && !temTexto){
+  bannerArea.innerHTML = `
+    <img src="${configLoja.banner_url}" alt="Banner">
+  `;
+}else if(!temImagem && temTexto){
+  bannerArea.innerHTML = `
+    <div class="banner-texto">${configLoja.banner_descricao}</div>
+  `;
+}else{
+  bannerArea.innerHTML = `
+    <img src="${configLoja.banner_url}" alt="Banner">
+    <div class="banner-texto">${configLoja.banner_descricao}</div>
+  `;
+}
 
       document.body.classList.remove("tema-natal","tema-anonovo","tema-capivara");
       if(configLoja.tema_site){
@@ -1173,52 +1282,109 @@ heroTags.innerHTML = tags
     }
 
     function renderizarProdutos(){
-      const lista = listaFiltrada();
+  const lista = listaFiltrada();
 
-      if(!lista.length){
-        listaProdutos.innerHTML = `<div class="vazio">Nenhum produto encontrado.</div>`;
-        return;
-      }
+  if(!lista.length){
+    listaProdutos.innerHTML = `<div class="vazio">Nenhum produto encontrado.</div>`;
+    return;
+  }
 
-      listaProdutos.innerHTML = lista.map((p) => {
-        const img = obterImagemProduto(p);
-        const estoque = Number(p.estoque || 0);
-        const semEstoque = estoque <= 0;
-        const categoria = p.categoria || "Produto";
+  listaProdutos.innerHTML = lista.map((p) => {
+    const imgs = obterImagensProduto(p);
+    const imgPrincipal = imgs[0] || "";
+    const estoque = Number(p.estoque || 0);
+    const categoria = p.categoria || "Produto";
 
-        return `
-          <article class="card">
-            <div class="foto">
-              <div class="badge-categoria">${categoria}</div>
-              ${img ? `<img src="${img}" alt="${p.nome}">` : `<div style="color:#94a3b8;font-weight:bold">Sem imagem</div>`}
-            </div>
+    const variacoes = obterVariacoesProduto(p);
+    const variacaoPadrao = obterVariacaoPadrao(p);
+    const precoInicial = obterPrecoInicialProduto(p);
 
-            <div class="conteudo">
-              <div class="nome">${p.nome || "Produto"}</div>
-              <div class="desc">${p.descricao || "Produto disponível para pedido."}</div>
+    const semEstoqueGeral = variacoes.length
+      ? !variacoes.some(v => Number(v.estoque || 0) > 0)
+      : estoque <= 0;
 
-              <div class="preco-row">
-                <div class="preco">${formatarReal(p.preco || 0)}</div>
-                <div class="estoque">${semEstoque ? "Sem estoque" : "Disponível"}</div>
-              </div>
+    return `
+      <article class="card">
+        <div class="foto">
+          <div class="badge-categoria">${categoria}</div>
 
-              <div class="acoes-produto">
-                <div class="qtd-box">
-                  <button class="btn-qtd" onclick="alterarQtdTemp('${p.id}', -1)">−</button>
-                  <div class="qtd-num" id="qtd_temp_${p.id}">1</div>
-                  <button class="btn-qtd" onclick="alterarQtdTemp('${p.id}', 1)">+</button>
+          ${imgPrincipal
+            ? `<img id="img_prod_${p.id}" src="${imgPrincipal}" alt="${p.nome}" loading="lazy">`
+            : `<div style="color:#94a3b8;font-weight:bold">Sem imagem</div>`
+          }
+
+          ${
+            imgs.length > 1
+              ? `
+                <div class="mini-galeria">
+                  ${imgs.map((img, idx) => `
+                    <img
+                      src="${img}"
+                      class="mini-thumb ${idx === 0 ? "ativa" : ""}"
+                      onclick="trocarImagemProduto('${p.id}', '${img}', this)"
+                    >
+                  `).join("")}
                 </div>
+              `
+              : ""
+          }
+        </div>
 
-                <button class="btn-add" onclick="adicionarAoCarrinho('${p.id}')"
-                  ${semEstoque ? "disabled style='opacity:.55;cursor:not-allowed'" : ""}>
-                  ${normalizarModoVenda(configLoja?.modo_venda) === "whatsapp" ? "Pedir" : "Adicionar"}
-                </button>
-              </div>
+        <div class="conteudo">
+          <div class="nome">${p.nome || "Produto"}</div>
+          <div class="desc">${p.descricao || "Produto disponível para pedido."}</div>
+
+          <div class="preco-row">
+            <div class="preco" id="preco_prod_${p.id}">${formatarReal(precoInicial)}</div>
+            <div class="estoque">
+              ${semEstoqueGeral ? "Sem estoque" : "Disponível"}
             </div>
-          </article>
-        `;
-      }).join("");
-    }
+          </div>
+
+          ${
+            variacoes.length
+              ? `
+                <div class="variacoes-card" id="variacoes_${p.id}">
+                  ${variacoes.map((v, idx) => {
+                    const precoVar = obterPrecoVariacao(p, v);
+                    const estoqueVar = Number(v.estoque || 0);
+                    const disabled = estoqueVar <= 0;
+
+                    return `
+                      <button
+                        class="btn-var ${idx === 0 ? "ativa" : ""}"
+                        onclick="selecionarVariacaoProduto('${p.id}', '${String(v.valor || "").replace(/'/g, "\\'")}', ${precoVar}, this)"
+                        ${disabled ? "disabled" : ""}
+                      >
+                        ${obterTextoVariacao(v)} - ${formatarReal(precoVar)}
+                      </button>
+                    `;
+                  }).join("")}
+                </div>
+              `
+              : ""
+          }
+
+          <div class="acoes-produto">
+            <div class="qtd-box">
+              <button class="btn-qtd" onclick="alterarQtdTemp('${p.id}', -1)">−</button>
+              <div class="qtd-num" id="qtd_temp_${p.id}">1</div>
+              <button class="btn-qtd" onclick="alterarQtdTemp('${p.id}', 1)">+</button>
+            </div>
+
+            <button
+              class="btn-add"
+              onclick="adicionarAoCarrinho('${p.id}')"
+              ${semEstoqueGeral ? "disabled style='opacity:.55;cursor:not-allowed'" : ""}
+            >
+              ${normalizarModoVenda(configLoja?.modo_venda) === "whatsapp" ? "Pedir" : "Adicionar"}
+            </button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
 
     window.alterarQtdTemp = function(id, delta){
       const el = document.getElementById("qtd_temp_" + id);
@@ -1230,39 +1396,95 @@ heroTags.innerHTML = tags
       el.textContent = atual;
     };
 
+    window.trocarImagemProduto = function(id, img, el){
+  const imgEl = document.getElementById(`img_prod_${id}`);
+  if(imgEl) imgEl.src = img;
+
+  document
+    .querySelectorAll(`#listaProdutos .mini-galeria .mini-thumb`)
+    .forEach(t => t.classList.remove("ativa"));
+
+  const grupo = el.parentElement;
+  if(grupo){
+    grupo.querySelectorAll(".mini-thumb").forEach(t => t.classList.remove("ativa"));
+  }
+
+  el.classList.add("ativa");
+};
+
+window.selecionarVariacaoProduto = function(id, valor, preco, el){
+  const precoEl = document.getElementById(`preco_prod_${id}`);
+  if(precoEl){
+    precoEl.textContent = formatarReal(preco);
+  }
+
+  const wrap = document.getElementById(`variacoes_${id}`);
+  if(wrap){
+    wrap.querySelectorAll(".btn-var").forEach(btn => btn.classList.remove("ativa"));
+  }
+
+  el.classList.add("ativa");
+  el.dataset.valor = valor;
+  el.dataset.preco = preco;
+};
+
     window.adicionarAoCarrinho = function(id){
-      if(!podeVenderAgora()){
-        alert(modoExibicaoAtual(configLoja) === "vitrine"
-          ? "No momento a loja está em modo vitrine."
-          : (configLoja?.mensagem_fechado || "Estamos fechados no momento."));
-        return;
-      }
+  if(!podeVenderAgora()){
+    alert(
+      modoExibicaoAtual(configLoja) === "vitrine"
+        ? "No momento a loja está em modo vitrine."
+        : (configLoja?.mensagem_fechado || "Estamos fechados no momento.")
+    );
+    return;
+  }
 
-      const produto = todosProdutos.find(p => String(p.id) === String(id));
-      if(!produto) return;
+  const produto = todosProdutos.find(p => String(p.id) === String(id));
+  if(!produto) return;
 
-      const qtdEl = document.getElementById("qtd_temp_" + id);
-      const qtd = Number(qtdEl?.textContent || 1);
+  const qtdEl = document.getElementById("qtd_temp_" + id);
+  const qtd = Number(qtdEl?.textContent || 1);
 
-      const existente = carrinho.find(i => String(i.id) === String(produto.id));
+  const variacoes = obterVariacoesProduto(produto);
+  let variacaoFinal = "Padrão";
+  let precoFinal = Number(produto.preco || 0);
 
-      if(existente){
-        existente.qtd += qtd;
-      }else{
-        carrinho.push({
-          ...produto,
-          qtd
-        });
-      }
+  if(variacoes.length){
+    const botaoAtivo = document.querySelector(`#variacoes_${id} .btn-var.ativa`);
 
-      salvarCarrinho();
+    if(botaoAtivo){
+      variacaoFinal = botaoAtivo.dataset.valor || "Padrão";
+      precoFinal = Number(botaoAtivo.dataset.preco || produto.preco || 0);
+    }else{
+      const variacaoPadrao = obterVariacaoPadrao(produto);
+      variacaoFinal = String(variacaoPadrao?.valor || "Padrão");
+      precoFinal = obterPrecoVariacao(produto, variacaoPadrao);
+    }
+  }
 
-      if(normalizarModoVenda(configLoja?.modo_venda) === "whatsapp"){
-        abrirCarrinho();
-      }else{
-        alert("Produto adicionado ao carrinho.");
-      }
-    };
+  const existente = carrinho.find(i =>
+    String(i.id) === String(produto.id) &&
+    String(i.variacao || "Padrão") === String(variacaoFinal)
+  );
+
+  if(existente){
+    existente.qtd += qtd;
+  }else{
+    carrinho.push({
+      ...produto,
+      qtd,
+      variacao: variacaoFinal,
+      preco: precoFinal
+    });
+  }
+
+  salvarCarrinho();
+
+  if(normalizarModoVenda(configLoja?.modo_venda) === "whatsapp"){
+    abrirCarrinho();
+  }else{
+    alert("Produto adicionado ao carrinho.");
+  }
+};
 
     function totalCarrinho(){
       return carrinho.reduce((acc, item) => acc + (Number(item.preco || 0) * Number(item.qtd || 0)), 0);
@@ -1281,6 +1503,7 @@ heroTags.innerHTML = tags
           <div>
             <h4>${item.nome}</h4>
             <p>${item.descricao || ""}</p>
+<div class="valor">${formatarReal(item.preco || 0)} x ${item.qtd}</div>
             <div class="valor">${formatarReal(item.preco || 0)} x ${item.qtd}</div>
           </div>
           <div class="item-acoes">
@@ -1344,7 +1567,7 @@ heroTags.innerHTML = tags
 
       msg += `*Produtos:*\n`;
       carrinho.forEach(item => {
-        msg += `- ${item.nome} | Qtd: ${item.qtd} | ${formatarReal(item.preco || 0)}\n`;
+        msg += `- ${item.nome} (${item.variacao || "Padrão"}) | Qtd: ${item.qtd} | ${formatarReal(item.preco || 0)}\n`;
       });
 
       msg += `\n*Total:* ${formatarReal(totalCarrinho())}\n`;
