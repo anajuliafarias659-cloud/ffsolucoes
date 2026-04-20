@@ -1211,6 +1211,7 @@ const { data, error } = await supabase
 
   preencherPerfil(perfilBorracheiro);
   preencherTopoBorracharia(perfilBorracheiro);
+  await atualizarTopoCobrancaSistema();
   await listarChamados();
 
   if(intervalLista) clearInterval(intervalLista);
@@ -1325,21 +1326,24 @@ borracheiro_id
     tocarSomNovoPedido();
   }
 
-function calcularCobrancaSistema(lista){
-  const chamadosDoBorracheiro = (lista || []).filter(item =>
-    item.borracheiro_id === perfilBorracheiro?.id &&
-    ["aceito", "em_andamento", "finalizado"].includes(item.status)
-  );
+async function atualizarTopoCobrancaSistema(){
+  if(!perfilBorracheiro?.id) return;
 
-  const totalBase = chamadosDoBorracheiro.reduce((acc, item) => {
-    return acc + Number(item.valor_estimado || 0);
-  }, 0);
+  const { data } = await supabase
+    .from("cobrancas_borracheiros")
+    .select("valor_cobrado,status_pagamento")
+    .eq("borracheiro_id", perfilBorracheiro.id)
+    .eq("status_pagamento", "pendente")
+    .order("data_referencia", { ascending:false })
+    .limit(1)
+    .maybeSingle();
 
-  totalCobrancaSistema = totalBase * (PERCENTUAL_SISTEMA / 100);
+  const valor = Number(data?.valor_cobrado || 0);
+  totalCobrancaSistema = valor;
 
   const elValor = document.getElementById("topValorSistema");
   if(elValor){
-    elValor.textContent = totalCobrancaSistema.toLocaleString("pt-BR", {
+    elValor.textContent = valor.toLocaleString("pt-BR", {
       style: "currency",
       currency: "BRL"
     });
@@ -1691,6 +1695,13 @@ async function mostrarTelaCobranca(){
       currency:"BRL"
     });
 
+document.getElementById("topValorSistema").textContent =
+  Number(data.valor_cobrado || 0).toLocaleString("pt-BR", {
+    style:"currency",
+    currency:"BRL"
+  });
+
+totalCobrancaSistema = Number(data.valor_cobrado || 0);
   document.getElementById("btnCopiarPixCobranca").onclick = async () => {
     await navigator.clipboard.writeText(data.chave_pix || "SUA_CHAVE_PIX");
     alert("PIX copiado!");
