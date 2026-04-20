@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -806,6 +807,24 @@ body{
         </select>
       </div>
 
+      <div>
+  <label>Modo de funcionamento</label>
+  <select id="modoFuncionamento">
+    <option value="manual">Manual</option>
+    <option value="automatico">Automático</option>
+  </select>
+</div>
+
+<div>
+  <label>Abre às</label>
+  <input type="time" id="horaAbre" />
+</div>
+
+<div>
+  <label>Fecha às</label>
+  <input type="time" id="horaFecha" />
+</div>
+
       <div class="toggleBox">
         <div class="muted">Situação atual</div>
         <div id="statusAtualLoja" class="statusLoja abertoTag">ABERTA</div>
@@ -1051,6 +1070,9 @@ window.fecharFoto = function(){
       el("latBorracheiro").value = perfil.latitude ?? "";
       el("lngBorracheiro").value = perfil.longitude ?? "";
       el("statusAberto").value = String(perfil.aberto ?? true);
+      el("modoFuncionamento").value = perfil.modo_funcionamento || "manual";
+el("horaAbre").value = perfil.hora_abre || "";
+el("horaFecha").value = perfil.hora_fecha || "";
       atualizarStatusVisualLoja(perfil.aberto ?? true);
       el("pixPadraoBorracheiro").value = perfil.pix_copia_cola_padrao || "";
     }
@@ -1084,6 +1106,9 @@ window.fecharFoto = function(){
       const latitude = el("latBorracheiro").value === "" ? null : Number(el("latBorracheiro").value);
       const longitude = el("lngBorracheiro").value === "" ? null : Number(el("lngBorracheiro").value);
       const aberto = el("statusAberto").value === "true";
+      const modoFuncionamento = el("modoFuncionamento").value;
+const horaAbre = el("horaAbre").value || null;
+const horaFecha = el("horaFecha").value || null;
       
 
       if(!nome){
@@ -1101,15 +1126,18 @@ window.fecharFoto = function(){
 const { data, error } = await supabase
   .from("borracheiros")
   .update({
-    nome,
-    telefone,
-    cidade,
-    aberto,
-    raio_atendimento_km: raio,
-    latitude,
-    longitude,
-    pix_copia_cola_padrao: pixPadrao
-  })
+  nome,
+  telefone,
+  cidade,
+  aberto,
+  modo_funcionamento: modoFuncionamento,
+  hora_abre: horaAbre,
+  hora_fecha: horaFecha,
+  raio_atendimento_km: raio,
+  latitude,
+  longitude,
+  pix_copia_cola_padrao: pixPadrao
+})
   .eq("id", perfilBorracheiro.id)
   .select()
   .single();
@@ -1160,6 +1188,9 @@ const { data, error } = await supabase
   preencherPerfil(perfilBorracheiro);
   preencherTopoBorracharia(perfilBorracheiro);
   await listarChamados();
+  verificarStatusAutomatico();
+
+setInterval(verificarStatusAutomatico, 60000);
 
   if(intervalLista) clearInterval(intervalLista);
   intervalLista = setInterval(() => {
@@ -1565,6 +1596,40 @@ el("btnAtualizar").addEventListener("click", () => {
 el("filtroStatus").addEventListener("change", listarChamados);
 el("statusAberto").addEventListener("change", (e) => atualizarStatusVisualLoja(e.target.value));
 el("btnPegarMinhaLocalizacao").addEventListener("click", pegarMinhaLocalizacao);
+
+function verificarStatusAutomatico(){
+  if(perfilBorracheiro?.modo_funcionamento !== "automatico") return;
+
+  const agora = new Date();
+  const horaAtual = agora.toTimeString().slice(0,5);
+
+  const abre = perfilBorracheiro.hora_abre;
+  const fecha = perfilBorracheiro.hora_fecha;
+
+  if(!abre || !fecha) return;
+
+  let abertoAgora = false;
+
+  if(abre < fecha){
+    abertoAgora = horaAtual >= abre && horaAtual <= fecha;
+  }else{
+    abertoAgora = horaAtual >= abre || horaAtual <= fecha;
+  }
+
+  if(perfilBorracheiro.aberto !== abertoAgora){
+    atualizarStatusNoBanco(abertoAgora);
+  }
+}
+
+async function atualizarStatusNoBanco(status){
+  await supabase
+    .from("borracheiros")
+    .update({ aberto: status })
+    .eq("id", perfilBorracheiro.id);
+
+  perfilBorracheiro.aberto = status;
+  atualizarStatusVisualLoja(status);
+}
 
 document.addEventListener("click", liberarAudio, { once:true });
 
