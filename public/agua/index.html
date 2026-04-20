@@ -1144,6 +1144,20 @@ function obterPrecoInicialProduto(produto){
   if(variacaoPadrao){
     return obterPrecoVariacao(produto, variacaoPadrao);
   }
+
+  function obterQtdMinimaVariacao(variacao){
+  const tipo = String(variacao?.tipo || "").toLowerCase();
+  const valor = String(variacao?.valor || "").toLowerCase();
+
+  // regra automática se for atacado
+  if(tipo.includes("atacado") || valor.includes("atacado")){
+    return 10;
+  }
+
+  const qtd = Number(variacao?.qtd_minima || 0);
+  return qtd > 0 ? qtd : 1;
+}
+
   return Number(produto.preco || 0);
 }
 
@@ -1531,7 +1545,7 @@ rodapeInfo.innerHTML = infoHtml;
                         onclick="selecionarVariacaoProduto('${p.id}', '${String(v.valor || "").replace(/'/g, "\\'")}', ${precoVar}, this)"
                         ${disabled ? "disabled" : ""}
                       >
-                        ${obterTextoVariacao(v)} - ${formatarReal(precoVar)}
+                        ${obterTextoVariacao(v)} - ${formatarReal(precoVar)}${obterQtdMinimaVariacao(v) > 1 ? ` | mín. ${obterQtdMinimaVariacao(v)}` : ""}
                       </button>
                     `;
                   }).join("")}
@@ -1621,7 +1635,8 @@ window.selecionarVariacaoProduto = function(id, valor, preco, el){
 
   const variacoes = obterVariacoesProduto(produto);
   let variacaoFinal = "Padrão";
-  let precoFinal = Number(produto.preco || 0);
+let precoFinal = Number(produto.preco || 0);
+let qtdMinimaFinal = 1;
 
   if(variacoes.length){
     const botaoAtivo = document.querySelector(`#variacoes_${id} .btn-var.ativa`);
@@ -1633,6 +1648,7 @@ window.selecionarVariacaoProduto = function(id, valor, preco, el){
       const variacaoPadrao = obterVariacaoPadrao(produto);
       variacaoFinal = String(variacaoPadrao?.valor || "Padrão");
       precoFinal = obterPrecoVariacao(produto, variacaoPadrao);
+      qtdMinimaFinal = obterQtdMinimaVariacao(variacaoObj);
     }
   }
 
@@ -1641,15 +1657,21 @@ window.selecionarVariacaoProduto = function(id, valor, preco, el){
     String(i.variacao || "Padrão") === String(variacaoFinal)
   );
 
+  if(qtd < qtdMinimaFinal){
+  alert(`Para essa opção, o mínimo é ${qtdMinimaFinal} unidade(s).`);
+  return;
+}
+
   if(existente){
     existente.qtd += qtd;
   }else{
     carrinho.push({
-      ...produto,
-      qtd,
-      variacao: variacaoFinal,
-      preco: precoFinal
-    });
+  ...produto,
+  qtd,
+  variacao: variacaoFinal,
+  preco: precoFinal,
+  qtd_minima: qtdMinimaFinal
+});
   }
 
   salvarCarrinho();
@@ -1697,18 +1719,29 @@ window.selecionarVariacaoProduto = function(id, valor, preco, el){
     }
 
     window.mudarQtdCarrinho = function(id, delta){
-      const item = carrinho.find(i => String(i.id) === String(id));
-      if(!item) return;
+  const item = carrinho.find(i => String(i.id) === String(id));
+  if(!item) return;
 
-      item.qtd += delta;
+  const novaQtd = Number(item.qtd || 0) + delta;
+  const minimo = Number(item.qtd_minima || 1);
 
-      if(item.qtd <= 0){
-        carrinho = carrinho.filter(i => String(i.id) !== String(id));
-      }
+  // 🔒 bloqueia cair abaixo do mínimo
+  if(delta < 0 && novaQtd > 0 && novaQtd < minimo){
+    alert(`A quantidade mínima para ${item.nome} (${item.variacao || "Padrão"}) é ${minimo}.`);
+    return;
+  }
 
-      salvarCarrinho();
-      renderizarCarrinho();
-    };
+  item.qtd = novaQtd;
+
+  if(item.qtd <= 0){
+    carrinho = carrinho.filter(i =>
+      !(String(i.id) === String(id) && String(i.variacao || "Padrão") === String(item.variacao || "Padrão"))
+    );
+  }
+
+  salvarCarrinho();
+  renderizarCarrinho();
+};
 
     window.removerCarrinho = function(id){
       carrinho = carrinho.filter(i => String(i.id) !== String(id));
