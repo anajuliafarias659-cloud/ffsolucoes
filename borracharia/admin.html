@@ -771,26 +771,6 @@ body{
   </div>
 </div>
 
-<div id="telaCobranca" style="display:none;">
-  <div class="wrap">
-    <div class="box" style="text-align:center;">
-      <div class="titulo">Atenção</div>
-
-      <div style="margin-top:10px; font-size:15px; color:#cbd5e1;">
-        Pague sua taxa de serviços anteriores para continuar recebendo atendimentos.
-      </div>
-
-      <div id="valorCobranca" style="margin-top:16px; font-size:26px; font-weight:800; color:#fbbf24;">
-        R$ 0,00
-      </div>
-
-      <button id="btnCopiarPixCobranca" class="green" style="margin-top:16px;">
-        Copiar PIX
-      </button>
-    </div>
-  </div>
-</div>
-
    <div id="painelApp">
       <div class="box boxRecolhivel fechado" id="boxPerfilBorracharia">
   <div class="headRecolhivel" onclick="toggleBoxRecolhivel('boxPerfilBorracharia')">
@@ -1194,15 +1174,7 @@ const { data, error } = await supabase
   userLogado = user;
   perfilBorracheiro = borracheiro;
 
-  // 🔥 NOVO BLOCO
-  const temPendencia = await verificarPendenciaFinanceira();
-
-  if(temPendencia){
-    mostrarTelaCobranca();
-    return;
-  }
-
-   await iniciarPainel();
+  await iniciarPainel();
 }
 
  async function iniciarPainel(){
@@ -1211,7 +1183,6 @@ const { data, error } = await supabase
 
   preencherPerfil(perfilBorracheiro);
   preencherTopoBorracharia(perfilBorracheiro);
-  await atualizarTopoCobrancaSistema();
   await listarChamados();
 
   if(intervalLista) clearInterval(intervalLista);
@@ -1221,24 +1192,6 @@ const { data, error } = await supabase
     }
   }, 5000);
 }
-
-async function verificarPendenciaFinanceira(){
-  const ontem = new Date();
-  ontem.setDate(ontem.getDate() - 1);
-
-  const dataRef = ontem.toISOString().slice(0,10);
-
-  const { data } = await supabase
-    .from("cobrancas_borracheiros")
-    .select("*")
-    .eq("borracheiro_id", perfilBorracheiro.id)
-    .eq("data_referencia", dataRef)
-    .eq("status_pagamento", "pendente")
-    .maybeSingle();
-
-  return !!data;
-}
-
     function montarFiltroLista(filtro){
       const idAtual = perfilBorracheiro?.id;
 
@@ -1326,24 +1279,21 @@ borracheiro_id
     tocarSomNovoPedido();
   }
 
-async function atualizarTopoCobrancaSistema(){
-  if(!perfilBorracheiro?.id) return;
+function calcularCobrancaSistema(lista){
+  const chamadosDoBorracheiro = (lista || []).filter(item =>
+    item.borracheiro_id === perfilBorracheiro?.id &&
+    ["aceito", "em_andamento", "finalizado"].includes(item.status)
+  );
 
-  const { data } = await supabase
-    .from("cobrancas_borracheiros")
-    .select("valor_cobrado,status_pagamento")
-    .eq("borracheiro_id", perfilBorracheiro.id)
-    .eq("status_pagamento", "pendente")
-    .order("data_referencia", { ascending:false })
-    .limit(1)
-    .maybeSingle();
+  const totalBase = chamadosDoBorracheiro.reduce((acc, item) => {
+    return acc + Number(item.valor_estimado || 0);
+  }, 0);
 
-  const valor = Number(data?.valor_cobrado || 0);
-  totalCobrancaSistema = valor;
+  totalCobrancaSistema = totalBase * (PERCENTUAL_SISTEMA / 100);
 
   const elValor = document.getElementById("topValorSistema");
   if(elValor){
-    elValor.textContent = valor.toLocaleString("pt-BR", {
+    elValor.textContent = totalCobrancaSistema.toLocaleString("pt-BR", {
       style: "currency",
       currency: "BRL"
     });
@@ -1451,24 +1401,6 @@ function montarCardChamado(item){
 
         <div class="setaCard">›</div>
       </div>
-
-      
-
-      <div style="margin-top:10px; font-size:15px; color:#cbd5e1;">
-        Pague sua taxa de serviços anteriores para continuar recebendo atendimentos.
-      </div>
-
-      <div id="valorCobranca" style="margin-top:16px; font-size:26px; font-weight:800; color:#fbbf24;">
-        R$ 0,00
-      </div>
-
-      <button id="btnCopiarPixCobranca" class="green" style="margin-top:16px;">
-        Copiar PIX
-      </button>
-    </div>
-  </div>
-</div>
-
 
       <div class="detalhesChamado">
         <div class="bloco">
@@ -1672,40 +1604,6 @@ if(!pixCopiaCola){
     console.error(error);
     setMsg("msgCompartilhar", "Não foi possível copiar a cobrança.", "#fca5a5");
   }
-}
-
-async function mostrarTelaCobranca(){
-  document.getElementById("painelApp").style.display = "none";
-  document.getElementById("telaCobranca").style.display = "block";
-
-  const { data } = await supabase
-    .from("cobrancas_borracheiros")
-    .select("*")
-    .eq("borracheiro_id", perfilBorracheiro.id)
-    .eq("status_pagamento", "pendente")
-    .order("data_referencia", { ascending:false })
-    .limit(1)
-    .single();
-
-  if(!data) return;
-
-  document.getElementById("valorCobranca").textContent =
-    Number(data.valor_cobrado || 0).toLocaleString("pt-BR", {
-      style:"currency",
-      currency:"BRL"
-    });
-
-document.getElementById("topValorSistema").textContent =
-  Number(data.valor_cobrado || 0).toLocaleString("pt-BR", {
-    style:"currency",
-    currency:"BRL"
-  });
-
-totalCobrancaSistema = Number(data.valor_cobrado || 0);
-  document.getElementById("btnCopiarPixCobranca").onclick = async () => {
-    await navigator.clipboard.writeText(data.chave_pix || "SUA_CHAVE_PIX");
-    alert("PIX copiado!");
-  };
 }
 
 async function sairPainel(){
