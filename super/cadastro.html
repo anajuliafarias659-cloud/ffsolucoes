@@ -41,29 +41,50 @@ async function gerarSlugUnico(nome){
   }
 }
 
-// 🔗 LINK
+// 🔗 LINK PÚBLICO
 function montarLink(slug, tipo){
   if(tipo === "passagens"){
     return `${location.origin}/public/passagens/?slug=${slug}`;
   }
+
+  if(tipo === "gas"){
+    return `${location.origin}/loj/${slug}`;
+  }
+
   return `${location.origin}/loj/${slug}`;
+}
+
+// 🔐 LINK DO ADMIN
+function montarAdminLink(tipo){
+  if(tipo === "gas"){
+    return "https://www.ffsolucoes.com.br/agua/admin.html";
+  }
+
+  if(tipo === "passagens"){
+    return "https://www.ffsolucoes.com.br/passagens/admin.html";
+  }
+
+  if(tipo === "borracharia"){
+    return "https://www.ffsolucoes.com.br/borracharia/admin.html";
+  }
+
+  return "https://www.ffsolucoes.com.br/auth/login.html";
 }
 
 // 🚀 CRIAR DEMO
 window.criarDemo = async () => {
-
   const nome = document.getElementById("nomeNegocio").value.trim();
   const tipo = document.getElementById("tipoNegocio").value;
   const email = document.getElementById("usuarioAdmin").value.trim().toLowerCase();
   const senha = document.getElementById("senhaAdmin").value.trim();
   const botao = document.getElementById("btnCriar");
 
-  if (!nome || !email || !senha) {
+  if(!nome || !email || !senha){
     alert("Preencha todos os campos");
     return;
   }
 
-  if (senha.length < 6) {
+  if(senha.length < 6){
     alert("Senha mínima 6 caracteres");
     return;
   }
@@ -71,15 +92,16 @@ window.criarDemo = async () => {
   botao.disabled = true;
   botao.textContent = "Criando...";
 
-  try {
-
+  try{
     // 🔐 AUTH
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password: senha
     });
 
-    if (authError) throw authError;
+    if(authError) throw authError;
+    if(!authData?.user?.id) throw new Error("Usuário não retornado pelo auth.");
+
     const userId = authData.user.id;
 
     // 📅 EXPIRAÇÃO
@@ -104,7 +126,7 @@ window.criarDemo = async () => {
       .select()
       .single();
 
-    if (appError) throw appError;
+    if(appError) throw appError;
 
     // 👤 USUÁRIO
     const { error: usuarioError } = await supabase
@@ -120,73 +142,91 @@ window.criarDemo = async () => {
         data_expiracao: expiracao.toISOString()
       });
 
-    if (usuarioError) throw usuarioError;
+    if(usuarioError) throw usuarioError;
 
-    // ⚙️ CONFIG SITE (PADRÃO)
-    await supabase.from("config_site").insert({
-      app_id: app.id,
-      nome_site: nome,
-      tema_site: "padrao",
-      modo_venda: "whatsapp",
-      modo_exibicao: "aberta",
-      loja_fechada: false
-    });
-
-    // 🔥 TIPOS ESPECÍFICOS
-
-    // 🛢️ GÁS
-    if (tipo === "gas") {
-      await supabase.from("lojas_gas").insert({
+    // ⚙️ CONFIG SITE
+    const { error: configError } = await supabase
+      .from("config_site")
+      .insert({
         app_id: app.id,
-        nome_loja: nome,
-        raio_entrega_km: 8,
-        taxa_por_km: 2.5,
-        ativa: true
+        nome_site: nome,
+        tema_site: "padrao",
+        modo_venda: "whatsapp",
+        modo_exibicao: "aberta",
+        loja_fechada: false
       });
+
+    if(configError) throw configError;
+
+    // 🛢️ ÁGUA E GÁS
+    if(tipo === "gas"){
+      const { error: gasError } = await supabase
+        .from("lojas_gas")
+        .insert({
+          app_id: app.id,
+          nome_loja: nome,
+          raio_entrega_km: 8,
+          taxa_por_km: 2.5,
+          ativa: true
+        });
+
+      if(gasError) throw gasError;
     }
 
     // 🛞 BORRACHARIA
-    if (tipo === "borracharia") {
-      await supabase.from("borracheiros").insert({
-        user_id: userId,
-        nome: nome,
-        ativo: true
-      });
+    if(tipo === "borracharia"){
+      const { error: borrError } = await supabase
+        .from("borracheiros")
+        .insert({
+          user_id: userId,
+          nome: nome,
+          ativo: true
+        });
+
+      if(borrError) throw borrError;
     }
 
-    // 🚌 PASSAGENS (AGORA CORRETO)
-    if (tipo === "passagens") {
+    // 🚌 PASSAGENS
+    if(tipo === "passagens"){
+      const { error: cfgPassError } = await supabase
+        .from("config_passagens")
+        .insert({
+          app_id: app.id,
+          nome_empresa: nome,
+          total_poltronas: 20,
+          valor_base: 0,
+          ativa: true
+        });
 
-      // CONFIG
-      await supabase.from("config_passagens").insert({
-        app_id: app.id,
-        nome_empresa: nome,
-        total_poltronas: 20,
-        valor_base: 0,
-        ativa: true
-      });
+      if(cfgPassError) throw cfgPassError;
 
-      // VIAGEM TESTE
-      await supabase.from("viagens").insert({
-        rota: "Cidade A → Cidade B",
-        hora: "08:00",
-        dias: "Seg,Qua,Sex",
-        app_id: app.id,
-        ativo: true
-      });
+      const { error: viagemError } = await supabase
+        .from("viagens")
+        .insert({
+          rota: "Cidade A → Cidade B",
+          hora: "08:00",
+          dias: "Seg,Qua,Sex",
+          app_id: app.id,
+          ativo: true
+        });
+
+      if(viagemError) throw viagemError;
     }
 
-    // 🔗 LINK FINAL
-    const link = montarLink(slug, tipo);
+    const linkPublico = montarLink(slug, tipo);
+    const linkAdmin = montarAdminLink(tipo);
 
     alert(
       "Conta criada com sucesso!\n\n" +
-      "Acesse:\n" + link
+      "Página pública:\n" + linkPublico + "\n\n" +
+      "Admin:\n" + linkAdmin + "\n\n" +
+      "Agora faça login com o e-mail e senha cadastrados."
     );
 
-    window.location.href = "/auth/login.html";
+    // manda direto pro admin da água quando for tipo gas
+    window.location.href = linkAdmin;
 
-  } catch (err) {
+  }catch(err){
     console.error(err);
     alert(err.message || "Erro ao criar conta");
   }
