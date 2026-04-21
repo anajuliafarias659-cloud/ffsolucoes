@@ -1,6 +1,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -243,27 +244,58 @@ small{opacity:.8}
       </div>
 
       <div>
-        <label>Nome do passageiro</label>
-        <input type="text" id="nomeVendaManual" placeholder="Nome completo" oninput="salvarRascunhoVendaManual()">
+  <label>Nome do passageiro</label>
+  <input type="text" id="nomeVendaManual" placeholder="Nome completo" oninput="salvarRascunhoVendaManual()">
 
-        <label>Documento</label>
-        <input type="text" id="cpfRgVendaManual" placeholder="CPF ou RG" oninput="salvarRascunhoVendaManual()">
+  <label>Documento</label>
+  <input type="text" id="cpfRgVendaManual" placeholder="CPF ou RG" oninput="salvarRascunhoVendaManual()">
 
-        <label>WhatsApp</label>
-        <input type="text" id="whatsappVendaManual" placeholder="WhatsApp" oninput="salvarRascunhoVendaManual()">
+  <label>WhatsApp</label>
+  <input type="text" id="whatsappVendaManual" placeholder="WhatsApp" oninput="salvarRascunhoVendaManual()">
 
-        <label>Forma de pagamento</label>
-        <select id="formaPagamentoVendaManual" onchange="salvarRascunhoVendaManual()">
-          <option value="">Selecione</option>
-          <option value="dinheiro">Dinheiro</option>
-          <option value="pix">PIX</option>
-          <option value="cartao">Cartão</option>
-        </select>
+  <div class="grid2">
+    <div>
+      <label>Tipo da poltrona</label>
+      <input type="text" id="tipoPoltronaVendaManual" readonly placeholder="Tipo da poltrona">
+    </div>
+    <div>
+      <label>Valor da passagem</label>
+      <input type="text" id="valorVendaManual" readonly placeholder="Valor calculado">
+    </div>
+  </div>
 
-        <div class="linha-acoes">
-          <button class="btn-azul" onclick="carregarPoltronasVendaManual()">Ver poltronas livres</button>
-          <button class="btn-verde" onclick="venderPassagemManual()">Vender no embarque</button>
-        </div>
+  <label>Forma de pagamento</label>
+  <select id="formaPagamentoVendaManual" onchange="aoTrocarFormaPagamentoVendaManual(); salvarRascunhoVendaManual()">
+    <option value="">Selecione</option>
+    <option value="dinheiro">Dinheiro</option>
+    <option value="pix">PIX</option>
+    <option value="cartao">Cartão</option>
+    <option value="embarque">Pagamento no embarque</option>
+  </select>
+
+  <div id="boxDinheiroVendaManual" style="display:none;">
+    <div class="grid2">
+      <div>
+        <label>Valor recebido</label>
+        <input type="number" id="valorRecebidoVendaManual" step="0.01" placeholder="Valor recebido" oninput="calcularTrocoVendaManual()">
+      </div>
+      <div>
+        <label>Troco</label>
+        <input type="text" id="trocoVendaManual" readonly placeholder="Troco">
+      </div>
+    </div>
+  </div>
+
+  <label style="display:flex;align-items:center;gap:8px;margin-top:10px;background:#0f172a;padding:10px;border-radius:10px;">
+    <input id="confirmacaoRecebimentoVendaManual" type="checkbox" style="width:auto;margin:0;">
+    Confirmo que recebi o pagamento
+  </label>
+
+  <div class="linha-acoes">
+    <button class="btn-azul" onclick="carregarPoltronasVendaManual()">Ver poltronas livres</button>
+    <button class="btn-verde" onclick="venderPassagemManual()">Vender no embarque</button>
+  </div>
+</div>
       </div>
     </div>
   </div>
@@ -689,6 +721,100 @@ function trechosConflitam(origemA, destinoA, origemB, destinoB){
   return origemA < destinoB && destinoA > origemB;
 }
 
+function getTipoPoltronaDoVeiculo(veiculo, numeroPoltrona){
+  const config = Array.isArray(veiculo?.poltronas_config) ? veiculo.poltronas_config : [];
+  const item = config.find(p => Number(p.numero) === Number(numeroPoltrona));
+  return item?.tipo || veiculo?.tipo_poltrona || "padrao";
+}
+
+async function buscarVeiculoDaViagem(viagem_id){
+  const { data: viagem } = await client
+    .from("viagens_passagens")
+    .select("veiculo_id")
+    .eq("id", viagem_id)
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!viagem?.veiculo_id) return null;
+
+  const { data: veiculo } = await client
+    .from("veiculos_passagens")
+    .select("*")
+    .eq("id", viagem.veiculo_id)
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  return veiculo || null;
+}
+
+function getPrecoTrechoVendaManual(origem, destino, tipoPoltrona="padrao"){
+  const item = precosTrechosVendaManual.find(p =>
+    Number(p.origem_ordem) === Number(origem) &&
+    Number(p.destino_ordem) === Number(destino)
+  );
+
+  if(!item) return 0;
+
+  if(tipoPoltrona === "leito"){
+    return Number(item.valor_leito || item.valor || 0);
+  }
+
+  if(tipoPoltrona === "semi_leito"){
+    return Number(item.valor_semi_leito || item.valor || 0);
+  }
+
+  return Number(item.valor || 0);
+}
+
+async function getPrecoViagemPorTipo(viagem_id, tipoPoltrona="padrao"){
+  const { data: viagem } = await client
+    .from("viagens_passagens")
+    .select("valor, valor_semi_leito, valor_leito")
+    .eq("id", viagem_id)
+    .eq("app_id", app_id)
+    .maybeSingle();
+
+  if(!viagem) return 0;
+
+  if(tipoPoltrona === "leito"){
+    return Number(viagem.valor_leito || viagem.valor || 0);
+  }
+
+  if(tipoPoltrona === "semi_leito"){
+    return Number(viagem.valor_semi_leito || viagem.valor || 0);
+  }
+
+  return Number(viagem.valor || 0);
+}
+
+function aoTrocarFormaPagamentoVendaManual(){
+  const forma = document.getElementById("formaPagamentoVendaManual").value;
+  const box = document.getElementById("boxDinheiroVendaManual");
+
+  if(box){
+    box.style.display = forma === "dinheiro" ? "block" : "none";
+  }
+
+  if(forma !== "dinheiro"){
+    document.getElementById("valorRecebidoVendaManual").value = "";
+    document.getElementById("trocoVendaManual").value = "";
+  }
+}
+
+function calcularTrocoVendaManual(){
+  const valorTexto = String(document.getElementById("valorVendaManual").value || "")
+    .replace("R$", "")
+    .replace(/\s/g, "")
+    .replace(",", ".");
+  const valor = Number(valorTexto || 0);
+
+  const recebido = Number(document.getElementById("valorRecebidoVendaManual").value || 0);
+  const troco = recebido - valor;
+
+  document.getElementById("trocoVendaManual").value =
+    troco >= 0 ? `R$ ${troco.toFixed(2)}` : "Valor insuficiente";
+}
+
 async function carregarViagensCobrador(){
   if(!app_id) return;
 
@@ -795,9 +921,22 @@ function aoTrocarTrechoVendaManual(){
   }
 
   const texto = getTextoTrechoVendaManual(origem, destino);
-  const valor = getPrecoTrechoVendaManual(origem, destino);
 
-  box.innerHTML = `<b>Trecho:</b> ${escapeHtml(texto)}<br><b>Valor:</b> ${valor > 0 ? "R$ " + valor.toFixed(2) : "não cadastrado"}`;
+  const item = precosTrechosVendaManual.find(p =>
+    Number(p.origem_ordem) === Number(origem) &&
+    Number(p.destino_ordem) === Number(destino)
+  );
+
+  const precoPadrao = Number(item?.valor || 0);
+  const precoSemi = Number(item?.valor_semi_leito || 0);
+  const precoLeito = Number(item?.valor_leito || 0);
+
+  box.innerHTML = `
+    <b>Trecho:</b> ${escapeHtml(texto)}<br>
+    <b>Padrão:</b> ${precoPadrao > 0 ? "R$ " + precoPadrao.toFixed(2) : "não cadastrado"}<br>
+    <b>Semi-leito:</b> ${precoSemi > 0 ? "R$ " + precoSemi.toFixed(2) : "não cadastrado"}<br>
+    <b>Leito:</b> ${precoLeito > 0 ? "R$ " + precoLeito.toFixed(2) : "não cadastrado"}
+  `;
 }
 
 window.aoTrocarTrechoVendaManual = aoTrocarTrechoVendaManual;
@@ -862,7 +1001,7 @@ async function carregarPoltronasVendaManual(){
 
   const { data: veiculo, error: erroVeiculo } = await client
     .from("veiculos_passagens")
-    .select("total_poltronas")
+.select("total_poltronas, tipo_poltrona, poltronas_config")
     .eq("id", viagem.veiculo_id)
     .maybeSingle();
 
@@ -917,13 +1056,14 @@ window.carregarPoltronasVendaManual = carregarPoltronasVendaManual;
 async function venderPassagemManual(){
   const viagemId = document.getElementById("viagemVendaManual").value;
   const dataViagem = document.getElementById("dataVendaManual").value;
-  const origem = document.getElementById("origemVendaManual").value;
-  const destino = document.getElementById("destinoVendaManual").value;
+  const origem = document.getElementById("origemVendaManual").value || null;
+  const destino = document.getElementById("destinoVendaManual").value || null;
   const poltrona = document.getElementById("poltronaVendaManual").value;
   const nome = document.getElementById("nomeVendaManual").value.trim();
   const cpfRg = document.getElementById("cpfRgVendaManual").value.trim();
   const whatsapp = document.getElementById("whatsappVendaManual").value.trim();
   const formaPagamento = document.getElementById("formaPagamentoVendaManual").value;
+  const confirmacaoRecebimento = document.getElementById("confirmacaoRecebimentoVendaManual").checked;
 
   if(!viagemId) return setMsg("Selecione a viagem.", "erro");
   if(!dataViagem) return setMsg("Selecione a data.", "erro");
@@ -932,22 +1072,18 @@ async function venderPassagemManual(){
   if(!poltrona) return setMsg("Selecione a poltrona.", "erro");
   if(!formaPagamento) return setMsg("Selecione a forma de pagamento.", "erro");
 
-  const textoTrecho = origem && destino
-    ? getTextoTrechoVendaManual(origem, destino)
-    : "Viagem inteira";
-
-  const valorTrechoPreview = origem && destino
-    ? Number(getPrecoTrechoVendaManual(origem, destino) || 0)
-    : 0;
+  if(paradasVendaManual.length){
+    if(!origem || !destino) return setMsg("Selecione origem e destino.", "erro");
+    if(Number(origem) >= Number(destino)) return setMsg("O destino precisa ser depois da origem.", "erro");
+  }
 
   abrirModalConfirmacao(
     "Confirmar venda no embarque",
     `
       <b>Passageiro:</b> ${escapeHtml(nome)}<br>
-      <b>Forma de pagamento:</b> ${escapeHtml(String(formaPagamento).toUpperCase())}<br>
+      <b>Documento:</b> ${escapeHtml(cpfRg)}<br>
       <b>Poltrona:</b> ${escapeHtml(poltrona)}<br>
-      <b>Trecho:</b> ${escapeHtml(textoTrecho)}<br>
-      <b>Valor:</b> ${valorTrechoPreview > 0 ? "R$ " + valorTrechoPreview.toFixed(2) : "não cadastrado"}
+      <b>Forma de pagamento:</b> ${escapeHtml(String(formaPagamento).toUpperCase())}
     `,
     async () => {
       try{
@@ -956,7 +1092,7 @@ async function venderPassagemManual(){
           .select("id, rota, hora, dias")
           .eq("id", viagemId)
           .eq("app_id", app_id)
-          .single();
+          .maybeSingle();
 
         if(erroViagemInfo || !viagemInfo){
           return setMsg("Não foi possível validar a viagem.", "erro");
@@ -970,38 +1106,64 @@ async function venderPassagemManual(){
           return setMsg(`Essa viagem de hoje às ${viagemInfo?.hora || ""} já saiu e não aceita mais venda.`, "erro");
         }
 
-        if(paradasVendaManual.length){
-          if(!origem || !destino) return setMsg("Selecione origem e destino.", "erro");
-          if(Number(origem) >= Number(destino)) return setMsg("O destino precisa ser depois da origem.", "erro");
+        const veiculo = await buscarVeiculoDaViagem(viagemId);
+        const tipoPoltrona = getTipoPoltronaDoVeiculo(veiculo, poltrona);
+
+        let valorCobrado = 0;
+        if(origem && destino){
+          valorCobrado = getPrecoTrechoVendaManual(origem, destino, tipoPoltrona);
+        }
+        if(!valorCobrado){
+          valorCobrado = await getPrecoViagemPorTipo(viagemId, tipoPoltrona);
+        }
+
+        document.getElementById("tipoPoltronaVendaManual").value = tipoPoltrona;
+        document.getElementById("valorVendaManual").value = `R$ ${Number(valorCobrado || 0).toFixed(2)}`;
+
+        const valorVenda = Number(valorCobrado || 0);
+        const valorRecebido = Number(document.getElementById("valorRecebidoVendaManual").value || 0);
+
+        if(
+          (formaPagamento === "dinheiro" || formaPagamento === "pix" || formaPagamento === "cartao") &&
+          !confirmacaoRecebimento
+        ){
+          return setMsg("Confirme que recebeu o pagamento.", "erro");
+        }
+
+        if(formaPagamento === "dinheiro" && valorRecebido < valorVenda){
+          return setMsg("Valor recebido é menor que o valor da passagem.", "erro");
         }
 
         const codigo = gerarCodigoReservaManual();
-        const origemCidade = origem ? (paradasVendaManual.find(p => Number(p.ordem) === Number(origem))?.cidade || null) : null;
-        const destinoCidade = destino ? (paradasVendaManual.find(p => Number(p.ordem) === Number(destino))?.cidade || null) : null;
-        const valorTrecho = origem && destino ? Number(getPrecoTrechoVendaManual(origem, destino) || 0) : 0;
 
-        const statusReserva = "pago_agencia";
-        const pagamentoStatus = "approved";
+        const origemObj = paradasVendaManual.find(p => Number(p.ordem) === Number(origem));
+        const destinoObj = paradasVendaManual.find(p => Number(p.ordem) === Number(destino));
+
+        const statusReserva = formaPagamento === "embarque" ? "pendente_agencia" : "pago_agencia";
+        const pagamentoStatus = formaPagamento === "embarque" ? "pending" : "approved";
 
         const { error: erroReserva } = await client
-  .from("reservas_passagens")
-  .insert([{
-    app_id,
-    viagem_id: viagemId,
-    poltrona: Number(poltrona),
-    nome,
-    cpf_rg: cpfRg,
-    whatsapp,
-    data_viagem: dataViagem,
-    status: statusReserva,
-    codigo_embarque: codigo,
-    origem_venda: "cobrador",
-    origem: origemCidade,
-    destino: destinoCidade,
-    origem_ordem: origem ? Number(origem) : null,
-    destino_ordem: destino ? Number(destino) : null,
-    valor_trecho: valorTrecho || null
-  }]);
+          .from("reservas_passagens")
+          .insert([{
+            app_id,
+            viagem_id: viagemId,
+            poltrona: Number(poltrona),
+            nome,
+            cpf_rg: cpfRg,
+            whatsapp,
+            data_viagem: dataViagem,
+            status: statusReserva,
+            codigo_embarque: codigo,
+            origem_venda: "cobrador",
+            forma_pagamento_agencia: formaPagamento,
+            tipo_poltrona: tipoPoltrona,
+            origem: origemObj?.cidade || null,
+            destino: destinoObj?.cidade || null,
+            origem_ordem: origem ? Number(origem) : null,
+            destino_ordem: destino ? Number(destino) : null,
+            valor_trecho: valorCobrado || null,
+            valor_cobrado: valorCobrado || null
+          }]);
 
         if(erroReserva){
           throw new Error(erroReserva.message || "Erro ao salvar reserva.");
@@ -1013,52 +1175,58 @@ async function venderPassagemManual(){
           .eq("id", viagemId)
           .maybeSingle();
 
-        const valorTotal = valorTrecho || 0;
-
         const { error: erroPedido } = await client
-  .from("pedidos")
-  .insert([{
-    app_id,
-    status: "pago",
-    pagamento_status: pagamentoStatus,
-    cliente_nome: nome,
-    valor_total: valorTotal,
-    origem_venda: "cobrador",
-    forma_pagamento: formaPagamento,
-    itens: [{
-      tipo: "passagem",
-      viagem_id: viagemId,
-      rota: viagem?.rota || "",
-      hora: viagem?.hora || "",
-      data_ida: dataViagem,
-      poltrona: Number(poltrona),
-      valor_unitario: valorTotal,
-      valor_total: valorTotal,
-      codigo_embarque: codigo,
-      cpf_rg: cpfRg,
-      whatsapp,
-      origem_venda: "cobrador",
-      origem: origemCidade,
-      destino: destinoCidade,
-      origem_ordem: origem ? Number(origem) : null,
-      destino_ordem: destino ? Number(destino) : null
-    }]
-  }]);
+          .from("pedidos")
+          .insert([{
+            app_id,
+            status: formaPagamento === "embarque" ? "pendente" : "pago",
+            pagamento_status: pagamentoStatus,
+            cliente_nome: nome,
+            valor_total: valorVenda,
+            origem_venda: "cobrador",
+            forma_pagamento: formaPagamento,
+            itens: [{
+              tipo: "passagem",
+              viagem_id: viagemId,
+              rota: viagem?.rota || "",
+              hora: viagem?.hora || "",
+              data_ida: dataViagem,
+              poltrona: Number(poltrona),
+              valor_unitario: valorVenda,
+              valor_total: valorVenda,
+              codigo_embarque: codigo,
+              cpf_rg: cpfRg,
+              whatsapp,
+              origem_venda: "cobrador",
+              origem: origemObj?.cidade || null,
+              destino: destinoObj?.cidade || null,
+              origem_ordem: origem ? Number(origem) : null,
+              destino_ordem: destino ? Number(destino) : null,
+              tipo_poltrona: tipoPoltrona
+            }]
+          }]);
 
         if(erroPedido){
           throw new Error(erroPedido.message || "Erro ao salvar pedido.");
         }
 
-        setMsg("Passagem vendida com sucesso no embarque.", "ok");
+        setMsg(`Passagem vendida com sucesso. Código: ${codigo} | Valor: R$ ${valorVenda.toFixed(2)}`, "ok");
+
         limparRascunhoVendaManual();
         document.getElementById("cardVendaManual").classList.remove("ativo");
-document.getElementById("cardVendaManual").classList.add("recolhido");
+        document.getElementById("cardVendaManual").classList.add("recolhido");
 
         document.getElementById("nomeVendaManual").value = "";
         document.getElementById("cpfRgVendaManual").value = "";
         document.getElementById("whatsappVendaManual").value = "";
         document.getElementById("poltronaVendaManual").value = "";
         document.getElementById("formaPagamentoVendaManual").value = "";
+        document.getElementById("tipoPoltronaVendaManual").value = "";
+        document.getElementById("valorVendaManual").value = "";
+        document.getElementById("valorRecebidoVendaManual").value = "";
+        document.getElementById("trocoVendaManual").value = "";
+        document.getElementById("confirmacaoRecebimentoVendaManual").checked = false;
+        document.getElementById("boxDinheiroVendaManual").style.display = "none";
 
         await carregarPoltronasVendaManual();
       }catch(e){
