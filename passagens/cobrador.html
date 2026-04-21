@@ -1,7 +1,3 @@
-
-
-
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -11,7 +7,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}
 body{
@@ -238,10 +235,9 @@ small{opacity:.8}
         <div id="resumoVendaManual" class="msg info">Selecione viagem, origem e destino.</div>
 
         <label>Poltrona</label>
-        <select id="poltronaVendaManual" onchange="salvarRascunhoVendaManual()">
-          <option value="">Selecione a poltrona</option>
-        </select>
-      </div>
+<select id="poltronaVendaManual" onchange="atualizarPrecoVendaManual(); salvarRascunhoVendaManual()">
+  <option value="">Selecione a poltrona</option>
+</select>
 
       <div>
   <label>Nome do passageiro</label>
@@ -897,13 +893,7 @@ function getTextoTrechoVendaManual(origem, destino){
   return `${o.cidade} → ${d.cidade}`;
 }
 
-function getPrecoTrechoVendaManual(origem, destino){
-  const item = precosTrechosVendaManual.find(p =>
-    Number(p.origem_ordem) === Number(origem) &&
-    Number(p.destino_ordem) === Number(destino)
-  );
-  return item ? Number(item.valor || 0) : 0;
-}
+
 
 function aoTrocarTrechoVendaManual(){
   const origem = document.getElementById("origemVendaManual").value;
@@ -931,15 +921,53 @@ function aoTrocarTrechoVendaManual(){
   const precoSemi = Number(item?.valor_semi_leito || 0);
   const precoLeito = Number(item?.valor_leito || 0);
 
-  box.innerHTML = `
+    box.innerHTML = `
     <b>Trecho:</b> ${escapeHtml(texto)}<br>
     <b>Padrão:</b> ${precoPadrao > 0 ? "R$ " + precoPadrao.toFixed(2) : "não cadastrado"}<br>
     <b>Semi-leito:</b> ${precoSemi > 0 ? "R$ " + precoSemi.toFixed(2) : "não cadastrado"}<br>
     <b>Leito:</b> ${precoLeito > 0 ? "R$ " + precoLeito.toFixed(2) : "não cadastrado"}
   `;
+
+  atualizarPrecoVendaManual();
 }
 
 window.aoTrocarTrechoVendaManual = aoTrocarTrechoVendaManual;
+
+async function atualizarPrecoVendaManual(){
+  const viagemId = document.getElementById("viagemVendaManual").value;
+  const origem = document.getElementById("origemVendaManual").value || null;
+  const destino = document.getElementById("destinoVendaManual").value || null;
+  const poltrona = document.getElementById("poltronaVendaManual").value;
+
+  const campoTipo = document.getElementById("tipoPoltronaVendaManual");
+  const campoValor = document.getElementById("valorVendaManual");
+
+  if(!campoTipo || !campoValor){
+    return;
+  }
+
+  if(!viagemId || !poltrona){
+    campoTipo.value = "";
+    campoValor.value = "";
+    return;
+  }
+
+  const veiculo = await buscarVeiculoDaViagem(viagemId);
+  const tipoPoltrona = getTipoPoltronaDoVeiculo(veiculo, poltrona);
+
+  let valorCobrado = 0;
+
+  if(origem && destino && Number(origem) < Number(destino)){
+    valorCobrado = getPrecoTrechoVendaManual(origem, destino, tipoPoltrona);
+  }
+
+  if(!valorCobrado){
+    valorCobrado = await getPrecoViagemPorTipo(viagemId, tipoPoltrona);
+  }
+
+  campoTipo.value = tipoPoltrona;
+  campoValor.value = `R$ ${Number(valorCobrado || 0).toFixed(2)}`;
+}
 
 async function carregarPoltronasVendaManual(){
   const viagemId = document.getElementById("viagemVendaManual").value;
@@ -1047,7 +1075,8 @@ async function carregarPoltronasVendaManual(){
     }
   }
 
-  setMsg("Poltronas livres carregadas.", "ok");
+    setMsg("Poltronas livres carregadas.", "ok");
+  await atualizarPrecoVendaManual();
   salvarRascunhoVendaManual();
 }
 
@@ -1211,6 +1240,23 @@ async function venderPassagemManual(){
         }
 
         setMsg(`Passagem vendida com sucesso. Código: ${codigo} | Valor: R$ ${valorVenda.toFixed(2)}`, "ok");
+                const dadosComprovante = {
+          empresa: document.getElementById("appInfo")?.innerText || "FF Transporte",
+          codigo,
+          nome,
+          documento: cpfRg,
+          whatsapp,
+          poltrona,
+          tipo_poltrona: tipoPoltrona,
+          valor_cobrado: Number(valorVenda || 0),
+          data_viagem: dataViagem,
+          origem: origemObj?.cidade || "Origem",
+          destino: destinoObj?.cidade || "Destino",
+          status: formaPagamento === "embarque" ? "Pendente" : "Pago",
+          forma_pagamento: formaPagamento
+        };
+
+        await gerarPdfPassagemCobrador(dadosComprovante);
 
         limparRascunhoVendaManual();
         document.getElementById("cardVendaManual").classList.remove("ativo");
@@ -1388,7 +1434,39 @@ async function buscarPassageiroPorCodigo(codigo){
 
 <div class="linha-acoes">
   <button class="btn-verde" onclick="marcarEmbarcado('${r.id}')">Confirmar embarque</button>
-  <button class="btn-cinza" onclick="window.print()">Imprimir tela</button>
+  <button class="btn-cinza" onclick='imprimirComprovantePassagem("${encodeURIComponent(JSON.stringify({
+    empresa: document.getElementById("appInfo")?.innerText || "FF Transporte",
+    codigo: r.codigo_embarque || "",
+    nome: r.nome || "",
+    documento: r.cpf_rg || "",
+    whatsapp: r.whatsapp || "",
+    poltrona: r.poltrona || "",
+    tipo_poltrona: r.tipo_poltrona || "",
+    valor_cobrado: Number(r.valor_cobrado || r.valor_trecho || 0),
+    data_viagem: r.data_viagem || "",
+    origem: r.origem || "Origem",
+    destino: r.destino || "Destino",
+    status: r.status || "",
+    forma_pagamento: r.forma_pagamento_agencia || ""
+  }))}")'>Imprimir comprovante</button>
+</div>
+
+<div class="linha-acoes">
+  <button class="btn-azul" onclick='compartilharComprovantePassagem("${encodeURIComponent(JSON.stringify({
+    empresa: document.getElementById("appInfo")?.innerText || "FF Transporte",
+    codigo: r.codigo_embarque || "",
+    nome: r.nome || "",
+    documento: r.cpf_rg || "",
+    whatsapp: r.whatsapp || "",
+    poltrona: r.poltrona || "",
+    tipo_poltrona: r.tipo_poltrona || "",
+    valor_cobrado: Number(r.valor_cobrado || r.valor_trecho || 0),
+    data_viagem: r.data_viagem || "",
+    origem: r.origem || "Origem",
+    destino: r.destino || "Destino",
+    status: r.status || "",
+    forma_pagamento: r.forma_pagamento_agencia || ""
+  }))}")'>Compartilhar comprovante</button>
 </div>
 
 ${
@@ -1509,9 +1587,38 @@ ${
             <div><b>Código:</b> ${escapeHtml(r.codigo_embarque || "-")}</div>
 
             <div class="linha-acoes">
-              <button class="btn-cinza" onclick="window.print()">Imprimir tela</button>
-              <button class="btn-cinza" disabled>Sem reserva vinculada</button>
-            </div>
+  <button class="btn-cinza" onclick='imprimirComprovantePassagem("${encodeURIComponent(JSON.stringify({
+    empresa: document.getElementById("appInfo")?.innerText || "FF Transporte",
+    codigo: r.codigo_embarque || "",
+    nome: r.nome || "",
+    documento: r.cpf_rg || "",
+    whatsapp: r.whatsapp || "",
+    poltrona: r.poltrona || "",
+    tipo_poltrona: r.tipo_poltrona || "",
+    valor_cobrado: Number(r.valor_cobrado || 0),
+    data_viagem: r.data_viagem || "",
+    origem: r.origem || "Origem",
+    destino: r.destino || "Destino",
+    status: r.status || "",
+    forma_pagamento: r.forma_pagamento_agencia || ""
+  }))}")'>Imprimir comprovante</button>
+
+  <button class="btn-azul" onclick='compartilharComprovantePassagem("${encodeURIComponent(JSON.stringify({
+    empresa: document.getElementById("appInfo")?.innerText || "FF Transporte",
+    codigo: r.codigo_embarque || "",
+    nome: r.nome || "",
+    documento: r.cpf_rg || "",
+    whatsapp: r.whatsapp || "",
+    poltrona: r.poltrona || "",
+    tipo_poltrona: r.tipo_poltrona || "",
+    valor_cobrado: Number(r.valor_cobrado || 0),
+    data_viagem: r.data_viagem || "",
+    origem: r.origem || "Origem",
+    destino: r.destino || "Destino",
+    status: r.status || "",
+    forma_pagamento: r.forma_pagamento_agencia || ""
+  }))}")'>Compartilhar comprovante</button>
+</div>
           </div>
 
           <div class="fotos">
@@ -1547,6 +1654,123 @@ ${
       `<div class="msg erro">${escapeHtml(e.message || "Erro ao buscar passageiro.")}</div>`;
   }
 }
+
+async function gerarImagemComprovantePassagem(dados){
+  const canvas = document.createElement("canvas");
+  canvas.width = 900;
+  canvas.height = 1400;
+
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "bold 34px Arial";
+  ctx.fillText(dados.empresa || "FF Transporte", 40, 60);
+
+  ctx.fillStyle = "#334155";
+  ctx.font = "24px Arial";
+  ctx.fillText("COMPROVANTE DE PASSAGEM", 40, 100);
+
+  const qrPayload = JSON.stringify({
+    codigo_embarque: dados.codigo || "",
+    nome: dados.nome || "",
+    documento: dados.documento || "",
+    poltrona: dados.poltrona || "",
+    data_viagem: dados.data_viagem || "",
+    origem: dados.origem || "",
+    destino: dados.destino || ""
+  });
+
+  const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+    width: 220,
+    margin: 1
+  });
+
+  const qrImg = new Image();
+  qrImg.src = qrDataUrl;
+
+  await new Promise((resolve) => {
+    qrImg.onload = resolve;
+  });
+
+  ctx.drawImage(qrImg, 620, 40, 220, 220);
+
+  let y = 170;
+  const x = 40;
+  const line = 48;
+
+  ctx.fillStyle = "#111827";
+  ctx.font = "24px Arial";
+
+  const linhas = [
+    `Código: ${dados.codigo || "-"}`,
+    `Passageiro: ${dados.nome || "-"}`,
+    `Documento: ${dados.documento || "-"}`,
+    `WhatsApp: ${dados.whatsapp || "-"}`,
+    `Origem: ${dados.origem || "-"}`,
+    `Destino: ${dados.destino || "-"}`,
+    `Data da viagem: ${dados.data_viagem || "-"}`,
+    `Poltrona: ${dados.poltrona || "-"}`,
+    `Tipo da poltrona: ${dados.tipo_poltrona || "-"}`,
+    `Forma de pagamento: ${dados.forma_pagamento || "-"}`,
+    `Status: ${dados.status || "-"}`,
+    `Valor: R$ ${Number(dados.valor_cobrado || 0).toFixed(2)}`
+  ];
+
+  for(const texto of linhas){
+    ctx.fillText(texto, x, y);
+    y += line;
+  }
+
+  ctx.fillStyle = "#475569";
+  ctx.font = "20px Arial";
+  ctx.fillText("Apresente este comprovante no embarque.", 40, y + 30);
+
+  return canvas.toDataURL("image/png");
+}
+
+async function gerarPdfPassagemCobrador(dados){
+  const imagem = await gerarImagemComprovantePassagem(dados);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF("p", "mm", "a4");
+
+  doc.addImage(imagem, "PNG", 10, 10, 190, 270);
+  doc.save(`passagem-${dados.codigo || "comprovante"}.pdf`);
+}
+
+async function compartilharComprovantePassagem(dados){
+  try{
+    const dataUrl = await gerarImagemComprovantePassagem(dados);
+    const resp = await fetch(dataUrl);
+    const blob = await resp.blob();
+    const file = new File([blob], `passagem-${dados.codigo || "comprovante"}.png`, { type: "image/png" });
+
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({
+        title: "Comprovante de passagem",
+        text: "Segue o comprovante da passagem.",
+        files: [file]
+      });
+      return;
+    }
+
+    await gerarPdfPassagemCobrador(dados);
+  }catch(e){
+    console.error(e);
+    await gerarPdfPassagemCobrador(dados);
+  }
+}
+
+window.imprimirComprovantePassagem = async function(dadosCodificados){
+  const dados = JSON.parse(decodeURIComponent(dadosCodificados));
+  await gerarPdfPassagemCobrador(dados);
+};
+
+window.compartilharComprovantePassagem = async function(dadosCodificados){
+  const dados = JSON.parse(decodeURIComponent(dadosCodificados));
+  await compartilharComprovantePassagem(dados);
+};
 
 let callbackConfirmacao = null;
 
