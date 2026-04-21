@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -230,19 +231,27 @@ th{
     <h3>📊 Fechamento de Caixa</h3>
 
     <div class="resumo-grid">
-      <div class="card">
-        <h4>Total Recebido Hoje</h4>
-        <p id="totalRecebido">R$ 0.00</p>
-      </div>
-      <div class="card">
-        <h4>Quantidade de Vendas</h4>
-        <p id="qtdVendas">0</p>
-      </div>
-      <div class="card">
-        <h4>Data</h4>
-        <p id="dataHoje">--/--/----</p>
-      </div>
-    </div>
+  <div class="card">
+    <h4>Entradas Hoje</h4>
+    <p id="totalEntradas">R$ 0.00</p>
+  </div>
+  <div class="card">
+    <h4>Saídas Hoje</h4>
+    <p id="totalSaidas" style="color:#ef4444">R$ 0.00</p>
+  </div>
+  <div class="card">
+    <h4>Saldo do Dia</h4>
+    <p id="saldoDia">R$ 0.00</p>
+  </div>
+  <div class="card">
+    <h4>Quantidade de Vendas</h4>
+    <p id="qtdVendas">0</p>
+  </div>
+  <div class="card">
+    <h4>Data</h4>
+    <p id="dataHoje">--/--/----</p>
+  </div>
+</div>
 
     <div class="status-box" id="statusRealtime">Status: iniciando...</div>
 
@@ -277,6 +286,15 @@ let resumoPagamentosGlobal = "";
 let canalRealtime = null;
 let intervaloBackup = null;
 let ultimoSomConta = 0;
+
+function obterTipoMovimento(p){
+  return String(
+    p.tipo_movimento ||
+    p.tipo ||
+    p.movimento ||
+    "entrada"
+  ).toLowerCase().trim();
+}
 
 async function aguardarSessao(){
   while(!window.APP_ID){
@@ -629,24 +647,26 @@ window.gerarFechamento = async function(){
   const amanha = new Date(inicio.getTime() + 86400000);
 
   const { data: pedidos, error } = await supabase
-    .from("pedidos")
-    .select("id, forma_pagamento, created_at")
-    .eq("app_id", window.APP_ID)
-    .eq("status", "finalizado")
-    .gte("created_at", inicio.toISOString())
-    .lt("created_at", amanha.toISOString());
+  .from("pedidos")
+  .select("id, forma_pagamento, created_at, tipo_movimento, tipo, movimento, status")
+  .eq("app_id", window.APP_ID)
+  .in("status", ["finalizado","fechado"])
+  .gte("created_at", inicio.toISOString())
+  .lt("created_at", amanha.toISOString());
 
   if(error){
     console.error("Erro ao gerar fechamento:", error);
   }
 
-  if(!pedidos || pedidos.length === 0){
-    document.getElementById("totalRecebido").innerText = "R$ 0.00";
-    document.getElementById("qtdVendas").innerText = "0";
-    document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
-    resumoPagamentosGlobal = "";
-    return;
-  }
+ if(!pedidos || pedidos.length === 0){
+  document.getElementById("totalEntradas").innerText = "R$ 0.00";
+  document.getElementById("totalSaidas").innerText = "R$ 0.00";
+  document.getElementById("saldoDia").innerText = "R$ 0.00";
+  document.getElementById("qtdVendas").innerText = "0";
+  document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
+  resumoPagamentosGlobal = "";
+  return;
+}
 
   const ids = pedidos.map(p => p.id);
 
@@ -659,28 +679,39 @@ window.gerarFechamento = async function(){
     console.error("Erro ao buscar itens do fechamento:", erroItens);
   }
 
-  let total = 0;
-  const pagamentos = {};
+  let totalEntradas = 0;
+let totalSaidas = 0;
+const pagamentos = {};
 
-  pedidos.forEach(p => {
-    let totalPedido = 0;
+pedidos.forEach(p => {
+  let totalPedido = 0;
 
-    (itens || [])
-      .filter(i => i.pedido_id === p.id)
-      .forEach(i => {
-        totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
-      });
+  (itens || [])
+    .filter(i => i.pedido_id === p.id)
+    .forEach(i => {
+      totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
+    });
 
-    total += totalPedido;
+  const tipoMov = obterTipoMovimento(p);
+
+  if(tipoMov === "saida"){
+    totalSaidas += totalPedido;
+  }else{
+    totalEntradas += totalPedido;
 
     const forma = p.forma_pagamento || "Não informado";
     if(!pagamentos[forma]) pagamentos[forma] = 0;
     pagamentos[forma] += totalPedido;
-  });
+  }
+});
 
-  document.getElementById("totalRecebido").innerText = "R$ " + total.toFixed(2);
-  document.getElementById("qtdVendas").innerText = pedidos.length;
-  document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
+const saldo = totalEntradas - totalSaidas;
+
+document.getElementById("totalEntradas").innerText = "R$ " + totalEntradas.toFixed(2);
+document.getElementById("totalSaidas").innerText = "R$ " + totalSaidas.toFixed(2);
+document.getElementById("saldoDia").innerText = "R$ " + saldo.toFixed(2);
+document.getElementById("qtdVendas").innerText = pedidos.length;
+document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
 
   let resumo = "";
   for(const forma in pagamentos){
@@ -697,22 +728,26 @@ window.fecharCaixa = function(){
   const doc = new jsPDF();
 
   const data = new Date().toLocaleDateString("pt-BR");
-  const total = document.getElementById("totalRecebido").innerText;
-  const qtd = document.getElementById("qtdVendas").innerText;
+  const entradas = document.getElementById("totalEntradas").innerText;
+const saidas = document.getElementById("totalSaidas").innerText;
+const saldo = document.getElementById("saldoDia").innerText;
+const qtd = document.getElementById("qtdVendas").innerText;
 
   doc.setFontSize(16);
   doc.text("Fechamento de Caixa", 14, 20);
 
   doc.setFontSize(12);
   doc.text(`Data: ${data}`, 14, 35);
-  doc.text(`Total Recebido: ${total}`, 14, 45);
-  doc.text(`Quantidade de Vendas: ${qtd}`, 14, 55);
+  doc.text(`Entradas: ${entradas}`, 14, 45);
+doc.text(`Saídas: ${saidas}`, 14, 55);
+doc.text(`Saldo: ${saldo}`, 14, 65);
+doc.text(`Quantidade de Vendas: ${qtd}`, 14, 75);
 
-  if(resumoPagamentosGlobal){
-    doc.text("Resumo por forma de pagamento:", 14, 70);
-    const linhas = doc.splitTextToSize(resumoPagamentosGlobal, 180);
-    doc.text(linhas, 14, 80);
-  }
+if(resumoPagamentosGlobal){
+  doc.text("Resumo por forma de pagamento:", 14, 90);
+  const linhas = doc.splitTextToSize(resumoPagamentosGlobal, 180);
+  doc.text(linhas, 14, 100);
+}
 
   doc.save(`fechamento-caixa-${data.replaceAll("/","-")}.pdf`);
 };
