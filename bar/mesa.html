@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1690,6 +1691,61 @@ document.getElementById("btnEnviar").onclick = async () => {
   await sincronizarMesaComPedidos();
 };
 
+document.getElementById("btnConta").onclick = async () => {
+  const clienteNome = document.getElementById("clienteNome").value.trim();
+  const clienteTelefone = document.getElementById("clienteTelefone").value.trim();
+
+  if (!pedidoAtual) {
+    alert("Nenhuma comanda ativa para pedir conta.");
+    return;
+  }
+
+  const statusAtual = normalizarStatus(pedidoAtual.status);
+
+  if (statusFechado(statusAtual)) {
+    alert("Essa comanda já foi encerrada.");
+    return;
+  }
+
+  if (statusAtual === "conta_solicitada" || statusAtual === "pedir_conta") {
+    alert("A conta dessa mesa já foi solicitada.");
+    return;
+  }
+
+  const { data: pedidoAtualizado, error } = await sb
+    .from("pedidos")
+    .update({
+      status: "conta_solicitada",
+      cliente_nome: clienteNome || pedidoAtual.cliente_nome || null,
+      cliente_telefone: clienteTelefone || pedidoAtual.cliente_telefone || null,
+      responsavel_nome: clienteNome || pedidoAtual.responsavel_nome || null
+    })
+    .eq("id", pedidoAtual.id)
+    .eq("app_id", APP_ID)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error(error);
+    alert("Erro ao pedir conta.");
+    return;
+  }
+
+  if (pedidoAtualizado) {
+    pedidoAtual = pedidoAtualizado;
+  }
+
+  await atualizarMesaStatus({
+    ocupada: true,
+    pedir_conta: true,
+    status: "conta_solicitada",
+    cliente_nome: clienteNome || pedidoAtual?.cliente_nome || null,
+    cliente_celular: clienteTelefone || pedidoAtual?.cliente_telefone || null
+  });
+
+  alert("Conta solicitada com sucesso.");
+  await sincronizarMesaComPedidos();
+};
 document.getElementById("btnTogglePedido").onclick = fecharPedidoFlutuante;
 document.getElementById("busca").oninput = aplicarFiltros;
 document.getElementById("clienteNome").oninput = atualizarInfoClienteMesa;
