@@ -46,18 +46,25 @@ button,select,input{
 <div class="container">
 
   <div class="filtro">
-    <label>Data:</label>
-    <input type="date" id="filtroData">
+  <label>Data:</label>
+  <input type="date" id="filtroData">
 
-    <label>Detalhar por:</label>
-    <select id="tipoRelatorio">
-      <option value="mesa">Mesa</option>
-      <option value="garcom">Garçom</option>
-    </select>
+  <label>Movimento:</label>
+  <select id="filtroMovimento">
+    <option value="todos">Todos</option>
+    <option value="entrada">Entradas</option>
+    <option value="saida">Saídas</option>
+  </select>
 
-    <button onclick="buscarPorData()">🔍 Buscar</button>
-    <button onclick="gerarPDFHistorico()">📄 Gerar PDF</button>
-  </div>
+  <label>Detalhar por:</label>
+  <select id="tipoRelatorio">
+    <option value="mesa">Mesa</option>
+    <option value="garcom">Garçom</option>
+  </select>
+
+  <button onclick="buscarPorData()">🔍 Buscar</button>
+  <button onclick="gerarPDFHistorico()">📄 Gerar PDF</button>
+</div>
 
   <div id="lista">Carregando histórico...</div>
 
@@ -69,6 +76,16 @@ import { supabase } from "../js/supabase.js";
 let vendas = [];
 let APP_ID = null;
 
+function obterTipoMovimento(p){
+  return String(
+    p.tipo_movimento ||
+    p.tipo ||
+    p.movimento ||
+    "entrada"
+  ).toLowerCase().trim();
+
+}let query = supabase
+
 async function iniciar(){
 
   const { data: { session } } = await supabase.auth.getSession();
@@ -79,8 +96,7 @@ async function iniciar(){
 
   const { data: usuario } = await supabase
     .from("usuarios")
-    .select("app_id")
-    .eq("id", session.user.id)
+let query = supabase    .eq("id", session.user.id)
     .single();
 
   if(!usuario){
@@ -103,11 +119,11 @@ async function iniciar(){
 async function carregarHistorico(app_id, dataFiltro = null){
 
   let query = supabase
-    .from("pedidos")
-    .select("id, created_at, recebido_por, mesa_id")
-    .eq("app_id", app_id)
-    .in("status", ["finalizado","fechado"])
-    .order("created_at", { ascending:false });
+  .from("pedidos")
+  .select("id, created_at, recebido_por, mesa_id, tipo_movimento, tipo, movimento, status")
+  .eq("app_id", app_id)
+  .in("status", ["finalizado","fechado"])
+  .order("created_at", { ascending:false });
 
   if(dataFiltro){
     const inicio = new Date(dataFiltro);
@@ -180,7 +196,15 @@ function renderizar(){
   const lista = document.getElementById("lista");
   lista.innerHTML = "";
 
-  if(vendas.length === 0){
+const filtroMovimento = document.getElementById("filtroMovimento")?.value || "todos";
+
+let vendasFiltradas = vendas;
+
+if(filtroMovimento !== "todos"){
+  vendasFiltradas = vendas.filter(p => obterTipoMovimento(p) === filtroMovimento);
+}
+
+  if(vendasFiltradas.length === 0){
     lista.innerHTML =
       "<p>Nenhuma venda encontrada</p>";
     return;
@@ -188,7 +212,7 @@ function renderizar(){
 
   const grupos = {};
 
-  vendas.forEach(p=>{
+  vendasFiltradas.forEach(p=>{
 
     let chave;
 
@@ -232,13 +256,14 @@ function renderizar(){
       lista.innerHTML += `
         <div class="card">
           <div class="top">
-            <small>
-              ⏰ ${new Date(p.created_at).toLocaleString()}
-            </small>
-            <div class="total">
-              R$ ${total.toFixed(2)}
-            </div>
-          </div>
+  <small>
+    ⏰ ${new Date(p.created_at).toLocaleString()} — 
+    ${obterTipoMovimento(p) === "saida" ? "🔻 Saída" : "🟢 Entrada"}
+  </small>
+  <div class="total" style="color:${obterTipoMovimento(p) === "saida" ? "#ef4444" : "#22c55e"}">
+    R$ ${total.toFixed(2)}
+  </div>
+</div>
 
           ${(p.pedido_itens || []).map(i=>`
             <div class="item">
@@ -257,21 +282,27 @@ function renderizar(){
 =============================== */
 window.gerarPDFHistorico = function(){
 
-  if(vendas.length === 0){
+  if(vendasPdf.length === 0){
     alert("Nenhum registro para gerar PDF.");
     return;
   }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
+const filtroMovimento = document.getElementById("filtroMovimento")?.value || "todos";
 
+let vendasPdf = vendas;
+
+if(filtroMovimento !== "todos"){
+  vendasPdf = vendas.filter(p => obterTipoMovimento(p) === filtroMovimento);
+}
   doc.setFontSize(16);
   doc.text("RELATÓRIO DE VENDAS", 20, 20);
 
   let y = 35;
   let totalGeral = 0;
 
-  vendas.forEach(p=>{
+  vendasPdf.forEach(p=>{
 
     let total = 0;
     (p.pedido_itens || []).forEach(i=>{
@@ -282,7 +313,7 @@ window.gerarPDFHistorico = function(){
 
     doc.setFontSize(10);
     doc.text(
-      `${new Date(p.created_at).toLocaleString()} - R$ ${total.toFixed(2)}`,
+      ``${new Date(p.created_at).toLocaleString()} - ${obterTipoMovimento(p) === "saida" ? "SAIDA" : "ENTRADA"} - R$ ${total.toFixed(2)}`
       20,
       y
     );
