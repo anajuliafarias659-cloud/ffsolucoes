@@ -1297,11 +1297,13 @@
         <div class="bloco">
           <h4>Entrega</h4>
           <div class="grid2">
-            <input id="clienteRua" placeholder="Rua" />
-            <input id="clienteNumero" placeholder="Número" />
-            <input id="clienteBairro" placeholder="Bairro" />
-            <input id="clienteCidade" placeholder="Cidade" />
-            <button type="button" id="btnLocalizacao" class="btn-secundario">
+  <input id="clienteRua" placeholder="Rua" />
+  <input id="clienteNumero" placeholder="Número" />
+  <input id="clienteBairro" placeholder="Bairro" />
+  <input id="clienteCidade" placeholder="Cidade" />
+</div>
+
+<button type="button" id="btnLocalizacao" class="btn-secundario">
   📍 Pegar localização
 </button>
 
@@ -2079,7 +2081,6 @@ window.selecionarVariacaoProduto = function(id, valor, preco, qtdMinima, el){
     };
 
     async function finalizarSistema(){
-
   if(!carrinho.length){
     alert("Carrinho vazio");
     return;
@@ -2089,56 +2090,62 @@ window.selecionarVariacaoProduto = function(id, valor, preco, qtdMinima, el){
   btnFinalizar.textContent = "Gerando pagamento...";
 
   try{
+    const pedidoId = `LOJA_${Date.now()}`;
 
-   const payload = {
-  app_id: APP_ID,
-
-  cliente: {
-    nome: document.getElementById("clienteNome").value.trim(),
-    telefone: document.getElementById("clienteTelefone").value.trim(),
-    rua: document.getElementById("clienteRua").value.trim(),
-    numero: document.getElementById("clienteNumero").value.trim(),
-    bairro: document.getElementById("clienteBairro").value.trim(),
-    cidade: document.getElementById("clienteCidade").value.trim(),
-    obs: document.getElementById("clienteObs").value.trim(),
-    maps: document.getElementById("clienteMaps").value.trim()
-  },
-
-  itens: carrinho.map(item => ({
-    id: item.id,
-    nome: item.nome,
-    variacao: item.variacao || "Padrão",
-    qtd: Number(item.qtd),
-    preco: Number(item.preco)
-  })),
-
-  total: totalCarrinho()
+    const payload = {
+  appId: APP_ID,
+  pedidoId,
+  items: itens
+    .map((i) => ({
+      title: String(`${i.nome || "Produto"} (${i.variacao || "Padrão"})`).slice(0, 120),
+      quantity: Number(i.qtd || 1),
+      unit_price: Number(i.preco || 0)
+    }))
+    .filter((i) => i.quantity > 0 && i.unit_price > 0)
 };
+
     const resp = await fetch(
       "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pagamento-loja",
       {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY
+        },
         body: JSON.stringify(payload)
       }
     );
 
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
+
+    if(!resp.ok){
+      const detalhe =
+        data?.detalhes?.message ||
+        data?.detalhes?.cause?.[0]?.description ||
+        data?.detalhes?.error ||
+        data?.detalhes?.status ||
+        JSON.stringify(data?.detalhes || {});
+      throw new Error(`${data?.erro || `Falha ao criar pagamento (${resp.status})`} | Detalhe: ${detalhe}`);
+    }
 
     if(data?.init_point){
       window.location.href = data.init_point;
       return;
     }
 
-    alert("Erro ao gerar pagamento");
+    if(data?.url){
+      window.location.href = data.url;
+      return;
+    }
 
+    alert("Pagamento criado, mas a função não retornou link.");
   }catch(e){
     console.error(e);
-    alert("Erro no pagamento");
+    alert(e.message || "Erro no pagamento");
+  }finally{
+    btnFinalizar.disabled = false;
+    btnFinalizar.textContent = "Finalizar pedido";
   }
-
-  btnFinalizar.disabled = false;
-  btnFinalizar.textContent = "Finalizar pedido";
 }
 
     function montarTextoWhatsapp(){
