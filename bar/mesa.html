@@ -1,5 +1,6 @@
 
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -753,7 +754,19 @@ function renderizarLoteLocal(){
     };
 
     botoes[1].onclick = () => {
-      loteLocal[index].quantidade++;
+  const produtoBanco = produtosCache.find(p => String(p.id) === String(loteLocal[index].produto_id));
+  const estoqueAtual = Number(produtoBanco?.estoque || 0);
+  const qtdAtual = Number(loteLocal[index].quantidade || 0);
+
+  if ((qtdAtual + 1) > estoqueAtual) {
+    alert(`Estoque máximo atingido (${estoqueAtual})`);
+    return;
+  }
+
+  loteLocal[index].quantidade++;
+  salvarLoteLocal();
+  renderizarLoteLocal();
+};
       salvarLoteLocal();
       renderizarLoteLocal();
     };
@@ -1121,10 +1134,11 @@ async function carregarProdutos(){
   }
 
   produtosCache = (data || []).map(p => ({
-    ...p,
-    categoria_exibicao: obterCategoriaProduto(p),
-    imagem_exibicao: obterImagemProduto(p)
-  }));
+  ...p,
+  estoque: Number(p.estoque || 0),
+  categoria_exibicao: obterCategoriaProduto(p),
+  imagem_exibicao: obterImagemProduto(p)
+}));
 
   montarCategoriasPelosProdutos();
   aplicarFiltros();
@@ -1197,7 +1211,9 @@ function aplicarFiltros(){
           <small>${p.categoria_exibicao}</small>
         </div>
         <div class="produto-preco">${formatarMoeda(p.preco)}</div>
-        <button data-id="${p.id}">Adicionar</button>
+        <button data-id="${p.id}" ${p.estoque <= 0 ? "disabled" : ""}>
+  ${p.estoque <= 0 ? "Sem estoque" : "Adicionar"}
+</button>
       </div>
     `;
 
@@ -1316,7 +1332,18 @@ async function addProduto(produtoId){
 
   const produto = produtosCache.find(p => String(p.id) === String(produtoId));
   if (!produto) return;
+const qtdJaNoLote = loteLocal.find(i => String(i.produto_id) === String(produto.id))?.quantidade || 0;
+const estoqueAtual = Number(produto.estoque || 0);
 
+if (estoqueAtual <= 0) {
+  alert("Produto sem estoque.");
+  return;
+}
+
+if ((qtdJaNoLote + 1) > estoqueAtual) {
+  alert(`Estoque insuficiente. Disponível: ${estoqueAtual}`);
+  return;
+}
   const idx = loteLocal.findIndex(i => String(i.produto_id) === String(produto.id));
 
   if (idx >= 0) {
@@ -1629,8 +1656,26 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
+  
   const comanda = await buscarOuCriarComanda();
-  if (!comanda) return;
+if (!comanda) return;
+
+for (const item of loteLocal) {
+  const produtoBanco = produtosCache.find(p => String(p.id) === String(item.produto_id));
+
+  if (!produtoBanco) {
+    alert(`Produto não encontrado: ${item.nome_produto}`);
+    return;
+  }
+
+  const estoqueAtual = Number(produtoBanco.estoque || 0);
+  const qtdVenda = Number(item.quantidade || 0);
+
+  if (qtdVenda > estoqueAtual) {
+    alert(`Estoque insuficiente para ${item.nome_produto}. Disponível: ${estoqueAtual}`);
+    return;
+  }
+}
 
   const itensInsert = loteLocal.map(item => ({
     app_id: APP_ID,
@@ -1646,14 +1691,37 @@ document.getElementById("btnEnviar").onclick = async () => {
   }));
 
   const { error: erroItens } = await sb
-    .from("pedido_itens")
-    .insert(itensInsert);
+  .from("pedido_itens")
+  .insert(itensInsert);
 
-  if (erroItens) {
-    console.error(erroItens);
-    alert("Erro ao enviar itens.");
+if (erroItens) {
+  console.error(erroItens);
+  alert("Erro ao enviar itens.");
+  return;
+}
+
+for (const item of loteLocal) {
+  const produtoBanco = produtosCache.find(p => String(p.id) === String(item.produto_id));
+  if (!produtoBanco) continue;
+
+  const estoqueAtual = Number(produtoBanco.estoque || 0);
+  const qtdVenda = Number(item.quantidade || 0);
+  const novoEstoque = Math.max(0, estoqueAtual - qtdVenda);
+
+  const { error: erroEstoque } = await sb
+    .from("produtos")
+    .update({ estoque: novoEstoque })
+    .eq("id", item.produto_id)
+    .eq("app_id", APP_ID);
+
+  if (erroEstoque) {
+    console.error("Erro ao baixar estoque:", erroEstoque);
+    alert(`Pedido enviado, mas falhou ao baixar o estoque de ${item.nome_produto}.`);
     return;
   }
+
+  produtoBanco.estoque = novoEstoque;
+}
 
   const { data: atualizado, error } = await sb
     .from("pedidos")
@@ -1675,7 +1743,8 @@ document.getElementById("btnEnviar").onclick = async () => {
   }
 
   if (atualizado) pedidoAtual = atualizado;
-
+  
+await carregarProdutos();
   limparLoteLocal();
 
   await atualizarMesaStatus({
