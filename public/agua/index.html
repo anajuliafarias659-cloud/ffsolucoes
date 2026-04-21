@@ -1291,6 +1291,7 @@
           <div class="grid2">
             <input id="clienteNome" placeholder="Seu nome" />
             <input id="clienteTelefone" placeholder="Telefone / WhatsApp" />
+            <input id="clienteEmail" placeholder="Seu email (opcional)" />
           </div>
         </div>
 
@@ -1320,8 +1321,46 @@
         <div class="bloco">
           <h4>Resumo</h4>
           <div class="resumo" id="resumoPedido"></div>
-          <button id="btnFinalizar" class="btn-finalizar">Finalizar pedido</button>
-        </div>
+
+<div id="areaPagamentoSistema" style="margin-top:12px;">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <button type="button" class="btn-add" style="flex:1;background:#16a34a;" onclick="selecionarPagamentoSistema('pix')">
+      PIX
+    </button>
+
+    <button type="button" class="btn-add" style="flex:1;" onclick="selecionarPagamentoSistema('cartao')">
+      Cartão / Mercado Pago
+    </button>
+  </div>
+
+  <div
+    id="areaPixSistema"
+    style="display:none;margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:14px;background:#fff;"
+  >
+    <div id="statusPagamentoPix" style="font-size:14px;color:#334155;margin-bottom:10px;">
+      Aguardando geração do PIX...
+    </div>
+
+    <div id="pixQrCodeArea" style="text-align:center;margin-top:10px;"></div>
+
+    <textarea
+      id="pixCopiaCola"
+      readonly
+      style="width:100%;min-height:90px;margin-top:10px;padding:10px;border-radius:10px;border:1px solid var(--line);"
+    ></textarea>
+
+    <button
+      type="button"
+      class="btn-secundario"
+      style="margin-top:10px;"
+      onclick="copiarPixCopiaCola()"
+    >
+      📋 Copiar código PIX
+    </button>
+  </div>
+</div>
+
+<button id="btnFinalizar" class="btn-finalizar">Finalizar pedido</button>
       </div>
     </div>
   </div>
@@ -1352,6 +1391,7 @@ const heroTags = document.getElementById("heroTags");
 
     let CARRINHO_KEY = "";
     let ULTIMO_PEDIDO_KEY = "";
+    let formaPagamentoSistema = "";
 
     const nomeLoja = document.getElementById("nomeLoja");
     const infoLoja = document.getElementById("infoLoja");
@@ -2230,17 +2270,28 @@ if(maps){
     });
 
     btnFinalizar.addEventListener("click", async () => {
-      if(!carrinho.length){
-        alert("Seu carrinho está vazio.");
-        return;
-      }
+  if(!carrinho.length){
+    alert("Seu carrinho está vazio.");
+    return;
+  }
 
-      if(normalizarModoVenda(configLoja?.modo_venda) === "whatsapp"){
-        finalizarWhatsapp();
-      }else{
-        finalizarSistema();
-      }
-    });
+  if(normalizarModoVenda(configLoja?.modo_venda) === "whatsapp"){
+    finalizarWhatsapp();
+    return;
+  }
+
+  if(!formaPagamentoSistema){
+    alert("Escolha PIX ou Cartão / Mercado Pago.");
+    return;
+  }
+
+  if(formaPagamentoSistema === "pix"){
+    finalizarPixSistema();
+    return;
+  }
+
+  finalizarSistema();
+});
 
     async function init(){
       await resolverAppId();
@@ -2323,6 +2374,133 @@ function pegarLocalizacaoCliente(){
 }
 
 btnLocalizacao?.addEventListener("click", pegarLocalizacaoCliente);
+
+window.selecionarPagamentoSistema = function(tipo){
+  formaPagamentoSistema = tipo;
+
+  const areaPix = document.getElementById("areaPixSistema");
+  if(areaPix){
+    areaPix.style.display = tipo === "pix" ? "block" : "none";
+  }
+
+  btnFinalizar.textContent =
+    tipo === "pix"
+      ? "Gerar PIX"
+      : "Pagar com cartão / Mercado Pago";
+};
+
+window.copiarPixCopiaCola = async function(){
+  const codigo = document.getElementById("pixCopiaCola").value || "";
+
+  if(!codigo){
+    alert("Nenhum código PIX gerado.");
+    return;
+  }
+
+  try{
+    await navigator.clipboard.writeText(codigo);
+    alert("✅ Código PIX copiado!");
+  }catch{
+    alert("Não foi possível copiar.");
+  }
+};
+
+async function finalizarPixSistema(){
+  if(!carrinho.length){
+    alert("Carrinho vazio");
+    return;
+  }
+
+  const nome = document.getElementById("clienteNome").value.trim();
+  const telefone = document.getElementById("clienteTelefone").value.trim();
+
+  if(!nome){
+    alert("Informe seu nome.");
+    return;
+  }
+
+  if(!telefone){
+    alert("Informe seu telefone / WhatsApp.");
+    return;
+  }
+
+  btnFinalizar.disabled = true;
+  btnFinalizar.textContent = "Gerando PIX...";
+
+  try{
+    const pedidoId = `LOJA_${Date.now()}`;
+
+    const payload = {
+      appId: String(APP_ID),
+      pedidoId: String(pedidoId),
+      transaction_amount: Number(Number(totalCarrinho()).toFixed(2)),
+      description: `Pedido ${pedidoId}`,
+      const email = document.getElementById("clienteEmail")?.value?.trim();
+
+payerEmail: email || "comprador@email.com"
+    };
+
+    const resp = await fetch(
+      "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-loja",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const data = await resp.json().catch(() => ({}));
+
+    if(!resp.ok){
+      const detalhe =
+        data?.detalhes?.message ||
+        data?.erro ||
+        JSON.stringify(data);
+      throw new Error(detalhe || "Erro ao gerar PIX");
+    }
+
+    document.getElementById("areaPixSistema").style.display = "block";
+
+    const status = document.getElementById("statusPagamentoPix");
+    const qrArea = document.getElementById("pixQrCodeArea");
+    const copiaCola = document.getElementById("pixCopiaCola");
+
+    if(status){
+      status.textContent = "✅ PIX gerado. Faça o pagamento para concluir.";
+    }
+
+    if(copiaCola){
+      copiaCola.value =
+        data?.pix_copia_cola ||
+        data?.copia_cola ||
+        data?.qr_code ||
+        "";
+    }
+
+    if(qrArea){
+      const qrBase64 =
+        data?.qr_code_base64 ||
+        data?.qrCodeBase64 ||
+        data?.base64;
+
+      if(qrBase64){
+        qrArea.innerHTML = `<img src="data:image/png;base64,${qrBase64}" style="max-width:220px;width:100%;">`;
+      }else{
+        qrArea.innerHTML = "";
+      }
+    }
+
+  }catch(e){
+    console.error(e);
+    alert(e.message || "Erro ao gerar PIX");
+  }finally{
+    btnFinalizar.disabled = false;
+    btnFinalizar.textContent = "Finalizar pedido";
+  }
+}
   </script>
 </body>
 </html>
