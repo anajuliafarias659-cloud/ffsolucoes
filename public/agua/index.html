@@ -2456,16 +2456,15 @@ async function finalizarPixSistema(){
 
   try{
     const pedidoId = `LOJA_${Date.now()}`;
-
     const email = document.getElementById("clienteEmail")?.value?.trim();
 
-const payload = {
-  appId: String(APP_ID),
-  pedidoId: String(pedidoId),
-  transaction_amount: Number(Number(totalCarrinho()).toFixed(2)),
-  description: `Pedido ${pedidoId}`,
-  payerEmail: email || "comprador@email.com"
-};
+    const payload = {
+      appId: String(APP_ID),
+      pedidoId: String(pedidoId),
+      transaction_amount: Number(Number(totalCarrinho()).toFixed(2)),
+      description: `Pedido ${pedidoId}`,
+      payerEmail: email || "comprador@email.com"
+    };
 
     const resp = await fetch(
       "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-pix-loja",
@@ -2478,8 +2477,6 @@ const payload = {
         body: JSON.stringify(payload)
       }
     );
-
-
 
     const data = await resp.json().catch(() => ({}));
 
@@ -2497,56 +2494,53 @@ const payload = {
     const qrArea = document.getElementById("pixQrCodeArea");
     const copiaCola = document.getElementById("pixCopiaCola");
 
-   if(status){
-  status.textContent = "✅ PIX gerado. Faça o pagamento para concluir.";
+    if(status){
+      status.textContent = "✅ PIX gerado. Faça o pagamento para concluir.";
+      btnFinalizar.textContent = "Aguardando pagamento... (PIX gerado)";
+      btnFinalizar.disabled = true;
+    }
 
-  btnFinalizar.textContent = "Aguardando pagamento... (PIX gerado)";
-  btnFinalizar.disabled = true;
-}
+    if(window._pixInterval){
+      clearInterval(window._pixInterval);
+    }
 
-if(window._pixInterval){
-  clearInterval(window._pixInterval);
-}
+    window._pixInterval = setInterval(async () => {
+      const pago = await verificarStatusPix(pedidoId);
+      if(pago){
+        clearInterval(window._pixInterval);
+      }
+    }, 5000);
 
-window._pixInterval = setInterval(async () => {
-  const pago = await verificarStatusPix(pedidoId);
+    if(copiaCola){
+      copiaCola.value =
+        data?.pix_copia_cola ||
+        data?.pixCopiaCola ||
+        data?.copia_cola ||
+        "";
+    }
 
-  if(pago){
-    clearInterval(window._pixInterval);
+    if(qrArea){
+      const qrBase64 =
+        data?.qr_code_base64 ||
+        data?.qrCodeBase64 ||
+        data?.base64 ||
+        "";
+
+      if(qrBase64){
+        qrArea.innerHTML = `
+          <img src="data:image/png;base64,${qrBase64}" style="max-width:220px;width:100%;">
+        `;
+      }else{
+        qrArea.innerHTML = "";
+      }
+    }
+
+    }catch(e){
+    console.error(e);
+    alert(e.message || "Erro ao gerar PIX");
+    btnFinalizar.disabled = false;
+    btnFinalizar.textContent = "Gerar PIX";
   }
-}, 5000);
-
-  if(copiaCola){
-  copiaCola.value =
-    data?.pix_copia_cola ||
-    data?.pixCopiaCola ||
-    data?.copia_cola ||
-    "";
-}
-
-if(qrArea){
-  const qrBase64 =
-    data?.qr_code_base64 ||
-    data?.qrCodeBase64 ||
-    data?.base64 ||
-    "";
-
-  if(qrBase64){
-    qrArea.innerHTML = `
-      <img src="data:image/png;base64,${qrBase64}" style="max-width:220px;width:100%;">
-    `;
-  }else{
-    qrArea.innerHTML = "";
-  }
-}
-
-}catch(e){
-  console.error(e);
-  alert(e.message || "Erro ao gerar PIX");
-
-  btnFinalizar.disabled = false;
-  btnFinalizar.textContent = "Gerar PIX";
-}
 }
 
 
