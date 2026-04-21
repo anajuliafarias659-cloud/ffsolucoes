@@ -1731,11 +1731,120 @@ async function gerarImagemComprovantePassagem(dados){
 }
 
 async function gerarPdfPassagemCobrador(dados){
-  const imagem = await gerarImagemComprovantePassagem(dados);
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF("p", "mm", "a4");
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: [80, 180]
+  });
 
-  doc.addImage(imagem, "PNG", 10, 10, 190, 270);
+  let empresaNome = "FF Transporte";
+  let empresaEndereco = "";
+  let empresaTelefone = "";
+
+  try{
+    const { data, error } = await client
+      .from("config_site")
+      .select("nome_site, telefone, loja_rua, loja_numero, loja_cidade, loja_estado")
+      .eq("app_id", app_id)
+      .maybeSingle();
+
+    if(error){
+      console.warn("Erro ao carregar config_site:", error.message);
+    }
+
+    if(data){
+      empresaNome = data.nome_site || empresaNome;
+      empresaTelefone = data.telefone || "";
+      empresaEndereco = [
+        data.loja_rua || "",
+        data.loja_numero || "",
+        data.loja_cidade || "",
+        data.loja_estado || ""
+      ].filter(Boolean).join(" - ");
+    }
+  }catch(e){
+    console.warn("Erro ao carregar config_site", e);
+  }
+
+  const statusTexto = String(dados.status || "").trim() || "Pago";
+
+  const qrTexto = JSON.stringify({
+    codigo_embarque: dados.codigo,
+    nome: dados.nome,
+    poltrona: dados.poltrona,
+    data_viagem: dados.data_viagem,
+    origem: dados.origem,
+    destino: dados.destino,
+    status: statusTexto
+  });
+
+  const qrDataUrl = await QRCode.toDataURL(qrTexto, {
+    width: 220,
+    margin: 1
+  });
+
+  doc.setDrawColor(0);
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(4, 4, 72, 172, 3, 3, "FD");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.text(String(empresaNome || "FF Transporte").toUpperCase(), 40, 10, { align: "center" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(4.5);
+
+  if(empresaEndereco){
+    const enderecoLinhas = doc.splitTextToSize(empresaEndereco, 62);
+    doc.text(enderecoLinhas, 40, 15, { align: "center" });
+  }
+
+  if(empresaTelefone){
+    doc.text(String(empresaTelefone), 40, empresaEndereco ? 20 : 15, { align: "center" });
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.text("COMPROVANTE DE EMBARQUE", 40, 27, { align: "center" });
+
+  doc.line(8, 30, 72, 30);
+
+  let y = 36;
+
+  function linha(label, valor){
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(5.2);
+    doc.text(`${label}`, 8, y);
+
+    doc.setFont("helvetica", "normal");
+    const texto = String(valor || "-");
+    const linhas = doc.splitTextToSize(texto, 42);
+    doc.text(linhas, 24, y);
+
+    y += Math.max(7, linhas.length * 4.2);
+  }
+
+  linha("Código:", dados.codigo);
+  linha("Nome:", dados.nome);
+  linha("Doc:", dados.documento);
+  linha("Whats:", dados.whatsapp);
+  linha("Data:", dados.data_viagem);
+  linha("Origem:", dados.origem);
+  linha("Destino:", dados.destino);
+  linha("Poltrona:", dados.poltrona);
+  linha("Tipo:", dados.tipo_poltrona);
+  linha("Valor:", `R$ ${Number(dados.valor_cobrado || 0).toFixed(2)}`);
+  linha("Status:", statusTexto);
+
+  doc.line(8, y + 2, 72, y + 2);
+
+  doc.addImage(qrDataUrl, "PNG", 24, y + 8, 32, 32);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(4.8);
+  doc.text("Apresente este QR no embarque", 40, y + 43, { align: "center" });
+
   doc.save(`passagem-${dados.codigo || "comprovante"}.pdf`);
 }
 
