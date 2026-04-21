@@ -76,6 +76,7 @@ import { supabase } from "../js/supabase.js";
 let vendas = [];
 let APP_ID = null;
 
+
 function obterTipoMovimento(p){
   return String(
     p.tipo_movimento ||
@@ -83,8 +84,7 @@ function obterTipoMovimento(p){
     p.movimento ||
     "entrada"
   ).toLowerCase().trim();
-
-}let query = supabase
+}
 
 async function iniciar(){
 
@@ -95,9 +95,10 @@ async function iniciar(){
   }
 
   const { data: usuario } = await supabase
-    .from("usuarios")
-let query = supabase    .eq("id", session.user.id)
-    .single();
+  .from("usuarios")
+  .select("app_id")
+  .eq("id", session.user.id)
+  .single();
 
   if(!usuario){
     location.href="../auth/login.html";
@@ -167,10 +168,10 @@ async function carregarHistorico(app_id, dataFiltro = null){
     .in("id", mesaIds);
 
   vendas = pedidos.map(p => ({
-    ...p,
-    pedido_itens: (itens || []).filter(i => i.pedido_id === p.id),
-    mesas: (mesas || []).find(m => m.id === p.mesa_id)
-  }));
+  ...p,
+  pedido_itens: (itens || []).filter(i => i.pedido_id === p.id),
+  mesas: (mesas || []).find(m => m.id === p.mesa_id)
+}));
 
   renderizar();
 }
@@ -282,6 +283,14 @@ if(filtroMovimento !== "todos"){
 =============================== */
 window.gerarPDFHistorico = function(){
 
+  const filtroMovimento = document.getElementById("filtroMovimento")?.value || "todos";
+
+  let vendasPdf = vendas;
+
+  if(filtroMovimento !== "todos"){
+    vendasPdf = vendas.filter(p => obterTipoMovimento(p) === filtroMovimento);
+  }
+
   if(vendasPdf.length === 0){
     alert("Nenhum registro para gerar PDF.");
     return;
@@ -289,34 +298,26 @@ window.gerarPDFHistorico = function(){
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-const filtroMovimento = document.getElementById("filtroMovimento")?.value || "todos";
 
-let vendasPdf = vendas;
-
-if(filtroMovimento !== "todos"){
-  vendasPdf = vendas.filter(p => obterTipoMovimento(p) === filtroMovimento);
-}
   doc.setFontSize(16);
   doc.text("RELATÓRIO DE VENDAS", 20, 20);
 
   let y = 35;
   let totalGeral = 0;
 
-  vendasPdf.forEach(p=>{
-
+  vendasPdf.forEach(p => {
     let total = 0;
-    (p.pedido_itens || []).forEach(i=>{
+
+    (p.pedido_itens || []).forEach(i => {
       total += Number(i.quantidade) * Number(i.preco);
     });
 
     totalGeral += total;
 
+    const linha = `${new Date(p.created_at).toLocaleString()} - ${obterTipoMovimento(p) === "saida" ? "SAIDA" : "ENTRADA"} - R$ ${total.toFixed(2)}`;
+
     doc.setFontSize(10);
-    doc.text(
-      ``${new Date(p.created_at).toLocaleString()} - ${obterTipoMovimento(p) === "saida" ? "SAIDA" : "ENTRADA"} - R$ ${total.toFixed(2)}`
-      20,
-      y
-    );
+    doc.text(linha, 20, y);
 
     y += 8;
 
