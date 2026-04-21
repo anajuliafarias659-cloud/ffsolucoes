@@ -288,12 +288,7 @@ let intervaloBackup = null;
 let ultimoSomConta = 0;
 
 function obterTipoMovimento(p){
-  return String(
-    p.tipo_movimento ||
-    p.tipo ||
-    p.movimento ||
-    "entrada"
-  ).toLowerCase().trim();
+  return "entrada";
 }
 
 async function aguardarSessao(){
@@ -647,26 +642,34 @@ window.gerarFechamento = async function(){
   const amanha = new Date(inicio.getTime() + 86400000);
 
   const { data: pedidos, error } = await supabase
-  .from("pedidos")
-  .select("id, forma_pagamento, created_at, tipo_movimento, tipo, movimento, status")
-  .eq("app_id", window.APP_ID)
-  .in("status", ["finalizado","fechado"])
-  .gte("created_at", inicio.toISOString())
-  .lt("created_at", amanha.toISOString());
+    .from("pedidos")
+    .select("id, forma_pagamento, created_at, status")
+    .eq("app_id", window.APP_ID)
+    .in("status", ["finalizado","fechado"])
+    .gte("created_at", inicio.toISOString())
+    .lt("created_at", amanha.toISOString());
 
   if(error){
     console.error("Erro ao gerar fechamento:", error);
+
+    document.getElementById("totalEntradas").innerText = "R$ 0.00";
+    document.getElementById("totalSaidas").innerText = "R$ 0.00";
+    document.getElementById("saldoDia").innerText = "R$ 0.00";
+    document.getElementById("qtdVendas").innerText = "0";
+    document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
+    resumoPagamentosGlobal = "";
+    return;
   }
 
- if(!pedidos || pedidos.length === 0){
-  document.getElementById("totalEntradas").innerText = "R$ 0.00";
-  document.getElementById("totalSaidas").innerText = "R$ 0.00";
-  document.getElementById("saldoDia").innerText = "R$ 0.00";
-  document.getElementById("qtdVendas").innerText = "0";
-  document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
-  resumoPagamentosGlobal = "";
-  return;
-}
+  if(!pedidos || pedidos.length === 0){
+    document.getElementById("totalEntradas").innerText = "R$ 0.00";
+    document.getElementById("totalSaidas").innerText = "R$ 0.00";
+    document.getElementById("saldoDia").innerText = "R$ 0.00";
+    document.getElementById("qtdVendas").innerText = "0";
+    document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
+    resumoPagamentosGlobal = "";
+    return;
+  }
 
   const ids = pedidos.map(p => p.id);
 
@@ -680,38 +683,38 @@ window.gerarFechamento = async function(){
   }
 
   let totalEntradas = 0;
-let totalSaidas = 0;
-const pagamentos = {};
+  let totalSaidas = 0;
+  const pagamentos = {};
 
-pedidos.forEach(p => {
-  let totalPedido = 0;
+  pedidos.forEach(p => {
+    let totalPedido = 0;
 
-  (itens || [])
-    .filter(i => i.pedido_id === p.id)
-    .forEach(i => {
-      totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
-    });
+    (itens || [])
+      .filter(i => i.pedido_id === p.id)
+      .forEach(i => {
+        totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
+      });
 
-  const tipoMov = obterTipoMovimento(p);
+    const tipoMov = obterTipoMovimento(p);
 
-  if(tipoMov === "saida"){
-    totalSaidas += totalPedido;
-  }else{
-    totalEntradas += totalPedido;
+    if(tipoMov === "saida"){
+      totalSaidas += totalPedido;
+    }else{
+      totalEntradas += totalPedido;
 
-    const forma = p.forma_pagamento || "Não informado";
-    if(!pagamentos[forma]) pagamentos[forma] = 0;
-    pagamentos[forma] += totalPedido;
-  }
-});
+      const forma = p.forma_pagamento || "Não informado";
+      if(!pagamentos[forma]) pagamentos[forma] = 0;
+      pagamentos[forma] += totalPedido;
+    }
+  });
 
-const saldo = totalEntradas - totalSaidas;
+  const saldo = totalEntradas - totalSaidas;
 
-document.getElementById("totalEntradas").innerText = "R$ " + totalEntradas.toFixed(2);
-document.getElementById("totalSaidas").innerText = "R$ " + totalSaidas.toFixed(2);
-document.getElementById("saldoDia").innerText = "R$ " + saldo.toFixed(2);
-document.getElementById("qtdVendas").innerText = pedidos.length;
-document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
+  document.getElementById("totalEntradas").innerText = "R$ " + totalEntradas.toFixed(2);
+  document.getElementById("totalSaidas").innerText = "R$ " + totalSaidas.toFixed(2);
+  document.getElementById("saldoDia").innerText = "R$ " + saldo.toFixed(2);
+  document.getElementById("qtdVendas").innerText = pedidos.length;
+  document.getElementById("dataHoje").innerText = new Date().toLocaleDateString("pt-BR");
 
   let resumo = "";
   for(const forma in pagamentos){
