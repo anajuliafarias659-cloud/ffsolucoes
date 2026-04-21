@@ -2286,8 +2286,9 @@ if(maps){
   }
 
   if(formaPagamentoSistema === "pix"){
-  return;
-}
+    finalizarPixSistema();
+    return;
+  }
 
   finalizarSistema();
 });
@@ -2458,15 +2459,6 @@ async function finalizarPixSistema(){
 
   const nome = document.getElementById("clienteNome").value.trim();
   const telefone = document.getElementById("clienteTelefone").value.trim();
-  const email = document.getElementById("clienteEmail")?.value?.trim();
-  const rua = document.getElementById("clienteRua").value.trim();
-  const numero = document.getElementById("clienteNumero").value.trim();
-  const bairro = document.getElementById("clienteBairro").value.trim();
-  const cidade = document.getElementById("clienteCidade").value.trim();
-  const obs = document.getElementById("clienteObs").value.trim();
-  const maps = document.getElementById("clienteMaps")?.value || "";
-  const lat = document.getElementById("clienteLat")?.value || null;
-  const lng = document.getElementById("clienteLng")?.value || null;
 
   if(!nome){
     alert("Informe seu nome.");
@@ -2482,61 +2474,15 @@ async function finalizarPixSistema(){
   btnFinalizar.textContent = "Gerando PIX...";
 
   try{
-    const total = Number(Number(totalCarrinho()).toFixed(2));
+    const pedidoId = `LOJA_${Date.now()}`;
+    const email = document.getElementById("clienteEmail")?.value?.trim();
 
-    if(!Number.isFinite(total) || total <= 0){
-      throw new Error("Total inválido para gerar PIX.");
-    }
-
-    const itensPedido = carrinho.map((item) => ({
-      produto_id: item.id || null,
-      nome: item.nome || "Produto",
-      variacao: item.variacao || "Padrão",
-      qtd: Number(item.qtd || 1),
-      preco: Number(item.preco || 0),
-      subtotal: Number(item.preco || 0) * Number(item.qtd || 1)
-    }));
-
-    const payloadPedido = {
-      app_id: APP_ID,
-      cliente_nome: nome,
-      cliente_telefone: telefone,
-      cliente_email: email || null,
-      cliente_rua: rua || null,
-      cliente_numero: numero || null,
-      cliente_bairro: bairro || null,
-      cliente_cidade: cidade || null,
-      cliente_obs: obs || null,
-      cliente_maps: maps || null,
-      cliente_lat: lat || null,
-      cliente_lng: lng || null,
-      itens: itensPedido,
-      valor_total: total,
-      status: "aguardando_pagamento",
-      pagamento_tipo: "pix",
-      pagamento_modo: "mercadopago_pix",
-      pagamento_status: "pending"
-    };
-
-    const { data: pedidoCriado, error: erroPedido } = await supabase
-      .from("pedidos")
-      .insert([payloadPedido])
-      .select("id")
-      .single();
-
-    if(erroPedido || !pedidoCriado?.id){
-      console.error(erroPedido);
-      throw new Error("Erro ao criar pedido no banco.");
-    }
-
-    const pedidoId = String(pedidoCriado.id);
-
-    const payloadPix = {
+    const payload = {
       appId: String(APP_ID),
-      pedidoId: pedidoId,
-      transaction_amount: total,
+      pedidoId: String(pedidoId),
+      transaction_amount: Number(Number(totalCarrinho()).toFixed(2)),
       description: `Pedido ${pedidoId}`,
-      payerEmail: email || "cliente@cliente.com"
+      payerEmail: email || "comprador@email.com"
     };
 
     const resp = await fetch(
@@ -2547,7 +2493,7 @@ async function finalizarPixSistema(){
           "Content-Type": "application/json",
           apikey: SUPABASE_ANON_KEY
         },
-        body: JSON.stringify(payloadPix)
+        body: JSON.stringify(payload)
       }
     );
 
@@ -2558,31 +2504,8 @@ async function finalizarPixSistema(){
         data?.detalhes?.message ||
         data?.erro ||
         JSON.stringify(data);
-
       throw new Error(detalhe || "Erro ao gerar PIX");
     }
-
-    const copiaColaTexto =
-      data?.pix_copia_cola ||
-      data?.pixCopiaCola ||
-      data?.copia_cola ||
-      "";
-
-    const qrBase64 =
-      data?.qr_code_base64 ||
-      data?.qrCodeBase64 ||
-      data?.base64 ||
-      "";
-
-    await supabase
-      .from("pedidos")
-      .update({
-        pagamento_status: data?.status || "pending",
-        mp_payment_id: data?.id ? String(data.id) : null,
-        mp_qr_code: copiaColaTexto || null,
-        status: "aguardando_pagamento"
-      })
-      .eq("id", pedidoId);
 
     document.getElementById("areaPixSistema").style.display = "block";
 
@@ -2596,11 +2519,24 @@ async function finalizarPixSistema(){
       btnFinalizar.disabled = true;
     }
 
+   iniciarVerificacaoPix(pedidoId);
+
     if(copiaCola){
-      copiaCola.value = copiaColaTexto;
-    }
+  copiaCola.value =
+    data?.pix_copia_cola ||
+    data?.copia_cola ||
+    data?.qr_code ||
+    data?.payload ||
+    "";
+}
 
     if(qrArea){
+      const qrBase64 =
+        data?.qr_code_base64 ||
+        data?.qrCodeBase64 ||
+        data?.base64 ||
+        "";
+
       if(qrBase64){
         qrArea.innerHTML = `
           <img src="data:image/png;base64,${qrBase64}" style="max-width:220px;width:100%;">
@@ -2610,9 +2546,7 @@ async function finalizarPixSistema(){
       }
     }
 
-    iniciarVerificacaoPix(pedidoId);
-
-  }catch(e){
+    }catch(e){
     console.error(e);
     alert(e.message || "Erro ao gerar PIX");
     btnFinalizar.disabled = false;
