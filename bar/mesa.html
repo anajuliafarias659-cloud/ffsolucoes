@@ -743,15 +743,20 @@ function renderizarLoteLocal(){
     `;
 
     const botoes = item.querySelectorAll("button");
-    botoes[0].onclick = () => {
-      if (loteLocal[index].quantidade <= 1) {
-        loteLocal.splice(index, 1);
-      } else {
-        loteLocal[index].quantidade--;
-      }
-      salvarLoteLocal();
-      renderizarLoteLocal();
-    };
+    botoes[1].onclick = () => {
+  const produtoBanco = produtosCache.find(p => String(p.id) === String(loteLocal[index].produto_id));
+  const estoqueAtual = Number(produtoBanco?.estoque || 0);
+  const qtdAtual = Number(loteLocal[index].quantidade || 0);
+
+  if ((qtdAtual + 1) > estoqueAtual) {
+    alert(`Estoque máximo atingido (${estoqueAtual})`);
+    return;
+  }
+
+  loteLocal[index].quantidade++;
+  salvarLoteLocal();
+  renderizarLoteLocal();
+};
 
     botoes[1].onclick = () => {
   const produtoBanco = produtosCache.find(p => String(p.id) === String(loteLocal[index].produto_id));
@@ -1656,26 +1661,25 @@ document.getElementById("btnEnviar").onclick = async () => {
     return;
   }
 
-  
   const comanda = await buscarOuCriarComanda();
-if (!comanda) return;
+  if (!comanda) return;
 
-for (const item of loteLocal) {
-  const produtoBanco = produtosCache.find(p => String(p.id) === String(item.produto_id));
+  for (const item of loteLocal) {
+    const produtoBanco = produtosCache.find(p => String(p.id) === String(item.produto_id));
 
-  if (!produtoBanco) {
-    alert(`Produto não encontrado: ${item.nome_produto}`);
-    return;
+    if (!produtoBanco) {
+      alert(`Produto não encontrado: ${item.nome_produto}`);
+      return;
+    }
+
+    const estoqueAtual = Number(produtoBanco.estoque || 0);
+    const qtdVenda = Number(item.quantidade || 0);
+
+    if (qtdVenda > estoqueAtual) {
+      alert(`Estoque insuficiente para ${item.nome_produto}. Disponível: ${estoqueAtual}`);
+      return;
+    }
   }
-
-  const estoqueAtual = Number(produtoBanco.estoque || 0);
-  const qtdVenda = Number(item.quantidade || 0);
-
-  if (qtdVenda > estoqueAtual) {
-    alert(`Estoque insuficiente para ${item.nome_produto}. Disponível: ${estoqueAtual}`);
-    return;
-  }
-}
 
   const itensInsert = loteLocal.map(item => ({
     app_id: APP_ID,
@@ -1691,37 +1695,40 @@ for (const item of loteLocal) {
   }));
 
   const { error: erroItens } = await sb
-  .from("pedido_itens")
-  .insert(itensInsert);
+    .from("pedido_itens")
+    .insert(itensInsert);
 
-if (erroItens) {
-  console.error(erroItens);
-  alert("Erro ao enviar itens.");
-  return;
-}
-
-for (const item of loteLocal) {
-  const produtoBanco = produtosCache.find(p => String(p.id) === String(item.produto_id));
-  if (!produtoBanco) continue;
-
-  const estoqueAtual = Number(produtoBanco.estoque || 0);
-  const qtdVenda = Number(item.quantidade || 0);
-  const novoEstoque = Math.max(0, estoqueAtual - qtdVenda);
-
-  const { error: erroEstoque } = await sb
-    .from("produtos")
-    .update({ estoque: novoEstoque })
-    .eq("id", item.produto_id)
-    .eq("app_id", APP_ID);
-
-  if (erroEstoque) {
-    console.error("Erro ao baixar estoque:", erroEstoque);
-    alert(`Pedido enviado, mas falhou ao baixar o estoque de ${item.nome_produto}.`);
+  if (erroItens) {
+    console.error(erroItens);
+    alert("Erro ao enviar itens.");
     return;
   }
 
-  produtoBanco.estoque = novoEstoque;
-}
+  for (const item of loteLocal) {
+    const produtoBanco = produtosCache.find(p => String(p.id) === String(item.produto_id));
+    if (!produtoBanco) continue;
+
+    const estoqueAtual = Number(produtoBanco.estoque || 0);
+    const qtdVenda = Number(item.quantidade || 0);
+    const novoEstoque = Math.max(0, estoqueAtual - qtdVenda);
+
+    const { error: erroEstoque } = await sb
+      .from("produtos")
+      .update({ estoque: novoEstoque })
+      .eq("id", item.produto_id)
+      .eq("app_id", APP_ID);
+
+    if (erroEstoque) {
+      console.error("Erro ao baixar estoque:", erroEstoque);
+      alert(`Pedido enviado, mas falhou ao baixar o estoque de ${item.nome_produto}.`);
+      return;
+    }
+
+    produtoBanco.estoque = novoEstoque;
+  }
+
+  limparLoteLocal();
+  await carregarProdutos();
 
   const { data: atualizado, error } = await sb
     .from("pedidos")
@@ -1743,9 +1750,6 @@ for (const item of loteLocal) {
   }
 
   if (atualizado) pedidoAtual = atualizado;
-  
-await carregarProdutos();
-  limparLoteLocal();
 
   await atualizarMesaStatus({
     ocupada:true,
