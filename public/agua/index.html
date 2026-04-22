@@ -1,3 +1,7 @@
+
+
+
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1153,6 +1157,98 @@
   font-size:14px;
   line-height:1.6;
 }
+.card-promocao{
+  position:fixed;
+  right:18px;
+  bottom:88px;
+  z-index:1300;
+  width:min(320px, calc(100vw - 24px));
+  background:linear-gradient(135deg,#fff200,#ffd500);
+  border:4px solid #ef4444;
+  border-radius:24px;
+  padding:16px 16px 14px;
+  box-shadow:0 20px 50px rgba(239,68,68,.35);
+  animation:pulsePromocao 1.2s infinite;
+  overflow:hidden;
+}
+
+.card-promocao.oculto{
+  display:none;
+}
+
+.card-promocao::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:radial-gradient(circle at top right, rgba(255,255,255,.45), transparent 45%);
+  pointer-events:none;
+}
+
+.card-promocao-topo{
+  position:relative;
+  z-index:1;
+  font-size:14px;
+  font-weight:900;
+  color:#b91c1c;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  margin-bottom:8px;
+}
+
+.card-promocao-texto{
+  position:relative;
+  z-index:1;
+  font-size:24px;
+  line-height:1.1;
+  font-weight:900;
+  color:#7f1d1d;
+  text-shadow:0 2px 0 rgba(255,255,255,.35);
+}
+
+.card-promocao-tempo{
+  position:relative;
+  z-index:1;
+  margin-top:10px;
+  font-size:13px;
+  font-weight:700;
+  color:#991b1b;
+}
+
+.fechar-promocao{
+  position:absolute;
+  top:8px;
+  right:8px;
+  width:34px;
+  height:34px;
+  border:none;
+  border-radius:12px;
+  background:rgba(255,255,255,.75);
+  color:#7f1d1d;
+  font-size:18px;
+  font-weight:bold;
+  cursor:pointer;
+  z-index:2;
+}
+
+@keyframes pulsePromocao{
+  0%{ transform:scale(1); box-shadow:0 20px 50px rgba(239,68,68,.28); }
+  50%{ transform:scale(1.04); box-shadow:0 24px 60px rgba(239,68,68,.42); }
+  100%{ transform:scale(1); box-shadow:0 20px 50px rgba(239,68,68,.28); }
+}
+
+@media (max-width:768px){
+  .card-promocao{
+    right:12px;
+    left:12px;
+    width:auto;
+    bottom:82px;
+    border-radius:20px;
+  }
+
+  .card-promocao-texto{
+    font-size:20px;
+  }
+}
 
     @media (max-width:1024px){
       .produtos{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -1418,6 +1514,13 @@
     <span class="contador" id="contadorCarrinho">0</span>
   </button>
 
+  <div id="cardPromocao" class="card-promocao oculto">
+  <button type="button" class="fechar-promocao" onclick="fecharCardPromocao()">✕</button>
+  <div class="card-promocao-topo">⚡ OFERTA ESPECIAL</div>
+  <div class="card-promocao-texto" id="textoCardPromocao"></div>
+  <div class="card-promocao-tempo" id="tempoCardPromocao"></div>
+</div>
+
   <div class="modal" id="modalCarrinho">
     <div class="modal-box">
       <div class="modal-topo">
@@ -1680,6 +1783,10 @@ const statusLocalizacao = document.getElementById("statusLocalizacao");
     const btnWhatsTopo = document.getElementById("btnWhatsTopo");
     const avisoFuncionamento = document.getElementById("avisoFuncionamento");
     const statusLoja = document.getElementById("statusLoja");
+    const cardPromocao = document.getElementById("cardPromocao");
+const textoCardPromocao = document.getElementById("textoCardPromocao");
+const tempoCardPromocao = document.getElementById("tempoCardPromocao");
+let intervaloPromocao = null;
 
     function formatarReal(valor){
       return Number(valor || 0).toLocaleString("pt-BR", {
@@ -1708,6 +1815,67 @@ const statusLocalizacao = document.getElementById("statusLocalizacao");
 
   return numero;
 }
+
+function promocaoEstaValida(config){
+  if(!config?.promocao_ativa) return false;
+
+  const agora = new Date();
+  const inicio = config.promocao_inicio ? new Date(config.promocao_inicio) : null;
+  const fim = config.promocao_fim ? new Date(config.promocao_fim) : null;
+
+  if(inicio && agora < inicio) return false;
+  if(fim && agora > fim) return false;
+
+  return !!String(config.promocao_texto || "").trim();
+}
+
+function atualizarTempoPromocao(){
+  if(!configLoja?.promocao_fim){
+    tempoCardPromocao.textContent = "";
+    return;
+  }
+
+  const agora = new Date().getTime();
+  const fim = new Date(configLoja.promocao_fim).getTime();
+  const diff = fim - agora;
+
+  if(diff <= 0){
+    esconderPromocao();
+    return;
+  }
+
+  const horas = Math.floor(diff / 3600000);
+  const minutos = Math.floor((diff % 3600000) / 60000);
+
+  tempoCardPromocao.textContent = `⏰ Termina em ${horas}h ${minutos}min`;
+}
+
+function mostrarPromocao(){
+  if(!promocaoEstaValida(configLoja)){
+    esconderPromocao();
+    return;
+  }
+
+  textoCardPromocao.textContent = configLoja.promocao_texto || "";
+  cardPromocao.classList.remove("oculto");
+
+  if(configLoja.promocao_fim){
+    atualizarTempoPromocao();
+    clearInterval(intervaloPromocao);
+    intervaloPromocao = setInterval(atualizarTempoPromocao, 30000);
+  }else{
+    tempoCardPromocao.textContent = "";
+  }
+}
+
+function esconderPromocao(){
+  cardPromocao.classList.add("oculto");
+  clearInterval(intervaloPromocao);
+}
+
+window.fecharCardPromocao = function(){
+  esconderPromocao();
+};
 
     function normalizarModoVenda(valor){
       const modo = String(valor || "").trim().toLowerCase();
@@ -1940,7 +2108,7 @@ if (configLoja.loja_cidade) {
 }
 
 if (configLoja.telefone) {
-  tags.push(`📞 ${configLoja.telefone}`);
+  tags.push(`📞 ${formatarTelefoneBR(configLoja.telefone)}`);
 }
 
 heroTags.innerHTML = tags
@@ -2021,6 +2189,7 @@ aplicarTema(tema);
       }
 
       atualizarStatusLoja();
+      mostrarPromocao();
     }
 
     async function carregarProdutos(){
