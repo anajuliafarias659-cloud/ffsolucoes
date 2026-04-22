@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -264,7 +265,8 @@ button{
     <div class="grid">
       <input id="nomeSite" placeholder="Nome do site">
       <input id="bgLogin" placeholder="URL da imagem de fundo do login">
-      <input id="logoPlay" placeholder="URL da logo do player">
+      <input type="file" id="logoFile" accept="image/*">
+      <img id="previewLogoPlay" style="max-height:70px; display:none; margin-top:10px; border-radius:12px;">
       <input id="corPrimaria" placeholder="Cor primária (#e50914)">
       <input id="corSecundaria" placeholder="Cor secundária (#b20710)">
       <input id="corFundo" placeholder="Cor do fundo (#020617)">
@@ -864,31 +866,70 @@ async function removerCliente(clienteId, nomeCliente){
   }
 }
 
+async function uploadLogo(file){
+  if(!file) return null;
+
+  const nomeArquivo = `logo_${adminId}_${Date.now()}_${file.name.replace(/\s+/g, "_")}`;
+
+  const { error } = await supabaseClient
+    .storage
+    .from("logos")
+    .upload(nomeArquivo, file, {
+      cacheControl: "3600",
+      upsert: true
+    });
+
+  if(error){
+    throw new Error("Erro no upload da logo: " + error.message);
+  }
+
+  const { data } = supabaseClient
+    .storage
+    .from("logos")
+    .getPublicUrl(nomeArquivo);
+
+  return data.publicUrl;
+}
 async function salvarTema(){
   limparMsg();
 
   const tema = document.getElementById("tema").value;
   const nome_site = document.getElementById("nomeSite").value.trim();
   const bg_login = document.getElementById("bgLogin").value.trim();
-  const logo_play = document.getElementById("logoPlay").value.trim();
+  const fileLogo = document.getElementById("logoFile")?.files?.[0] || null;
+
   const cor_primaria = document.getElementById("corPrimaria").value.trim();
   const cor_secundaria = document.getElementById("corSecundaria").value.trim();
   const cor_fundo = document.getElementById("corFundo").value.trim();
   const cor_card = document.getElementById("corCard").value.trim();
   const cor_texto = document.getElementById("corTexto").value.trim();
 
+  let logo_play = null;
+
+  const { data: temaAtual } = await supabaseClient
+    .from("config_filmes")
+    .select("logo_play")
+    .eq("admin_id", adminId)
+    .maybeSingle();
+
+  if(fileLogo){
+    logo_play = await uploadLogo(fileLogo);
+  }else{
+    logo_play = temaAtual?.logo_play || null;
+  }
+
   const payload = {
-  admin_id: adminId,
-  tema,
-  nome_site,
-  bg_login,
-  logo_play,
-  cor_primaria,
-  cor_secundaria,
-  cor_fundo,
-  cor_card,
-  cor_texto
-};
+    admin_id: adminId,
+    tema,
+    nome_site,
+    bg_login,
+    logo_play,
+    cor_primaria,
+    cor_secundaria,
+    cor_fundo,
+    cor_card,
+    cor_texto
+  };
 
   const { error } = await supabaseClient
     .from("config_filmes")
@@ -919,18 +960,38 @@ async function carregarTema(){
   document.getElementById("tema").value = data.tema || "dark";
   document.getElementById("nomeSite").value = data.nome_site || "";
   document.getElementById("bgLogin").value = data.bg_login || "";
-  document.getElementById("logoPlay").value = data.logo_play || "";
   document.getElementById("corPrimaria").value = data.cor_primaria || "";
   document.getElementById("corSecundaria").value = data.cor_secundaria || "";
   document.getElementById("corFundo").value = data.cor_fundo || "";
   document.getElementById("corCard").value = data.cor_card || "";
   document.getElementById("corTexto").value = data.cor_texto || "";
+  const previewLogo = document.getElementById("previewLogoPlay");
+if(previewLogo){
+  if(data.logo_play){
+    previewLogo.src = data.logo_play;
+    previewLogo.style.display = "block";
+  }else{
+    previewLogo.removeAttribute("src");
+    previewLogo.style.display = "none";
+  }
+}
 }
 
 async function logout(){
   await supabaseClient.auth.signOut();
   location.href = "index.html";
 }
+
+document.getElementById("logoFile")?.addEventListener("change", function(){
+  const file = this.files?.[0];
+  const preview = document.getElementById("previewLogoPlay");
+  if(!preview) return;
+
+  if(file){
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = "block";
+  }
+});
 
 init();
 </script>
