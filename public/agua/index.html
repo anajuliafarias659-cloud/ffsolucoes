@@ -1,8 +1,3 @@
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -2951,8 +2946,10 @@ window.selecionarVariacaoProduto = function(id, valor, preco, qtdMinima, el){
     function abrirCarrinho(){
   renderizarCarrinho();
   modalCarrinho.classList.add("ativo");
+  restaurarPixSalvo(); // 👈 NOVO
   esconderPromocao();
 }
+
 
     window.fecharCarrinho = function(){
       modalCarrinho.classList.remove("ativo");
@@ -3043,6 +3040,71 @@ window.fecharModalMotivacional = function(){
   }finally{
     btnFinalizar.disabled = false;
     btnFinalizar.textContent = "Finalizar pedido";
+  }
+}
+
+async function verificarStatusPagamento(pedidoId){
+  try{
+    const { data, error } = await supabase
+      .from("pedidos")
+      .select("pagamento_status")
+      .eq("id", pedidoId)
+      .single();
+
+    if(error || !data) return;
+
+    if(data.pagamento_status === "approved"){
+      localStorage.removeItem(ULTIMO_PEDIDO_KEY);
+
+      const areaPix = document.getElementById("areaPixSistema");
+      if(areaPix) areaPix.style.display = "none";
+
+      alert("✅ Pagamento confirmado!");
+    }
+
+  }catch(e){
+    console.error("Erro ao verificar pagamento", e);
+  }
+}
+
+function restaurarPixSalvo(){
+  const dados = localStorage.getItem(ULTIMO_PEDIDO_KEY);
+  if(!dados) return;
+
+  try{
+    const pix = JSON.parse(dados);
+
+    if(!pix?.qr && !pix?.copia) return;
+
+    const areaPix = document.getElementById("areaPixSistema");
+    const qrArea = document.getElementById("pixQrCodeArea");
+    const copia = document.getElementById("pixCopiaCola");
+    const status = document.getElementById("statusPagamentoPix");
+
+    if(areaPix) areaPix.style.display = "block";
+
+    if(status){
+      status.textContent = "PIX já gerado. Aguardando pagamento...";
+    }
+
+    if(qrArea && pix.qr){
+      qrArea.innerHTML = `<img src="data:image/png;base64,${pix.qr}" style="width:200px;">`;
+    }
+
+    if(copia && pix.copia){
+      copia.value = pix.copia;
+    }
+
+    if(pix.pedido_id){
+  verificarStatusPagamento(pix.pedido_id);
+
+  setInterval(() => {
+    verificarStatusPagamento(pix.pedido_id);
+  }, 5000); // a cada 5s
+}
+
+  }catch(e){
+    console.error("Erro ao restaurar PIX", e);
   }
 }
 
@@ -3496,6 +3558,14 @@ const copiaColaTexto =
   data?.qrCode ||
   data?.ticket_url ||
   "";
+const dadosPix = {
+  qr: qrBase64,
+  copia: copiaColaTexto,
+  pedido_id: data?.pedido_id || null,
+  status: "pendente"
+};
+
+localStorage.setItem(ULTIMO_PEDIDO_KEY, JSON.stringify(dadosPix));
 
 const qrBase64 =
   data?.qr_code_base64 ||
