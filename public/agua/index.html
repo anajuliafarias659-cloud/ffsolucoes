@@ -1,9 +1,3 @@
-
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1588,7 +1582,7 @@
       <div class="barra-wrap">
         <div class="filtros" id="listaCategorias"></div>
         <div class="busca">
-          <input type="text" id="buscaProduto" placeholder="Buscar água, gás, galão..." />
+          <input type="text" id="buscaProduto" placeholder="Buscar ..." />
         </div>
       </div>
     </section>
@@ -1907,15 +1901,17 @@ const TEMAS = {
 };
 
 let APP_ID = null;
-    let configLoja = null;
-    let todosProdutos = [];
-    let carrinho = [];
-    let categoriaAtual = "Todos";
-    let textoBusca = "";
+let configLoja = null;
+let todosProdutos = [];
+let carrinho = [];
+let categoriaAtual = "Todos";
+let textoBusca = "";
 
-    let CARRINHO_KEY = "";
-    let ULTIMO_PEDIDO_KEY = "";
-    let formaPagamentoSistema = "";
+let CARRINHO_KEY = "";
+let ULTIMO_PEDIDO_KEY = "";
+let formaPagamentoSistema = "";
+let pagamentoJaConfirmado = false;
+let intervaloPix = null;
 
     const nomeLoja = document.getElementById("nomeLoja");
     const infoLoja = document.getElementById("infoLoja");
@@ -2562,11 +2558,11 @@ renderizarDestaques(); // 👈 FALTAVA ISSO
       `).join("");
     }
 
-    window.filtrarCategoria = function(cat){
-      categoriaAtual = cat;
-      criarCategorias();
-      renderizarProdutos();
-    };
+   window.filtrarCategoria = function(cat){
+  categoriaAtual = cat;
+  criarCategorias();
+  renderizarProdutos();
+};
 
     window.irParaTodosProdutos = function(id){
   categoriaAtual = "Todos";
@@ -2952,8 +2948,10 @@ window.selecionarVariacaoProduto = function(id, valor, preco, qtdMinima, el){
     function abrirCarrinho(){
   renderizarCarrinho();
   modalCarrinho.classList.add("ativo");
+  restaurarPixSalvo(); // 👈 NOVO
   esconderPromocao();
 }
+
 
     window.fecharCarrinho = function(){
       modalCarrinho.classList.remove("ativo");
@@ -3047,6 +3045,79 @@ window.fecharModalMotivacional = function(){
   }
 }
 
+async function verificarStatusPagamento(pedidoId){
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("pagamento_status,status")
+    .eq("id", pedidoId)
+    .single();
+
+  if(error || !data) return;
+
+  const statusPagamento = String(data.pagamento_status || "").toLowerCase();
+
+  if(statusPagamento === "approved"){
+    alert("✅ Pagamento confirmado!");
+
+    carrinho = [];
+    salvarCarrinho();
+    renderizarCarrinho();
+    fecharCarrinho();
+
+    clearInterval(window.verificacaoPix);
+    localStorage.removeItem(ULTIMO_PEDIDO_KEY);
+    return;
+  }
+
+  if(statusPagamento === "pending"){
+    return;
+  }
+
+  if(statusPagamento === "rejected" || statusPagamento === "cancelled"){
+    clearInterval(window.verificacaoPix);
+    alert("❌ Pagamento não aprovado.");
+  }
+}
+
+function restaurarPixSalvo(){
+  const dados = localStorage.getItem(ULTIMO_PEDIDO_KEY);
+  if(!dados) return;
+
+  try{
+    const pix = JSON.parse(dados);
+
+    if(!pix?.qr && !pix?.copia) return;
+
+    const areaPix = document.getElementById("areaPixSistema");
+    const qrArea = document.getElementById("pixQrCodeArea");
+    const copia = document.getElementById("pixCopiaCola");
+    const status = document.getElementById("statusPagamentoPix");
+
+    if(areaPix) areaPix.style.display = "block";
+
+    if(status){
+      status.textContent = "PIX já gerado. Aguardando pagamento...";
+    }
+
+    if(qrArea && pix.qr){
+      qrArea.innerHTML = `<img src="data:image/png;base64,${pix.qr}" style="width:200px;">`;
+    }
+
+    if(copia && pix.copia){
+      copia.value = pix.copia;
+    }
+
+    if(pix.pedido_id){
+      intervaloPix = setInterval(() => {
+        verificarStatusPagamento(pix.pedido_id);
+      }, 5000);
+    }
+
+  }catch(e){
+    console.error("Erro ao restaurar PIX", e);
+  }
+}
+
     function montarTextoWhatsapp(){
       const cpf = document.getElementById("clienteCpf")?.value?.trim();
 const cep = document.getElementById("clienteCep")?.value?.trim();
@@ -3122,19 +3193,47 @@ if(referencia) msg += `\n*Referência:* ${referencia}`;
       renderizarProdutos();
     });
 
-    btnFinalizar.addEventListener("click", async () => {
+   btnFinalizar.addEventListener("click", async () => {
+
   if(!carrinho.length){
-    alert("Seu carrinho está vazio.");
+    alert("Adicione pelo menos 1 item no carrinho.");
     return;
   }
 
-  if(normalizarModoVenda(configLoja?.modo_venda) === "whatsapp"){
-    finalizarWhatsapp();
+  const modo = normalizarModoVenda(configLoja?.modo_venda);
+
+  // 🔥 WHATSAPP
+  if(modo === "whatsapp"){
+    const confirmar = confirm("Deseja finalizar o pedido?");
+    if(!confirmar) return;
+
+    const whatsapp = apenasNumeros(
+      configLoja?.whatsapp_numero || configLoja?.telefone || ""
+    );
+
+    if(!whatsapp){
+      alert("WhatsApp não configurado.");
+      return;
+    }
+
+    const mensagem = montarTextoWhatsapp();
+
+    window.open(
+      `https://wa.me/${whatsapp}?text=${encodeURIComponent(mensagem)}`,
+      "_blank"
+    );
+
+    carrinho = [];
+    salvarCarrinho();
+    renderizarCarrinho();
+    fecharCarrinho();
     return;
   }
+
+  // 🔥 SISTEMA (PIX / CARTÃO)
 
   if(!formaPagamentoSistema){
-    alert("Escolha PIX ou Cartão / Mercado Pago.");
+    alert("Escolha PIX ou Cartão.");
     return;
   }
 
@@ -3143,7 +3242,9 @@ if(referencia) msg += `\n*Referência:* ${referencia}`;
     return;
   }
 
+  // cartão / mercado pago
   finalizarSistema();
+
 });
 
     async function init(){
@@ -3210,6 +3311,7 @@ function iniciarVerificacaoPix(pedidoId){
     verificarStatusPagamento(pedidoId);
   }, 5000);
 }
+
 function pegarLocalizacaoCliente(){
   if(!navigator.geolocation){
     statusLocalizacao.textContent = "Geolocalização não suportada.";
@@ -3287,38 +3389,6 @@ window.fecharModalMotivacional = function(){
   localStorage.setItem(CHAVE_FRASE_DIA, obterDataHoje());
 };
 
-async function verificarStatusPagamento(pedidoId){
-  const { data, error } = await supabase
-    .from("pedidos")
-    .select("pagamento_status,status")
-    .eq("id", pedidoId)
-    .single();
-
-  if(error || !data) return;
-
-  const statusPagamento = String(data.pagamento_status || "").toLowerCase();
-
-  if(statusPagamento === "approved"){
-    alert("✅ Pagamento confirmado!");
-
-    carrinho = [];
-    salvarCarrinho();
-    renderizarCarrinho();
-    fecharCarrinho();
-
-    clearInterval(window.verificacaoPix);
-    return;
-  }
-
-  if(statusPagamento === "pending"){
-    return;
-  }
-
-  if(statusPagamento === "rejected" || statusPagamento === "cancelled"){
-    clearInterval(window.verificacaoPix);
-    alert("❌ Pagamento não aprovado.");
-  }
-}
 
 window.selecionarPagamentoSistema = async function(tipo){
   formaPagamentoSistema = tipo;
@@ -3486,6 +3556,8 @@ const payloadPedido = {
 
     console.log("RETORNO PIX:", data);
 
+pagamentoJaConfirmado = false;
+
 const copiaColaTexto =
   data?.pix_copia_cola ||
   data?.pixCopiaCola ||
@@ -3504,6 +3576,14 @@ const qrBase64 =
   data?.base64 ||
   data?.qr_base64 ||
   "";
+const dadosPix = {
+  qr: qrBase64,
+  copia: copiaColaTexto,
+  pedido_id: data?.pedido_id || null,
+  status: "pendente"
+};
+
+localStorage.setItem(ULTIMO_PEDIDO_KEY, JSON.stringify(dadosPix));
 
     await supabase
   .from("pedidos")
