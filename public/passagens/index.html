@@ -1,9 +1,14 @@
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>F Transporte</title>
+<title>FF Transporte</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
@@ -335,7 +340,7 @@ button:hover{opacity:.95}
   <div id="resumoTrechoPublico" class="valor-box hidden"></div>
 </div>
 
-    <select id="formaPagamento">
+  <select id="formaPagamento" onchange="atualizarUIFormaPagamento()">
   <option value="">Forma de pagamento</option>
   <option value="PIX">PIX</option>
   <option value="cartao">Cartão / Mercado Pago</option>
@@ -384,8 +389,8 @@ button:hover{opacity:.95}
 
     <img id="previewSelfie" style="width:100%;border-radius:12px;display:none;margin-top:10px;">
 
-    <button onclick="pagarEReservar()">Pagar e Reservar</button>
-    <button type="button" onclick="forcarVerificacao()" style="background:#22c55e;">Já paguei</button>
+    <button id="btnPagarReservar" onclick="pagarEReservar()">Pagar e Reservar</button>
+<button id="btnJaPaguei" type="button" onclick="forcarVerificacao()" style="background:#22c55e;">Já paguei</button>
 
     <div id="mensagem"></div>
 
@@ -624,6 +629,51 @@ function limparPagamentoUI(){
   document.getElementById("pixValor").innerHTML = "";
   document.getElementById("checkoutLink").classList.add("hidden");
   document.getElementById("checkoutLink").href = "#";
+  const btnJaPaguei = document.getElementById("btnJaPaguei");
+if(btnJaPaguei) btnJaPaguei.style.display = "none";
+}
+
+function atualizarUIFormaPagamento(){
+  const formaPagamento = document.getElementById("formaPagamento")?.value || "";
+  const btnPagar = document.getElementById("btnPagarReservar");
+  const btnJaPaguei = document.getElementById("btnJaPaguei");
+  const pixBox = document.getElementById("pixBox");
+  const checkoutLink = document.getElementById("checkoutLink");
+
+  if(!btnPagar || !btnJaPaguei) return;
+
+  // padrão
+  btnPagar.textContent = "Pagar e Reservar";
+  btnPagar.style.display = "block";
+  btnJaPaguei.style.display = "none";
+
+  if(formaPagamento === "PIX"){
+    btnPagar.textContent = "Pagar e Reservar";
+    btnJaPaguei.style.display = "block";
+    return;
+  }
+
+  if(formaPagamento === "cartao"){
+    btnPagar.textContent = "Ir para pagamento";
+    btnJaPaguei.style.display = "none";
+    return;
+  }
+
+  if(formaPagamento === "embarque"){
+  setMsg("✅ Reserva feita! Pagamento no embarque.");
+
+  atualizarUIFormaPagamento(); // 👈 ADICIONA AQUI
+
+  await mostrarComprovanteReserva();
+  await carregarPoltronas();
+  return;
+}
+
+  if(pixBox) pixBox.style.display = "none";
+  if(checkoutLink){
+    checkoutLink.classList.add("hidden");
+    checkoutLink.href = "#";
+  }
 }
 
 function limparSelecaoViagem(){
@@ -649,6 +699,8 @@ function mostrarTela(nome){
 
   if(!restaurandoEstado){
     salvarEstadoParcial();
+    if(nome === "poltronas"){
+  atualizarUIFormaPagamento();
   }
 }
 
@@ -1595,6 +1647,27 @@ async function gerarImagemReciboComQR(){
   const tipoViagem = document.getElementById("tipoViagem").value;
   const dataVolta = formatarDataPadrao(document.getElementById("dataVolta").value);
   const valorTotal = await calcularValorTotal();
+  const formaPagamento = document.getElementById("formaPagamento").value;
+
+let statusComprovante = "Aguardando pagamento";
+
+if(formaPagamento === "embarque"){
+  statusComprovante = "Pagamento no dia do embarque";
+}else if(formaPagamento === "PIX"){
+  statusComprovante = "Aguardando pagamento PIX";
+}else if(formaPagamento === "cartao"){
+  statusComprovante = "Aguardando pagamento no Mercado Pago";
+}
+  const formaPagamento = document.getElementById("formaPagamento").value;
+let statusComprovante = "Aguardando pagamento";
+
+if(formaPagamento === "embarque"){
+  statusComprovante = "Pagamento no dia do embarque";
+}else if(formaPagamento === "PIX"){
+  statusComprovante = "Aguardando pagamento PIX";
+}else if(formaPagamento === "cartao"){
+  statusComprovante = "Aguardando pagamento no Mercado Pago";
+}
 
   const origemTexto = origemTrechoSelecionada
     ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || "Origem")
@@ -1820,6 +1893,7 @@ async function mostrarComprovanteReserva(){
     <b>Destino:</b> ${destinoTexto}<br>
     <b>Poltrona:</b> ${poltronaSelecionada}<br>
     <b>Tipo:</b> ${tipoViagem === "ida_volta" ? "Ida e Volta" : "Somente Ida"}<br>
+    <b>Status:</b> ${statusComprovante}<br>
     <b>Tipo da poltrona:</b> ${String(tipoPoltronaSelecionada || "padrao").replace("_","-")}<br>
     <b>Valor:</b> R$ ${Number(valorTotal || 0).toFixed(2)}
   `;
@@ -2185,6 +2259,17 @@ async function baixarPDFRecibo(){
     const tipoViagem = document.getElementById("tipoViagem").value;
     const dataVolta = formatarDataPadrao(document.getElementById("dataVolta").value);
     const valorTotal = await calcularValorTotal();
+    const formaPagamento = document.getElementById("formaPagamento").value;
+
+let statusRecibo = "Aguardando pagamento";
+
+if(formaPagamento === "embarque"){
+  statusRecibo = "Pagamento no dia do embarque";
+}else if(formaPagamento === "PIX"){
+  statusRecibo = "Aguardando pagamento PIX";
+}else if(formaPagamento === "cartao"){
+  statusRecibo = "Aguardando pagamento no Mercado Pago";
+}
 
     const empresaNome = configLoja?.nome_site || "FF TRANSPORTE";
     const empresaTelefone = configLoja?.whatsapp_numero || configLoja?.telefone || "";
