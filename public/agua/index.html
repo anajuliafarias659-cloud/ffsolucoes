@@ -2556,7 +2556,7 @@ renderizarDestaques(); // 👈 FALTAVA ISSO
       `).join("");
     }
 
-    window.filtrarCategoria = function(cat){
+   window.filtrarCategoria = function(cat){
   categoriaAtual = cat;
   criarCategorias();
   renderizarProdutos();
@@ -3044,47 +3044,36 @@ window.fecharModalMotivacional = function(){
 }
 
 async function verificarStatusPagamento(pedidoId){
-  if(pagamentoJaConfirmado) return;
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("pagamento_status,status")
+    .eq("id", pedidoId)
+    .single();
 
-  try{
-    const { data, error } = await supabase
-      .from("pedidos")
-      .select("pagamento_status")
-      .eq("id", pedidoId)
-      .single();
+  if(error || !data) return;
 
-    if(error || !data) return;
+  const statusPagamento = String(data.pagamento_status || "").toLowerCase();
 
-    if(data.pagamento_status === "approved"){
-      pagamentoJaConfirmado = true;
+  if(statusPagamento === "approved"){
+    alert("✅ Pagamento confirmado!");
 
-      clearInterval(intervaloPix);
+    carrinho = [];
+    salvarCarrinho();
+    renderizarCarrinho();
+    fecharCarrinho();
 
-      localStorage.removeItem(ULTIMO_PEDIDO_KEY);
+    clearInterval(window.verificacaoPix);
+    localStorage.removeItem(ULTIMO_PEDIDO_KEY);
+    return;
+  }
 
-      carrinho = [];
-      salvarCarrinho();
-      renderizarCarrinho();
+  if(statusPagamento === "pending"){
+    return;
+  }
 
-      const areaPix = document.getElementById("areaPixSistema");
-      if(areaPix) areaPix.style.display = "none";
-
-      const qrArea = document.getElementById("pixQrCodeArea");
-      if(qrArea) qrArea.innerHTML = "";
-
-      const copia = document.getElementById("pixCopiaCola");
-      if(copia) copia.value = "";
-
-      const statusPix = document.getElementById("statusPagamentoPix");
-      if(statusPix) statusPix.textContent = "✅ Pagamento confirmado!";
-
-      formaPagamentoSistema = "";
-
-      alert("✅ Pagamento confirmado!");
-    }
-
-  }catch(e){
-    console.error("Erro ao verificar pagamento", e);
+  if(statusPagamento === "rejected" || statusPagamento === "cancelled"){
+    clearInterval(window.verificacaoPix);
+    alert("❌ Pagamento não aprovado.");
   }
 }
 
@@ -3290,6 +3279,7 @@ function iniciarVerificacaoPix(pedidoId){
     verificarStatusPagamento(pedidoId);
   }, 5000);
 }
+
 function pegarLocalizacaoCliente(){
   if(!navigator.geolocation){
     statusLocalizacao.textContent = "Geolocalização não suportada.";
