@@ -7,6 +7,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
 <style>
 *{box-sizing:border-box}
@@ -1840,31 +1841,128 @@ function copiarRecibo(){
 }
 
 async function baixarPDFRecibo(){
-  const txt = document.getElementById("textoRecibo").value || "";
-  const qrSrc = document.getElementById("qrReservaImg").src || "";
-
-  if(!txt){
-    alert("Recibo vazio.");
-    return;
-  }
-
   try{
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("FF TRANSPORTE - COMPROVANTE", 15, 20);
-
-    if(qrSrc){
-      doc.addImage(qrSrc, "PNG", 145, 15, 45, 45);
+    if(!codigoReservaGlobal){
+      alert("Código da reserva não encontrado.");
+      return;
     }
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(12);
+    const nome = document.getElementById("nome").value.trim();
+    const cpfRg = document.getElementById("cpfRg").value.trim();
+    const whatsapp = document.getElementById("whatsapp").value.trim();
+    const dataIda = formatarDataPadrao(document.getElementById("dataIda").value);
+    const tipoViagem = document.getElementById("tipoViagem").value;
+    const dataVolta = formatarDataPadrao(document.getElementById("dataVolta").value);
+    const valorTotal = calcularValorTotal();
 
-    const linhas = doc.splitTextToSize(txt, 120);
-    doc.text(linhas, 15, 35);
+    let empresaNome = configLoja?.nome_site || "FF Transporte";
+    let empresaTelefone = configLoja?.telefone || "";
+    let empresaEndereco = [
+      configLoja?.loja_rua || "",
+      configLoja?.loja_numero || "",
+      configLoja?.loja_cidade || "",
+      configLoja?.loja_estado || ""
+    ].filter(Boolean).join(" - ");
+
+    const origemTexto = origemTrechoSelecionada
+      ? (paradasPublicas.find(p => Number(p.ordem) === Number(origemTrechoSelecionada))?.cidade || "Origem")
+      : "Origem";
+
+    const destinoTexto = destinoTrechoSelecionado
+      ? (paradasPublicas.find(p => Number(p.ordem) === Number(destinoTrechoSelecionado))?.cidade || "Destino")
+      : "Destino";
+
+    const statusTexto =
+      document.getElementById("formaPagamento").value === "embarque"
+        ? "Pendente"
+        : "Pago";
+
+    const qrTexto = JSON.stringify({
+      codigo_embarque: codigoReservaGlobal,
+      nome,
+      poltrona: poltronaSelecionada,
+      data_viagem: dataIda,
+      origem: origemTexto,
+      destino: destinoTexto,
+      status: statusTexto
+    });
+
+    const qrDataUrl = await QRCode.toDataURL(qrTexto, {
+      width: 220,
+      margin: 1
+    });
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: [80, 180]
+    });
+
+    doc.setDrawColor(0);
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(4, 4, 72, 172, 3, 3, "FD");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.text(String(empresaNome || "FF Transporte").toUpperCase(), 40, 10, { align: "center" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(4.5);
+
+    if(empresaEndereco){
+      const enderecoLinhas = doc.splitTextToSize(empresaEndereco, 62);
+      doc.text(enderecoLinhas, 40, 15, { align: "center" });
+    }
+
+    if(empresaTelefone){
+      doc.text(String(empresaTelefone), 40, empresaEndereco ? 20 : 15, { align: "center" });
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.text("COMPROVANTE DE EMBARQUE", 40, 27, { align: "center" });
+
+    doc.line(8, 30, 72, 30);
+
+    let y = 36;
+
+    function linha(label, valor){
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(5.2);
+      doc.text(`${label}`, 8, y);
+
+      doc.setFont("helvetica", "normal");
+      const texto = String(valor || "-");
+      const linhas = doc.splitTextToSize(texto, 42);
+      doc.text(linhas, 24, y);
+
+      y += Math.max(7, linhas.length * 4.2);
+    }
+
+    linha("Código:", codigoReservaGlobal);
+    linha("Nome:", nome);
+    linha("Doc:", cpfRg);
+    linha("Whats:", whatsapp);
+    linha("Data:", dataIda);
+
+    if(tipoViagem === "ida_volta" && dataVolta){
+      linha("Volta:", dataVolta);
+    }
+
+    linha("Origem:", origemTexto);
+    linha("Destino:", destinoTexto);
+    linha("Poltrona:", poltronaSelecionada);
+    linha("Tipo:", tipoViagem === "ida_volta" ? "Ida e Volta" : "Somente Ida");
+    linha("Valor:", `R$ ${Number(valorTotal || 0).toFixed(2)}`);
+    linha("Status:", statusTexto);
+
+    doc.line(8, y + 2, 72, y + 2);
+    doc.addImage(qrDataUrl, "PNG", 24, y + 8, 32, 32);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(4.8);
+    doc.text("Apresente este QR no embarque", 40, y + 43, { align: "center" });
 
     doc.save(`recibo-${codigoReservaGlobal || "passagem"}.pdf`);
   }catch(e){
