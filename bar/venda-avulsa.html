@@ -206,7 +206,7 @@ function renderCarrinho(){
   let total = 0;
 
   carrinho.forEach(i=>{
-    total += i.preco * i.qtd;
+    total += Number(i.preco) * Number(i.qtd);
     div.innerHTML += `
       <div class="item">
         <strong>${i.nome}</strong>
@@ -242,7 +242,7 @@ window.ajustarForma = function(){
 window.calcularTroco = function(){
   const forma = document.getElementById("forma").value;
   const recebido = Number(document.getElementById("valorRecebido").value || 0);
-  const total = carrinho.reduce((s,i)=>s + i.preco*i.qtd,0);
+  const total = carrinho.reduce((s,i)=>s + (Number(i.preco) * Number(i.qtd)),0);
 
   if(forma !== "dinheiro"){
     document.getElementById("troco").innerText = "";
@@ -274,17 +274,20 @@ window.finalizar = async function(){
   }
 
   /* 1️⃣ CRIA PEDIDO */
-  const { data: pedido, error } = await supabase
-    .from("pedidos")
-    .insert({
-      app_id,
-      mesa_id: null,
-      status: "finalizado",
-      forma_pagamento: forma,
-      recebido_em: new Date().toISOString()
-    })
-    .select()
-    .single();
+  const troco = forma === "dinheiro" ? (recebido - total) : 0;
+
+const { data: pedido, error } = await supabase
+  .from("pedidos")
+  .insert({
+  app_id,
+  mesa_id: null,
+  status: "finalizado",
+  forma_pagamento: forma,
+  valor_pago: total,
+  recebido_em: new Date().toISOString()
+})
+  .select()
+  .single();
 
   if(error){
     alert("Erro ao criar pedido");
@@ -294,14 +297,23 @@ window.finalizar = async function(){
 
   /* 2️⃣ INSERE ITENS */
   for(const item of carrinho){
-    await supabase.from("pedido_itens").insert({
+  const { error: erroItem } = await supabase
+    .from("pedido_itens")
+    .insert({
+      app_id: app_id,
       pedido_id: pedido.id,
       produto_id: item.id,
       nome_produto: item.nome,
-      quantidade: item.qtd,
-      preco: item.preco
+      quantidade: Number(item.qtd),
+      preco: Number(item.preco)
     });
+
+  if(erroItem){
+    console.error("Erro ao inserir item:", erroItem);
+    alert("Erro ao salvar item da venda");
+    return;
   }
+}
 
   alert("✅ Venda registrada");
   location.href="caixa.html";
