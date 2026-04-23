@@ -1,4 +1,6 @@
 
+
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -274,6 +276,26 @@ th{
       <tbody id="listaContas"></tbody>
     </table>
   </div>
+<div class="box">
+
+  <h3 onclick="toggleVendas()" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+    🛒 Vendas do dia 
+    <span id="setaVendas">▼</span>
+  </h3>
+
+  <div id="conteudoVendas">
+    <table>
+      <thead>
+        <tr>
+          <th>Pedido</th>
+          <th>Forma</th>
+          <th>Itens</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody id="listaVendasDia"></tbody>
+    </table>
+  </div>
 
 </div>
 
@@ -313,6 +335,29 @@ aguardarSessao();
 window.irPara = p => location.href = p;
 window.scrollContas = () => document.getElementById("boxContas").scrollIntoView({ behavior:"smooth" });
 window.irPagamento = id => location.href = `pagamento.html?pedido=${id}`;
+
+
+// abrir / fechar vendas
+window.toggleVendas = function(){
+  const box = document.getElementById("conteudoVendas");
+  const seta = document.getElementById("setaVendas");
+
+  if(box.style.display === "none"){
+    box.style.display = "block";
+    seta.innerText = "▼";
+  }else{
+    box.style.display = "none";
+    seta.innerText = "▲";
+  }
+}
+
+// começa recolhido
+document.addEventListener("DOMContentLoaded", () => {
+  const box = document.getElementById("conteudoVendas");
+  if(box){
+    box.style.display = "none";
+  }
+});
 
 /* =========================
    REALTIME + BACKUP
@@ -643,7 +688,7 @@ window.gerarFechamento = async function(){
 
   const { data: pedidos, error } = await supabase
   .from("pedidos")
-  .select("id, forma_pagamento, created_at, status")
+  .select("id, forma_pagamento, created_at, status, valor_pago")
   .eq("app_id", window.APP_ID)
   .in("status", ["finalizado","fechado","pago","recebido","concluido","quitado"])
   .gte("created_at", inicio.toISOString())
@@ -674,9 +719,9 @@ window.gerarFechamento = async function(){
   const ids = pedidos.map(p => p.id);
 
   const { data: itens, error: erroItens } = await supabase
-    .from("pedido_itens")
-    .select("pedido_id, preco, quantidade")
-    .in("pedido_id", ids);
+  .from("pedido_itens")
+  .select("pedido_id, preco, quantidade, nome_produto")
+  .in("pedido_id", ids);
 
   if(erroItens){
     console.error("Erro ao buscar itens do fechamento:", erroItens);
@@ -685,28 +730,52 @@ window.gerarFechamento = async function(){
   let totalEntradas = 0;
   let totalSaidas = 0;
   const pagamentos = {};
+  const listaVendasDia = document.getElementById("listaVendasDia");
+if(listaVendasDia) listaVendasDia.innerHTML = "";
+
 
   pedidos.forEach(p => {
-    let totalPedido = 0;
+  let totalPedido = 0;
 
-    (itens || [])
-      .filter(i => i.pedido_id === p.id)
-      .forEach(i => {
-        totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
-      });
+  const itensDoPedido = (itens || []).filter(i => i.pedido_id === p.id);
 
-    const tipoMov = obterTipoMovimento(p);
+  if(itensDoPedido.length > 0){
+    itensDoPedido.forEach(i => {
+      totalPedido += Number(i.preco || 0) * Number(i.quantidade || 0);
+    });
+  } else {
+    totalPedido = Number(p.valor_pago || 0);
+  }
 
-    if(tipoMov === "saida"){
-      totalSaidas += totalPedido;
-    }else{
-      totalEntradas += totalPedido;
+  const tipoMov = obterTipoMovimento(p);
 
-      const forma = p.forma_pagamento || "Não informado";
-      if(!pagamentos[forma]) pagamentos[forma] = 0;
-      pagamentos[forma] += totalPedido;
-    }
-  });
+  if(tipoMov === "saida"){
+    totalSaidas += totalPedido;
+  }else{
+    totalEntradas += totalPedido;
+
+    const forma = p.forma_pagamento || "Não informado";
+    if(!pagamentos[forma]) pagamentos[forma] = 0;
+    pagamentos[forma] += totalPedido;
+  }
+
+  if(listaVendasDia){
+    const itensTexto = itensDoPedido.length
+      ? itensDoPedido.map(i =>
+          `${i.quantidade}x ${i.nome_produto || "Item"}`
+        ).join("<br>")
+      : "Venda avulsa / sem itens";
+
+    listaVendasDia.innerHTML += `
+      <tr>
+        <td>${p.id}</td>
+        <td>${p.forma_pagamento || "Não informado"}</td>
+        <td>${itensTexto}</td>
+        <td>${moeda(totalPedido)}</td>
+      </tr>
+    `;
+  }
+});
 
   const saldo = totalEntradas - totalSaidas;
 
