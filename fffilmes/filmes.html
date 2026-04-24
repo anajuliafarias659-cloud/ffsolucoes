@@ -10,6 +10,7 @@
   <meta name="theme-color" content="#141414">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
   <style>
     *{
@@ -835,8 +836,8 @@ right:auto;
   <img id="logoPlayer" class="logo-player" style="display:none;">
 
   <div id="overlayPlayer"></div>
-http://primenew.org/get.php?username=010948035&password=899473884&type=m3u_plus
-  <div id="legendaFlutuante" class="legenda-flutuante"></div>
+<video id="iptvPlayer" controls autoplay playsinline style="display:none;width:100%;height:100%;background:#000"></video>
+<div id="legendaFlutuante" class="legenda-flutuante"></div>
 </div>
   </div>
 
@@ -1442,6 +1443,8 @@ let timerPingAssistindo = null;
     const overlay = document.getElementById("playerOverlay");
     const overlayTitulo = document.getElementById("overlayTitulo");
     const playerArea = document.getElementById("playerArea");
+    const videoIptv = document.getElementById("iptvPlayer");
+const playerYoutube = document.getElementById("overlayPlayer");
 
     await salvarProgressoAtual(true);
 
@@ -1465,6 +1468,39 @@ let timerPingAssistindo = null;
     }
 
     await iniciarPingAssistindo(filmeObj || filmeAtualPlayer);
+
+    if (filmeAtualPlayer?.tipo_video === "iptv" || String(videoId).includes(".m3u8")) {
+  playerYoutube.style.display = "none";
+  videoIptv.style.display = "block";
+
+  try {
+    if (ytPlayer && typeof ytPlayer.stopVideo === "function") {
+      ytPlayer.stopVideo();
+    }
+  } catch(e) {}
+
+  if (window.hlsAtual) {
+    window.hlsAtual.destroy();
+    window.hlsAtual = null;
+  }
+
+  if (Hls.isSupported()) {
+    window.hlsAtual = new Hls();
+    window.hlsAtual.loadSource(videoId);
+    window.hlsAtual.attachMedia(videoIptv);
+    window.hlsAtual.on(Hls.Events.MANIFEST_PARSED, () => {
+      videoIptv.play().catch(() => {});
+    });
+  } else {
+    videoIptv.src = videoId;
+    videoIptv.play().catch(() => {});
+  }
+
+  return;
+}
+
+playerYoutube.style.display = "block";
+videoIptv.style.display = "none";
 
     const playerCriado = garantirPlayerYoutube(videoId);
 
@@ -2044,7 +2080,49 @@ let timerPingAssistindo = null;
     if (legendaMaxMinutos < legendaMinMinutos) legendaMaxMinutos = legendaMinMinutos;
     if (legendaDuracaoSegundos < 1) legendaDuracaoSegundos = 1;
   }
+async function carregarCanaisIPTV() {
+  const url = "http://primenew.org/get.php?username=010948035&password=899473884&type=m3u_plus&output=m3u8";
 
+  try {
+    const res = await fetch(url);
+    const texto = await res.text();
+
+    const linhas = texto.split("\n");
+    const canais = [];
+    let atual = null;
+    let idFake = 900000;
+
+    linhas.forEach(linha => {
+      linha = linha.trim();
+
+      if (linha.startsWith("#EXTINF")) {
+        const nome = linha.split(",").pop()?.trim() || "Canal IPTV";
+        const logoMatch = linha.match(/tvg-logo="([^"]*)"/);
+
+        atual = {
+          id: idFake++,
+          titulo: nome,
+          categoria: "TV AO VIVO",
+          descricao: "Canal ao vivo",
+          thumb: logoMatch ? logoMatch[1] : "https://via.placeholder.com/300x450/111827/ffffff?text=TV+AO+VIVO",
+          video_id: "",
+          tipo_video: "iptv"
+        };
+      }
+
+      if (linha.startsWith("http") && atual) {
+        atual.video_id = linha;
+        canais.push(atual);
+        atual = null;
+      }
+    });
+
+    return canais;
+  } catch (e) {
+    console.error("Erro carregando IPTV:", e);
+    return [];
+  }
+}
   async function carregarFilmes() {
     const catalogo = document.getElementById("catalogoNetflix");
     catalogo.innerHTML = '<div class="vazio">Carregando filmes...</div>';
@@ -2058,9 +2136,11 @@ let timerPingAssistindo = null;
       if (error) throw error;
 
       let filmes = data || [];
-      filmes = embaralharArray(filmes);
+filmes = embaralharArray(filmes);
 
-      filmesBase = filmes;
+const canaisIPTV = await carregarCanaisIPTV();
+
+filmesBase = [...canaisIPTV, ...filmes];
       filmesCache = [...filmesBase];
       categoriaAtual = "Todos";
       buscaAtual = "";
