@@ -70,12 +70,32 @@ button{background:#22c55e;font-weight:bold}
 
 <script>
 /* ===== SESSÃO ===== */
-const admin = JSON.parse(localStorage.getItem("admin_logado"));
-if(!admin || !admin.app_id){
-  alert("Sessão inválida");
-  location.href = "../auth/login.html";
+let app_id = null;
+
+async function verificarSessaoCaixa(){
+  const { data:{ session } } = await sb.auth.getSession();
+
+  if(!session){
+    alert("Sessão inválida");
+    location.href = "/auth/login.html";
+    return false;
+  }
+
+  const { data: usuario, error } = await sb
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+  if(error || !usuario?.app_id){
+    alert("Não foi possível carregar o app_id do usuário.");
+    location.href = "/auth/login.html";
+    return false;
+  }
+
+  app_id = usuario.app_id;
+  return true;
 }
-const app_id = admin.app_id;
 
 /* ===== SUPABASE ===== */
 const sb = supabase.createClient(
@@ -223,9 +243,15 @@ async function vender(){
   descontoInput.value = "";
   trocoInput.value = "";
 
-  carregarProdutos();
-  carregarCaixa();
+  async function iniciarCaixa(){
+  const ok = await verificarSessaoCaixa();
+  if(!ok) return;
+
+  await carregarProdutos();
+  await carregarCaixa();
 }
+
+iniciarCaixa();
 
 /* ===== PDF ===== */
 function gerarPDFRelatorio(vendas, totalRecebido){
