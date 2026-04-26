@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Clientes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial;
+  background:#020617;
+  color:#fff;
+}
+
+.topo{
+  background:#0f172a;
+  padding:14px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.container{
+  max-width:1000px;
+  margin:auto;
+  padding:20px;
+}
+
+input{
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:none;
+  margin-bottom:14px;
+  background:#0f172a;
+  color:#fff;
+}
+
+.card{
+  background:#0f172a;
+  border-radius:14px;
+  padding:14px;
+  margin-bottom:12px;
+}
+
+.btn{
+  padding:8px 12px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+  font-size:12px;
+}
+
+.btn-edit{background:#0ea5e9;color:#fff}
+.btn-del{background:#ef4444;color:#fff}
+.btn-wpp{background:#22c55e;color:#fff}
+.btn-hist{background:#facc15;color:#000}
+
+.grid-btn{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="topo">
+  <h3>👥 Clientes</h3>
+  <button onclick="history.back()">⬅ Voltar</button>
+</div>
+
+<div class="container">
+
+  <input id="busca" placeholder="Buscar por nome ou telefone..." oninput="filtrar()">
+
+  <div id="lista"></div>
+
+</div>
+
+<script>
+
+const sb = supabase.createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "SUA_PUBLIC_KEY_AQUI"
+);
+
+let app_id = null;
+let clientes = [];
+
+async function init(){
+  const { data:{ session } } = await sb.auth.getSession();
+
+  if(!session){
+    alert("Faça login");
+    return;
+  }
+
+  const userId = session.user.id;
+
+  const { data } = await sb
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", userId)
+    .single();
+
+  app_id = data.app_id;
+
+  carregarClientes();
+}
+
+async function carregarClientes(){
+  const { data } = await sb
+    .from("clientes")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("created_at", { ascending:false });
+
+  clientes = data || [];
+  render(clientes);
+}
+
+function render(lista){
+  document.getElementById("lista").innerHTML =
+    lista.map(c => `
+      <div class="card">
+        <b>${c.nome || "Sem nome"}</b><br>
+        📞 ${c.telefone || "-"}<br>
+        🆔 ${c.cpf || "-"}<br>
+
+        <div class="grid-btn">
+          <button class="btn btn-wpp" onclick="wpp('${c.telefone}')">WhatsApp</button>
+          <button class="btn btn-hist" onclick="historico('${c.telefone}')">Histórico</button>
+          <button class="btn btn-edit" onclick="editar('${c.id}')">Editar</button>
+          <button class="btn btn-del" onclick="excluir('${c.id}')">Excluir</button>
+        </div>
+      </div>
+    `).join("");
+}
+
+function filtrar(){
+  const termo = document.getElementById("busca").value.toLowerCase();
+
+  const filtrado = clientes.filter(c =>
+    (c.nome || "").toLowerCase().includes(termo) ||
+    (c.telefone || "").includes(termo)
+  );
+
+  render(filtrado);
+}
+
+async function editar(id){
+  const nome = prompt("Novo nome:");
+  if(!nome) return;
+
+  await sb.from("clientes").update({ nome }).eq("id", id);
+  carregarClientes();
+}
+
+async function excluir(id){
+  if(!confirm("Excluir cliente?")) return;
+
+  await sb.from("clientes").delete().eq("id", id);
+  carregarClientes();
+}
+
+function wpp(numero){
+  if(!numero) return alert("Sem telefone");
+
+  const num = numero.replace(/\D/g,"");
+  window.open(`https://wa.me/55${num}`, "_blank");
+}
+
+async function historico(telefone){
+  const { data } = await sb
+    .from("pedidos")
+    .select("*")
+    .eq("telefone", telefone);
+
+  if(!data || data.length === 0){
+    alert("Cliente sem compras");
+    return;
+  }
+
+  let total = 0;
+
+  data.forEach(p=>{
+    total += Number(p.total || 0);
+  });
+
+  alert(
+    `Pedidos: ${data.length}\n` +
+    `Total gasto: R$ ${total.toFixed(2)}`
+  );
+}
+
+init();
+
+</script>
+
+</body>
+</html>
