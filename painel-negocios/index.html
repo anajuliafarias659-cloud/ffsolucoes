@@ -10,7 +10,378 @@
   <style>
     *{box-sizing:border-box}
 
+    body{<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Painel de Negócios</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    *{box-sizing:border-box}
+
     body{
+      margin:0;
+      font-family:Arial, sans-serif;
+      background:#020617;
+      color:#fff;
+    }
+
+    .topo{
+      background:#0f172a;
+      padding:16px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      border-bottom:1px solid #1e293b;
+    }
+
+    .topo h1{
+      font-size:20px;
+      margin:0;
+    }
+
+    .btn-sair{
+      background:#dc2626;
+      color:#fff;
+      border:none;
+      padding:10px 14px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:bold;
+    }
+
+    .container{
+      max-width:1100px;
+      margin:auto;
+      padding:24px;
+    }
+
+    .bemvindo{
+      background:#0f172a;
+      border:1px solid #1e293b;
+      border-radius:16px;
+      padding:18px;
+      margin-bottom:24px;
+    }
+
+    .bemvindo h2{
+      margin:0 0 6px;
+      font-size:22px;
+    }
+
+    .bemvindo p{
+      margin:0;
+      color:#94a3b8;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+      gap:18px;
+    }
+
+    .card{
+      background:#0f172a;
+      border:1px solid #1e293b;
+      border-radius:18px;
+      padding:18px;
+      box-shadow:0 10px 30px rgba(0,0,0,.25);
+    }
+
+    .card h3{
+      margin:0 0 8px;
+      font-size:20px;
+    }
+
+    .tipo{
+      color:#38bdf8;
+      font-size:14px;
+      margin-bottom:8px;
+      font-weight:bold;
+    }
+
+    .app{
+      font-size:12px;
+      color:#94a3b8;
+      word-break:break-all;
+      margin-bottom:16px;
+    }
+
+    .acoes{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .btn{
+      border:none;
+      padding:11px 14px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:bold;
+      text-decoration:none;
+      display:inline-block;
+      text-align:center;
+    }
+
+    .btn-admin{
+      background:#22c55e;
+      color:#052e16;
+    }
+
+    .btn-loja{
+      background:#38bdf8;
+      color:#082f49;
+    }
+
+    .vazio{
+      background:#0f172a;
+      border:1px dashed #334155;
+      border-radius:16px;
+      padding:30px;
+      text-align:center;
+      color:#94a3b8;
+    }
+
+    .erro{
+      background:#7f1d1d;
+      color:#fecaca;
+      padding:14px;
+      border-radius:12px;
+      margin-bottom:16px;
+      display:none;
+    }
+
+    @media(max-width:600px){
+      .topo{
+        flex-direction:column;
+        gap:12px;
+        align-items:flex-start;
+      }
+
+      .container{
+        padding:16px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="topo">
+    <h1>🏢 Painel de Negócios</h1>
+    <button class="btn-sair" onclick="sair()">Sair</button>
+  </div>
+
+  <div class="container">
+
+    <div class="bemvindo">
+      <h2>Minhas lojas</h2>
+      <p>Escolha qual negócio deseja administrar.</p>
+    </div>
+
+    <div id="erro" class="erro"></div>
+
+    <div id="listaNegocios" class="grid"></div>
+
+  </div>
+
+<script>
+/* =========================
+   SUPABASE
+========================= */
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+
+/* =========================
+   CONFIGURAÇÕES
+========================= */
+
+/*
+  Coloque aqui o caminho do seu admin principal.
+  Exemplo:
+  /admin/index.html
+  /admin.html
+  /painel/admin.html
+*/
+const URL_ADMIN = "admin.html";
+
+/*
+  Coloque aqui o caminho da loja pública.
+  Exemplo:
+  /loja/index.html
+  /celular/index.html
+*/
+const URL_LOJA_PUBLICA = "index.html";
+
+
+/* =========================
+   INICIAR
+========================= */
+document.addEventListener("DOMContentLoaded", iniciar);
+
+async function iniciar(){
+  const erroBox = document.getElementById("erro");
+  const lista = document.getElementById("listaNegocios");
+
+  lista.innerHTML = `<div class="vazio">Carregando negócios...</div>`;
+
+  const { data:{ session }, error: sessionError } = await db.auth.getSession();
+
+  if(sessionError || !session){
+  window.location.href = "/auth/login.html";
+  return;
+}
+
+  const user = session.user;
+
+  /*
+    TABELA ESPERADA:
+
+    negocios
+    - id
+    - dono_id
+    - app_id
+    - nome
+    - tipo
+    - ativo
+
+    dono_id recebe o user.id do Supabase Auth.
+  */
+
+  const { data: negocios, error } = await db
+  .from("negocios")
+  .select("*")
+  .eq("dono_id", user.id)
+  .eq("ativo", true)
+  .order("created_at", { ascending:false });
+
+  if(error){
+    erroBox.style.display = "block";
+    erroBox.innerText = "Erro ao buscar negócios: " + error.message;
+    lista.innerHTML = "";
+    return;
+  }
+
+  if(!negocios || negocios.length === 0){
+    lista.innerHTML = `
+      <div class="vazio">
+        Nenhum negócio encontrado para este usuário.
+        <br><br>
+        Verifique se existe registro na tabela <b>negocios</b>
+        com o <b>dono_id</b> igual ao ID do usuário logado.
+      </div>
+    `;
+    return;
+  }
+
+  renderizarNegocios(negocios);
+}
+
+
+/* =========================
+   RENDERIZAR CARDS
+========================= */
+function renderizarNegocios(negocios){
+  const lista = document.getElementById("listaNegocios");
+
+  lista.innerHTML = negocios.map(n => {
+    const nome = n.nome || "Negócio sem nome";
+    const tipo = n.tipo || "Loja";
+    const appId = n.app_id;
+
+    return `
+      <div class="card">
+        <h3>${escapeHtml(nome)}</h3>
+        <div class="tipo">${escapeHtml(tipo)}</div>
+        <div class="app">
+          APP_ID:<br>${escapeHtml(appId)}
+        </div>
+
+        <div class="acoes">
+  <button class="btn btn-admin" onclick="window.location.href='/auth/login.html?app_id=${appId}'">
+    Gerenciar
+  </button>
+
+  <button class="btn btn-loja" onclick="abrirLoja('${appId}')">
+    Ver loja
+  </button>
+</div>
+      </div>
+    `;
+  }).join("");
+}
+
+
+/* =========================
+   ABRIR ADMIN / LOJA
+
+async function abrirAdmin(appId){
+  if(!appId){
+    alert("APP_ID não encontrado");
+    return;
+  }
+
+  // usa o MESMO cliente supabase que você já usa no painel
+  // (no seu código ele se chama `supabase`, não `db`)
+  const { data, error } = await supabase
+    .from("apps")
+    .select("tipo, sistema")
+    .eq("id", appId)
+    .maybeSingle();
+
+  if(error || !data){
+    alert("App não encontrado.");
+    return;
+  }
+
+  const sistema = String(data.tipo || data.sistema || "").trim().toLowerCase();
+
+  if(!sistema){
+    alert("Sistema do app não configurado.");
+    return;
+  }
+
+  window.location.href = `/${sistema}/admin.html`;
+}
+
+
+/* =========================
+   SAIR
+========================= */
+async function sair(){
+  await db.auth.signOut();
+  window.location.href = "/auth/login.html";
+}
+
+window.sair = sair;
+
+/* =========================
+   SEGURANÇA HTML
+========================= */
+function escapeHtml(texto){
+  return String(texto || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+window.abrirAdmin = abrirAdmin;
+window.abrirLoja = abrirLoja;
+window.sair = sair;
+
+</script>
+
+</body>
+</html>
       margin:0;
       font-family:Arial, sans-serif;
       background:#020617;
