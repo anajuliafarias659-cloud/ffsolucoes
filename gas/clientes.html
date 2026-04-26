@@ -8,13 +8,11 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-*{
-  box-sizing:border-box;
-}
+*{box-sizing:border-box}
 
 body{
   margin:0;
-  font-family:Arial, sans-serif;
+  font-family:Arial,sans-serif;
   background:#020617;
   color:#fff;
 }
@@ -57,14 +55,10 @@ body{
   box-shadow:0 10px 35px rgba(0,0,0,.45);
 }
 
-.card-form{
-  border:1px solid #475569;
-}
-
 .card h3{
   margin-top:0;
-  margin-bottom:22px;
-  font-size:26px;
+  margin-bottom:18px;
+  font-size:24px;
 }
 
 .grid-form{
@@ -78,7 +72,6 @@ input{
   padding:15px 17px;
   border-radius:14px;
   border:1px solid #334155;
-  margin-bottom:0;
   background:#e8f0ff;
   color:#000;
   font-size:18px;
@@ -91,7 +84,7 @@ input:focus{
 }
 
 #busca{
-  margin-bottom:20px;
+  margin-bottom:18px;
   background:#fff;
   color:#000;
 }
@@ -113,29 +106,11 @@ input:focus{
   padding:14px 22px;
 }
 
-.btn-salvar:hover{
-  background:#16a34a;
-}
-
-.btn-edit{
-  background:#0ea5e9;
-  color:#fff;
-}
-
-.btn-del{
-  background:#ef4444;
-  color:#fff;
-}
-
-.btn-wpp{
-  background:#22c55e;
-  color:#fff;
-}
-
-.btn-hist{
-  background:#facc15;
-  color:#000;
-}
+.btn-wpp{background:#22c55e;color:#fff}
+.btn-hist{background:#facc15;color:#000}
+.btn-edit{background:#0ea5e9;color:#fff}
+.btn-del{background:#ef4444;color:#fff}
+.btn-roxo{background:#7c3aed;color:#fff}
 
 .grid-btn{
   display:flex;
@@ -150,11 +125,14 @@ input:focus{
   border-left:6px solid #22c55e;
 }
 
+.cliente-card.pedidos{
+  border-left-color:#facc15;
+}
+
 .cliente-nome{
   font-size:22px;
   font-weight:bold;
   margin-bottom:10px;
-  color:#fff;
 }
 
 .cliente-info{
@@ -165,9 +143,37 @@ input:focus{
 
 .vazio{
   text-align:center;
-  padding:30px;
-  color:#94a3b8;
+  padding:28px;
+  color:#93c5fd;
   font-size:18px;
+}
+
+.duas-colunas{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:18px;
+}
+
+.titulo-card{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+}
+
+.badge{
+  background:#334155;
+  color:#fff;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:13px;
+  font-weight:bold;
+}
+
+@media(max-width:900px){
+  .duas-colunas{
+    grid-template-columns:1fr;
+  }
 }
 
 @media(max-width:700px){
@@ -212,8 +218,8 @@ input:focus{
 
 <div class="container">
 
-  <div class="card card-form">
-    <h3>Cadastrar cliente</h3>
+  <div class="card">
+    <h3>Cadastrar cliente fixo</h3>
 
     <div class="grid-form">
       <input id="nomeCliente" placeholder="Nome">
@@ -228,9 +234,27 @@ input:focus{
     <button class="btn btn-salvar" onclick="salvarCliente()">Salvar cliente</button>
   </div>
 
-  <input id="busca" placeholder="Buscar por nome ou telefone..." oninput="filtrar()">
+  <input id="busca" placeholder="Buscar por nome ou telefone..." oninput="renderizarTudo()">
 
-  <div id="lista"></div>
+  <div class="duas-colunas">
+
+    <div class="card">
+      <div class="titulo-card">
+        <h3>🛒 Clientes dos pedidos</h3>
+        <span class="badge" id="qtdPedidos">0</span>
+      </div>
+      <div id="listaPedidos"></div>
+    </div>
+
+    <div class="card">
+      <div class="titulo-card">
+        <h3>✅ Clientes cadastrados</h3>
+        <span class="badge" id="qtdCadastrados">0</span>
+      </div>
+      <div id="listaCadastrados"></div>
+    </div>
+
+  </div>
 
 </div>
 
@@ -241,10 +265,22 @@ const sb = supabase.createClient(
 );
 
 let app_id = null;
-let clientes = [];
+let clientesPedidos = [];
+let clientesCadastrados = [];
+
+let clientesOcultosPedidos = JSON.parse(
+  localStorage.getItem("clientes_ocultos_pedidos") || "[]"
+);
 
 function limparNumero(v){
   return String(v || "").replace(/\D/g,"");
+}
+
+function dinheiro(v){
+  return Number(v || 0).toLocaleString("pt-BR", {
+    style:"currency",
+    currency:"BRL"
+  });
 }
 
 async function init(){
@@ -269,52 +305,55 @@ async function init(){
     return;
   }
 
-  app_id = data.app_id;
-  carregarClientes();
+  app_id = String(data.app_id);
+
+  await carregarClientesPedidos();
+  await carregarClientesCadastrados();
+
+  renderizarTudo();
 }
 
-async function carregarClientes(){
+async function carregarClientesPedidos(){
   const { data, error } = await sb
     .from("pedidos")
-    .select(`
-      id,
-      cliente_nome,
-      cliente_telefone,
-      cliente_email,
-      cliente_cpf,
-      cliente_rua,
-      cliente_numero,
-      cliente_bairro,
-      cliente_cidade,
-      total,
-      valor_total,
-      created_at
-    `)
+    .select("*")
     .eq("app_id", app_id)
     .order("created_at", { ascending:false });
 
   if(error){
     console.error(error);
-    alert("Erro ao carregar clientes dos pedidos.");
+    clientesPedidos = [];
     return;
   }
 
   const mapa = new Map();
 
   (data || []).forEach(p => {
-    const telefone = limparNumero(p.cliente_telefone);
+    const telefone = limparNumero(
+      p.cliente_telefone ||
+      p.telefone ||
+      p.whatsapp ||
+      p.celular
+    );
 
     if(!telefone) return;
 
+    if(clientesOcultosPedidos.includes(telefone)) return;
+
     if(!mapa.has(telefone)){
       mapa.set(telefone, {
-        nome: p.cliente_nome || "Sem nome",
+        nome: p.cliente_nome || p.nome || p.nome_cliente || "Sem nome",
         telefone,
-        email: p.cliente_email || "",
-        cpf: p.cliente_cpf || "",
-        endereco: [p.cliente_rua, p.cliente_numero].filter(Boolean).join(", "),
-        bairro: p.cliente_bairro || "",
-        cidade: p.cliente_cidade || "",
+        email: p.cliente_email || p.email || "",
+        cpf: p.cliente_cpf || p.cpf || "",
+        endereco: (
+          [p.cliente_rua, p.cliente_numero].filter(Boolean).join(", ") ||
+          p.endereco ||
+          p.cliente_endereco ||
+          ""
+        ),
+        bairro: p.cliente_bairro || p.bairro || "",
+        cidade: p.cliente_cidade || p.cidade || "",
         pedidos: 0,
         total: 0,
         ultima_compra: p.created_at
@@ -323,17 +362,31 @@ async function carregarClientes(){
 
     const c = mapa.get(telefone);
     c.pedidos += 1;
-    c.total += Number(p.total || p.valor_total || 0);
+    c.total += Number(p.total || p.valor_total || p.valor || 0);
   });
 
-  clientes = Array.from(mapa.values());
-  render(clientes);
+  clientesPedidos = Array.from(mapa.values());
+}
+
+async function carregarClientesCadastrados(){
+  const { data, error } = await sb
+    .from("clientes")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("created_at", { ascending:false });
+
+  if(error){
+    console.error(error);
+    clientesCadastrados = [];
+    return;
+  }
+
+  clientesCadastrados = data || [];
 }
 
 async function salvarCliente(){
   const nome = document.getElementById("nomeCliente").value.trim();
   const telefone = limparNumero(document.getElementById("telefoneCliente").value);
-  const cpf = limparNumero(document.getElementById("cpfCliente").value);
   const email = document.getElementById("emailCliente").value.trim();
   const endereco = document.getElementById("enderecoCliente").value.trim();
   const bairro = document.getElementById("bairroCliente").value.trim();
@@ -344,7 +397,7 @@ async function salvarCliente(){
     return;
   }
 
-  const { error } = await sb.from("clientes").insert({
+  const { error } = await sb.from("clientes").upsert({
     app_id,
     nome,
     telefone,
@@ -352,6 +405,8 @@ async function salvarCliente(){
     endereco,
     bairro,
     cidade
+  }, {
+    onConflict: "app_id,telefone"
   });
 
   if(error){
@@ -363,19 +418,42 @@ async function salvarCliente(){
   ["nomeCliente","telefoneCliente","cpfCliente","emailCliente","enderecoCliente","bairroCliente","cidadeCliente"]
     .forEach(id => document.getElementById(id).value = "");
 
-  carregarClientes();
+  await carregarClientesCadastrados();
+  renderizarTudo();
+
+  alert("Cliente salvo/atualizado com sucesso.");
 }
 
-function render(lista){
+function renderizarTudo(){
+  const termo = document.getElementById("busca").value.toLowerCase().trim();
+
+  const pedidosFiltrados = clientesPedidos.filter(c =>
+    (c.nome || "").toLowerCase().includes(termo) ||
+    (c.telefone || "").includes(termo)
+  );
+
+  const cadastradosFiltrados = clientesCadastrados.filter(c =>
+    (c.nome || "").toLowerCase().includes(termo) ||
+    (c.telefone || "").includes(termo)
+  );
+
+  renderPedidos(pedidosFiltrados);
+  renderCadastrados(cadastradosFiltrados);
+
+  document.getElementById("qtdPedidos").innerText = pedidosFiltrados.length;
+  document.getElementById("qtdCadastrados").innerText = cadastradosFiltrados.length;
+}
+
+function renderPedidos(lista){
+  const el = document.getElementById("listaPedidos");
+
   if(!lista.length){
-    document.getElementById("lista").innerHTML = `
-      <div class="card vazio">Nenhum cliente encontrado nos pedidos.</div>
-    `;
+    el.innerHTML = `<div class="vazio">Nenhum cliente encontrado nos pedidos.</div>`;
     return;
   }
 
-  document.getElementById("lista").innerHTML = lista.map(c => `
-    <div class="card cliente-card">
+  el.innerHTML = lista.map(c => `
+    <div class="card cliente-card pedidos">
       <div class="cliente-nome">${c.nome || "Sem nome"}</div>
 
       <div class="cliente-info">
@@ -384,103 +462,44 @@ function render(lista){
         ✉️ <strong>E-mail:</strong> ${c.email || "-"}<br>
         📍 <strong>Endereço:</strong> ${[c.endereco, c.bairro, c.cidade].filter(Boolean).join(" - ") || "-"}<br>
         🛒 <strong>Pedidos:</strong> ${c.pedidos}<br>
-        💰 <strong>Total gasto:</strong> ${Number(c.total || 0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}
+        💰 <strong>Total gasto:</strong> ${dinheiro(c.total)}
       </div>
 
       <div class="grid-btn">
         <button class="btn btn-wpp" onclick="wpp('${c.telefone || ""}')">WhatsApp</button>
-        <button class="btn btn-hist" onclick="alert('Pedidos: ${c.pedidos}\\nTotal gasto: ${Number(c.total || 0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}')">Histórico</button>
+        <button class="btn btn-hist" onclick="alert('Pedidos: ${c.pedidos}\\nTotal gasto: ${dinheiro(c.total)}')">Histórico</button>
         <button class="btn btn-edit" onclick='preencherCadastro(${JSON.stringify(c)})'>Cadastrar fixo</button>
+        <button class="btn btn-del" onclick="ocultarClientePedido('${c.telefone}')">Ocultar</button>
       </div>
     </div>
   `).join("");
 }
 
-function filtrar(){
-  const termo = document.getElementById("busca").value.toLowerCase();
+function renderCadastrados(lista){
+  const el = document.getElementById("listaCadastrados");
 
-  const filtrado = clientes.filter(c =>
-    (c.nome || "").toLowerCase().includes(termo) ||
-    (c.telefone || "").includes(termo)
-  );
-
-  render(filtrado);
-}
-
-async function editar(id){
-  const cliente = clientes.find(c => String(c.id) === String(id));
-  if(!cliente) return;
-
-  const nome = prompt("Novo nome:", cliente.nome || "");
-  if(!nome) return;
-
-  const { error } = await sb
-    .from("clientes")
-    .update({ nome })
-    .eq("id", id)
-    .eq("app_id", app_id);
-
-  if(error){
-    console.error(error);
-    alert("Erro ao editar cliente.");
+  if(!lista.length){
+    el.innerHTML = `<div class="vazio">Nenhum cliente cadastrado fixo.</div>`;
     return;
   }
 
-  carregarClientes();
-}
+  el.innerHTML = lista.map(c => `
+    <div class="card cliente-card">
+      <div class="cliente-nome">${c.nome || "Sem nome"}</div>
 
-async function excluir(id){
-  if(!confirm("Excluir cliente?")) return;
+      <div class="cliente-info">
+        📞 <strong>Telefone:</strong> ${c.telefone || "-"}<br>
+        ✉️ <strong>E-mail:</strong> ${c.email || "-"}<br>
+        📍 <strong>Endereço:</strong> ${[c.endereco, c.bairro, c.cidade].filter(Boolean).join(" - ") || "-"}
+      </div>
 
-  const { error } = await sb
-    .from("clientes")
-    .delete()
-    .eq("id", id)
-    .eq("app_id", app_id);
-
-  if(error){
-    console.error(error);
-    alert("Erro ao excluir cliente.");
-    return;
-  }
-
-  carregarClientes();
-}
-
-function wpp(numero){
-  if(!numero) return alert("Sem telefone");
-
-  const num = limparNumero(numero);
-  window.open(`https://wa.me/55${num}`, "_blank");
-}
-
-async function historico(telefone){
-  const tel = limparNumero(telefone);
-
-  const { data, error } = await sb
-    .from("pedidos")
-    .select("*")
-    .eq("app_id", app_id)
-    .or(`telefone.eq.${tel},cliente_telefone.eq.${tel}`);
-
-  if(error){
-    console.error(error);
-    alert("Erro ao buscar histórico.");
-    return;
-  }
-
-  if(!data || data.length === 0){
-    alert("Cliente sem compras");
-    return;
-  }
-
-  let total = 0;
-  data.forEach(p => total += Number(p.total || p.valor_total || 0));
-
-  alert(
-    `Pedidos: ${data.length}\n` +
-    `Total gasto: R$ ${total.toFixed(2)}`
-  );
+      <div class="grid-btn">
+        <button class="btn btn-wpp" onclick="wpp('${c.telefone || ""}')">WhatsApp</button>
+        <button class="btn btn-edit" onclick='preencherCadastro(${JSON.stringify(c)})'>Editar</button>
+        <button class="btn btn-del" onclick="excluirCliente('${c.id}')">Excluir</button>
+      </div>
+    </div>
+  `).join("");
 }
 
 window.preencherCadastro = function(c){
@@ -494,6 +513,44 @@ window.preencherCadastro = function(c){
 
   window.scrollTo({ top:0, behavior:"smooth" });
 };
+
+async function excluirCliente(id){
+  if(!confirm("Excluir cliente cadastrado?")) return;
+
+  const { error } = await sb
+    .from("clientes")
+    .delete()
+    .eq("id", id)
+    .eq("app_id", app_id);
+
+  if(error){
+    console.error(error);
+    alert("Erro ao excluir cliente.");
+    return;
+  }
+
+  await carregarClientesCadastrados();
+  renderizarTudo();
+}
+
+function ocultarClientePedido(telefone){
+  if(!confirm("Ocultar este cliente da lista de pedidos? Os pedidos não serão apagados.")) return;
+
+  if(!clientesOcultosPedidos.includes(telefone)){
+    clientesOcultosPedidos.push(telefone);
+  }
+
+  localStorage.setItem("clientes_ocultos_pedidos", JSON.stringify(clientesOcultosPedidos));
+
+  carregarClientesPedidos().then(renderizarTudo);
+}
+
+function wpp(numero){
+  if(!numero) return alert("Sem telefone");
+
+  const num = limparNumero(numero);
+  window.open(`https://wa.me/55${num}`, "_blank");
+}
 
 init();
 </script>
