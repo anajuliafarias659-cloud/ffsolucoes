@@ -275,18 +275,58 @@ async function init(){
 
 async function carregarClientes(){
   const { data, error } = await sb
-    .from("clientes")
-    .select("*")
+    .from("pedidos")
+    .select(`
+      id,
+      cliente_nome,
+      cliente_telefone,
+      cliente_email,
+      cliente_cpf,
+      cliente_rua,
+      cliente_numero,
+      cliente_bairro,
+      cliente_cidade,
+      total,
+      valor_total,
+      created_at
+    `)
     .eq("app_id", app_id)
     .order("created_at", { ascending:false });
 
   if(error){
     console.error(error);
-    alert("Erro ao carregar clientes.");
+    alert("Erro ao carregar clientes dos pedidos.");
     return;
   }
 
-  clientes = data || [];
+  const mapa = new Map();
+
+  (data || []).forEach(p => {
+    const telefone = limparNumero(p.cliente_telefone);
+
+    if(!telefone) return;
+
+    if(!mapa.has(telefone)){
+      mapa.set(telefone, {
+        nome: p.cliente_nome || "Sem nome",
+        telefone,
+        email: p.cliente_email || "",
+        cpf: p.cliente_cpf || "",
+        endereco: [p.cliente_rua, p.cliente_numero].filter(Boolean).join(", "),
+        bairro: p.cliente_bairro || "",
+        cidade: p.cliente_cidade || "",
+        pedidos: 0,
+        total: 0,
+        ultima_compra: p.created_at
+      });
+    }
+
+    const c = mapa.get(telefone);
+    c.pedidos += 1;
+    c.total += Number(p.total || p.valor_total || 0);
+  });
+
+  clientes = Array.from(mapa.values());
   render(clientes);
 }
 
@@ -327,9 +367,9 @@ async function salvarCliente(){
 }
 
 function render(lista){
-  if(!lista || lista.length === 0){
+  if(!lista.length){
     document.getElementById("lista").innerHTML = `
-      <div class="card vazio">Nenhum cliente cadastrado ainda.</div>
+      <div class="card vazio">Nenhum cliente encontrado nos pedidos.</div>
     `;
     return;
   }
@@ -342,14 +382,15 @@ function render(lista){
         📞 <strong>Telefone:</strong> ${c.telefone || "-"}<br>
         🆔 <strong>CPF:</strong> ${c.cpf || "-"}<br>
         ✉️ <strong>E-mail:</strong> ${c.email || "-"}<br>
-        📍 <strong>Endereço:</strong> ${[c.endereco, c.bairro, c.cidade].filter(Boolean).join(" - ") || "-"}
+        📍 <strong>Endereço:</strong> ${[c.endereco, c.bairro, c.cidade].filter(Boolean).join(" - ") || "-"}<br>
+        🛒 <strong>Pedidos:</strong> ${c.pedidos}<br>
+        💰 <strong>Total gasto:</strong> ${Number(c.total || 0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}
       </div>
 
       <div class="grid-btn">
         <button class="btn btn-wpp" onclick="wpp('${c.telefone || ""}')">WhatsApp</button>
-        <button class="btn btn-hist" onclick="historico('${c.telefone || ""}')">Histórico</button>
-        <button class="btn btn-edit" onclick="editar('${c.id}')">Editar</button>
-        <button class="btn btn-del" onclick="excluir('${c.id}')">Excluir</button>
+        <button class="btn btn-hist" onclick="alert('Pedidos: ${c.pedidos}\\nTotal gasto: ${Number(c.total || 0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}')">Histórico</button>
+        <button class="btn btn-edit" onclick='preencherCadastro(${JSON.stringify(c)})'>Cadastrar fixo</button>
       </div>
     </div>
   `).join("");
@@ -441,6 +482,18 @@ async function historico(telefone){
     `Total gasto: R$ ${total.toFixed(2)}`
   );
 }
+
+window.preencherCadastro = function(c){
+  document.getElementById("nomeCliente").value = c.nome || "";
+  document.getElementById("telefoneCliente").value = c.telefone || "";
+  document.getElementById("cpfCliente").value = c.cpf || "";
+  document.getElementById("emailCliente").value = c.email || "";
+  document.getElementById("enderecoCliente").value = c.endereco || "";
+  document.getElementById("bairroCliente").value = c.bairro || "";
+  document.getElementById("cidadeCliente").value = c.cidade || "";
+
+  window.scrollTo({ top:0, behavior:"smooth" });
+};
 
 init();
 </script>
