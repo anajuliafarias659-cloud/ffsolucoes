@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -9,63 +8,19 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-body{
-  margin:0;
-  font-family:Arial;
-  background:#020617;
-  color:#fff;
-}
-
-.topo{
-  background:#0f172a;
-  padding:14px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-
-.container{
-  max-width:1000px;
-  margin:auto;
-  padding:20px;
-}
-
-input{
-  width:100%;
-  padding:12px;
-  border-radius:10px;
-  border:none;
-  margin-bottom:14px;
-  background:#0f172a;
-  color:#fff;
-}
-
-.card{
-  background:#0f172a;
-  border-radius:14px;
-  padding:14px;
-  margin-bottom:12px;
-}
-
-.btn{
-  padding:8px 12px;
-  border:none;
-  border-radius:8px;
-  cursor:pointer;
-  font-size:12px;
-}
-
+body{margin:0;font-family:Arial;background:#020617;color:#fff}
+.topo{background:#0f172a;padding:14px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:1000px;margin:auto;padding:20px}
+input{width:100%;padding:12px;border-radius:10px;border:none;margin-bottom:14px;background:#0f172a;color:#fff}
+.card{background:#0f172a;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #334155}
+.btn{padding:10px 12px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold}
 .btn-edit{background:#0ea5e9;color:#fff}
 .btn-del{background:#ef4444;color:#fff}
 .btn-wpp{background:#22c55e;color:#fff}
 .btn-hist{background:#facc15;color:#000}
-
-.grid-btn{
-  display:flex;
-  gap:6px;
-  flex-wrap:wrap;
-  margin-top:10px;
-}
+.grid-btn{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.grid-form{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(max-width:700px){.grid-form{grid-template-columns:1fr}}
 </style>
 </head>
 
@@ -78,6 +33,22 @@ input{
 
 <div class="container">
 
+  <div class="card">
+    <h3>Cadastrar cliente</h3>
+
+    <div class="grid-form">
+      <input id="nomeCliente" placeholder="Nome">
+      <input id="telefoneCliente" placeholder="Telefone / WhatsApp">
+      <input id="cpfCliente" placeholder="CPF">
+      <input id="emailCliente" placeholder="E-mail">
+      <input id="enderecoCliente" placeholder="Endereço">
+      <input id="bairroCliente" placeholder="Bairro">
+      <input id="cidadeCliente" placeholder="Cidade">
+    </div>
+
+    <button class="btn btn-wpp" onclick="salvarCliente()">Salvar cliente</button>
+  </div>
+
   <input id="busca" placeholder="Buscar por nome ou telefone..." oninput="filtrar()">
 
   <div id="lista"></div>
@@ -85,7 +56,6 @@ input{
 </div>
 
 <script>
-
 const sb = supabase.createClient(
   "https://pdajixsoowcyhnjwhgpc.supabase.co",
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
@@ -93,6 +63,10 @@ const sb = supabase.createClient(
 
 let app_id = null;
 let clientes = [];
+
+function limparNumero(v){
+  return String(v || "").replace(/\D/g,"");
+}
 
 async function init(){
   const { data:{ session } } = await sb.auth.getSession();
@@ -104,44 +78,91 @@ async function init(){
 
   const userId = session.user.id;
 
-  const { data } = await sb
+  const { data, error } = await sb
     .from("usuarios")
     .select("app_id")
     .eq("id", userId)
     .single();
 
-  app_id = data.app_id;
+  if(error || !data){
+    alert("Erro ao carregar usuário.");
+    return;
+  }
 
+  app_id = data.app_id;
   carregarClientes();
 }
 
 async function carregarClientes(){
-  const { data } = await sb
+  const { data, error } = await sb
     .from("clientes")
     .select("*")
     .eq("app_id", app_id)
     .order("created_at", { ascending:false });
 
+  if(error){
+    console.error(error);
+    alert("Erro ao carregar clientes.");
+    return;
+  }
+
   clientes = data || [];
   render(clientes);
 }
 
-function render(lista){
-  document.getElementById("lista").innerHTML =
-    lista.map(c => `
-      <div class="card">
-        <b>${c.nome || "Sem nome"}</b><br>
-        📞 ${c.telefone || "-"}<br>
-        🆔 ${c.cpf || "-"}<br>
+async function salvarCliente(){
+  const nome = document.getElementById("nomeCliente").value.trim();
+  const telefone = limparNumero(document.getElementById("telefoneCliente").value);
+  const cpf = limparNumero(document.getElementById("cpfCliente").value);
+  const email = document.getElementById("emailCliente").value.trim();
+  const endereco = document.getElementById("enderecoCliente").value.trim();
+  const bairro = document.getElementById("bairroCliente").value.trim();
+  const cidade = document.getElementById("cidadeCliente").value.trim();
 
-        <div class="grid-btn">
-          <button class="btn btn-wpp" onclick="wpp('${c.telefone}')">WhatsApp</button>
-          <button class="btn btn-hist" onclick="historico('${c.telefone}')">Histórico</button>
-          <button class="btn btn-edit" onclick="editar('${c.id}')">Editar</button>
-          <button class="btn btn-del" onclick="excluir('${c.id}')">Excluir</button>
-        </div>
+  if(!nome && !telefone){
+    alert("Informe pelo menos nome ou telefone.");
+    return;
+  }
+
+  const { error } = await sb.from("clientes").insert({
+    app_id,
+    nome,
+    telefone,
+    cpf,
+    email,
+    endereco,
+    bairro,
+    cidade
+  });
+
+  if(error){
+    console.error(error);
+    alert("Erro ao salvar cliente.");
+    return;
+  }
+
+  ["nomeCliente","telefoneCliente","cpfCliente","emailCliente","enderecoCliente","bairroCliente","cidadeCliente"]
+    .forEach(id => document.getElementById(id).value = "");
+
+  carregarClientes();
+}
+
+function render(lista){
+  document.getElementById("lista").innerHTML = lista.map(c => `
+    <div class="card">
+      <b>${c.nome || "Sem nome"}</b><br>
+      📞 ${c.telefone || "-"}<br>
+      🆔 ${c.cpf || "-"}<br>
+      📍 ${[c.endereco, c.bairro, c.cidade].filter(Boolean).join(" - ") || "-"}
+
+      <div class="grid-btn">
+        <button class="btn btn-wpp" onclick="wpp('${c.telefone || ""}')">WhatsApp</button>
+        <button class="btn btn-hist" onclick="historico('${c.telefone || ""}')">Histórico</button>
+        <button class="btn btn-edit" onclick="editar('${c.id}')">Editar</button>
+        <button class="btn btn-del" onclick="excluir('${c.id}')">Excluir</button>
       </div>
-    `).join("");
+    </div>
+  `).join("");
 }
 
 function filtrar(){
@@ -156,7 +177,10 @@ function filtrar(){
 }
 
 async function editar(id){
-  const nome = prompt("Novo nome:");
+  const cliente = clientes.find(c => String(c.id) === String(id));
+  if(!cliente) return;
+
+  const nome = prompt("Novo nome:", cliente.nome || "");
   if(!nome) return;
 
   await sb.from("clientes").update({ nome }).eq("id", id);
@@ -173,15 +197,18 @@ async function excluir(id){
 function wpp(numero){
   if(!numero) return alert("Sem telefone");
 
-  const num = numero.replace(/\D/g,"");
+  const num = limparNumero(numero);
   window.open(`https://wa.me/55${num}`, "_blank");
 }
 
 async function historico(telefone){
+  const tel = limparNumero(telefone);
+
   const { data } = await sb
     .from("pedidos")
     .select("*")
-    .eq("telefone", telefone);
+    .eq("app_id", app_id)
+    .or(`telefone.eq.${tel},cliente_telefone.eq.${tel}`);
 
   if(!data || data.length === 0){
     alert("Cliente sem compras");
@@ -189,10 +216,7 @@ async function historico(telefone){
   }
 
   let total = 0;
-
-  data.forEach(p=>{
-    total += Number(p.total || 0);
-  });
+  data.forEach(p => total += Number(p.total || p.valor_total || 0));
 
   alert(
     `Pedidos: ${data.length}\n` +
@@ -201,7 +225,6 @@ async function historico(telefone){
 }
 
 init();
-
 </script>
 
 </body>
