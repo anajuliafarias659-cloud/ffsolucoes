@@ -1,6 +1,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -174,13 +175,14 @@ small{opacity:.7}
     </div>
 
     <div class="linha-4">
-      <input id="tipoVariacaoInput" placeholder="Tipo da variação (ex: Cor, Tamanho, Volume, Embalagem)">
-      <input id="valorVariacaoInput" placeholder="Valor da variação (ex: Preto, M, 2L, Long Neck)">
-      <input id="estoqueVariacaoInput" type="number" placeholder="Estoque dessa variação">
-      <input id="precoVariacaoInput" type="text" placeholder="Preço dessa variação">
-    </div>
+  <input id="tipoVariacaoInput" placeholder="Tipo da variação">
+  <input id="valorVariacaoInput" placeholder="Valor da variação">
+  <input id="estoqueVariacaoInput" type="number" placeholder="Estoque dessa variação">
+  <input id="precoVariacaoInput" type="text" placeholder="Preço dessa variação">
+  <input id="qtdMinimaInput" type="number" placeholder="Qtd mínima (ex: 1, 10, 12)">
+</div>
 
-    <button type="button" onclick="adicionarVariacao()">Adicionar variação</button>
+    <button type="button" onclick="salvarVariacao()">Adicionar / Salvar variação</button>
     <div id="listaVariacoes"></div>
 
     <h3 style="margin-top:18px;">🔗 Produtos complementares</h3>
@@ -211,6 +213,7 @@ let admin = null;
 let fotosTemp = [];
 let fotosExistentes = [];
 let variacoes = [];
+let variacaoEditandoIndex = null;
 const LIMITE = 6
 let editando = false;
 let produtoEditandoId = null;
@@ -469,6 +472,24 @@ async function comprimirImagem(file, maxLado = 1600, qualidade = 0.82){
   });
 }
 
+function atualizarVariacoes(){
+  listaVariacoes.innerHTML = variacoes.map((v,i)=>`
+    <div class="variacao-box">
+      <span>
+        <b>${v.tipo}:</b> ${v.valor}
+        - ${v.estoque} unidades
+        - ${v.preco !== null && v.preco !== undefined ? formatarReal(v.preco) : "usa preço padrão"}
+        - mínimo: ${v.qtd_minima || 1}
+      </span>
+
+      <div style="display:flex; gap:6px;">
+        <button type="button" style="background:#0ea5e9" onclick="editarVariacao(${i})">Editar</button>
+        <button type="button" onclick="removerVariacao(${i})">x</button>
+      </div>
+    </div>
+  `).join("");
+}
+
 function atualizarPreview(){
   preview.innerHTML = "";
 
@@ -499,49 +520,66 @@ function removerTemp(i){
   atualizarPreview();
 }
 
+function removerVariacao(i){
+  variacoes.splice(i,1);
+  atualizarVariacoes();
+}
+
 /* ===== VARIAÇÕES ===== */
-function adicionarVariacao(){
+function salvarVariacao(){
   const tipo = tipoVariacaoInput.value.trim();
   const valor = valorVariacaoInput.value.trim();
   const estoqueVar = estoqueVariacaoInput.value;
   const precoVarTexto = precoVariacaoInput.value.trim();
   const precoVar = precoVarTexto ? moedaParaNumero(precoVarTexto) : null;
 
+  const qtdMinimaInput = document.getElementById("qtdMinimaInput");
+  const qtdMinima = Number(qtdMinimaInput?.value || 1);
+
   if(!tipo || !valor || estoqueVar === "" || Number(estoqueVar) < 0){
     alert("Informe tipo, valor e estoque da variação");
     return;
   }
 
-  variacoes.push({
+  const nova = {
     tipo,
     valor,
     estoque: Number(estoqueVar),
-    preco: precoVar
-  });
+    preco: precoVar,
+    qtd_minima: qtdMinima
+  };
+
+  if(variacaoEditandoIndex !== null){
+    variacoes[variacaoEditandoIndex] = nova;
+    variacaoEditandoIndex = null;
+  }else{
+    variacoes.push(nova);
+  }
 
   tipoVariacaoInput.value = "";
   valorVariacaoInput.value = "";
   estoqueVariacaoInput.value = "";
   precoVariacaoInput.value = "";
+  if(qtdMinimaInput) qtdMinimaInput.value = "";
+
   atualizarVariacoes();
 }
 
-function atualizarVariacoes(){
-  listaVariacoes.innerHTML = variacoes.map((v,i)=>`
-    <div class="variacao-box">
-      <span>
-        <b>${v.tipo}:</b> ${v.valor}
-        - ${v.estoque} unidades
-        - ${v.preco !== null && v.preco !== undefined ? formatarReal(v.preco) : "usa preço padrão"}
-      </span>
-      <button type="button" onclick="removerVariacao(${i})">x</button>
-    </div>
-  `).join("");
-}
+function editarVariacao(i){
+  const v = variacoes[i];
+  if(!v) return;
 
-function removerVariacao(i){
-  variacoes.splice(i,1);
-  atualizarVariacoes();
+  variacaoEditandoIndex = i;
+
+  tipoVariacaoInput.value = v.tipo || "";
+  valorVariacaoInput.value = v.valor || "";
+  estoqueVariacaoInput.value = v.estoque ?? "";
+  precoVariacaoInput.value = v.preco !== null && v.preco !== undefined ? formatarReal(v.preco) : "";
+
+  const qtdMinimaInput = document.getElementById("qtdMinimaInput");
+  if(qtdMinimaInput) qtdMinimaInput.value = v.qtd_minima || 1;
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 /* ===== STORAGE ===== */
@@ -670,6 +708,7 @@ function editar(p){
   try {
     const parsed = JSON.parse(p.variacoes || "[]");
     variacoes = Array.isArray(parsed) ? parsed.map(v => ({
+      qtd_minima: Number(v.qtd_minima || 1)
       tipo: v.tipo || "",
       valor: v.valor || "",
       estoque: Number(v.estoque || 0),
