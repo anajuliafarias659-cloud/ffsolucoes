@@ -350,6 +350,45 @@ line-height:1.4;
       .topo h1{font-size:17px}
       .topo p{font-size:12px}
     }
+    .produto-gas-card{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  background:#101d33;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:14px;
+  padding:10px;
+  margin-bottom:10px;
+  cursor:pointer;
+}
+
+.produto-gas-card.ativo{
+  border-color:#f59e0b;
+  background:#1f2937;
+}
+
+.produto-gas-img{
+  width:70px;
+  height:70px;
+  border-radius:12px;
+  object-fit:cover;
+  background:#020617;
+}
+
+.produto-gas-info{
+  flex:1;
+}
+
+.produto-gas-nome{
+  font-weight:900;
+  font-size:14px;
+}
+
+.produto-gas-preco{
+  color:#22c55e;
+  font-weight:900;
+  margin-top:4px;
+}
   </style>
 </head>
 <body>
@@ -403,13 +442,10 @@ line-height:1.4;
       
         <div>
   <label>Produto</label>
-  <select id="produto_gas">
-    <option value="Botijão P13">Botijão P13</option>
-    <option value="Botijão P20">Botijão P20</option>
-    <option value="Botijão P45">Botijão P45</option>
-    <option value="Água mineral">Água mineral</option>
-    <option value="Outro">Outro</option>
-  </select>
+  <div class="full">
+  <label>Escolha seu produto</label>
+  <div id="listaProdutosGas"></div>
+  <input type="hidden" id="produto_gas">
 </div>
 
 <div>
@@ -420,21 +456,23 @@ line-height:1.4;
   </select>
 </div>
 
-        <div class="full">
-  <label>Foto do veículo</label>
+ <button id="btnLocalizacao" type="button">
+  📍 Pegar minha localização para entrega
+</button>
 
-  <div style="
-   <button id="btnLocalizacao" type="button">Pegar minha localização (obrigatório)</button>
+<div>
+  <label>Latitude</label>
+  <input id="latitude" readonly />
+</div>
 
-        <div>
-          <label>Latitude</label>
-          <input id="latitude" readonly />
-        </div>
+<div>
+  <label>Longitude</label>
+  <input id="longitude" readonly />
+</div>
 
-        <div>
-          <label>Longitude</label>
-          <input id="longitude" readonly />
-        </div>
+<div class="muted" style="margin-top:6px">
+  A localização é obrigatória para a distribuidora encontrar o endereço de entrega.
+</div>
 
         <div class="muted" style="margin-top:6px">
   A localização é obrigatória para enviar o chamado.
@@ -508,6 +546,84 @@ line-height:1.4;
     );
 
 const el = (id) => document.getElementById(id);
+let produtoSelecionadoGas = null;
+
+function pegarImagemProdutoGas(p){
+  if (Array.isArray(p.imagens) && p.imagens.length > 0) return p.imagens[0];
+  if (p.imagem_url) return p.imagem_url;
+  if (p.imagem) return p.imagem;
+  if (p.foto) return p.foto;
+  return "";
+}
+
+async function carregarProdutosGas(){
+  const lista = el("listaProdutosGas");
+  if (!lista) return;
+
+  lista.innerHTML = `<div class="muted">Carregando produtos...</div>`;
+
+  const { data, error } = await supabase
+    .from("produtos")
+    .select("*")
+    .eq("ativo", true)
+    .order("nome", { ascending:true });
+
+  if (error) {
+    console.error(error);
+    lista.innerHTML = `<div class="msg">Erro ao carregar produtos.</div>`;
+    return;
+  }
+
+  const produtos = (data || []).filter(p => {
+    const nome = String(p.nome || "").toLowerCase();
+    const categoria = String(p.categoria || "").toLowerCase();
+
+    return (
+      nome.includes("gás") ||
+      nome.includes("gas") ||
+      nome.includes("botijão") ||
+      nome.includes("botijao") ||
+      nome.includes("água") ||
+      nome.includes("agua") ||
+      categoria.includes("gás") ||
+      categoria.includes("gas") ||
+      categoria.includes("água") ||
+      categoria.includes("agua")
+    );
+  });
+
+  if (!produtos.length) {
+    lista.innerHTML = `<div class="muted">Nenhum gás ou água cadastrado.</div>`;
+    return;
+  }
+
+  lista.innerHTML = produtos.map(p => {
+    const img = pegarImagemProdutoGas(p);
+    const preco = Number(p.preco || p.valor || 0);
+
+    return `
+      <div class="produto-gas-card" data-id="${p.id}">
+        <img class="produto-gas-img" src="${img || "https://via.placeholder.com/120?text=Produto"}">
+        <div class="produto-gas-info">
+          <div class="produto-gas-nome">${p.nome || "Produto"}</div>
+          <div class="produto-gas-preco">R$ ${preco.toFixed(2)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  document.querySelectorAll(".produto-gas-card").forEach(card => {
+    card.addEventListener("click", () => {
+      document.querySelectorAll(".produto-gas-card").forEach(c => c.classList.remove("ativo"));
+      card.classList.add("ativo");
+
+      const id = card.dataset.id;
+      produtoSelecionadoGas = produtos.find(p => String(p.id) === String(id));
+
+      el("produto_gas").value = produtoSelecionadoGas?.nome || "";
+    });
+  });
+}
 async function atualizarDisponibilidadeTopo() {
   const aviso = el("statusDisponibilidadeTopo");
   if (!aviso) return;
@@ -892,6 +1008,10 @@ if (!abertas || abertas.length === 0) {
       const cliente_nome = el("cliente_nome")?.value.trim() || "";
 const cliente_telefone = el("cliente_telefone")?.value.trim() || "";
 const produto_gas = el("produto_gas")?.value || "";
+if (!produto_gas) {
+  mostrarMensagem("Escolha um produto.");
+  return;
+}
 const forma_pagamento = el("forma_pagamento")?.value || "";
 const observacoes = el("observacoes")?.value.trim() || "";
 const endereco_texto = el("endereco_texto")?.value.trim() || "";
@@ -899,7 +1019,7 @@ const latitude = el("latitude")?.value ? Number(el("latitude").value) : null;
 const longitude = el("longitude")?.value ? Number(el("longitude").value) : null;
 
 if (latitude === null || longitude === null || isNaN(latitude) || isNaN(longitude)) {
-  mostrarMensagem("Pegue sua localização antes de solicitar o atendimento.");
+  mostrarMensagem("Pegue sua localização antes de enviar o pedido.");
   return;
 }
 
@@ -1242,6 +1362,7 @@ el("btnEnviarAvaliacao").addEventListener("click", () => {
 el("btnAbrirCamera").addEventListener("click", abrirCamera);
 el("btnCapturar").addEventListener("click", capturarFoto);
 
+carregarProdutosGas();
 carregarClienteSalvo();
 verificarChamadoSalvoAoAbrir();
 atualizarDisponibilidadeTopo();
