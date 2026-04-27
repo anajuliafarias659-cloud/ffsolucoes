@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Funcionários do Bar</title>
+<title>Usuários do Sistema</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script type="module" src="../js/auth.js"></script>
@@ -21,6 +21,10 @@ body{
   display:flex;
   justify-content:space-between;
   align-items:center;
+}
+.topo button{
+  width:auto;
+  padding:9px 14px;
 }
 .container{
   max-width:900px;
@@ -54,13 +58,15 @@ button{
   padding:12px 0;
 }
 .badge{
+  display:inline-block;
   padding:4px 8px;
   border-radius:8px;
   font-size:12px;
+  margin-top:5px;
 }
-.garcom{background:#2563eb}
-.caixa{background:#facc15;color:#000}
-.cozinha{background:#22c55e;color:#000}
+.caixa_gas{background:#facc15;color:#000}
+.produtos{background:#2563eb;color:#fff}
+.caixa_produtos{background:#22c55e;color:#000}
 .qr{
   background:#020617;
   padding:8px;
@@ -75,27 +81,40 @@ button{
   cursor:pointer;
   font-size:12px;
 }
+.link-acesso{
+  font-size:12px;
+  color:#93c5fd;
+  word-break:break-all;
+  display:block;
+  margin-top:6px;
+}
+@media(max-width:700px){
+  .usuario{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+}
 </style>
 </head>
 
 <body>
 
 <div class="topo">
-  <h3>⚙️ Funcionários</h3>
+  <h3>⚙️ Usuários</h3>
   <button onclick="location.href='admin.html'">Voltar</button>
 </div>
 
 <div class="container">
 
   <div class="box">
-    <h4>Criar Funcionário</h4>
+    <h4>Criar Usuário</h4>
 
-    <input id="nome" placeholder="Nome do funcionário">
+    <input id="nome" placeholder="Nome do usuário">
 
     <select id="tipo">
-      <option value="garcom">Garçom</option>
-      <option value="caixa">Caixa</option>
-      <option value="cozinha">Cozinha</option>
+      <option value="caixa_gas">Caixa Gás</option>
+      <option value="produtos">Cadastro de Produtos</option>
+      <option value="caixa_produtos">Caixa + Produtos</option>
     </select>
 
     <input id="pin" placeholder="PIN (ex: 1234)" maxlength="6">
@@ -104,7 +123,7 @@ button{
   </div>
 
   <div class="box">
-    <h4>Funcionários cadastrados</h4>
+    <h4>Usuários cadastrados</h4>
     <div id="lista"></div>
   </div>
 
@@ -115,7 +134,18 @@ import { supabase } from "../js/supabase.js";
 
 const CODIGO_ENCERRAMENTO = "9999";
 
-/* ⏳ Espera auth.js definir APP_ID */
+const LINKS = {
+  caixa_gas: "/gas/caixa.html",
+  produtos: "/produtos.html",
+  caixa_produtos: "/painel-acesso.html"
+};
+
+const NOMES = {
+  caixa_gas: "CAIXA GÁS",
+  produtos: "PRODUTOS",
+  caixa_produtos: "CAIXA + PRODUTOS"
+};
+
 function esperarAuth() {
   if (window.APP_ID) {
     carregarFuncionarios();
@@ -140,13 +170,19 @@ async function criarFuncionario(){
     return;
   }
 
-  await supabase.from("funcionarios").insert({
+  const { error } = await supabase.from("funcionarios").insert({
     nome,
     tipo,
     pin,
     app_id: window.APP_ID,
     ativo: true
   });
+
+  if(error){
+    console.error(error);
+    alert("Erro ao criar usuário.");
+    return;
+  }
 
   document.getElementById("nome").value = "";
   document.getElementById("pin").value = "";
@@ -158,12 +194,18 @@ async function carregarFuncionarios(){
 
   if (!window.APP_ID) return;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("funcionarios")
     .select("id,nome,tipo")
     .eq("app_id", window.APP_ID)
     .eq("ativo", true)
     .order("nome");
+
+  if(error){
+    console.error(error);
+    alert("Erro ao carregar usuários.");
+    return;
+  }
 
   const div = document.getElementById("lista");
   div.innerHTML = "";
@@ -173,10 +215,21 @@ async function carregarFuncionarios(){
     const box = document.createElement("div");
     box.className = "usuario";
 
+    const destino = LINKS[u.tipo] || "/produtos.html";
+
+    const link =
+      location.origin +
+      destino +
+      "?app_id=" +
+      encodeURIComponent(window.APP_ID) +
+      "&funcionario_id=" +
+      encodeURIComponent(u.id);
+
     box.innerHTML = `
       <div>
         <strong>${u.nome}</strong><br>
-        <span class="badge ${u.tipo}">${u.tipo.toUpperCase()}</span>
+        <span class="badge ${u.tipo}">${NOMES[u.tipo] || u.tipo}</span>
+        <a class="link-acesso" href="${link}" target="_blank">Abrir acesso</a>
       </div>
 
       <div class="qr">
@@ -189,11 +242,6 @@ async function carregarFuncionarios(){
     `;
 
     div.appendChild(box);
-
-    const link =
-      location.origin +
-      "/bar/login-funcionario.html?app_id=" +
-      window.APP_ID;
 
     QRCode.toCanvas(
       document.getElementById("qr-" + u.id),
@@ -225,7 +273,6 @@ esperarAuth();
 
 window.criarFuncionario = criarFuncionario;
 </script>
-
 
 </body>
 </html>
