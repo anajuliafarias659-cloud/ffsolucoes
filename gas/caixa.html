@@ -282,7 +282,7 @@ button{
         <div id="listaProdutos" class="sugestoes"></div>
 
         <input id="preco" disabled placeholder="Preço unitário">
-        <input id="estoque" disabled placeholder="Estoque disponível">
+        <select id="variacaoSelect" style="display:none"></select>
         <input id="quantidade" type="number" min="1" value="1">
         
       </div>
@@ -363,6 +363,8 @@ const produtoInput = document.getElementById("produtoInput");
 const listaProdutos = document.getElementById("listaProdutos");
 const precoInput = document.getElementById("preco");
 const estoqueInput = document.getElementById("estoque");
+const variacaoSelect = document.getElementById("variacaoSelect");
+let variacaoSelecionada = null;
 const quantidadeInput = document.getElementById("quantidade");
 const formaPagamentoInput = document.getElementById("formaPagamento");
 const totalVendaInput = document.getElementById("totalVenda");
@@ -436,6 +438,93 @@ function pegarFotoProduto(p){
   return foto || "";
 }
 
+function lerVariacoes(p){
+  if(!p.variacoes) return [];
+
+  if(Array.isArray(p.variacoes)) return p.variacoes;
+
+  if(typeof p.variacoes === "string"){
+    try{
+      const v = JSON.parse(p.variacoes);
+      return Array.isArray(v) ? v : [];
+    }catch(e){
+      return [];
+    }
+  }
+
+  return [];
+}
+
+function nomeVariacao(v){
+  return v.nome || v.tamanho || v.descricao || v.cor || "Variação";
+}
+
+function precoVariacao(v, produto){
+  return Number(v.preco ?? v.valor ?? v.preco_venda ?? produto.preco ?? 0);
+}
+
+function estoqueVariacao(v, produto){
+  return Number(v.estoque ?? v.qtd ?? v.quantidade ?? produto.estoque ?? 0);
+}
+
+function configurarVariacoes(produto){
+  const variacoes = lerVariacoes(produto);
+
+  variacaoSelecionada = null;
+  variacaoSelect.innerHTML = "";
+  variacaoSelect.style.display = "none";
+
+  if(!variacoes.length){
+    precoInput.value = produto.preco;
+    estoqueInput.value = produto.estoque;
+    return;
+  }
+
+  variacaoSelect.style.display = "block";
+
+  variacoes.forEach((v, index)=>{
+    const opt = document.createElement("option");
+    opt.value = index;
+
+    opt.textContent = `${nomeVariacao(v)} - R$ ${precoVariacao(v, produto).toFixed(2)} - Est: ${estoqueVariacao(v, produto)}`;
+
+    variacaoSelect.appendChild(opt);
+  });
+
+  variacaoSelecionada = variacoes[0];
+  precoInput.value = precoVariacao(variacaoSelecionada, produto);
+  estoqueInput.value = estoqueVariacao(variacaoSelecionada, produto);
+
+  variacaoSelect.onchange = ()=>{
+    const i = Number(variacaoSelect.value);
+    variacaoSelecionada = variacoes[i];
+
+    precoInput.value = precoVariacao(variacaoSelecionada, produto);
+    estoqueInput.value = estoqueVariacao(variacaoSelecionada, produto);
+    calcularValores();
+  };
+}
+
+function selecionarProdutoCaixa(p){
+  selecionarProdutoCaixa(p);
+
+  const foto = pegarFotoProduto(p);
+  const img = document.getElementById("fotoProduto");
+  const semFoto = document.getElementById("semFoto");
+
+  if(foto){
+    img.src = foto;
+    img.style.display = "block";
+    semFoto.style.display = "none";
+  }else{
+    img.src = "";
+    img.style.display = "none";
+    semFoto.style.display = "block";
+  }
+
+  produtoInput.value = p.nome;
+  configurarVariacoes(p);
+}
 /* ===== AUTOCOMPLETE ===== */
 produtoInput.addEventListener("input", ()=>{
   const termo = produtoInput.value.toLowerCase();
@@ -451,7 +540,7 @@ produtoInput.addEventListener("input", ()=>{
   const foto = pegarFotoProduto(p);
 
   if(index === 0){
-    produtoSelecionado = p;
+    selecionarProdutoCaixa(p);
 
     const img = document.getElementById("fotoProduto");
     const semFoto = document.getElementById("semFoto");
@@ -484,7 +573,7 @@ produtoInput.addEventListener("input", ()=>{
 
 // clique no CARD → só seleciona
 d.onclick = ()=>{
-  produtoSelecionado = p;
+  selecionarProdutoCaixa(p);
 
   const foto = pegarFotoProduto(p);
   const img = document.getElementById("fotoProduto");
@@ -509,11 +598,14 @@ d.onclick = ()=>{
 d.querySelector(".btn-add-lista").onclick = (e)=>{
   e.stopPropagation();
 
-  produtoSelecionado = p;
+  selecionarProdutoCaixa(p);
   produtoInput.value = p.nome;
   precoInput.value = p.preco;
   estoqueInput.value = p.estoque;
   quantidadeInput.value = 1;
+  variacaoSelecionada = null;
+variacaoSelect.innerHTML = "";
+variacaoSelect.style.display = "none";
 
   adicionarItemVenda();
   listaProdutos.innerHTML = "";
@@ -571,21 +663,25 @@ function adicionarItemVenda(){
     return;
   }
 
-  if(q > produtoSelecionado.estoque){
-    alert("Estoque insuficiente");
-    return;
-  }
+  const estoqueDisponivel = variacaoSelecionada
+  ? estoqueVariacao(variacaoSelecionada, produtoSelecionado)
+  : Number(produtoSelecionado.estoque);
 
-  const valorUnitario = Number(produtoSelecionado.preco);
-  const subtotal = valorUnitario * q;
+if(q > estoqueDisponivel){
+
+  const valorUnitario = variacaoSelecionada
+  ? precoVariacao(variacaoSelecionada, produtoSelecionado)
+  : Number(produtoSelecionado.preco);
+
+const nomeFinal = variacaoSelecionada
+  ? `${produtoSelecionado.nome} - ${nomeVariacao(variacaoSelecionada)}`
+  : produtoSelecionado.nome;
 
   itensVenda.push({
     id: produtoSelecionado.id,
-    nome: produtoSelecionado.nome,
-    qtd: q,
-    valorUnitario,
-    valor: subtotal,
-    estoque: produtoSelecionado.estoque
+    nome: nomeFinal,
+variacaoIndex: variacaoSelecionada ? Number(variacaoSelect.value) : null,
+produtoOriginal: produtoSelecionado,
   });
 
   renderizarItensVenda();
@@ -650,10 +746,26 @@ async function vender(){
 });
 
   for(const item of itensParaSalvar){
+
+  if(item.variacaoIndex !== null && item.produtoOriginal?.variacoes){
+    const variacoes = lerVariacoes(item.produtoOriginal);
+    const v = variacoes[item.variacaoIndex];
+
+    if(v){
+      const estoqueAtual = estoqueVariacao(v, item.produtoOriginal);
+      v.estoque = estoqueAtual - item.qtd;
+
+      await sb.from("produtos")
+        .update({ variacoes })
+        .eq("id", item.id);
+    }
+
+  }else{
     await sb.from("produtos")
       .update({ estoque: item.estoque - item.qtd })
       .eq("id", item.id);
   }
+}
 
   itensVenda = [];
   renderizarItensVenda();
