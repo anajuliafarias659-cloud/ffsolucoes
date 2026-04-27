@@ -192,29 +192,35 @@ async function iniciar(){
     return;
   }
 
-  const { data: negocios } = await db
+  const { data: negocios, error: negError } = await db
   .from("negocios")
-  .select(`
-    *,
-    apps:app_id (
-      ativo,
-      plano,
-      data_expiracao
-    )
-  `)
+  .select("*")
   .eq("dono_id", session.user.id)
   .eq("ativo", true);
 
-  if(!negocios || negocios.length === 0){
-    lista.innerHTML = `<div class="vazio">Nenhum negócio encontrado</div>`;
-    return;
-  }
+if(negError){
+  console.error(negError);
+  lista.innerHTML = `<div class="vazio">Erro ao carregar negócios</div>`;
+  return;
+}
+
+const appIds = (negocios || []).map(n => n.app_id).filter(Boolean);
+
+const { data: apps } = await db
+  .from("apps")
+  .select("id, ativo, plano, data_expiracao")
+  .in("id", appIds);
+
+const appsMap = {};
+(apps || []).forEach(app => {
+  appsMap[app.id] = app;
+});
 
   lista.innerHTML = negocios.map(n => `
     <div class="card">
       <h3>${n.nome}</h3>
       <div class="tipo">${n.tipo}</div>
-${avisoVencimento(n.apps)}
+${avisoVencimento(appsMap[n.app_id])}
 <div class="app">APP_ID: ${n.app_id}</div>
 
       <div class="acoes">
