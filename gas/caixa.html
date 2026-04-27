@@ -34,6 +34,59 @@ button{background:#22c55e;font-weight:bold}
   border-radius:8px;
   background:#1e293b;
 }
+
+.pdv-grid{
+  display:grid;
+  grid-template-columns: 1fr 420px;
+  gap:18px;
+}
+
+.foto-produto-box{
+  width:100%;
+  height:230px;
+  background:#020617;
+  border-radius:14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  margin-bottom:12px;
+  border:1px solid #1e293b;
+}
+
+.foto-produto-box img{
+  max-width:100%;
+  max-height:100%;
+  object-fit:contain;
+}
+
+#semFoto{
+  color:#64748b;
+  font-weight:bold;
+}
+
+.cupom{
+  background:#020617;
+  border:1px solid #334155;
+  border-radius:14px;
+  padding:12px;
+  min-height:320px;
+}
+
+.item-cupom{
+  display:grid;
+  grid-template-columns:1fr 50px 80px;
+  gap:8px;
+  border-bottom:1px solid #1e293b;
+  padding:8px 0;
+  font-size:14px;
+}
+
+@media(max-width:900px){
+  .pdv-grid{
+    grid-template-columns:1fr;
+  }
+}
+
 </style>
 </head>
 
@@ -49,12 +102,26 @@ button{background:#22c55e;font-weight:bold}
   <div class="box">
     <h3>🛒 Venda</h3>
 
-    <input id="produtoInput" placeholder="Produto">
+    <div class="pdv-grid">
+  <div>
+    <div class="foto-produto-box">
+      <img id="fotoProduto" src="" style="display:none">
+      <span id="semFoto">SEM FOTO</span>
+    </div>
+
+    <input id="produtoInput" placeholder="Digite o produto">
     <div id="listaProdutos" class="sugestoes"></div>
 
     <input id="preco" disabled placeholder="Preço unitário">
     <input id="estoque" disabled placeholder="Estoque disponível">
     <input id="quantidade" type="number" min="1" value="1">
+  </div>
+
+  <div class="cupom">
+    <h3>🧾 Produtos passados</h3>
+    <div id="listaItensVenda"></div>
+  </div>
+</div>
 
     <select id="formaPagamento">
       <option value="">Forma de pagamento</option>
@@ -131,6 +198,7 @@ const total = document.getElementById("total");
 
 let produtos = [];
 let produtoSelecionado = null;
+let itensVenda = [];
 
 /* ===== PRODUTOS ===== */
 async function carregarProdutos(){
@@ -150,6 +218,28 @@ async function carregarProdutos(){
   produtos = data || [];
 }
 
+function pegarFotoProduto(p){
+  let foto =
+    p.imagem_url ||
+    p.imagem ||
+    p.foto ||
+    p.foto_url ||
+    p.url_imagem ||
+    "";
+
+  if(!foto && Array.isArray(p.fotos) && p.fotos.length){
+    foto = p.fotos[0];
+  }
+
+  if(!foto && typeof p.fotos === "string"){
+    try{
+      const arr = JSON.parse(p.fotos);
+      if(Array.isArray(arr) && arr.length) foto = arr[0];
+    }catch(e){}
+  }
+
+  return foto || "";
+}
 
 /* ===== AUTOCOMPLETE ===== */
 produtoInput.addEventListener("input", ()=>{
@@ -171,16 +261,28 @@ d.innerHTML = `
   </div>
 `;
       d.onclick = ()=>{
-        produtoSelecionado = p;
-        produtoInput.value = p.nome;
-        precoInput.value = p.preco;
-        estoqueInput.value = p.estoque;
-        listaProdutos.innerHTML = "";
-        calcularValores();
-      };
-      listaProdutos.appendChild(d);
-    });
-});
+  produtoSelecionado = p;
+
+  const foto = pegarFotoProduto(p);
+  const img = document.getElementById("fotoProduto");
+  const semFoto = document.getElementById("semFoto");
+
+  if(foto){
+    img.src = foto;
+    img.style.display = "block";
+    semFoto.style.display = "none";
+  }else{
+    img.src = "";
+    img.style.display = "none";
+    semFoto.style.display = "block";
+  }
+
+  produtoInput.value = p.nome;
+  precoInput.value = p.preco;
+  estoqueInput.value = p.estoque;
+  listaProdutos.innerHTML = "";
+  calcularValores();
+};
 
 /* ===== CALCULOS ===== */
 quantidadeInput.addEventListener("input", calcularValores);
@@ -246,6 +348,14 @@ async function vender(){
   const descricao = desconto > 0
     ? `Venda: ${produtoSelecionado.nome} x${q} (${forma}) | Desconto R$ ${desconto.toFixed(2)}`
     : `Venda: ${produtoSelecionado.nome} x${q} (${forma})`;
+
+    itensVenda.push({
+  nome: produtoSelecionado.nome,
+  qtd: q,
+  valor: pago
+});
+
+renderizarItensVenda();
 
   await sb.from("caixa").insert({
     app_id,
@@ -363,6 +473,19 @@ async function fecharCaixa(){
 
   gerarPDFRelatorio(data, totalRecebido);
   carregarCaixa();
+}
+
+function renderizarItensVenda(){
+  const div = document.getElementById("listaItensVenda");
+  if(!div) return;
+
+  div.innerHTML = itensVenda.map(i => `
+    <div class="item-cupom">
+      <span>${i.nome}</span>
+      <span>${i.qtd}x</span>
+      <span>R$ ${Number(i.valor).toFixed(2)}</span>
+    </div>
+  `).join("");
 }
 
 async function iniciarCaixa(){
