@@ -9,77 +9,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
-html, body{
-  width:100%;
-  height:100%;
-  overflow:hidden;
-}
 
-body{
-  display:flex;
-  flex-direction:column;
-}
-
-.topo{
-  height:90px;
-  flex-shrink:0;
-  align-items:center;
-}
-
-.container{
-  max-width:none;
-  width:100%;
-  height:calc(100vh - 90px);
-  padding:16px;
-  overflow:hidden;
-}
-
-.box{
-  height:100%;
-  margin-bottom:0;
-  overflow:hidden;
-}
-
-.box:first-child{
-  display:flex;
-  flex-direction:column;
-}
-
-.pdv-grid{
-  flex:1;
-  min-height:0;
-  grid-template-columns: 1fr 430px;
-}
-
-.foto-produto-box{
-  height:220px;
-}
-
-.cupom{
-  height:100%;
-  overflow:hidden;
-}
-
-#listaItensVenda{
-  max-height:calc(100vh - 310px);
-  overflow:auto;
-}
-
-.box:nth-child(2){
-  display:none;
-}
-
-input, select, button{
-  padding:10px;
-  margin-top:7px;
-}
-
-h3{
-  margin:8px 0 12px;
-}
 body{margin:0;font-family:Arial;background:#020617;color:#fff}
 .topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between}
-.container{padding:16px;width:100%;margin:0}
+.container{padding:24px;max-width:900px;margin:auto}
 .box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
 input,select,button{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:none}
 input,select{background:#020617;color:#fff}
@@ -142,7 +75,7 @@ button{background:#22c55e;font-weight:bold}
 
 .item-cupom{
   display:grid;
-  grid-template-columns:1fr 50px 80px;
+  grid-template-columns:1fr 50px 80px 35px;
   gap:8px;
   border-bottom:1px solid #1e293b;
   padding:8px 0;
@@ -289,10 +222,14 @@ async function carregarProdutos(){
 function pegarFotoProduto(p){
   let foto =
     p.imagem_url ||
-    p.imagem ||
-    p.foto ||
     p.foto_url ||
     p.url_imagem ||
+    p.imagem ||
+    p.foto ||
+    p.imagem1 ||
+    p.foto1 ||
+    p.imagem_1 ||
+    p.foto_1 ||
     "";
 
   if(!foto && Array.isArray(p.fotos) && p.fotos.length){
@@ -303,7 +240,22 @@ function pegarFotoProduto(p){
     try{
       const arr = JSON.parse(p.fotos);
       if(Array.isArray(arr) && arr.length) foto = arr[0];
-    }catch(e){}
+    }catch(e){
+      foto = p.fotos;
+    }
+  }
+
+  if(!foto && Array.isArray(p.imagens) && p.imagens.length){
+    foto = p.imagens[0];
+  }
+
+  if(!foto && typeof p.imagens === "string"){
+    try{
+      const arr = JSON.parse(p.imagens);
+      if(Array.isArray(arr) && arr.length) foto = arr[0];
+    }catch(e){
+      foto = p.imagens;
+    }
   }
 
   return foto || "";
@@ -384,6 +336,55 @@ function calcularValores(){
   }
 }
 
+function adicionarItemVenda(){
+  if(!produtoSelecionado){
+    alert("Selecione um produto");
+    return;
+  }
+
+  const q = Number(quantidadeInput.value || 1);
+
+  if(q <= 0){
+    alert("Quantidade inválida");
+    return;
+  }
+
+  if(q > produtoSelecionado.estoque){
+    alert("Estoque insuficiente");
+    return;
+  }
+
+  const valorUnitario = Number(produtoSelecionado.preco);
+  const subtotal = valorUnitario * q;
+
+  itensVenda.push({
+    id: produtoSelecionado.id,
+    nome: produtoSelecionado.nome,
+    qtd: q,
+    valorUnitario,
+    valor: subtotal,
+    estoque: produtoSelecionado.estoque
+  });
+
+  renderizarItensVenda();
+
+  produtoSelecionado = null;
+  produtoInput.value = "";
+  precoInput.value = "";
+  estoqueInput.value = "";
+  quantidadeInput.value = 1;
+  totalVendaInput.value = calcularTotalItensVenda().toFixed(2);
+
+  const img = document.getElementById("fotoProduto");
+  const semFoto = document.getElementById("semFoto");
+  img.src = "";
+  img.style.display = "none";
+  semFoto.style.display = "block";
+}
+
+function calcularTotalItensVenda(){
+  return itensVenda.reduce((soma, item) => soma + Number(item.valor), 0);
+}
 /* ===== VENDA (DESCONTO ATÉ 10%) ===== */
 async function vender(){
   if(!produtoSelecionado){
@@ -551,13 +552,27 @@ function renderizarItensVenda(){
   const div = document.getElementById("listaItensVenda");
   if(!div) return;
 
-  div.innerHTML = itensVenda.map(i => `
+  if(!itensVenda.length){
+    div.innerHTML = `<p style="color:#64748b">Nenhum produto adicionado</p>`;
+    totalVendaInput.value = "";
+    return;
+  }
+
+  div.innerHTML = itensVenda.map((i, index) => `
     <div class="item-cupom">
       <span>${i.nome}</span>
       <span>${i.qtd}x</span>
       <span>R$ ${Number(i.valor).toFixed(2)}</span>
+      <button type="button" onclick="removerItemVenda(${index})" style="padding:4px;margin:0;background:#ef4444;color:white">X</button>
     </div>
   `).join("");
+
+  totalVendaInput.value = calcularTotalItensVenda().toFixed(2);
+}
+
+function removerItemVenda(index){
+  itensVenda.splice(index, 1);
+  renderizarItensVenda();
 }
 
 async function iniciarCaixa(){
