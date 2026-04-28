@@ -1,6 +1,3 @@
-
-
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -3123,11 +3120,38 @@ mostrarPromocao();
     .order("created_at", { ascending: false });
 
   if(PUBLICA_FFGAZ){
-    query = query.in("categoria", [
-      "gas", "gás", "Gas", "Gás",
-      "agua", "água", "Agua", "Água",
-      "Água Cristal", "Água Poá"
-    ]);
+
+    const { data: distribuidoras, error: erroDist } = await supabase
+      .from("distribuidoras_gas")
+      .select("app_id")
+      .eq("ativo", true)
+      .eq("aberto", true);
+
+    if(erroDist){
+      console.error(erroDist);
+      listaProdutos.innerHTML = `<div class="vazio">Erro ao buscar distribuidoras.</div>`;
+      return;
+    }
+
+    const appIdsAbertos = (distribuidoras || [])
+      .map(d => d.app_id)
+      .filter(Boolean);
+
+    if(!appIdsAbertos.length){
+      todosProdutos = [];
+      listaProdutos.innerHTML = `<div class="vazio">Nenhuma distribuidora aberta no momento.</div>`;
+      renderizarDestaques();
+      return;
+    }
+
+    query = query
+      .in("app_id", appIdsAbertos)
+      .in("categoria", [
+        "gas", "gás", "Gas", "Gás",
+        "agua", "água", "Agua", "Água",
+        "Água Cristal", "Água Poá"
+      ]);
+
   }else{
     query = query.eq("app_id", APP_ID);
   }
@@ -3141,64 +3165,10 @@ mostrarPromocao();
   }
 
   todosProdutos = data || [];
-
   criarCategorias();
   renderizarProdutos();
   renderizarDestaques();
 }
-   function renderizarDestaques(){
-  const lista = [...todosProdutos]
-    .sort(() => Math.random() - 0.5)
-    .slice(0,5);
-
-  const el = document.getElementById("produtosDestaque");
-  const titulo = document.getElementById("tituloDestaques");
-
-  if(!el) return;
-
-  if(lista.length){
-    const menorPreco = Math.min(...lista.map(p => obterPrecoInicialProduto(p)));
-    if(titulo){
-      titulo.textContent = `🔥 Oferta do dia a partir de ${formatarReal(menorPreco)}`;
-    }
-  }else{
-    if(titulo){
-      titulo.textContent = "🔥 Oferta do dia";
-    }
-  }
-
-  el.innerHTML = lista.map(p => `
-    <div class="card-destaque" onclick="irParaTodosProdutos('${p.id}')">
-      <img src="${obterImagemProduto(p) || ''}">
-      <div>${p.nome}</div>
-      <div class="preco">${formatarReal(obterPrecoInicialProduto(p))}</div>
-    </div>
-  `).join("");
-}
-
-    function criarCategorias(){
-      const categorias = [
-        "Todos",
-        ...new Set(
-          todosProdutos
-            .map(p => String(p.categoria || "").trim())
-            .filter(Boolean)
-        )
-      ];
-
-      listaCategorias.innerHTML = categorias.map(cat => `
-        <button class="${cat === categoriaAtual ? "ativo" : ""}" onclick="filtrarCategoria('${cat.replace(/'/g, "\\'")}')">
-          ${cat}
-        </button>
-      `).join("");
-    }
-
-  window.filtrarCategoria = function(cat){
-  categoriaAtual = cat;
-  paginaAtual = 1;
-  criarCategorias();
-  renderizarProdutos();
-};
 
     window.irParaTodosProdutos = function(id){
   categoriaAtual = "Todos";
