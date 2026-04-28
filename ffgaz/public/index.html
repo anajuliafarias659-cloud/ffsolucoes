@@ -1969,14 +1969,18 @@ const partes = location.pathname.split("/").filter(Boolean);
 const slugPath = partes[partes.length - 1];
 
 let slugUrl = slugQuery || slugPath;
+
 const PUBLICA_FFGAZ =
   location.pathname.includes("ffgaz") ||
   location.pathname.includes("gas");
 
-// 🔥 FORÇAR MODO DISTRIBUIDORA (SEM SLUG)
 var APP_ID = null;
 var configLoja = null;
 var distribuidora = null;
+
+if(appIdUrl){
+  APP_ID = appIdUrl;
+}
 
 
 // 🔥 PEGAR PELO DOMÍNIO SE NÃO TIVER SLUG
@@ -2564,9 +2568,18 @@ window.adicionarSugestaoAoCarrinho = function(id){
   if(!produto) return;
 
   const variacaoPadrao = obterVariacaoPadrao(produto);
-  const variacaoFinal = variacaoPadrao ? String(variacaoPadrao.valor || "Padrão") : "Padrão";
-  const precoFinal = variacaoPadrao ? obterPrecoVariacao(produto, variacaoPadrao) : Number(produto.preco || 0);
-  
+
+  const variacaoFinal = variacaoPadrao
+    ? String(variacaoPadrao.valor || "Padrão")
+    : "Padrão";
+
+  const precoFinal = variacaoPadrao
+    ? obterPrecoVariacao(produto, variacaoPadrao)
+    : Number(produto.preco || 0);
+
+  const qtdMinimaFinal = variacaoPadrao
+    ? obterQtdMinimaVariacao(variacaoPadrao)
+    : 1;
 
   const existente = carrinho.find(i =>
     String(i.id) === String(produto.id) &&
@@ -2577,19 +2590,21 @@ window.adicionarSugestaoAoCarrinho = function(id){
     existente.qtd += qtdMinimaFinal;
   }else{
     carrinho.push({
-  ...produto,
-  qtd: qtd,
-  variacao: variacaoFinal,
-  preco: precoFinal,
-  qtd_minima: qtdMinimaFinal,
-  imagem: obterImagemProduto(produto)
-});
-
+      id: produto.id,
+      nome: produto.nome,
+      preco: precoFinal,
+      qtd: qtdMinimaFinal,
+      variacao: variacaoFinal,
+      imagem: obterImagemProduto(produto),
+      produtos_complementares: produto.produtos_complementares || "[]",
+      qtd_minima: qtdMinimaFinal
+    });
   }
 
   salvarCarrinho();
   renderizarCarrinho();
 };
+
 function atualizarTempoPromocao(){
   if(!configLoja?.promocao_fim){
     tempoCardPromocao.textContent = "";
@@ -2905,8 +2920,9 @@ function obterPrecoInicialProduto(produto){
     distribuidora = distribuidoras[0];
 APP_ID = distribuidora.app_id;
 return;
+}
 
-  const { data: appData, error: appError } = await supabase
+const { data: appData, error: appError } = await supabase
     .from("config_site")
     .select("app_id")
     .eq("slug", slugUrl)
@@ -2934,14 +2950,52 @@ async function carregarConfig(){
  if(PUBLICA_FFGAZ){
   APP_ID = "PUBLICA_FFGAZ";
 
-  configLoja = {
-    nome_site: "FF Gás Express",
-    nome_loja: "FF Gás Express",
-    banner_descricao: "Peça gás e água perto de você. Aqui é mais rápido.",
-    modo_venda: "sistema",
+  if(PUBLICA_FFGAZ){
+  const APP_ID_GERAL_FFGAZ = "705255f3-9f5c-420d-9054-c620e1119545";
+
+  const { data, error } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id", APP_ID_GERAL_FFGAZ)
+    .maybeSingle();
+
+  if(error){
+    console.error("Erro ao carregar config geral FFGaz:", error);
+  }
+
+  configLoja = data || {
+    nome_site: "FF Gás",
+    nome_loja: "FF Gás",
+    banner_descricao: "Peça gás e água perto de você",
+    modo_venda: "whatsapp",
     modo_exibicao: "aberta",
     loja_fechada: false
   };
+
+  nomeLoja.textContent = configLoja.nome_site || "FF Gás";
+  heroTitulo.textContent = configLoja.nome_site || "FF Gás";
+  heroTexto.textContent = configLoja.banner_descricao || "Peça gás e água perto de você";
+
+  if(configLoja.logo_url){
+    logoLoja.src = configLoja.logo_url;
+    logoLoja.style.display = "block";
+  }else{
+    logoLoja.style.display = "none";
+  }
+
+  if(configLoja.banner_url){
+    bannerArea.innerHTML = `
+      <img src="${configLoja.banner_url}" alt="Banner">
+      <div class="banner-texto">${configLoja.banner_descricao || ""}</div>
+    `;
+  }else{
+    bannerArea.innerHTML = `
+      <div class="banner-texto">${configLoja.banner_descricao || "Peça gás e água perto de você"}</div>
+    `;
+  }
+
+  atualizarStatusLoja();
+  atualizarVisibilidadePagamento();
 
   return;
 }
@@ -3490,28 +3544,30 @@ window.adicionarModalAoCarrinho = function(){
   }
 
   const existente = carrinho.find(i =>
-    String(i.id) === String(produto.id) &&
-    String(i.variacao || "Padrão") === String(variacaoFinal)
-  );
+  String(i.id) === String(produto.id) &&
+  String(i.variacao || "Padrão") === String(variacaoFinal)
+);
 
-  if(existente){
-    existente.qtd += qtd;
-  }else{
+if(existente){
+  existente.qtd += qtdMinimaFinal;
+}else{
   carrinho.push({
-  ...produto,
-  qtd: qtd,
-  variacao: variacaoFinal,
-  preco: precoFinal,
-  qtd_minima: qtdMinimaFinal,
-  imagem: obterImagemProduto(produto)
-});
-  }
+    id: produto.id,
+    nome: produto.nome,
+    preco: precoFinal,
+    qtd: qtdMinimaFinal,
+    variacao: variacaoFinal,
+    imagem: obterImagemProduto(produto),
+    produtos_complementares: produto.produtos_complementares || "[]"
+  });
+}
 
-  salvarCarrinho();
-  renderizarCarrinho();
-  fecharModalProduto();
+salvarCarrinho();
+renderizarCarrinho();
+fecharModalProduto();
 };
-    window.adicionarAoCarrinho = function(id){
+
+window.adicionarAoCarrinho = function(id){
   if(!podeVenderAgora()){
     alert(
       modoExibicaoAtual(configLoja) === "vitrine"
