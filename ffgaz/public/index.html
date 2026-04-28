@@ -4227,6 +4227,15 @@ function mostrarListaDistribuidoras(lista){
 }
 
 async function init(){
+
+  // 🔥 BLOQUEIA A LOJA SE TEM PEDIDO
+  const pedidoSalvo = JSON.parse(localStorage.getItem("pedido_em_andamento") || "null");
+
+  if(pedidoSalvo?.id && pedidoSalvo?.codigo){
+    mostrarTelaAcompanhamento(pedidoSalvo.id, pedidoSalvo.codigo);
+    return;
+  }
+
   await resolverAppId();
   if(!APP_ID && !PUBLICA_FFGAZ) return;
 
@@ -4236,11 +4245,11 @@ async function init(){
 
   salvarCarrinho();
 
-if(typeof carregarConfig === "function"){
-  await carregarConfig();
-}
+  if(typeof carregarConfig === "function"){
+    await carregarConfig();
+  }
 
-await carregarProdutos();
+ await carregarProdutos();
 mostrarModalMotivacionalDoDia();
 }
 
@@ -4758,6 +4767,89 @@ if(areaSecreta){
 
 window.abrirDistribuidora = function(appId){
   location.href = location.pathname + "?app_id=" + appId;
+};
+
+function mostrarTelaAcompanhamento(pedidoId, codigo){
+  document.body.innerHTML = `
+    <div style="min-height:100vh;padding:24px;font-family:Arial;background:#f8fafc;text-align:center">
+      <h2>✅ Pedido enviado!</h2>
+
+      <p>Seu código de acompanhamento é:</p>
+
+      <div style="
+        font-size:30px;
+        font-weight:900;
+        background:#0ea5e9;
+        color:#fff;
+        padding:18px;
+        border-radius:18px;
+        margin:18px auto;
+        max-width:360px;
+      ">
+        ${codigo}
+      </div>
+
+      <p id="statusPedido" style="font-weight:bold;color:#334155">
+        Aguardando distribuidora aceitar...
+      </p>
+
+      <button
+        onclick="cancelarPedido('${pedidoId}')"
+        style="margin-top:20px;padding:14px 18px;border:none;border-radius:14px;background:#dc2626;color:#fff;font-weight:bold"
+      >
+        Cancelar pedido
+      </button>
+    </div>
+  `;
+
+  acompanharPedido(pedidoId);
+}
+
+function acompanharPedido(pedidoId){
+  supabase
+    .channel("pedido_" + pedidoId)
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "pedidos",
+      filter: `id=eq.${pedidoId}`
+    }, payload => {
+      const p = payload.new;
+
+      const statusEl = document.getElementById("statusPedido");
+      if(statusEl){
+        statusEl.innerText = p.status_entrega || p.status || "Atualizando...";
+      }
+
+      if(p.status === "finalizado" || p.status_entrega === "Pedido entregue"){
+        localStorage.removeItem("pedido_em_andamento");
+        alert("✅ Pedido entregue!");
+        location.reload();
+      }
+
+      if(p.status === "cancelado"){
+        localStorage.removeItem("pedido_em_andamento");
+        alert("Pedido cancelado.");
+        location.reload();
+      }
+    })
+    .subscribe();
+}
+
+window.cancelarPedido = async function(id){
+  if(!confirm("Cancelar pedido?")) return;
+
+  await supabase
+    .from("pedidos")
+    .update({
+      status: "cancelado",
+      status_entrega: "Cancelado pelo cliente",
+      pedido_aberto: false
+    })
+    .eq("id", id);
+
+  localStorage.removeItem("pedido_em_andamento");
+  location.reload();
 };
 </script>
 
