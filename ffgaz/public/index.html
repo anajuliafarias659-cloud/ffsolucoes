@@ -1972,36 +1972,10 @@ const slugPath = partes[partes.length - 1];
 let slugUrl = slugQuery || slugPath;
 
 // 🔥 FORÇAR MODO DISTRIBUIDORA (SEM SLUG)
-if(location.pathname.includes("ffgaz") && location.pathname.includes("public")){
+var APP_ID = null;
+var configLoja = null;
+var distribuidora = null;
 
-  const { data, error } = await supabase
-    .from("distribuidoras_gas")
-    .select("*")
-    .eq("ativo", true)
-    .eq("aberto", true)
-    .limit(1)
-    .maybeSingle();
-
-  console.log("ERRO DISTRIBUIDORA:", error);
-  console.log("DADOS DISTRIBUIDORA:", data);
-
-  if(error){
-    console.error(error);
-  }
-
-  if(!data){
-    document.body.innerHTML = `
-      <div style="padding:30px;font-family:Arial">
-        ❌ Nenhuma distribuidora online<br><br>
-        A consulta voltou vazia.
-      </div>
-    `;
-    throw new Error("Sem distribuidora");
-  }
-
-  distribuidora = data;
-  APP_ID = distribuidora.app_id;
-}
 
 // 🔥 PEGAR PELO DOMÍNIO SE NÃO TIVER SLUG
 if(!slugUrl && !location.pathname.includes("ffgaz/public")){
@@ -2186,9 +2160,7 @@ const TEMAS = {
   }
 };
 
-let APP_ID = null;
-let configLoja = null;
-let distribuidora = null;
+
 let todosProdutos = [];
 let carrinho = [];
 let categoriaAtual = "Todos";
@@ -2899,23 +2871,45 @@ function obterPrecoInicialProduto(produto){
     }
 
   async function resolverAppId(){
-  const { data, error } = await supabase
-  .from("distribuidoras_gas")
-  .select("*")
-  .limit(1)
-  .maybeSingle();
 
-  if(error){
-    console.error("Erro ao buscar distribuidora:", error);
-    return;
-  }
+  if(location.pathname.includes("ffgaz") || location.pathname.includes("gas")){
 
-  if(data?.app_id){
+    const { data, error } = await supabase
+      .from("distribuidoras_gas")
+      .select("*")
+      .eq("ativo", true)
+      .eq("aberto", true)
+      .limit(1)
+      .maybeSingle();
+
+    console.log("ERRO DISTRIBUIDORA:", error);
+    console.log("DADOS DISTRIBUIDORA:", data);
+
+    if(error){
+      console.error(error);
+      return;
+    }
+
+    if(!data){
+      document.body.innerHTML = `
+        <div style="padding:30px;font-family:Arial">
+          ❌ Nenhuma distribuidora online<br><br>
+          A consulta voltou vazia.
+        </div>
+      `;
+      throw new Error("Sem distribuidora");
+    }
+
+    distribuidora = data;
     APP_ID = data.app_id;
+
     configLoja = {
       ...data,
       nome_site: data.nome || "Distribuidora",
+      nome_loja: data.nome || "Distribuidora",
       whatsapp_numero: data.telefone || "",
+      telefone: data.telefone || "",
+      cidade: data.cidade || "",
       loja_fechada: false,
       modo_exibicao: "aberta",
       modo_venda: "whatsapp",
@@ -2924,31 +2918,83 @@ function obterPrecoInicialProduto(produto){
       raio_atendimento_km: data.raio_atendimento_km,
       pix_copia_cola_padrao: data.pix_copia_cola_padrao || ""
     };
+
+    return;
+  }
+
+  if(appIdUrl){
+    APP_ID = appIdUrl;
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("apps")
+    .select("id")
+    .eq("slug", slugUrl)
+    .maybeSingle();
+
+  if(error){
+    console.error("Erro ao buscar slug:", error);
+  }
+
+  if(data?.id){
+    APP_ID = data.id;
     return;
   }
 
   document.body.innerHTML = `
-    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#f8fafc;font-family:Arial,sans-serif">
-      <div style="background:#fff;border:1px solid #e2e8f0;padding:24px;border-radius:20px;text-align:center;max-width:420px;box-shadow:0 10px 30px rgba(2,6,23,.08)">
-        <h2 style="margin:0 0 10px">🔴 Nenhuma distribuidora online</h2>
-        <p style="margin:0;color:#64748b">Tente novamente mais tarde.</p>
-      </div>
+    <div style="padding:30px;font-family:Arial">
+      ❌ Loja não encontrada
     </div>
   `;
 }
 
     async function carregarConfig(){
-      const { data, error } = await supabase
-  .from("distribuidoras_gas")
-  .select("app_id")
-  .eq("ativo", true)
-  .limit(1);
- if(error){
-  console.error(error);
-  return;
-}
 
-configLoja = data || {};
+  // 🔥 SE FOR DISTRIBUIDORA → NÃO USA config_site
+  if(distribuidora){
+
+    console.log("🚫 Modo distribuidora ativo");
+
+    configLoja = {
+      ...distribuidora,
+      nome_site: distribuidora.nome || "Distribuidora",
+      nome_loja: distribuidora.nome || "Distribuidora",
+      telefone: distribuidora.telefone || "",
+      whatsapp_numero: distribuidora.telefone || "",
+      cidade: distribuidora.cidade || "",
+      modo_exibicao: "aberta",
+      modo_venda: "whatsapp",
+      loja_fechada: false
+    };
+
+    atualizarStatusLoja();
+
+    nomeLoja.textContent = configLoja.nome_site;
+    heroTitulo.textContent = configLoja.nome_site;
+    heroTexto.textContent = "Escolha seu gás ou água e finalize o pedido.";
+
+    btnWhatsTopo.href = configLoja.telefone
+      ? `https://wa.me/55${String(configLoja.telefone).replace(/\D/g,"")}`
+      : "#";
+
+    return;
+  }
+
+  // 🔵 LOJA NORMAL (config_site)
+  const { data, error } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .maybeSingle();
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  configLoja = data || {};
+}
 
 // ===== APLICA TEMA =====
 const temaBruto = String(configLoja.tema_site || "").trim().toLowerCase();
