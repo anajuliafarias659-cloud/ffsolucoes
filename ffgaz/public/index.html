@@ -3116,54 +3116,38 @@ mostrarPromocao();
 
     async function carregarProdutos(){
 
+  // 🔥 BUSCAR DISTRIBUIDORAS ABERTAS
+  const { data: distribuidoras, error: erroDist } = await supabase
+    .from("distribuidoras_gas")
+    .select("*")
+    .eq("ativo", true)
+    .eq("aberto", true);
+
+  if(erroDist){
+    console.error(erroDist);
+    listaProdutos.innerHTML = `<div class="vazio">Erro ao buscar distribuidoras.</div>`;
+    return;
+  }
+
+  if(!distribuidoras || !distribuidoras.length){
+    listaProdutos.innerHTML = `<div class="vazio">Nenhuma distribuidora aberta no momento.</div>`;
+    return;
+  }
+
+  // 🔥 PEGAR TIPOS DISPONÍVEIS (gas / agua)
+  const tiposDisponiveis = new Set();
+
+  distribuidoras.forEach(d => {
+    if(d.vende_gas) tiposDisponiveis.add("gas");
+    if(d.vende_agua) tiposDisponiveis.add("agua");
+  });
+
+  // 🔥 BUSCAR PRODUTOS APENAS DO QUE TEM DISPONÍVEL
   let query = supabase
     .from("produtos")
     .select("*")
     .eq("ativo", true)
     .order("created_at", { ascending: false });
-
-  if(PUBLICA_FFGAZ){
-
-    const { data: distribuidoras, error: erroDist } = await supabase
-      .from("distribuidoras_gas")
-.select("tipo")
-      .eq("ativo", true)
-      .eq("aberto", true);
-
-    if(erroDist){
-      console.error(erroDist);
-      listaProdutos.innerHTML = `<div class="vazio">Erro ao buscar distribuidoras.</div>`;
-      return;
-    }
-
-    const tiposDisponiveis = [...new Set(
-      (distribuidoras || [])
-        .map(d => "gas") // força tudo como gas por enquanto
-        .filter(Boolean)
-    )];
-
-    let categoriasFiltro = [];
-
-    if(tiposDisponiveis.includes("gas") || tiposDisponiveis.includes("gás")){
-      categoriasFiltro.push("gas", "gás", "Gas", "Gás");
-    }
-
-    if(tiposDisponiveis.includes("agua") || tiposDisponiveis.includes("água")){
-      categoriasFiltro.push("agua", "água", "Agua", "Água");
-    }
-
-    if(!categoriasFiltro.length){
-      todosProdutos = [];
-      listaProdutos.innerHTML = `<div class="vazio">Nenhuma distribuidora disponível no momento.</div>`;
-      renderizarDestaques();
-      return;
-    }
-
-    query = query.in("categoria", categoriasFiltro);
-
-  }else{
-    query = query.eq("app_id", APP_ID);
-  }
 
   const { data, error } = await query;
 
@@ -3173,7 +3157,12 @@ mostrarPromocao();
     return;
   }
 
-  todosProdutos = data || [];
+  // 🔥 FILTRO FINAL (AQUI É O SEGREDO)
+  todosProdutos = (data || []).filter(p => {
+    const cat = String(p.categoria || "").toLowerCase();
+    return tiposDisponiveis.has(cat);
+  });
+
   criarCategorias();
   renderizarProdutos();
   renderizarDestaques();
