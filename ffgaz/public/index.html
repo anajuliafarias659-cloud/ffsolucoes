@@ -4035,43 +4035,25 @@ msg += `📌 Referência: ${referencia ? referencia : "Não informada (cliente n
 
    btnFinalizar.addEventListener("click", async () => {
 
-  const codigoPedido = "PED" + Date.now();
-
-  // 🔥 aqui pega dados (você já tem isso no seu código)
-  const nome = document.getElementById("clienteNome").value;
-  const telefone = document.getElementById("clienteTelefone").value;
-
-  // 👉 SEU ARRAY DE ITENS já existe (carrinho)
-
-  const { data, error } = await supabase
-    .from("pedidos")
-    .insert([{
-      codigo: codigoPedido,
-      status: "aberto",
-      pedido_aberto: true,
-      status_entrega: "Aguardando distribuidora aceitar",
-
-      cliente_nome: nome,
-      cliente_telefone: telefone,
-      itens: carrinho
-    }])
-    .select();
-
-  if(error){
-    alert("Erro ao salvar pedido");
+  if(!carrinho.length){
+    alert("Adicione pelo menos 1 item no carrinho.");
     return;
   }
 
-  // 🔥 SALVA NO CELULAR
-  localStorage.setItem("pedido_em_andamento", JSON.stringify({
-    id: data[0].id,
-    codigo: codigoPedido
-  }));
+  if(!validarRaioEntrega()){
+    return;
+  }
 
-  // 🔥 MOSTRA TELA DE ACOMPANHAMENTO
-  mostrarTelaAcompanhamento(data[0].id, codigoPedido);
+  const modo = normalizarModoVenda(configLoja?.modo_venda);
 
-});
+  // 🔥 WHATSAPP
+  if(modo === "whatsapp"){
+    const confirmar = confirm("Deseja finalizar o pedido?");
+    if(!confirmar) return;
+
+    const whatsapp = apenasNumeros(
+      configLoja?.whatsapp_numero || configLoja?.telefone || ""
+    );
 
     // if(!whatsapp){
 //   alert("WhatsApp não configurado.");
@@ -4108,7 +4090,7 @@ const itensPedido = carrinho.map(item => ({
 
 const codigoAcompanhamento = `PED${Date.now()}`;
 
-const { data: pedidoCriado, error: erroPedidoWhats } = await supabase
+const { error: erroPedidoWhats } = await supabase
   .from("pedidos")
   .insert([{
     app_id: distribuidora?.app_id || null,
@@ -4130,39 +4112,29 @@ const { data: pedidoCriado, error: erroPedidoWhats } = await supabase
     cliente_lng: lng,
     observacao: obs,
 
-    itens: itensPedido,
-    total: Number(totalCarrinho()),
-    forma_pagamento: formaPagamentoSistema || formaPagamentoWhatsapp || "nao informado",
+  itens: itensPedido,
+total: Number(totalCarrinho()),
+forma_pagamento: formaPagamentoSistema || formaPagamentoWhatsapp || "nao informado",
 
-    status: "aguardando",
-    status_entrega: "Aguardando distribuidora aceitar",
-    pagamento_tipo: "whatsapp",
-    pagamento_modo: "whatsapp",
-    pagamento_status: "pendente_whatsapp",
-    codigo_acompanhamento: codigoAcompanhamento,
-    origem: "online",
+status: "aguardando",
+status_entrega: "Aguardando distribuidora aceitar",
+pagamento_tipo: "whatsapp",
+pagamento_modo: "whatsapp",
+pagamento_status: "pendente_whatsapp",
+codigo_acompanhamento: codigoAcompanhamento,
+origem: "online",
 
-    tipo_pedido: "gas",
-    pedido_aberto: true,
-    distribuidora_id: null,
-    aceito_em: null
-  }])
-  .select("id")
-  .single();
+tipo_pedido: "gas",
+pedido_aberto: true,
+distribuidora_id: null,
+aceito_em: null
+}]);
 
-if(erroPedidoWhats || !pedidoCriado?.id){
+if(erroPedidoWhats){
   console.error("Erro ao salvar pedido WhatsApp:", erroPedidoWhats);
   alert("Erro ao registrar pedido no painel. Veja o console.");
   return;
 }
-
-localStorage.setItem("pedido_em_andamento", JSON.stringify({
-  id: pedidoCriado.id,
-  codigo: codigoAcompanhamento
-}));
-
-mostrarTelaAcompanhamento(pedidoCriado.id, codigoAcompanhamento);
-return;
 
 alert("✅ Pedido enviado! Aguarde uma distribuidora aceitar.");
 
