@@ -2871,6 +2871,10 @@ function obterPrecoInicialProduto(produto){
     }
 
   async function resolverAppId(){
+    if(appIdUrl){
+  APP_ID = appIdUrl;
+  return;
+}
 
   if(location.pathname.includes("ffgaz") || location.pathname.includes("gas")){
 
@@ -2888,43 +2892,24 @@ function obterPrecoInicialProduto(produto){
       return;
     }
 
-    if(!data){
-      document.body.innerHTML = `
-        <div style="padding:30px;font-family:Arial">
-          ❌ Nenhuma distribuidora online<br><br>
-          A consulta voltou vazia.
-        </div>
-      `;
-      throw new Error("Sem distribuidora");
-    }
+    
 
-    distribuidora = data;
-    APP_ID = data.app_id;
+    if(!data || !data.length){
+  document.body.innerHTML = `
+    <div style="padding:30px;font-family:Arial">
+      ❌ Nenhuma distribuidora online
+    </div>
+  `;
+  throw new Error("Sem distribuidora");
+}
 
-    configLoja = {
-      ...data,
-      nome_site: data.nome || "Distribuidora",
-      nome_loja: data.nome || "Distribuidora",
-      whatsapp_numero: data.telefone || "",
-      telefone: data.telefone || "",
-      cidade: data.cidade || "",
-      loja_fechada: false,
-      modo_exibicao: "aberta",
-      modo_venda: "whatsapp",
-      loja_lat: data.latitude,
-      loja_lng: data.longitude,
-      raio_atendimento_km: data.raio_atendimento_km,
-      pix_copia_cola_padrao: data.pix_copia_cola_padrao || ""
-    };
+mostrarListaDistribuidoras(data);
+throw new Error("LISTA_DISTRIBUIDORAS");
 
     return;
   }
 
-  if(appIdUrl){
-    APP_ID = appIdUrl;
-    return;
-  }
-
+ 
   const { data, error } = await supabase
     .from("apps")
     .select("id")
@@ -4164,40 +4149,77 @@ window.open(
 });
 
     async function init(){
-  await resolverAppId();
-  if(!APP_ID) return;
+ async function resolverAppId(){
 
-  CARRINHO_KEY = `carrinho_${APP_ID}`;
-  ULTIMO_PEDIDO_KEY = `ultimo_pedido_${APP_ID}`;
-  carrinho = JSON.parse(localStorage.getItem(CARRINHO_KEY) || "[]");
+  if(location.pathname.includes("ffgaz") || location.pathname.includes("gas")){
 
-  salvarCarrinho();
-  await carregarConfig();
-  await carregarProdutos();
-  mostrarModalMotivacionalDoDia();
+    const { data, error } = await supabase
+      .from("distribuidoras_gas")
+      .select("*")
+      .eq("ativo", true)
+      .eq("aberto", true)
+      .order("nome", { ascending:true });
+
+    console.log("ERRO DISTRIBUIDORAS:", error);
+    console.log("DISTRIBUIDORAS:", data);
+
+    if(error){
+      console.error(error);
+      return;
+    }
+
+    if(!data || !data.length){
+      document.body.innerHTML = `
+        <div style="padding:30px;font-family:Arial">
+          ❌ Nenhuma distribuidora online
+        </div>
+      `;
+      throw new Error("Sem distribuidora");
+    }
+
+    mostrarListaDistribuidoras(data);
+    throw new Error("LISTA_DISTRIBUIDORAS");
+  }
 }
 
-    init();
+function mostrarListaDistribuidoras(lista){
 
-   window.comprarDestaque = function(id){
-  const produto = todosProdutos.find(p => String(p.id) === String(id));
-  if(!produto) return;
+  document.body.innerHTML = `
+    <div style="min-height:100vh;background:#f8fafc;font-family:Arial;padding:24px">
+      <h1 style="margin:0 0 8px;color:#0f172a">Distribuidoras disponíveis</h1>
+      <p style="margin:0 0 20px;color:#64748b">Escolha uma distribuidora para fazer seu pedido.</p>
 
-  let qtdCompra = 1;
-  const variacaoPadrao = obterVariacaoPadrao(produto);
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;">
+        ${lista.map(d => `
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:18px;box-shadow:0 10px 25px rgba(2,6,23,.08)">
+            <h2 style="margin:0 0 8px;color:#0f172a;font-size:22px">
+              ${d.nome || "Distribuidora"}
+            </h2>
 
-  if(variacaoPadrao){
-    qtdCompra = obterQtdMinimaVariacao(variacaoPadrao);
-  }
+            <div style="color:#64748b;font-size:14px;margin-bottom:6px">
+              📍 ${d.cidade || ""}
+            </div>
 
-  const qtdEl = document.getElementById("qtd_temp_" + id);
-  if(qtdEl){
-    qtdEl.textContent = qtdCompra;
-  }
+            <div style="color:#16a34a;font-weight:bold;margin-bottom:14px">
+              🟢 Aberta
+            </div>
 
-  adicionarAoCarrinho(id);
+            <button
+              onclick="abrirDistribuidora('${d.app_id}')"
+              style="width:100%;border:none;border-radius:14px;padding:14px;background:#16a34a;color:#fff;font-weight:bold;font-size:16px;cursor:pointer"
+            >
+              Pedir aqui
+            </button>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+window.abrirDistribuidora = function(appId){
+  location.href = location.pathname + "?app_id=" + encodeURIComponent(appId);
 };
-
 window.irParaProduto = function(id){
   const el = document.getElementById("produto_" + id);
   if(!el) return;
