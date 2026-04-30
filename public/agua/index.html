@@ -2873,61 +2873,59 @@ function obterPrecoInicialProduto(produto){
 
  async function resolverAppId(){
 
-  const params = new URLSearchParams(window.location.search);
-  const appIdUrl = params.get("app_id");
+  const host = window.location.hostname.replace(/^www\./, "");
+  const arquivoAtualBruto = location.pathname.split("/").pop();
 
-  const partes = location.pathname.split("/").filter(Boolean);
-  const slugPath = partes[partes.length - 1];
+  let arquivoAtual = arquivoAtualBruto || "index.html";
 
-  let slugUrl = (params.get("slug") || slugPath || "").trim();
+  if(arquivoAtual === "agua") arquivoAtual = "index.html";
+  if(arquivoAtual === "index") arquivoAtual = "index.html";
+  if(arquivoAtual === "indexx") arquivoAtual = "indexx.html";
 
-  // 🔥 1 - prioridade: app_id
+  // 1) Primeiro tenta pelo painel de domínios
+  const { data: dominioData, error: dominioError } = await supabase
+    .from("dominios_publicos")
+    .select("app_id, slug, arquivo, ativo")
+    .eq("dominio", host)
+    .eq("ativo", true)
+    .maybeSingle();
+
+  if(dominioError){
+    console.error("Erro ao buscar domínio:", dominioError);
+  }
+
+  if(dominioData?.app_id){
+    const arquivoCerto = dominioData.arquivo || "index.html";
+
+    if(arquivoCerto !== arquivoAtual){
+      location.href = `/public/agua/${arquivoCerto}`;
+      return;
+    }
+
+    APP_ID = dominioData.app_id;
+    return;
+  }
+
+  // 2) Se não tiver domínio cadastrado, usa app_id antigo
   if(appIdUrl){
     APP_ID = appIdUrl;
     return;
   }
 
-  // 🔥 2 - tenta pelo domínio (usando apps direto)
-  const host = window.location.hostname.replace(/^www\./, "");
-
-  const { data: dominioData } = await supabase
-    .from("apps")
-    .select("id, slug")
-    .eq("dominio", host)
-    .maybeSingle();
-
-  if(dominioData?.id){
-    APP_ID = dominioData.id;
-
-    // 🔥 define modelo pelo slug
-    if(dominioData.slug?.includes("tema") || dominioData.slug?.includes("novo")){
-      if(!location.pathname.includes("indexx")){
-        location.href = `/public/agua/indexx?app_id=${APP_ID}`;
-        return;
-      }
-    }
-
-    return;
-  }
-
-  // 🔥 3 - fallback slug
+  // 3) Se não tiver app_id, usa slug antigo
   if(slugUrl){
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("apps")
-      .select("id, slug")
+      .select("id")
       .eq("slug", slugUrl)
       .maybeSingle();
 
+    if(error){
+      console.error("Erro ao buscar slug:", error);
+    }
+
     if(data?.id){
       APP_ID = data.id;
-
-      if(data.slug?.includes("tema") || data.slug?.includes("novo")){
-        if(!location.pathname.includes("indexx")){
-          location.href = `/public/agua/indexx?app_id=${APP_ID}`;
-          return;
-        }
-      }
-
       return;
     }
   }
