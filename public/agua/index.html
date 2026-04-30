@@ -2874,25 +2874,20 @@ function obterPrecoInicialProduto(produto){
  async function resolverAppId(){
 
   const host = window.location.hostname.replace(/^www\./, "");
-  const arquivoAtualBruto = location.pathname.split("/").pop();
 
-  let arquivoAtual = arquivoAtualBruto || "index.html";
+  let arquivoAtual = location.pathname.split("/").pop() || "index.html";
 
   if(arquivoAtual === "agua") arquivoAtual = "index.html";
   if(arquivoAtual === "index") arquivoAtual = "index.html";
   if(arquivoAtual === "indexx") arquivoAtual = "indexx.html";
 
-  // 1) Primeiro tenta pelo painel de domínios
-  const { data: dominioData, error: dominioError } = await supabase
+  // 🔥 1 - tenta pelo painel (dominios_publicos)
+  const { data: dominioData } = await supabase
     .from("dominios_publicos")
-    .select("app_id, slug, arquivo, ativo")
+    .select("app_id, arquivo, ativo")
     .eq("dominio", host)
     .eq("ativo", true)
     .maybeSingle();
-
-  if(dominioError){
-    console.error("Erro ao buscar domínio:", dominioError);
-  }
 
   if(dominioData?.app_id){
     const arquivoCerto = dominioData.arquivo || "index.html";
@@ -2906,23 +2901,30 @@ function obterPrecoInicialProduto(produto){
     return;
   }
 
-  // 2) Se não tiver domínio cadastrado, usa app_id antigo
+  // 🔥 2 - fallback apps (se não tiver no painel)
+  const { data: appData } = await supabase
+    .from("apps")
+    .select("id")
+    .eq("dominio", host)
+    .maybeSingle();
+
+  if(appData?.id){
+    APP_ID = appData.id;
+    return;
+  }
+
+  // 🔥 3 - fallback antigo
   if(appIdUrl){
     APP_ID = appIdUrl;
     return;
   }
 
-  // 3) Se não tiver app_id, usa slug antigo
   if(slugUrl){
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("apps")
       .select("id")
       .eq("slug", slugUrl)
       .maybeSingle();
-
-    if(error){
-      console.error("Erro ao buscar slug:", error);
-    }
 
     if(data?.id){
       APP_ID = data.id;
@@ -2932,6 +2934,8 @@ function obterPrecoInicialProduto(produto){
 
   document.body.innerHTML = "Loja não encontrada";
 }
+
+
     async function carregarConfig(){
       const { data, error } = await supabase
         .from("config_site")
