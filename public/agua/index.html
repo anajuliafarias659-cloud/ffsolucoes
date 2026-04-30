@@ -2873,66 +2873,67 @@ function obterPrecoInicialProduto(produto){
 
  async function resolverAppId(){
 
-  const host = window.location.hostname.replace(/^www\./, "");
+  const params = new URLSearchParams(window.location.search);
+  const appIdUrl = params.get("app_id");
 
-  const { data: dominioData, error: dominioError } = await supabase
-    .from("dominios_publicos")
-    .select("app_id, slug, arquivo, ativo")
-    .eq("dominio", host)
-    .eq("ativo", true)
-    .maybeSingle();
+  const partes = location.pathname.split("/").filter(Boolean);
+  const slugPath = partes[partes.length - 1];
 
-  if(dominioError){
-    console.error("Erro ao buscar domínio:", dominioError);
-  }
+  let slugUrl = (params.get("slug") || slugPath || "").trim();
 
-  if(dominioData?.app_id){
-    const arquivoConfigurado = dominioData.arquivo || "index.html";
-
-    let arquivoAtual = location.pathname.split("/").pop() || "index.html";
-
-    if(!arquivoAtual || arquivoAtual === "agua"){
-      arquivoAtual = "index.html";
-    }
-
-    if(arquivoAtual === "indexx"){
-      arquivoAtual = "indexx.html";
-    }
-
-    if(arquivoAtual === "index"){
-      arquivoAtual = "index.html";
-    }
-
-    if(arquivoConfigurado !== arquivoAtual){
-      location.href = `/public/agua/${arquivoConfigurado}`;
-      return;
-    }
-
-    APP_ID = dominioData.app_id;
-    return;
-  }
-
+  // 🔥 1 - prioridade: app_id
   if(appIdUrl){
     APP_ID = appIdUrl;
     return;
   }
 
+  // 🔥 2 - tenta pelo domínio (usando apps direto)
+  const host = window.location.hostname.replace(/^www\./, "");
+
+  const { data: dominioData } = await supabase
+    .from("apps")
+    .select("id, slug")
+    .eq("dominio", host)
+    .maybeSingle();
+
+  if(dominioData?.id){
+    APP_ID = dominioData.id;
+
+    // 🔥 define modelo pelo slug
+    if(dominioData.slug?.includes("tema") || dominioData.slug?.includes("novo")){
+      if(!location.pathname.includes("indexx")){
+        location.href = `/public/agua/indexx?app_id=${APP_ID}`;
+        return;
+      }
+    }
+
+    return;
+  }
+
+  // 🔥 3 - fallback slug
   if(slugUrl){
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("apps")
-      .select("id")
+      .select("id, slug")
       .eq("slug", slugUrl)
       .maybeSingle();
 
     if(data?.id){
       APP_ID = data.id;
+
+      if(data.slug?.includes("tema") || data.slug?.includes("novo")){
+        if(!location.pathname.includes("indexx")){
+          location.href = `/public/agua/indexx?app_id=${APP_ID}`;
+          return;
+        }
+      }
+
       return;
     }
   }
 
   document.body.innerHTML = "Loja não encontrada";
 }
-
     async function carregarConfig(){
       const { data, error } = await supabase
         .from("config_site")
