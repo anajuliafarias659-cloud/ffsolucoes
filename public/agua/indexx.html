@@ -2995,68 +2995,108 @@ function obterPrecoInicialProduto(produto){
     }
 
 async function resolverAppId(){
-  const hostOriginal = window.location.hostname;
-  const host = hostOriginal.replace(/^www\./, "");
+  const params = new URLSearchParams(window.location.search);
+
+  const appIdUrl = params.get("app_id");
+  const slugQuery = params.get("slug");
+
+  const partes = location.pathname.split("/").filter(Boolean);
+  const slugPath = partes[partes.length - 1];
+
+  let slugUrl = slugQuery || slugPath;
+
+  const hostOriginal = window.location.hostname.toLowerCase();
+  const hostSemWww = hostOriginal.replace(/^www\./, "");
 
   let arquivoAtual = location.pathname.split("/").pop() || "index.html";
 
-  if(arquivoAtual === "agua") arquivoAtual = "index.html";
-  if(arquivoAtual === "index") arquivoAtual = "index.html";
-  if(arquivoAtual === "indexx") arquivoAtual = "indexx.html";
+  if(!arquivoAtual.includes(".")){
+    arquivoAtual = "index.html";
+  }
 
-  const { data: dominioData, error: dominioError } = await supabase
+  console.log("HOST:", hostOriginal, hostSemWww);
+  console.log("ARQUIVO ATUAL:", arquivoAtual);
+
+  // ✅ 1) PRIMEIRO LÊ dominios_publicos
+  const { data: dominioPublico, error: erroDominio } = await supabase
     .from("dominios_publicos")
-    .select("app_id, arquivo, ativo")
-    .in("dominio", [host, hostOriginal])
+    .select("app_id, arquivo, ativo, dominio")
+    .in("dominio", [hostOriginal, hostSemWww])
     .eq("ativo", true)
     .maybeSingle();
 
-  if(dominioError){
-    console.error("Erro dominio_publicos:", dominioError);
+  if(erroDominio){
+    console.error("Erro ao buscar dominios_publicos:", erroDominio);
   }
 
-  if(dominioData?.app_id){
-    const arquivoCerto = dominioData.arquivo || "index.html";
+  if(dominioPublico?.app_id){
+    APP_ID = dominioPublico.app_id;
 
-    if(arquivoCerto !== arquivoAtual){
-      window.location.href = `/public/agua/${arquivoCerto}`;
+    const arquivoDoBanco = dominioPublico.arquivo || "index.html";
+
+    console.log("DOMÍNIO PÚBLICO ACHOU:", dominioPublico);
+    console.log("APP_ID FINAL:", APP_ID);
+    console.log("ARQUIVO DO BANCO:", arquivoDoBanco);
+
+    // ✅ Se o painel mandou outro modelo, redireciona
+    if(arquivoDoBanco !== arquivoAtual){
+      const pastaAtual = location.pathname.substring(
+        0,
+        location.pathname.lastIndexOf("/") + 1
+      );
+
+      window.location.href = pastaAtual + arquivoDoBanco;
       return;
     }
 
-    APP_ID = dominioData.app_id;
     return;
   }
 
+  // ✅ 2) Depois tenta app_id da URL
   if(appIdUrl){
     APP_ID = appIdUrl;
+    console.log("APP_ID pela URL:", APP_ID);
     return;
   }
 
+  // ✅ 3) Depois tenta slug
   if(slugUrl){
-    const { data } = await supabase
+    const { data: appSlug, error: erroSlug } = await supabase
       .from("apps")
       .select("id")
       .eq("slug", slugUrl)
       .maybeSingle();
 
-    if(data?.id){
-      APP_ID = data.id;
+    if(erroSlug){
+      console.error("Erro ao buscar slug:", erroSlug);
+    }
+
+    if(appSlug?.id){
+      APP_ID = appSlug.id;
+      console.log("APP_ID pelo slug:", APP_ID);
       return;
     }
   }
 
-  const { data: appData } = await supabase
+  // ✅ 4) POR ÚLTIMO tenta apps.dominio
+  const { data: appDominio, error: erroAppDominio } = await supabase
     .from("apps")
     .select("id")
-    .in("dominio", [host, hostOriginal])
+    .in("dominio", [hostOriginal, hostSemWww])
     .maybeSingle();
 
-  if(appData?.id){
-    APP_ID = appData.id;
+  if(erroAppDominio){
+    console.error("Erro ao buscar apps.dominio:", erroAppDominio);
+  }
+
+  if(appDominio?.id){
+    APP_ID = appDominio.id;
+    console.log("APP_ID pelo apps.dominio:", APP_ID);
     return;
   }
 
-  document.body.innerHTML = "Loja não encontrada";
+  console.error("Nenhuma loja encontrada para:", hostOriginal);
+  document.body.innerHTML = "<h2 style='padding:30px;font-family:Arial'>Loja não encontrada</h2>";
 }
 
     async function carregarConfig(){
@@ -4257,21 +4297,25 @@ window.open(
 
 });
 
-    async function init(){
+   async function init(){
   await resolverAppId();
+
   if(!APP_ID) return;
 
   CARRINHO_KEY = `carrinho_${APP_ID}`;
   ULTIMO_PEDIDO_KEY = `ultimo_pedido_${APP_ID}`;
+
   carrinho = JSON.parse(localStorage.getItem(CARRINHO_KEY) || "[]");
 
   salvarCarrinho();
+
   await carregarConfig();
   await carregarProdutos();
+
   mostrarModalMotivacionalDoDia();
 }
 
-    init();
+init();
 
    window.comprarDestaque = function(id){
   const produto = todosProdutos.find(p => String(p.id) === String(id));
