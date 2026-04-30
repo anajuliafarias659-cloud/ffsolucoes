@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -2119,29 +2111,9 @@ if(partes.includes("public") && partes.includes("agua")){
   slugPath = partes[partes.length - 1];
 }
 
-let slugUrl = slugQuery || slugPath;
+let slugUrl = (slugQuery || slugPath || "").trim();
 
-// 🔥 pegar pelo domínio se não tiver slug
-if(!slugUrl){
-  const host = window.location.hostname.replace(/^www\./, "");
 
-const { data } = await supabase
-  .from("dominios_publicos")
-  .select("*")
-  .eq("dominio", host)
-  .eq("ativo", true)
-  .maybeSingle();
-
-if(data){
-  APP_ID = data.app_id;
-
-  // 🔥 troca de modelo automática
-  const arquivoAtual = location.pathname.split("/").pop();
-
-  if(data.arquivo !== arquivoAtual){
-    location.href = `/public/agua/${data.arquivo}`;
-  }
-}
     const heroTitulo = document.getElementById("heroTitulo");
 const heroTexto = document.getElementById("heroTexto");
 const heroTags = document.getElementById("heroTags");
@@ -3022,35 +2994,52 @@ function obterPrecoInicialProduto(produto){
       `;
     }
 
-   async function resolverAppId(){
+
+async function resolverAppId(){
+
+  // 1 - continua aceitando links antigos com ?app_id=
   if(appIdUrl){
     APP_ID = appIdUrl;
     return;
   }
 
+  // 2 - tenta resolver pelo domínio
   const host = window.location.hostname.replace(/^www\./, "");
 
-  const { data, error } = await supabase
+  const { data: dominioData, error: dominioError } = await supabase
     .from("dominios_publicos")
-    .select("app_id, pasta, arquivo, ativo")
+    .select("app_id, arquivo, ativo")
     .eq("dominio", host)
     .eq("ativo", true)
     .maybeSingle();
 
-  if(error){
-    console.error("Erro ao buscar domínio:", error);
+  if(dominioError){
+    console.error("Erro ao buscar domínio:", dominioError);
   }
 
-  if(data?.app_id){
-    APP_ID = data.app_id;
+  if(dominioData?.app_id){
+  const arquivoConfigurado = dominioData.arquivo || "index.html";
+
+  let arquivoAtual = location.pathname.split("/").pop() || "index.html";
+
+  if(!arquivoAtual || arquivoAtual === "agua"){
+    arquivoAtual = "index.html";
+  }
+
+  if(arquivoConfigurado !== arquivoAtual){
+    location.href = `/public/agua/${arquivoConfigurado}`;
     return;
   }
+
+  APP_ID = dominioData.app_id;
+  return;
+}
 
   document.body.innerHTML = `
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#f8fafc;font-family:Arial,sans-serif">
       <div style="background:#fff;border:1px solid #e2e8f0;padding:24px;border-radius:20px;text-align:center;max-width:420px;box-shadow:0 10px 30px rgba(2,6,23,.08)">
         <h2 style="margin:0 0 10px">❌ Loja não encontrada</h2>
-        <p style="margin:0;color:#64748b">Domínio não configurado.</p>
+        <p style="margin:0;color:#64748b">Domínio, slug ou app_id não configurado.</p>
       </div>
     </div>
   `;
