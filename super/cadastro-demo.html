@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Teste Grátis 15 Dias</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const supabase = createClient(
+  "https://pdajixsoowcyhnjwhgpc.supabase.co",
+  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+// 🔥 SLUG
+function gerarSlugBase(texto){
+  return String(texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function gerarSlugUnico(nome){
+  let base = gerarSlugBase(nome) || "loja";
+  let slug = base;
+  let i = 1;
+
+  while(true){
+    const { data } = await supabase
+      .from("apps")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if(!data) return slug;
+
+    slug = `${base}-${i++}`;
+  }
+}
+
+// 🔗 LINK PÚBLICO
+function montarLink(slug, tipo){
+  if(tipo === "passagens"){
+    return `${location.origin}/public/passagens/?slug=${slug}`;
+  }
+
+  if(tipo === "gas"){
+    return `${location.origin}/loj/${slug}`;
+  }
+
+  return `${location.origin}/loj/${slug}`;
+}
+
+// 🔐 LINK DO ADMIN
+function montarAdminLink(tipo){
+
+  if(tipo === "gas"){
+    return "https://www.ffsolucoes.com.br/gas/admin.html";
+   }
+
+   if(tipo === "celular"){
+    return "https://www.ffsolucoes.com.br/gas/admin.html";
+  }
+
+  if(tipo === "loja-roupas"){
+    return "https://www.ffsolucoes.com.br/gas/admin.html";
+  }
+  
+  if(tipo === "ffgaz"){
+  return "https://www.ffsolucoes.com.br/ffgaz/admin.html";
+}
+
+  if(tipo === "passagens"){
+    return "https://www.ffsolucoes.com.br/passagens/admin.html";
+  }
+
+  if(tipo === "borracharia"){
+    return "https://www.ffsolucoes.com.br/borracharia/admin.html";
+  }
+
+  if(tipo === "bar"){
+    return "https://www.ffsolucoes.com.br/bar/admin.html";
+  }
+
+  if(tipo === "locadora"){
+    return "https://www.ffsolucoes.com.br/locadora/admin.html";
+  }
+
+  if(tipo === "mercado"){
+    return "https://www.ffsolucoes.com.br/gas/admin.html";
+  }
+
+  return "https://www.ffsolucoes.com.br/auth/login.html";
+}
+
+// 🚀 CRIAR DEMO
+window.criarDemo = async () => {
+  const nome = document.getElementById("nomeNegocio").value.trim();
+  const tipo = document.getElementById("tipoNegocio").value;
+  const email = document.getElementById("usuarioAdmin").value.trim().toLowerCase();
+  const senha = document.getElementById("senhaAdmin").value.trim();
+  const botao = document.getElementById("btnCriar");
+
+  if(!nome || !email || !senha){
+    alert("Preencha todos os campos");
+    return;
+  }
+
+  if(senha.length < 6){
+    alert("Senha mínima 6 caracteres");
+    return;
+  }
+
+  botao.disabled = true;
+  botao.textContent = "Criando...";
+
+  try{
+    // 🔐 AUTH
+    let userId;
+
+// tenta login primeiro
+const { data: loginData } = await supabase.auth.signInWithPassword({
+  email,
+  password: senha
+});
+
+if(loginData?.user){
+  userId = loginData.user.id;
+}else{
+  // se não existir, cria
+  const { data: authData, error: authError } = await supabase.auth.signUp({
+    email,
+    password: senha
+  });
+
+  if(authError) throw authError;
+
+  userId = authData.user.id;
+}
+
+// 🔒 BORRACHARIA: 1 e-mail = 1 borracharia
+if(tipo === "borracharia"){
+  const { data: borrExistente } = await supabase
+    .from("borracheiros")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if(borrExistente){
+    alert("Esse e-mail já possui uma borracharia cadastrada. Use outro e-mail.");
+    botao.disabled = false;
+    botao.textContent = "Criar Conta";
+    return;
+  }
+}
+
+    // 📅 EXPIRAÇÃO
+    const expiracao = new Date();
+    expiracao.setDate(expiracao.getDate() + 15);
+
+    // 🔗 SLUG
+    const slug = await gerarSlugUnico(nome);
+
+    // 🏢 APP
+    const { data: app, error: appError } = await supabase
+      .from("apps")
+      .insert({
+        nome,
+        tipo,
+        sistema: tipo,
+        slug,
+        plano: "demo",
+        data_expiracao: expiracao.toISOString(),
+        ativo: true
+      })
+      .select()
+      .single();
+
+    if(appError) throw appError;
+
+    // 🔥 MULTI-LOJA (ESSA LINHA RESOLVE SUA VIDA)
+await supabase
+  .from("negocios")
+  .insert({
+    nome,
+    tipo,
+    dono_id: userId,
+    app_id: app.id,
+    ativo: true
+  });
+
+    // 👤 USUÁRIO
+    // verifica se já existe
+const { data: usuarioExistente } = await supabase
+  .from("usuarios")
+  .select("id")
+  .eq("id", userId)
+  .maybeSingle();
+
+await supabase.from("usuarios").upsert({
+  id: userId,
+  nome,
+  email,
+  tipo: "admin",
+  sistema: tipo,
+  ativo: true,
+  data_expiracao: expiracao.toISOString(),
+  app_id: app.id
+}, {
+  onConflict: "id"
+});
+
+
+    // ⚙️ CONFIG SITE
+    const { error: configError } = await supabase
+      .from("config_site")
+      .insert({
+        app_id: app.id,
+        nome_site: nome,
+        tema_site: "padrao",
+        modo_venda: "whatsapp",
+        modo_exibicao: "aberta",
+        loja_fechada: false
+      });
+
+    if(configError) throw configError;
+
+    // 🛢️ ÁGUA E GÁS
+    if(tipo === "gas"){
+      const { error: gasError } = await supabase
+        .from("lojas_gas")
+        .insert({
+          app_id: app.id,
+          nome_loja: nome,
+          raio_entrega_km: 8,
+          taxa_por_km: 2.5,
+          ativa: true
+        });
+
+      if(gasError) throw gasError;
+    }
+
+    if(tipo === "ffgaz"){
+  const { error } = await supabase
+    .from("distribuidoras_gas")
+    .insert({
+      user_id: userId,
+      app_id: app.id,
+      nome: nome,
+      ativo: true
+    });
+
+  if(error) throw error;
+}
+
+    // 🛞 BORRACHARIA
+    if(tipo === "borracharia"){
+  const { error: borrError } = await supabase
+    .from("borracheiros")
+    .insert({
+      user_id: userId,
+      app_id: app.id,
+      nome: nome,
+      ativo: true
+    });
+
+  if(borrError) throw borrError;
+}
+
+    // 🚌 PASSAGENS
+    if(tipo === "passagens"){
+      const { error: cfgPassError } = await supabase
+        .from("config_passagens")
+        .insert({
+          app_id: app.id,
+          nome_empresa: nome,
+          total_poltronas: 20,
+          valor_base: 0,
+          ativa: true
+        });
+
+      if(cfgPassError) throw cfgPassError;
+
+      const { error: viagemError } = await supabase
+        .from("viagens")
+        .insert({
+          rota: "Cidade A → Cidade B",
+          hora: "08:00",
+          dias: "Seg,Qua,Sex",
+          app_id: app.id,
+          ativo: true
+        });
+
+      if(viagemError) throw viagemError;
+    }
+
+    const linkPublico = montarLink(slug, tipo);
+    const linkAdmin = montarAdminLink(tipo);
+
+    alert(
+      "Conta criada com sucesso!\n\n" +
+      "Página pública:\n" + linkPublico + "\n\n" +
+      "Admin:\n" + linkAdmin + "\n\n" +
+      "Agora faça login com o e-mail e senha cadastrados."
+    );
+
+    // manda direto pro admin da água quando for tipo gas
+    window.location.href = "/painel-negocios/";
+
+  }catch(err){
+    console.error(err);
+    alert(err.message || "Erro ao criar conta");
+  }
+
+  botao.disabled = false;
+  botao.textContent = "Criar Conta";
+};
+</script>
+
+<style>
+body{
+  margin:0;
+  min-height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:#020617;
+  font-family:Arial;
+  color:#fff;
+}
+
+.box{
+  width:100%;
+  max-width:500px;
+  background:#0f172a;
+  padding:30px;
+  border-radius:20px;
+}
+
+input,select,button{
+  width:100%;
+  padding:14px;
+  margin-top:10px;
+  border-radius:12px;
+  border:none;
+}
+
+input,select{
+  background:#111827;
+  color:#fff;
+}
+
+button{
+  background:#22c55e;
+  font-weight:bold;
+  cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+  <h2>🚀 Teste Grátis 15 Dias</h2>
+
+  <input id="nomeNegocio" placeholder="Nome do negócio">
+
+  <select id="tipoNegocio">
+  <option value="bar">Bar</option>
+  <option value="mercado">Mercado</option>
+  <option value="locadora">Locadora</option>
+  <option value="hotel">Hotel</option>
+  <option value="loja-roupas">Loja de Roupas</option>
+  <option value="celular">Loja de Celular</option>
+
+  <option value="gas">Água e Gás</option>
+  <option value="ffgaz">Distribuidora de Gás</option>
+
+  <option value="borracharia">Borracharia</option>
+  <option value="passagens">🚌 Passagens</option>
+</select>
+
+  <input id="usuarioAdmin" type="email" placeholder="E-mail">
+  <input id="senhaAdmin" type="password" placeholder="Senha">
+
+  <button id="btnCriar" onclick="criarDemo()">Criar Conta</button>
+</div>
+
+</body>
+</html>
