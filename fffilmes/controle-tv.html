@@ -45,7 +45,7 @@ h1{
   margin-bottom:16px;
 }
 
-input{
+input, textarea{
   width:100%;
   padding:14px;
   border:none;
@@ -54,6 +54,11 @@ input{
   color:#fff;
   margin-bottom:10px;
   font-size:15px;
+}
+
+textarea{
+  min-height:80px;
+  resize:vertical;
 }
 
 button{
@@ -100,6 +105,8 @@ button{
   min-height:42px;
   margin-top:10px;
 }
+
+.oculto{display:none}
 </style>
 </head>
 
@@ -108,45 +115,65 @@ button{
 <div class="container">
 
   <h1>📱 Controle FF TV</h1>
-  <div class="status" id="status">Conectando...</div>
+  <div class="status" id="status">Verificando login...</div>
 
-  <div class="card">
-    <h3>🏠 Sala da TV</h3>
-    <input id="sala" placeholder="Ex: sala1">
-    <button class="btn-blue" onclick="salvarSala()">Salvar sala</button>
-    <p class="info">
-      A TV e o celular precisam estar com a mesma sala.<br>
-      Exemplo: TV abre <b>?sala=sala1</b> e celular também <b>?sala=sala1</b>.
-    </p>
+  <!-- LOGIN -->
+  <div class="card" id="boxLogin">
+    <h3>🔐 Login</h3>
+    <input id="emailLogin" type="email" placeholder="Email">
+    <input id="senhaLogin" type="password" placeholder="Senha">
+    <button class="btn-red" onclick="login()">Entrar</button>
+    <p class="info">Use o mesmo login do FF Filmes.</p>
   </div>
 
-  <div class="card">
-    <h3>🎮 Controle rápido</h3>
+  <!-- CONTROLE -->
+  <div id="areaControle" class="oculto">
 
-    <div class="grid">
-      <button class="btn-green" onclick="enviarComando('play')">▶ Play</button>
-      <button class="btn-yellow" onclick="enviarComando('pause')">⏸ Pause</button>
-      <button class="btn-blue" onclick="enviarComando('proximo')">⏭ Próximo</button>
-      <button class="btn-purple" onclick="enviarComando('repetir')">🔁 Repetir</button>
-      <button class="btn-gray" onclick="enviarComando('tela_cheia')">⛶ Tela cheia</button>
-      <button class="btn-red" onclick="enviarComando('fechar')">⛔ Fechar</button>
+    <div class="card">
+      <h3>🏠 Sala da TV</h3>
+      <input id="sala" placeholder="Ex: sala1">
+      <button class="btn-blue" onclick="salvarSala()">Salvar sala</button>
+      <p class="info">
+        A TV e o celular precisam estar com a mesma sala.<br>
+        TV: <b>?sala=sala1</b><br>
+        Controle: <b>?sala=sala1</b>
+      </p>
     </div>
 
-    <div id="log" class="log">Aguardando comando...</div>
-  </div>
+    <div class="card">
+      <h3>🎮 Controle rápido</h3>
 
-  <div class="card">
-    <h3>🎬 Abrir vídeo direto na TV</h3>
+      <div class="grid">
+        <button class="btn-green" onclick="enviarComando('play')">▶ Play</button>
+        <button class="btn-yellow" onclick="enviarComando('pause')">⏸ Pause</button>
+        <button class="btn-blue" onclick="enviarComando('proximo')">⏭ Próximo</button>
+        <button class="btn-purple" onclick="enviarComando('repetir')">🔁 Repetir</button>
+        <button class="btn-gray" onclick="enviarComando('tela_cheia')">⛶ Tela cheia</button>
+        <button class="btn-red" onclick="enviarComando('fechar')">⛔ Fechar</button>
+      </div>
 
-    <input id="videoId" placeholder="ID do YouTube. Ex: dQw4w9WgXcQ">
-    <input id="titulo" placeholder="Título do filme/canal">
-    <input id="filmeId" placeholder="ID do filme no banco (opcional)">
+      <div id="log" class="log">Aguardando comando...</div>
+    </div>
 
-    <button class="btn-red" onclick="abrirNaTV()">📺 Abrir na TV</button>
+    <!-- CADASTRAR FILME -->
+    <div class="card">
+      <h3>➕ Cadastrar filme do YouTube</h3>
 
-    <p class="info">
-      Para usar com filme do catálogo, você pode mandar o video_id, título e ID do filme.
-    </p>
+      <input id="tituloFilme" placeholder="Título do filme">
+      <input id="linkYoutube" placeholder="Link do YouTube ou ID do vídeo">
+      <input id="categoriaFilme" placeholder="Categoria. Ex: Ação, Comédia, TV AO VIVO">
+      <textarea id="descricaoFilme" placeholder="Descrição opcional"></textarea>
+      <input id="thumbFilme" placeholder="Capa opcional. Se deixar vazio, usa capa do YouTube">
+
+      <button class="btn-green" onclick="cadastrarFilme()">💾 Cadastrar filme</button>
+
+      <p class="info">
+        Depois de cadastrar, atualize a TV ou clique na categoria para aparecer.
+      </p>
+    </div>
+
+    <button class="btn-gray" onclick="logout()">Sair</button>
+
   </div>
 
 </div>
@@ -160,35 +187,106 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const params = new URLSearchParams(location.search);
 let SALA = params.get("sala") || localStorage.getItem("SALA_TV") || "sala1";
 
-document.getElementById("sala").value = SALA;
-document.getElementById("status").innerText = "Conectado na sala: " + SALA;
+let usuarioAtual = null;
+let adminAtual = null;
 
 function log(msg){
-  document.getElementById("log").innerText = msg;
+  const el = document.getElementById("log");
+  if(el) el.innerText = msg;
+}
+
+function atualizarStatus(msg){
+  document.getElementById("status").innerText = msg;
+}
+
+function mostrarControle(){
+  document.getElementById("boxLogin").classList.add("oculto");
+  document.getElementById("areaControle").classList.remove("oculto");
+  document.getElementById("sala").value = SALA;
+  atualizarStatus("Conectado na sala: " + SALA);
+}
+
+async function verificarSessao(){
+  const { data } = await supabaseClient.auth.getSession();
+
+  if(data?.session?.user){
+    usuarioAtual = data.session.user;
+    await carregarAdmin();
+    mostrarControle();
+    return;
+  }
+
+  atualizarStatus("Faça login para controlar a TV");
+}
+
+async function login(){
+  const email = document.getElementById("emailLogin").value.trim();
+  const senha = document.getElementById("senhaLogin").value.trim();
+
+  if(!email || !senha){
+    alert("Informe email e senha.");
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({
+    email,
+    password: senha
+  });
+
+  if(error){
+    alert("Erro no login: " + error.message);
+    return;
+  }
+
+  usuarioAtual = data.user;
+  await carregarAdmin();
+  mostrarControle();
+}
+
+async function logout(){
+  await supabaseClient.auth.signOut();
+  location.reload();
 }
 
 function salvarSala(){
   SALA = document.getElementById("sala").value.trim() || "sala1";
   localStorage.setItem("SALA_TV", SALA);
-  document.getElementById("status").innerText = "Conectado na sala: " + SALA;
+  atualizarStatus("Conectado na sala: " + SALA);
   log("Sala salva: " + SALA);
 }
 
-async function garantirLogin(){
-  const { data } = await supabaseClient.auth.getSession();
+async function carregarAdmin(){
+  if(!usuarioAtual?.id) return;
 
-  if(data?.session){
-    return true;
+  const { data: admin } = await supabaseClient
+    .from("admin_filmes")
+    .select("*")
+    .eq("user_id", usuarioAtual.id)
+    .maybeSingle();
+
+  if(admin){
+    adminAtual = admin;
+    return;
   }
 
-  log("Você precisa estar logado no sistema para enviar comandos.");
-  alert("Abra primeiro logado no sistema FF Filmes.");
-  return false;
+  const { data: cliente } = await supabaseClient
+    .from("admin_clientes")
+    .select("*")
+    .eq("user_id", usuarioAtual.id)
+    .maybeSingle();
+
+  if(cliente){
+    adminAtual = { id: cliente.admin_id };
+  }
 }
 
 async function enviarComando(comando, extra = {}){
-  const ok = await garantirLogin();
-  if(!ok) return;
+  if(!usuarioAtual){
+    alert("Faça login primeiro.");
+    return;
+  }
+
+  console.log("📤 ENVIANDO COMANDO:", comando, "SALA:", SALA);
 
   const payload = {
     sala: SALA,
@@ -202,6 +300,8 @@ async function enviarComando(comando, extra = {}){
     .from("controle_tv")
     .insert(payload);
 
+  console.log("✅ RESPOSTA INSERT:", error);
+
   if(error){
     console.error(error);
     log("Erro: " + error.message);
@@ -212,22 +312,105 @@ async function enviarComando(comando, extra = {}){
   log("✅ Comando enviado: " + comando);
 }
 
-function abrirNaTV(){
-  const videoId = document.getElementById("videoId").value.trim();
-  const titulo = document.getElementById("titulo").value.trim();
-  const filmeIdTexto = document.getElementById("filmeId").value.trim();
+function extrairVideoId(valor){
+  const txt = String(valor || "").trim();
 
-  if(!videoId){
-    alert("Informe o ID do vídeo.");
+  if(!txt) return "";
+
+  try{
+    if(txt.includes("youtube.com/watch?v=")){
+      return new URL(txt).searchParams.get("v") || "";
+    }
+
+    if(txt.includes("youtu.be/")){
+      return txt.split("youtu.be/")[1].split("?")[0];
+    }
+
+    if(txt.includes("/embed/")){
+      return txt.split("/embed/")[1].split("?")[0];
+    }
+
+    if(txt.includes("shorts/")){
+      return txt.split("shorts/")[1].split("?")[0];
+    }
+  }catch(e){}
+
+  return txt;
+}
+
+async function cadastrarFilme(){
+  if(!usuarioAtual){
+    alert("Faça login primeiro.");
     return;
   }
 
-  enviarComando("abrir", {
+  const titulo = document.getElementById("tituloFilme").value.trim();
+  const link = document.getElementById("linkYoutube").value.trim();
+  const categoria = document.getElementById("categoriaFilme").value.trim();
+  const descricao = document.getElementById("descricaoFilme").value.trim();
+  let thumb = document.getElementById("thumbFilme").value.trim();
+
+  if(!titulo || !link){
+    alert("Informe título e link do YouTube.");
+    return;
+  }
+
+  const videoId = extrairVideoId(link);
+
+  if(!videoId){
+    alert("Não consegui identificar o vídeo.");
+    return;
+  }
+
+  if(!thumb){
+    thumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  }
+
+  const payload = {
+    titulo,
     video_id: videoId,
-    titulo: titulo || "Assistindo na TV",
-    filme_id: filmeIdTexto ? Number(filmeIdTexto) : null
-  });
+    categoria: categoria || "Sem categoria",
+    descricao,
+    thumb,
+    ativo: true
+  };
+
+  if(adminAtual?.id){
+    payload.admin_id = Number(adminAtual.id);
+  }
+
+  const { data, error } = await supabaseClient
+    .from("filmes")
+    .insert(payload)
+    .select()
+    .single();
+
+  if(error){
+    console.error(error);
+    alert("Erro ao cadastrar filme: " + error.message);
+    return;
+  }
+
+  alert("✅ Filme cadastrado!");
+
+  document.getElementById("tituloFilme").value = "";
+  document.getElementById("linkYoutube").value = "";
+  document.getElementById("categoriaFilme").value = "";
+  document.getElementById("descricaoFilme").value = "";
+  document.getElementById("thumbFilme").value = "";
+
+  log("✅ Filme cadastrado: " + titulo);
+
+  if(confirm("Quer abrir esse filme agora na TV?")){
+    await enviarComando("abrir", {
+      video_id: videoId,
+      titulo,
+      filme_id: data?.id || null
+    });
+  }
 }
+
+verificarSessao();
 </script>
 
 </body>
