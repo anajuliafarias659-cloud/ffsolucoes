@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle Simples | FF Filmes</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial;background:#020617;color:#fff;padding:16px}
+.container{max-width:520px;margin:auto}
+h1{text-align:center;color:#ef4444}
+.card{background:#0f172a;border-radius:16px;padding:14px;margin-bottom:14px}
+input{width:100%;padding:13px;border:none;border-radius:10px;background:#020617;color:#fff;margin-bottom:10px}
+button{width:100%;padding:14px;border:none;border-radius:12px;margin-top:8px;font-weight:bold;color:#fff;cursor:pointer}
+.btn-red{background:#dc2626}
+.btn-green{background:#16a34a}
+.btn-blue{background:#2563eb}
+.btn-yellow{background:#f59e0b;color:#020617}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.filme{display:flex;gap:10px;background:#020617;border-radius:12px;padding:10px;margin-top:10px;align-items:center}
+.filme img{width:70px;height:95px;object-fit:cover;border-radius:8px;background:#111}
+.filme-info{flex:1}
+.filme-info b{font-size:14px}
+.filme-info small{color:#94a3b8}
+.status{text-align:center;color:#94a3b8;font-size:13px;margin-bottom:12px}
+.oculto{display:none}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>📱 Controle Simples</h1>
+<div id="status" class="status">Verificando login...</div>
+
+<div id="boxLogin" class="card">
+  <h3>🔐 Login</h3>
+  <input id="email" type="email" placeholder="Email">
+  <input id="senha" type="password" placeholder="Senha">
+  <button class="btn-red" onclick="login()">Entrar</button>
+</div>
+
+<div id="area" class="oculto">
+
+  <div class="card">
+    <h3>🏠 Sala</h3>
+    <input id="sala" placeholder="Ex: sala1">
+    <button class="btn-blue" onclick="salvarSala()">Salvar sala</button>
+  </div>
+
+  <div class="card">
+    <h3>🎮 Controle</h3>
+    <div class="grid">
+      <button class="btn-green" onclick="enviarComando('play')">▶ Play</button>
+      <button class="btn-yellow" onclick="enviarComando('pause')">⏸ Pause</button>
+      <button class="btn-blue" onclick="enviarComando('proximo')">⏭ Próximo</button>
+      <button class="btn-red" onclick="enviarComando('fechar')">⛔ Fechar</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🎬 Escolher filme</h3>
+    <input id="busca" placeholder="Pesquisar filme..." oninput="renderFilmes()">
+    <div id="listaFilmes">Carregando...</div>
+  </div>
+
+</div>
+
+</div>
+
+<script>
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const params = new URLSearchParams(location.search);
+let SALA = params.get("sala") || localStorage.getItem("SALA_TV") || "sala1";
+let filmes = [];
+let usuario = null;
+
+function status(txt){
+  document.getElementById("status").innerText = txt;
+}
+
+function mostrarArea(){
+  document.getElementById("boxLogin").classList.add("oculto");
+  document.getElementById("area").classList.remove("oculto");
+  document.getElementById("sala").value = SALA;
+  status("Conectado na sala: " + SALA);
+}
+
+async function verificarLogin(){
+  const { data } = await supabaseClient.auth.getSession();
+
+  if(data?.session?.user){
+    usuario = data.session.user;
+    mostrarArea();
+    await carregarFilmes();
+  }else{
+    status("Faça login para controlar a TV");
+  }
+}
+
+async function login(){
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value.trim();
+
+  if(!email || !senha){
+    alert("Informe email e senha.");
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({
+    email,
+    password: senha
+  });
+
+  if(error){
+    alert("Erro no login: " + error.message);
+    return;
+  }
+
+  usuario = data.user;
+  mostrarArea();
+  await carregarFilmes();
+}
+
+function salvarSala(){
+  SALA = document.getElementById("sala").value.trim() || "sala1";
+  localStorage.setItem("SALA_TV", SALA);
+  status("Conectado na sala: " + SALA);
+}
+
+async function enviarComando(comando, extra = {}){
+  const { error } = await supabaseClient
+    .from("controle_tv")
+    .insert({
+      sala: SALA,
+      comando,
+      video_id: extra.video_id || null,
+      titulo: extra.titulo || null,
+      filme_id: extra.filme_id || null
+    });
+
+  if(error){
+    alert("Erro ao enviar comando: " + error.message);
+    return;
+  }
+
+  status("✅ Comando enviado: " + comando);
+}
+
+async function carregarFilmes(){
+  const { data, error } = await supabaseClient
+    .from("filmes")
+    .select("id,titulo,video_id,thumb,categoria,ativo")
+    .eq("ativo", true)
+    .order("titulo");
+
+  if(error){
+    document.getElementById("listaFilmes").innerHTML = "Erro ao carregar filmes.";
+    return;
+  }
+
+  filmes = data || [];
+  renderFilmes();
+}
+
+function renderFilmes(){
+  const termo = document.getElementById("busca").value.toLowerCase().trim();
+
+  const filtrados = filmes.filter(f =>
+    String(f.titulo || "").toLowerCase().includes(termo) ||
+    String(f.categoria || "").toLowerCase().includes(termo)
+  );
+
+  document.getElementById("listaFilmes").innerHTML = filtrados.map(f => `
+    <div class="filme">
+      <img src="${f.thumb || ""}">
+      <div class="filme-info">
+        <b>${f.titulo || "Sem título"}</b><br>
+        <small>${f.categoria || "Sem categoria"}</small>
+        <button class="btn-green" onclick="tocarFilme('${f.video_id}', '${String(f.titulo || "").replace(/'/g,"\\'")}', ${f.id})">
+          ▶ Tocar na TV
+        </button>
+      </div>
+    </div>
+  `).join("") || "Nenhum filme encontrado.";
+}
+
+async function tocarFilme(videoId, titulo, id){
+  await enviarComando("abrir", {
+    video_id: videoId,
+    titulo,
+    filme_id: id
+  });
+}
+
+verificarLogin();
+</script>
+
+</body>
+</html>
