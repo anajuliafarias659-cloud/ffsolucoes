@@ -1,4 +1,4 @@
-const CACHE_NAME = "controle-ff-tv-v2";
+const CACHE_NAME = "fffilmes-v2";
 
 self.addEventListener("install", event => {
   self.skipWaiting();
