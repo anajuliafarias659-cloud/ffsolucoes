@@ -1393,43 +1393,78 @@ const SALA_TV = paramsTV.get("sala") || "sala1";
   }
 }
 
-  function garantirPlayerYoutube(videoId) {
-    if (!ytApiPronta || !window.YT || !window.YT.Player) return false;
+function extrairVideoId(valor){
+  const txt = String(valor || "").trim();
 
-    if (!ytPlayer) {
-      ytPlayer = new YT.Player("overlayPlayer", {
-        width: "100%",
-        height: "100%",
-        videoId: videoId,
-        playerVars: {
-          autoplay: 1,
-          rel: 0,
-          playsinline: 1
-        },
-        events: {
-          onReady: onYouTubePlayerReady,
-          onStateChange: onYouTubePlayerStateChange
-        }
-      });
-    } else {
-      try {
-        if(filmeEhAoVivo(filmeAtualPlayer)){
-  ytPlayer.loadVideoById(videoId);
-}else{
-  ytPlayer.loadVideoById({
-    videoId: videoId,
-    startSeconds: Math.max(0, Math.floor(obterProgressoFilme(filmeAtualPlayer?.id) || 0))
-  });
-}
-      } catch (e) {
-        try {
-          ytPlayer.loadVideoById(videoId);
-        } catch (err) {}
-      }
-    }
+  if(!txt) return "";
 
-    return true;
+  if(txt.includes("youtube.com/watch?v=")){
+    return new URL(txt).searchParams.get("v") || "";
   }
+
+  if(txt.includes("youtu.be/")){
+    return txt.split("youtu.be/")[1].split("?")[0];
+  }
+
+  if(txt.includes("/embed/")){
+    return txt.split("/embed/")[1].split("?")[0];
+  }
+
+  return txt;
+}
+
+  function garantirPlayerYoutube(videoId) {
+  videoId = extrairVideoId(videoId);
+
+  console.log("🎬 Tentando iniciar vídeo:", videoId);
+
+  if (!videoId) {
+    console.error("❌ video_id vazio");
+    return false;
+  }
+
+  if (window.YT && window.YT.Player) {
+    ytApiPronta = true;
+  }
+
+  if (!ytApiPronta || !window.YT || !window.YT.Player) {
+    console.warn("⏳ API do YouTube ainda não pronta");
+    return false;
+  }
+
+  const playerBox = document.getElementById("overlayPlayer");
+
+  if(!playerBox){
+    console.error("❌ overlayPlayer não encontrado");
+    return false;
+  }
+
+  if (!ytPlayer) {
+    ytPlayer = new YT.Player("overlayPlayer", {
+      width: "100%",
+      height: "100%",
+      videoId: videoId,
+      playerVars: {
+        autoplay: 1,
+        rel: 0,
+        playsinline: 1
+      },
+      events: {
+        onReady: function(event){
+          console.log("✅ Player pronto");
+          event.target.playVideo();
+          onYouTubePlayerReady(event);
+        },
+        onStateChange: onYouTubePlayerStateChange
+      }
+    });
+  } else {
+    ytPlayer.loadVideoById(videoId);
+    ytPlayer.playVideo();
+  }
+
+  return true;
+}
 
   window.onYouTubeIframeAPIReady = function () {
   ytApiPronta = true;
@@ -1467,13 +1502,21 @@ const SALA_TV = paramsTV.get("sala") || "sala1";
 
     await iniciarPingAssistindo(filmeObj || filmeAtualPlayer);
 
-    const playerCriado = garantirPlayerYoutube(videoId);
+    let tentativas = 0;
 
-    if (!playerCriado) {
-      setTimeout(() => {
-        garantirPlayerYoutube(videoId);
-      }, 400);
-    }
+const tentarAbrir = setInterval(() => {
+  tentativas++;
+
+  const abriu = garantirPlayerYoutube(videoId);
+
+  if(abriu || tentativas >= 10){
+    clearInterval(tentarAbrir);
+  }
+
+  if(tentativas >= 10 && !abriu){
+    console.error("❌ Não conseguiu iniciar o player do YouTube");
+  }
+}, 500);
 
     try {
       if (playerArea.requestFullscreen) {
