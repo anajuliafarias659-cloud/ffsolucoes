@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -887,6 +888,10 @@ let ultimoTempoSalvo = 0;
 let modoRepetir = false;
 
 let timerPingAssistindo = null;
+let canalControleTV = null;
+
+const paramsTV = new URLSearchParams(location.search);
+const SALA_TV = paramsTV.get("sala") || "sala1";
 
   async function getUserIdAtual() {
     const { data, error } = await supabaseClient.auth.getUser();
@@ -2131,6 +2136,59 @@ renderSecoesUsuario();
       .subscribe();
   }
 
+  function iniciarControleTV(){
+  if(canalControleTV){
+    supabaseClient.removeChannel(canalControleTV);
+  }
+
+  canalControleTV = supabaseClient
+    .channel("controle-tv-" + SALA_TV)
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "controle_tv",
+        filter: `sala=eq.${SALA_TV}`
+      },
+      async (payload) => {
+        const c = payload.new;
+        if(!c) return;
+
+        if(c.comando === "abrir"){
+          await abrirPlayer(c.video_id, c.titulo || "Assistindo", c.filme_id || null);
+        }
+
+        if(c.comando === "pause" && ytPlayer){
+          ytPlayer.pauseVideo();
+        }
+
+        if(c.comando === "play" && ytPlayer){
+          ytPlayer.playVideo();
+        }
+
+        if(c.comando === "proximo"){
+          abrirProximoFilme();
+        }
+
+        if(c.comando === "fechar"){
+          fecharPlayer();
+        }
+
+        if(c.comando === "repetir"){
+          toggleRepetir();
+        }
+
+        if(c.comando === "tela_cheia"){
+          const playerArea = document.getElementById("playerArea");
+          if(playerArea?.requestFullscreen){
+            playerArea.requestFullscreen();
+          }
+        }
+      }
+    )
+    .subscribe();
+}
   async function protegerPagina() {
     const cliente = await validarClienteAtual();
     if (!cliente) return;
@@ -2148,6 +2206,8 @@ renderSecoesUsuario();
     if (tipoUsuarioAtual === "cliente" && cliente.id) {
       ativarBloqueioTempoReal(cliente.id);
     }
+    
+    iniciarControleTV();
   }
 
   function resetToquesAdmin() {
