@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle TV | FF Filmes</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#020617;
+  color:#fff;
+  min-height:100vh;
+  padding:18px;
+}
+
+.container{
+  max-width:520px;
+  margin:auto;
+}
+
+h1{
+  text-align:center;
+  color:#ef4444;
+  margin-bottom:6px;
+}
+
+.status{
+  text-align:center;
+  color:#94a3b8;
+  margin-bottom:18px;
+  font-size:14px;
+}
+
+.card{
+  background:#0f172a;
+  border:1px solid #1e293b;
+  border-radius:18px;
+  padding:16px;
+  margin-bottom:16px;
+}
+
+input{
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:12px;
+  background:#020617;
+  color:#fff;
+  margin-bottom:10px;
+  font-size:15px;
+}
+
+button{
+  width:100%;
+  padding:16px;
+  border:none;
+  border-radius:14px;
+  margin-top:10px;
+  font-size:17px;
+  font-weight:900;
+  cursor:pointer;
+  color:#fff;
+}
+
+.btn-red{background:#dc2626}
+.btn-green{background:#16a34a}
+.btn-blue{background:#2563eb}
+.btn-gray{background:#334155}
+.btn-yellow{background:#f59e0b;color:#020617}
+.btn-purple{background:#7c3aed}
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+
+.grid button{
+  margin-top:0;
+}
+
+.info{
+  font-size:13px;
+  color:#94a3b8;
+  line-height:1.5;
+}
+
+.log{
+  background:#020617;
+  border-radius:12px;
+  padding:12px;
+  font-size:13px;
+  color:#22c55e;
+  min-height:42px;
+  margin-top:10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <h1>📱 Controle FF TV</h1>
+  <div class="status" id="status">Conectando...</div>
+
+  <div class="card">
+    <h3>🏠 Sala da TV</h3>
+    <input id="sala" placeholder="Ex: sala1">
+    <button class="btn-blue" onclick="salvarSala()">Salvar sala</button>
+    <p class="info">
+      A TV e o celular precisam estar com a mesma sala.<br>
+      Exemplo: TV abre <b>?sala=sala1</b> e celular também <b>?sala=sala1</b>.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>🎮 Controle rápido</h3>
+
+    <div class="grid">
+      <button class="btn-green" onclick="enviarComando('play')">▶ Play</button>
+      <button class="btn-yellow" onclick="enviarComando('pause')">⏸ Pause</button>
+      <button class="btn-blue" onclick="enviarComando('proximo')">⏭ Próximo</button>
+      <button class="btn-purple" onclick="enviarComando('repetir')">🔁 Repetir</button>
+      <button class="btn-gray" onclick="enviarComando('tela_cheia')">⛶ Tela cheia</button>
+      <button class="btn-red" onclick="enviarComando('fechar')">⛔ Fechar</button>
+    </div>
+
+    <div id="log" class="log">Aguardando comando...</div>
+  </div>
+
+  <div class="card">
+    <h3>🎬 Abrir vídeo direto na TV</h3>
+
+    <input id="videoId" placeholder="ID do YouTube. Ex: dQw4w9WgXcQ">
+    <input id="titulo" placeholder="Título do filme/canal">
+    <input id="filmeId" placeholder="ID do filme no banco (opcional)">
+
+    <button class="btn-red" onclick="abrirNaTV()">📺 Abrir na TV</button>
+
+    <p class="info">
+      Para usar com filme do catálogo, você pode mandar o video_id, título e ID do filme.
+    </p>
+  </div>
+
+</div>
+
+<script>
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const params = new URLSearchParams(location.search);
+let SALA = params.get("sala") || localStorage.getItem("SALA_TV") || "sala1";
+
+document.getElementById("sala").value = SALA;
+document.getElementById("status").innerText = "Conectado na sala: " + SALA;
+
+function log(msg){
+  document.getElementById("log").innerText = msg;
+}
+
+function salvarSala(){
+  SALA = document.getElementById("sala").value.trim() || "sala1";
+  localStorage.setItem("SALA_TV", SALA);
+  document.getElementById("status").innerText = "Conectado na sala: " + SALA;
+  log("Sala salva: " + SALA);
+}
+
+async function garantirLogin(){
+  const { data } = await supabaseClient.auth.getSession();
+
+  if(data?.session){
+    return true;
+  }
+
+  log("Você precisa estar logado no sistema para enviar comandos.");
+  alert("Abra primeiro logado no sistema FF Filmes.");
+  return false;
+}
+
+async function enviarComando(comando, extra = {}){
+  const ok = await garantirLogin();
+  if(!ok) return;
+
+  const payload = {
+    sala: SALA,
+    comando,
+    video_id: extra.video_id || null,
+    titulo: extra.titulo || null,
+    filme_id: extra.filme_id || null
+  };
+
+  const { error } = await supabaseClient
+    .from("controle_tv")
+    .insert(payload);
+
+  if(error){
+    console.error(error);
+    log("Erro: " + error.message);
+    alert("Erro ao enviar comando.");
+    return;
+  }
+
+  log("✅ Comando enviado: " + comando);
+}
+
+function abrirNaTV(){
+  const videoId = document.getElementById("videoId").value.trim();
+  const titulo = document.getElementById("titulo").value.trim();
+  const filmeIdTexto = document.getElementById("filmeId").value.trim();
+
+  if(!videoId){
+    alert("Informe o ID do vídeo.");
+    return;
+  }
+
+  enviarComando("abrir", {
+    video_id: videoId,
+    titulo: titulo || "Assistindo na TV",
+    filme_id: filmeIdTexto ? Number(filmeIdTexto) : null
+  });
+}
+</script>
+
+</body>
+</html>
