@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -62,10 +63,13 @@ button{width:100%;padding:14px;border:none;border-radius:12px;margin-top:8px;fon
   <div class="card">
     <h3>🎮 Controle</h3>
     <div class="grid">
-      <button class="btn-green" onclick="enviarComando('play')">▶ Play</button>
-      <button class="btn-yellow" onclick="enviarComando('pause')">⏸ Pause</button>
-      <button class="btn-blue" onclick="enviarComando('proximo')">⏭ Próximo</button>
-      <button class="btn-red" onclick="enviarComando('fechar')">⛔ Fechar</button>
+      <div class="grid">
+  <button class="btn-green" onclick="enviarComando('play')">▶ Play</button>
+  <button class="btn-yellow" onclick="enviarComando('pause')">⏸ Pause</button>
+  <button class="btn-blue" onclick="enviarComando('proximo')">⏭ Próximo</button>
+  <button class="btn-red" onclick="enviarComando('fechar')">⛔ Fechar</button>
+  <button class="btn-blue" onclick="enviarComando('fullscreen')">🖥 Tela cheia</button>
+</div>
     </div>
   </div>
   <div style="margin-top:14px">
@@ -81,10 +85,25 @@ button{width:100%;padding:14px;border:none;border-radius:12px;margin-top:8px;fon
 </div>
 
   <div class="card">
-    <h3>🎬 Escolher filme</h3>
+  <h3 onclick="toggleListaFilmes()" style="cursor:pointer">
+    🎬 Escolher filme <span id="setaFilmes">▼</span>
+  </h3>
+
+  <div id="boxListaFilmes" class="oculto">
     <input id="busca" placeholder="Pesquisar filme..." oninput="renderFilmes()">
     <div id="listaFilmes">Carregando...</div>
   </div>
+</div>
+
+  <div id="areaMaster" class="card oculto">
+  <h3>👑 Cadastrar Filme</h3>
+
+  <input id="novoTituloFilme" placeholder="Título do filme">
+  <input id="novoLinkFilme" placeholder="Link do YouTube">
+  <input id="novaCategoriaFilme" placeholder="Categoria">
+
+  <button id="btnCadastrarFilme" class="btn-green" onclick="cadastrarFilme()">Cadastrar Filme</button>
+</div>
 
 </div>
 
@@ -99,6 +118,7 @@ const params = new URLSearchParams(location.search);
 let SALA = params.get("sala") || localStorage.getItem("SALA_TV") || "sala1";
 let filmes = [];
 let usuario = null;
+let isMaster = false;
 
 function status(txt){
   document.getElementById("status").innerText = txt;
@@ -111,15 +131,31 @@ function mostrarArea(){
   status("Conectado na sala: " + SALA);
 }
 
+function renderMasterArea(){
+  if(isMaster){
+    document.getElementById("areaMaster").classList.remove("oculto");
+  }
+}
+
 async function verificarLogin(){
   const { data } = await supabaseClient.auth.getSession();
 
   if(data?.session?.user){
     usuario = data.session.user;
+
+    const { data: master } = await supabaseClient
+      .from("super_admins")
+      .select("id")
+      .eq("user_id", usuario.id)
+      .maybeSingle();
+
+    isMaster = !!master;
+
     mostrarArea();
     await carregarFilmes();
-  }else{
-    status("Faça login para controlar a TV");
+    renderMasterArea();
+  } else {
+    status("Faça login para usar o controle");
   }
 }
 
@@ -143,8 +179,19 @@ async function login(){
   }
 
   usuario = data.user;
-  mostrarArea();
-  await carregarFilmes();
+
+// 🔥 verifica se é master
+const { data: master } = await supabaseClient
+  .from("super_admins")
+  .select("id")
+  .eq("user_id", usuario.id)
+  .maybeSingle();
+
+isMaster = !!master;
+
+mostrarArea();
+await carregarFilmes();
+renderMasterArea(); // 🔥 faltava isso
 }
 
 function salvarSala(){
@@ -196,6 +243,15 @@ async function carregarFilmes(){
   renderFilmes();
 }
 
+function toggleListaFilmes(){
+  const box = document.getElementById("boxListaFilmes");
+  const seta = document.getElementById("setaFilmes");
+
+  box.classList.toggle("oculto");
+
+  seta.innerText = box.classList.contains("oculto") ? "▼" : "▲";
+}
+
 function renderFilmes(){
   const termo = document.getElementById("busca").value.toLowerCase().trim();
 
@@ -225,6 +281,95 @@ async function tocarFilme(videoId, titulo, id){
     filme_id: id
   });
 }
+
+
+
+function extrairYoutubeId(url) {
+  if (!url) return "";
+  url = url.trim();
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+
+  const patterns = [
+    /youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/live\/([a-zA-Z0-9_-]{11})/
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) return match[1];
+  }
+
+  return "";
+}
+
+async function cadastrarFilme(){
+  if(!isMaster){
+    alert("Sem permissão");
+    return;
+  }
+
+
+  const titulo = document.getElementById("novoTituloFilme").value.trim();
+  const link = document.getElementById("novoLinkFilme").value.trim();
+  const categoria = document.getElementById("novaCategoriaFilme").value.trim();
+
+  if(!titulo || !link){
+    alert("Preencha título e link do YouTube");
+    return;
+  }
+
+  const videoId = extrairYoutubeId(link);
+
+  if(!videoId){
+    alert("Link do YouTube inválido");
+    return;
+  }
+
+  // 🔥 evita cadastrar o mesmo vídeo 2x, mesmo com título diferente
+const { data: existe } = await supabaseClient
+  .from("filmes")
+  .select("id,titulo")
+  .eq("video_id", videoId)
+  .maybeSingle();
+
+if(existe){
+  alert("Esse vídeo já está cadastrado como: " + existe.titulo);
+  return;
+}
+
+  const thumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+
+  const { error } = await supabaseClient
+    .from("filmes")
+    .insert({
+      titulo,
+      link,
+      video_id: videoId,
+      categoria: categoria || "Sem categoria",
+      descricao: "",
+      thumb,
+      ativo: true
+    });
+
+  if(error){
+    alert("Erro ao cadastrar filme: " + error.message);
+    return;
+  }
+
+  alert("✅ Filme cadastrado com sucesso");
+
+  document.getElementById("novoTituloFilme").value = "";
+  document.getElementById("novoLinkFilme").value = "";
+  document.getElementById("novaCategoriaFilme").value = "";
+
+  await carregarFilmes();
+}
+
+
 
 verificarLogin();
 </script>
