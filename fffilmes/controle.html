@@ -41,31 +41,40 @@ button{
 .btn-blue{background:#2563eb}
 .btn-red{background:#dc2626}
 
-.input{
+input{
   width:100%;
   padding:12px;
   border-radius:10px;
   border:none;
-  margin-top:10px;
+  margin-bottom:10px;
 }
 
 .oculto{display:none}
 
-/* 🎬 CARD BUSCA */
-.card-filme{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  height:80px;
-  font-size:28px;
-  cursor:pointer;
-  border:1px solid rgba(255,255,255,.1);
-  transition:.2s;
+/* FILMES */
+#listaFilmes{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
 }
 
-.card-filme:hover{
-  transform:scale(1.05);
-  border-color:#dc2626;
+.filme-card{
+  background:#020617;
+  border-radius:12px;
+  overflow:hidden;
+  cursor:pointer;
+  border:1px solid rgba(255,255,255,.1);
+}
+
+.filme-card img{
+  width:100%;
+  height:120px;
+  object-fit:cover;
+}
+
+.filme-overlay{
+  font-size:12px;
+  padding:6px;
 }
 </style>
 </head>
@@ -78,8 +87,8 @@ button{
 
 <!-- LOGIN -->
 <div id="boxLogin" class="card">
-  <input id="email" class="input" placeholder="Email">
-  <input id="senha" class="input" type="password" placeholder="Senha">
+  <input id="email" placeholder="Email">
+  <input id="senha" type="password" placeholder="Senha">
   <button class="btn-red" onclick="login()">Entrar</button>
 </div>
 
@@ -94,6 +103,7 @@ button{
       <button class="btn-blue" onclick="enviarComando('proximo')">⏭</button>
       <button class="btn-red" onclick="enviarComando('fechar')">⛔</button>
       <button class="btn-blue" onclick="enviarComando('fullscreen')">🖥</button>
+      <button class="btn-blue" onclick="toggleFilmes()">🎬 Filmes</button>
     </div>
 
     <div style="margin-top:10px">
@@ -105,15 +115,10 @@ button{
     <button class="btn-red" style="margin-top:10px" onclick="logout()">Sair</button>
   </div>
 
-  <!-- 🎬 CARD ÚNICO -->
-  <div class="card card-filme" onclick="abrirBusca()">
-    🎬
-  </div>
-
-  <!-- BUSCA -->
-  <div id="boxBusca" class="card oculto">
-    <input id="buscaFilme" class="input" placeholder="Digite o nome do filme">
-    <button class="btn-green" onclick="buscarFilme()">Buscar e tocar</button>
+  <!-- FILMES -->
+  <div id="boxFilmes" class="card oculto">
+    <input id="busca" placeholder="Buscar filme..." oninput="renderFilmes()">
+    <div id="listaFilmes"></div>
   </div>
 
 </div>
@@ -126,19 +131,23 @@ const supabaseClient = supabase.createClient(
   "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
+let filmes = [];
 let SALA = "sala1";
 
 /* LOGIN */
 async function login(){
-  const email = emailEl().value;
-  const senha = senhaEl().value;
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value.trim();
 
   const { error } = await supabaseClient.auth.signInWithPassword({
     email,
     password: senha
   });
 
-  if(error) return alert(error.message);
+  if(error){
+    alert(error.message);
+    return;
+  }
 
   mostrarArea();
 }
@@ -149,10 +158,10 @@ async function verificarLogin(){
   if(data?.session) mostrarArea();
 }
 
-/* UI */
+/* MOSTRAR */
 function mostrarArea(){
-  boxLogin().classList.add("oculto");
-  area().classList.remove("oculto");
+  document.getElementById("boxLogin").classList.add("oculto");
+  document.getElementById("area").classList.remove("oculto");
 }
 
 /* LOGOUT */
@@ -161,7 +170,7 @@ async function logout(){
   location.reload();
 }
 
-/* CONTROLE */
+/* COMANDO */
 async function enviarComando(comando, extra={}){
   await supabaseClient.from("controle_tv").insert({
     sala:SALA,
@@ -172,37 +181,50 @@ async function enviarComando(comando, extra={}){
 
 /* VOLUME */
 async function alterarVolume(v){
-  volEl().innerText = v;
+  document.getElementById("vol").innerText = v;
   await enviarComando("volume",{volume:Number(v)});
 }
 
-/* 🎬 BUSCA */
-function abrirBusca(){
-  boxBusca().classList.toggle("oculto");
+/* TOGGLE FILMES */
+function toggleFilmes(){
+  const box = document.getElementById("boxFilmes");
+
+  box.classList.toggle("oculto");
+
+  if(!box.classList.contains("oculto")){
+    carregarFilmes();
+  }
 }
 
-async function buscarFilme(){
-  const termo = buscaFilmeEl().value.trim();
-  if(!termo) return;
+/* CARREGAR FILMES */
+async function carregarFilmes(){
+  const { data } = await supabaseClient
+    .from("filmes")
+    .select("*")
+    .eq("ativo", true);
 
-  // manda direto pra TV (YouTube busca)
-  await enviarComando("abrir", {
-    video_id: termo,
-    titulo: termo
-  });
-
-  buscaFilmeEl().value = "";
-  boxBusca().classList.add("oculto");
+  filmes = data || [];
+  renderFilmes();
 }
 
-/* helpers */
-const emailEl = ()=>document.getElementById("email");
-const senhaEl = ()=>document.getElementById("senha");
-const boxLogin = ()=>document.getElementById("boxLogin");
-const area = ()=>document.getElementById("area");
-const volEl = ()=>document.getElementById("vol");
-const boxBusca = ()=>document.getElementById("boxBusca");
-const buscaFilmeEl = ()=>document.getElementById("buscaFilme");
+/* RENDER */
+function renderFilmes(){
+  const termo = document.getElementById("busca").value.toLowerCase();
+
+  const lista = filmes.filter(f =>
+    (f.titulo || "").toLowerCase().includes(termo)
+  );
+
+  document.getElementById("listaFilmes").innerHTML = lista.map(f => `
+    <div class="filme-card"
+      onclick="enviarComando('abrir',{video_id:'${f.video_id}',titulo:'${f.titulo}',filme_id:${f.id}})">
+
+      <img src="${f.thumb}">
+      <div class="filme-overlay">${f.titulo}</div>
+
+    </div>
+  `).join("");
+}
 
 /* INIT */
 verificarLogin();
