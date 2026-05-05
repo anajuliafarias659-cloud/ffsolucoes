@@ -378,9 +378,495 @@ if(existe){
   await carregarFilmes();
 }
 
-function buscarYoutubeSimples(){
-  const termo = document.getElementById("buscaYoutube").value;
-  window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(termo)}`);
+const YOUTUBE_API_KEY = "
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle Simples | FF Filmes</title>
+
+<link rel="manifest" href="/fffilmes/manifest-controle.json">
+<meta name="theme-color" content="#020617">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Controle FF TV">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial;background:#020617;color:#fff;padding:16px}
+.container{max-width:520px;margin:auto}
+h1{text-align:center;color:#ef4444}
+.card{background:#0f172a;border-radius:16px;padding:14px;margin-bottom:14px}
+input{width:100%;padding:13px;border:none;border-radius:10px;background:#020617;color:#fff;margin-bottom:10px}
+button{width:100%;padding:14px;border:none;border-radius:12px;margin-top:8px;font-weight:bold;color:#fff;cursor:pointer}
+.btn-red{background:#dc2626}
+.btn-green{background:#16a34a}
+.btn-blue{background:#2563eb}
+.btn-yellow{background:#f59e0b;color:#020617}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.filme{display:flex;gap:10px;background:#020617;border-radius:12px;padding:10px;margin-top:10px;align-items:center}
+.filme img{width:70px;height:95px;object-fit:cover;border-radius:8px;background:#111}
+.filme-info{flex:1}
+.filme-info b{font-size:14px}
+.filme-info small{color:#94a3b8}
+.status{text-align:center;color:#94a3b8;font-size:13px;margin-bottom:12px}
+.oculto{display:none}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>📱 Controle Simples</h1>
+<div id="status" class="status">Verificando login...</div>
+
+<div id="boxLogin" class="card">
+  <h3>🔐 Login</h3>
+  <input id="email" type="email" placeholder="Email">
+  <input id="senha" type="password" placeholder="Senha">
+  <button class="btn-red" onclick="login()">Entrar</button>
+</div>
+
+<div id="area" class="oculto">
+
+  <div class="card">
+    <h3>🏠 Sala</h3>
+    <input id="sala" placeholder="Ex: sala1">
+    <button class="btn-blue" onclick="salvarSala()">Salvar sala</button>
+  </div>
+
+  <div class="card">
+    <h3>🎮 Controle</h3>
+    <div class="grid">
+      <div class="grid">
+  <button class="btn-green" onclick="enviarComando('play')">▶ Play</button>
+  <button class="btn-yellow" onclick="enviarComando('pause')">⏸ Pause</button>
+  <button class="btn-blue" onclick="enviarComando('proximo')">⏭ Próximo</button>
+  <button class="btn-red" onclick="enviarComando('fechar')">⛔ Fechar</button>
+  <button class="btn-blue" onclick="enviarComando('fullscreen')">🖥 Tela cheia</button>
+</div>
+    </div>
+  </div>
+  <div style="margin-top:14px">
+  <label>🔊 Volume: <span id="valorVolume">70</span>%</label>
+  <input 
+    id="volumeControle" 
+    type="range" 
+    min="0" 
+    max="100" 
+    value="70"
+    oninput="alterarVolume(this.value)"
+  >
+</div>
+
+  <div class="card">
+  <h3 onclick="toggleListaFilmes()" style="cursor:pointer">
+    🎬 Escolher filme <span id="setaFilmes">▼</span>
+  </h3>
+
+  <div id="boxListaFilmes" class="oculto">
+    <input id="busca" placeholder="Pesquisar filme..." oninput="renderFilmes()">
+    <div id="listaFilmes">Carregando...</div>
+  </div>
+</div>
+
+  <div id="areaMaster" class="card oculto">
+  <h3>👑 Cadastrar Filme</h3>
+
+  <input id="novoTituloFilme" placeholder="Título do filme">
+  <input id="novoLinkFilme" placeholder="Link do YouTube">
+  <input id="novaCategoriaFilme" placeholder="Categoria">
+
+  <button id="btnCadastrarFilme" class="btn-green" onclick="cadastrarFilme()">Cadastrar Filme</button>
+</div>
+
+<div class="card">
+  <h3>🔎 Buscar no YouTube</h3>
+
+  <input id="buscaYoutube" placeholder="Ex: Velozes e Furiosos">
+  <button class="btn-red" onclick="buscarYoutube()">Buscar</button>
+
+  <div id="resultadoYoutube"></div>
+</div>
+
+</div>
+
+</div>
+
+<script>
+const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const params = new URLSearchParams(location.search);
+let SALA = params.get("sala") || localStorage.getItem("SALA_TV") || "sala1";
+let filmes = [];
+let usuario = null;
+let isMaster = false;
+
+function status(txt){
+  document.getElementById("status").innerText = txt;
+}
+
+function mostrarArea(){
+  document.getElementById("boxLogin").classList.add("oculto");
+  document.getElementById("area").classList.remove("oculto");
+  document.getElementById("sala").value = SALA;
+  status("Conectado na sala: " + SALA);
+}
+
+function renderMasterArea(){
+  if(isMaster){
+    document.getElementById("areaMaster").classList.remove("oculto");
+  }
+}
+
+async function verificarLogin(){
+  const { data } = await supabaseClient.auth.getSession();
+
+  if(data?.session?.user){
+    usuario = data.session.user;
+
+    const { data: master } = await supabaseClient
+      .from("super_admins")
+      .select("id")
+      .eq("user_id", usuario.id)
+      .maybeSingle();
+
+    isMaster = !!master;
+
+    mostrarArea();
+    await carregarFilmes();
+    renderMasterArea();
+  } else {
+    status("Faça login para usar o controle");
+  }
+}
+
+async function login(){
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value.trim();
+
+  if(!email || !senha){
+    alert("Informe email e senha.");
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({
+    email,
+    password: senha
+  });
+
+  if(error){
+    alert("Erro no login: " + error.message);
+    return;
+  }
+
+  usuario = data.user;
+
+// 🔥 verifica se é master
+const { data: master } = await supabaseClient
+  .from("super_admins")
+  .select("id")
+  .eq("user_id", usuario.id)
+  .maybeSingle();
+
+isMaster = !!master;
+
+mostrarArea();
+await carregarFilmes();
+renderMasterArea(); // 🔥 faltava isso
+}
+
+function salvarSala(){
+  SALA = document.getElementById("sala").value.trim() || "sala1";
+  localStorage.setItem("SALA_TV", SALA);
+  status("Conectado na sala: " + SALA);
+}
+
+async function enviarComando(comando, extra = {}){
+  const { error } = await supabaseClient
+    .from("controle_tv")
+    .insert({
+      sala: SALA,
+      comando,
+      video_id: extra.video_id || null,
+      titulo: extra.titulo || null,
+      filme_id: extra.filme_id || null,
+      volume: extra.volume ?? null
+    });
+
+  if(error){
+    alert("Erro ao enviar comando: " + error.message);
+    return;
+  }
+
+  status("✅ Comando enviado: " + comando);
+}
+
+async function alterarVolume(valor){
+  document.getElementById("valorVolume").innerText = valor;
+
+  await enviarComando("volume", {
+    volume: Number(valor)
+  });
+}
+async function carregarFilmes(){
+  const { data, error } = await supabaseClient
+    .from("filmes")
+    .select("id,titulo,video_id,thumb,categoria,ativo")
+    .eq("ativo", true)
+    .order("titulo");
+
+  if(error){
+    document.getElementById("listaFilmes").innerHTML = "Erro ao carregar filmes.";
+    return;
+  }
+
+  filmes = data || [];
+  renderFilmes();
+}
+
+function toggleListaFilmes(){
+  const box = document.getElementById("boxListaFilmes");
+  const seta = document.getElementById("setaFilmes");
+
+  box.classList.toggle("oculto");
+
+  seta.innerText = box.classList.contains("oculto") ? "▼" : "▲";
+}
+
+function renderFilmes(){
+  const termo = document.getElementById("busca").value.toLowerCase().trim();
+
+  const filtrados = filmes.filter(f =>
+    String(f.titulo || "").toLowerCase().includes(termo) ||
+    String(f.categoria || "").toLowerCase().includes(termo)
+  );
+
+  document.getElementById("listaFilmes").innerHTML = filtrados.map(f => `
+    <div class="filme">
+      <img src="${f.thumb || ""}">
+      <div class="filme-info">
+        <b>${f.titulo || "Sem título"}</b><br>
+        <small>${f.categoria || "Sem categoria"}</small>
+        <button class="btn-green" onclick="tocarFilme('${f.video_id}', '${String(f.titulo || "").replace(/'/g,"\\'")}', ${f.id})">
+          ▶ Tocar na TV
+        </button>
+      </div>
+    </div>
+  `).join("") || "Nenhum filme encontrado.";
+}
+
+async function tocarFilme(videoId, titulo, id){
+  await enviarComando("abrir", {
+    video_id: videoId,
+    titulo,
+    filme_id: id
+  });
+}
+
+
+
+function extrairYoutubeId(url) {
+  if (!url) return "";
+  url = url.trim();
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+
+  const patterns = [
+    /youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/live\/([a-zA-Z0-9_-]{11})/
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) return match[1];
+  }
+
+  return "";
+}
+
+async function cadastrarFilme(){
+  if(!isMaster){
+    alert("Sem permissão");
+    return;
+  }
+
+
+  const titulo = document.getElementById("novoTituloFilme").value.trim();
+  const link = document.getElementById("novoLinkFilme").value.trim();
+  const categoria = document.getElementById("novaCategoriaFilme").value.trim();
+
+  if(!titulo || !link){
+    alert("Preencha título e link do YouTube");
+    return;
+  }
+
+  const videoId = extrairYoutubeId(link);
+
+  if(!videoId){
+    alert("Link do YouTube inválido");
+    return;
+  }
+
+  // 🔥 evita cadastrar o mesmo vídeo 2x, mesmo com título diferente
+const { data: existe } = await supabaseClient
+  .from("filmes")
+  .select("id,titulo")
+  .eq("video_id", videoId)
+  .maybeSingle();
+
+if(existe){
+  alert("Esse vídeo já está cadastrado como: " + existe.titulo);
+  return;
+}
+
+  const thumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+
+  const { error } = await supabaseClient
+    .from("filmes")
+    .insert({
+      titulo,
+      link,
+      video_id: videoId,
+      categoria: categoria || "Sem categoria",
+      descricao: "",
+      thumb,
+      ativo: true
+    });
+
+  if(error){
+    alert("Erro ao cadastrar filme: " + error.message);
+    return;
+  }
+
+  alert("✅ Filme cadastrado com sucesso");
+
+  document.getElementById("novoTituloFilme").value = "";
+  document.getElementById("novoLinkFilme").value = "";
+  document.getElementById("novaCategoriaFilme").value = "";
+
+  await carregarFilmes();
+}
+
+const YOUTUBE_API_KEY = "AIzaSyBRTkvh_4dNLYGzDzopf_pPg7fDPwBoG50";
+
+async function buscarYoutube(){
+  const termo = document.getElementById("buscaYoutube").value.trim();
+
+  if(!termo){
+    alert("Digite algo para buscar");
+    return;
+  }
+
+  document.getElementById("resultadoYoutube").innerHTML = "Buscando...";
+
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(termo)}&type=video&maxResults=10&key=${YOUTUBE_API_KEY}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if(!data.items){
+    document.getElementById("resultadoYoutube").innerHTML = "Erro ao buscar.";
+    return;
+  }
+
+  document.getElementById("resultadoYoutube").innerHTML = data.items.map(v => {
+    const videoId = v.id.videoId;
+    const titulo = v.snippet.title;
+    const thumb = v.snippet.thumbnails.medium.url;
+    const link = `https://www.youtube.com/watch?v=${videoId}`;
+
+    return `
+      <div class="filme">
+        <img src="${thumb}">
+        <div class="filme-info">
+          <b>${titulo}</b><br>
+          <button class="btn-blue" onclick="usarLink('${titulo.replace(/'/g,"")}', '${link}')">
+            📥 Usar esse vídeo
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function usarLink(titulo, link){
+  document.getElementById("novoTituloFilme").value = titulo;
+  document.getElementById("novoLinkFilme").value = link;
+
+  alert("Link preenchido 👍 agora é só cadastrar");
+}
+
+verificarLogin();
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/fffilmes/sw-controle.js")
+      .then(() => console.log("✅ PWA Controle instalado"))
+      .catch(err => console.error("Erro SW:", err));
+  });
+}
+</script>
+</body>
+</html>";
+
+async function buscarYoutube(){
+  const termo = document.getElementById("buscaYoutube").value.trim();
+
+  if(!termo){
+    alert("Digite algo para buscar");
+    return;
+  }
+
+  document.getElementById("resultadoYoutube").innerHTML = "Buscando...";
+
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(termo)}&type=video&maxResults=10&key=${YOUTUBE_API_KEY}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if(!data.items){
+    document.getElementById("resultadoYoutube").innerHTML = "Erro ao buscar.";
+    return;
+  }
+
+  document.getElementById("resultadoYoutube").innerHTML = data.items.map(v => {
+    const videoId = v.id.videoId;
+    const titulo = v.snippet.title;
+    const thumb = v.snippet.thumbnails.medium.url;
+    const link = `https://www.youtube.com/watch?v=${videoId}`;
+
+    return `
+      <div class="filme">
+        <img src="${thumb}">
+        <div class="filme-info">
+          <b>${titulo}</b><br>
+          <button class="btn-blue" onclick="usarLink('${titulo.replace(/'/g,"")}', '${link}')">
+            📥 Usar esse vídeo
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function usarLink(titulo, link){
+  document.getElementById("novoTituloFilme").value = titulo;
+  document.getElementById("novoLinkFilme").value = link;
+
+  alert("Link preenchido 👍 agora é só cadastrar");
 }
 
 verificarLogin();
