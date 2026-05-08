@@ -220,30 +220,7 @@ const SALA = "sala1";
 
 const YOUTUBE_API_KEY = "AIzaSyBRTkvh_4dNLYGzDzopf_pPg7fDPwBoG50";
 let filaAtual = [];
-const FILA_KEY = "fila_tv";
 
-function salvarFila(){
-  localStorage.setItem(
-    FILA_KEY,
-    JSON.stringify(filaAtual)
-  );
-}
-
-function carregarFila(){
-
-  const salva =
-    localStorage.getItem(FILA_KEY);
-
-  if(!salva) return;
-
-  try{
-    filaAtual = JSON.parse(salva) || [];
-  }catch(e){
-    filaAtual = [];
-  }
-
-  renderFila();
-}
 
 function status(txt){
   document.getElementById("status").innerText = txt;
@@ -290,10 +267,18 @@ function renderFila(){
         </div>
 
         <div class="fila-titulo">
-          ${i === 0 ? "🎵 Tocando:" : "⏭️ Próxima:"}
-          <br>
-          <b>${item.titulo}</b>
-        </div>
+
+  ${
+    item.status === "tocando"
+      ? "🎵 Tocando Agora:"
+      : "⏭️ Próxima:"
+  }
+
+  <br>
+
+  <b>${item.titulo}</b>
+
+</div>
 
       </div>
 
@@ -302,51 +287,74 @@ function renderFila(){
 
 async function tocarYoutube(videoId, titulo){
 
-  await enviarComando("abrir", {
-    video_id: videoId,
-    titulo: titulo
-  });
+  // verifica se já existe algo tocando
+  const { data: tocando } = await supabaseClient
+    .from("fila_tv")
+    .select("*")
+    .eq("sala", SALA)
+    .eq("status", "tocando")
+    .limit(1);
 
-  // remove duplicados
-  filaAtual = filaAtual.filter(
-    item => item.titulo !== titulo
-  );
+  // se não tiver nada tocando
+  if(!tocando.length){
 
-  // adiciona no topo
-  filaAtual.unshift({
-    titulo,
-    videoId
-  });
+    await supabaseClient
+      .from("fila_tv")
+      .insert([{
+        sala: SALA,
+        video_id: videoId,
+        titulo,
+        status: "tocando"
+      }]);
 
-  // remove músicas antigas do topo
-  if(filaAtual.length > 1){
+    await enviarComando("abrir", {
+      video_id: videoId,
+      titulo
+    });
 
-    filaAtual = [
-      filaAtual[0],
-      ...filaAtual.slice(1)
-    ];
+  } else {
+
+    // adiciona na fila
+    await supabaseClient
+      .from("fila_tv")
+      .insert([{
+        sala: SALA,
+        video_id: videoId,
+        titulo,
+        status: "fila"
+      }]);
 
   }
 
-  renderFila();
-  salvarFila();
-
-  status("📺 Tocando: " + titulo);
+  carregarFilaSupabase();
 }
+
+async function carregarFilaSupabase(){
+
+  const { data } = await supabaseClient
+    .from("fila_tv")
+    .select("*")
+    .eq("sala", SALA)
+    .in("status", ["tocando", "fila"])
+    .order("id");
+
+  filaAtual = data || [];
+
+  renderFila();
+}
+
 async function adicionarFilaYoutube(videoId, titulo){
 
-  await enviarComando("add_lista", {
-    video_id: videoId,
-    titulo: titulo
-  });
+  await supabaseClient
+    .from("fila_tv")
+    .insert([{
+      sala: SALA,
+      video_id: videoId,
+      titulo,
+      status: "fila"
+    }]);
 
-  filaAtual.push({
-  titulo,
-  videoId
-});
-
-renderFila();
-salvarFila();
+  carregarFilaSupabase();
 
   status("➕ Adicionado à fila");
 }
@@ -433,7 +441,7 @@ async function buscarYoutube(){
 }
 
 supabaseClient
-  .channel("fila-tv")
+  .channel("fila-real-tv")
 
   .on(
     "postgres_changes",
@@ -444,60 +452,27 @@ supabaseClient
       filter: `sala=eq.${SALA}`
     },
 
-    (payload) => {
+  supabaseClient
+  .channel("fila-real-tv")
 
-      const cmd = payload.new;
+  .on(
+    "postgres_changes",
+    {
+      event: "*",
+      schema: "public",
+      table: "fila_tv",
+      filter: `sala=eq.${SALA}`
+    },
 
-      if(!cmd) return;
-
-      
-  // remove música que entrou
-if(cmd.comando === "abrir"){
-
-  // se já é o atual, ignora
-  if(
-    filaAtual.length &&
-    filaAtual[0].videoId === cmd.video_id
-  ){
-    return;
-  }
-
-  // remove duplicadas
-  filaAtual = filaAtual.filter(
-    item => item.videoId !== cmd.video_id
-  );
-
-  // remove atual antiga
-  if(filaAtual.length){
-    filaAtual.shift();
-  }
-
-  // nova atual
-  filaAtual.unshift({
-    titulo: cmd.titulo,
-    videoId: cmd.video_id
-  });
-
-  renderFila();
-  salvarFila();
-}
-
-if(cmd.comando === "proximo"){
-
-  if(filaAtual.length){
-    filaAtual.shift();
-  }
-
-  renderFila();
-  salvarFila();
-}
-
-  }
+    async () => {
+      carregarFilaSupabase();
+    }
 
   )
 
+  
   .subscribe();
-carregarFila();
+carregarFilaSupabase();
 </script>
 </body>
 </html>
