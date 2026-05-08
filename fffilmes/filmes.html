@@ -1992,52 +1992,54 @@ const tentarAbrir = setInterval(() => {
 
   async function abrirProximoFilme() {
 
-  // 🔥 toca fila primeiro
-  if(window.minhaLista && window.minhaLista.length){
+  // pega o atual tocando
+  const { data: atual } = await supabaseClient
+    .from("fila_tv")
+    .select("*")
+    .eq("sala", SALA_TV)
+    .eq("status", "tocando")
+    .limit(1)
+    .single();
 
-    const prox = window.minhaLista.shift();
+  // remove atual
+  if(atual){
+    await supabaseClient
+      .from("fila_tv")
+      .delete()
+      .eq("id", atual.id);
+  }
 
-    renderMinhaLista();
+  // pega próxima da fila
+  const { data: proximo } = await supabaseClient
+    .from("fila_tv")
+    .select("*")
+    .eq("sala", SALA_TV)
+    .eq("status", "fila")
+    .order("id", { ascending: true })
+    .limit(1)
+    .single();
 
-    await abrirPlayer(
-      prox.video_id,
-      prox.titulo,
-      prox.filme_id || null
-    );
-
+  // se não tiver mais nada
+  if(!proximo){
+    console.log("Fila terminou");
     return;
   }
 
-  // 🔥 fallback catálogo normal
-  await salvarProgressoAtual(true);
+  // vira tocando
+  await supabaseClient
+    .from("fila_tv")
+    .update({
+      status: "tocando"
+    })
+    .eq("id", proximo.id);
 
-  if (!filmesBase.length) return;
-
-  if (filmeAtualIndex < 0) {
-    filmeAtualIndex = 0;
-  } else {
-    filmeAtualIndex =
-      (filmeAtualIndex + 1) % filmesBase.length;
-  }
-
-  const proximo = filmesBase[filmeAtualIndex];
-
-  supabaseClient
-  .from("controle_tv")
-  .insert([{
-    sala: SALA_TV,
-    comando: "abrir",
-    video_id: proximo.video_id,
-    titulo: proximo.titulo
-  }]);
-
-  if (!proximo) return;
-
+  // abre player
   await abrirPlayer(
     proximo.video_id,
     proximo.titulo,
-    proximo.id
+    proximo.filme_id || null
   );
+
 }
 
   function renderMinhaLista(){
