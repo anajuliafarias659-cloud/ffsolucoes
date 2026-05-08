@@ -2713,46 +2713,99 @@ renderSecoesUsuario();
     }
   }
 
-  function ativarBloqueioTempoReal(clienteId) {
-    if (!clienteId) return;
+ function ativarBloqueioTempoReal(clienteId) {
 
-    try {
-      if (canalTempoReal) {
-        supabaseClient.removeChannel(canalTempoReal);
+  if (!clienteId) return;
+
+  try {
+    if (canalTempoReal) {
+      supabaseClient.removeChannel(canalTempoReal);
+    }
+  } catch (e) {}
+
+  canalTempoReal = supabaseClient
+
+    .channel("cliente-status-" + clienteId)
+
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "admin_clientes",
+        filter: `id=eq.${clienteId}`
+      },
+
+      async (payload) => {
+
+        const novo = payload.new || {};
+
+        // 🔥 BLOQUEIO CLIENTE
+        if (novo.ativo === false) {
+          await derrubarUsuario(
+            "Seu acesso foi bloqueado pelo admin."
+          );
+        }
+
       }
-    } catch (e) {}
+    )
 
-    canalTempoReal = supabaseClient
-      .channel("cliente-status-" + clienteId)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "admin_clientes",
-          filter: `id=eq.${clienteId}`
-        },
-        async (payload) => {
-          const novo = payload.new || {};
-          if (novo.ativo === false) {
-            await derrubarUsuario("Seu acesso foi bloqueado pelo admin.");
+    // 🔥 FILA / CONTROLE TV
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "controle_tv",
+        filter: `sala=eq.${SALA_TV}`
+      },
+
+      async (payload) => {
+
+        const cmd = payload.new;
+
+        if(!cmd) return;
+
+        // 🔥 TOCAR AGORA
+        if(cmd.comando === "abrir"){
+
+          await abrirPlayer(
+            cmd.video_id,
+            cmd.titulo || "YouTube",
+            cmd.filme_id || null
+          );
+
+        }
+
+        // 🔥 ADICIONAR FILA
+        if(cmd.comando === "add_lista"){
+
+          if(!window.minhaLista){
+            window.minhaLista = [];
           }
+
+          window.minhaLista.push({
+            video_id: cmd.video_id,
+            titulo: cmd.titulo,
+            filme_id: cmd.filme_id || null
+          });
+
+          renderMinhaLista();
+
         }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "admin_clientes",
-          filter: `id=eq.${clienteId}`
-        },
-        async () => {
-          await derrubarUsuario("Seu acesso foi removido.");
+
+        // 🔥 PRÓXIMO
+        if(cmd.comando === "proximo"){
+
+          abrirProximoFilme();
+
         }
-      )
-      .subscribe();
-  }
+
+      }
+    )
+
+    .subscribe();
+}
 
   let canalControleTV = null;
 
