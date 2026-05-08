@@ -307,17 +307,18 @@ async function tocarYoutube(videoId, titulo){
     titulo: titulo
   });
 
-  // remove se já estiver na fila
+  // remove duplicados
   filaAtual = filaAtual.filter(
     item => item.titulo !== titulo
   );
 
-  // coloca como tocando agora
+  // adiciona no topo
   filaAtual.unshift({
-    titulo
+    titulo,
+    videoId
   });
 
-  // mantém só 1 tocando no topo
+  // remove músicas antigas do topo
   if(filaAtual.length > 1){
 
     filaAtual = [
@@ -332,7 +333,6 @@ async function tocarYoutube(videoId, titulo){
 
   status("📺 Tocando: " + titulo);
 }
-
 async function adicionarFilaYoutube(videoId, titulo){
 
   await enviarComando("add_lista", {
@@ -431,6 +431,56 @@ async function buscarYoutube(){
     }).join("");
 }
 
+supabaseClient
+  .channel("fila-tv")
+
+  .on(
+    "postgres_changes",
+    {
+      event: "INSERT",
+      schema: "public",
+      table: "controle_tv",
+      filter: `sala=eq.${SALA}`
+    },
+
+    (payload) => {
+
+      const cmd = payload.new;
+
+      if(!cmd) return;
+
+      // quando tocar
+      if(cmd.comando === "abrir"){
+
+        filaAtual = filaAtual.filter(
+          item => item.titulo !== cmd.titulo
+        );
+
+        filaAtual.unshift({
+          titulo: cmd.titulo,
+          videoId: cmd.video_id
+        });
+
+        renderFila();
+        salvarFila();
+      }
+
+      // quando próximo
+      if(cmd.comando === "proximo"){
+
+        if(filaAtual.length > 1){
+          filaAtual.shift();
+        }
+
+        renderFila();
+        salvarFila();
+      }
+
+    }
+
+  )
+
+  .subscribe();
 carregarFila();
 </script>
 </body>
