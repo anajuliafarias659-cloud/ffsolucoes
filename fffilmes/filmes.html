@@ -1904,6 +1904,42 @@ onStateChange: onYouTubePlayerStateChange
 };
   async function abrirPlayer(videoId, titulo = "", filmeId = null) {
 
+// atualiza tocando agora na fila
+await supabaseClient
+  .from("fila_tv")
+  .update({ status: "fila" })
+  .eq("sala", SALA_TV)
+  .eq("status", "tocando");
+
+// verifica se já existe esse vídeo
+const { data: existe } = await supabaseClient
+  .from("fila_tv")
+  .select("*")
+  .eq("sala", SALA_TV)
+  .eq("video_id", videoId)
+  .limit(1);
+
+if(existe && existe.length){
+
+  await supabaseClient
+    .from("fila_tv")
+    .update({
+      status: "tocando"
+    })
+    .eq("id", existe[0].id);
+
+} else {
+
+  await supabaseClient
+    .from("fila_tv")
+    .insert([{
+      sala: SALA_TV,
+      video_id: videoId,
+      titulo: titulo || "Sem título",
+      status: "tocando"
+    }]);
+
+}
   // 🔥 pausa vídeo da hero
   if (heroPlayer && typeof heroPlayer.pauseVideo === "function") {
     heroPlayer.pauseVideo();
@@ -1923,37 +1959,7 @@ onStateChange: onYouTubePlayerStateChange
     titulo: titulo
   };
 
- // tira tocando antigo
-await supabaseClient
-  .from("fila_tv")
-  .update({
-    status: "fila"
-  })
-  .eq("sala", SALA_TV)
-  .eq("status", "tocando");
-
-// pega primeiro item da fila desse vídeo
-const { data: atual } = await supabaseClient
-  .from("fila_tv")
-  .select("id")
-  .eq("sala", SALA_TV)
-  .eq("video_id", videoId)
-  .eq("status", "fila")
-  .order("id", { ascending: true })
-  .limit(1)
-  .single();
-
-if(atual){
-
-  await supabaseClient
-    .from("fila_tv")
-    .update({
-      status: "tocando"
-    })
-    .eq("id", atual.id);
-
-}
-
+ 
 document.body.style.overflow = "hidden";
 
 overlay.classList.add("show");
@@ -1992,7 +1998,7 @@ const tentarAbrir = setInterval(() => {
 
   async function abrirProximoFilme() {
 
-  // atual tocando
+  // pega atual
   const { data: atualData } = await supabaseClient
     .from("fila_tv")
     .select("*")
@@ -2010,7 +2016,7 @@ const tentarAbrir = setInterval(() => {
       .eq("id", atual.id);
   }
 
-  // próxima da fila
+  // pega próximo
   const { data: proxData } = await supabaseClient
     .from("fila_tv")
     .select("*")
@@ -2026,7 +2032,7 @@ const tentarAbrir = setInterval(() => {
     return;
   }
 
-  // marca como tocando
+  // 🔥 marca próximo como tocando
   await supabaseClient
     .from("fila_tv")
     .update({
@@ -2034,12 +2040,14 @@ const tentarAbrir = setInterval(() => {
     })
     .eq("id", proximo.id);
 
-  // abre player
-  abrirPlayer(
-    proximo.video_id,
-    proximo.titulo,
-    proximo.filme_id || null
-  );
+  // 🔥 abre SEM mexer mais na fila
+  garantirPlayerYoutube(proximo.video_id);
+
+  filmeAtualPlayer = {
+    id: proximo.filme_id || null,
+    video_id: proximo.video_id,
+    titulo: proximo.titulo
+  };
 
 }
 
