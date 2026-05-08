@@ -331,29 +331,64 @@ async function tocarYoutube(videoId, titulo){
 
 async function carregarFilaSupabase(){
 
+  const lista = document.getElementById("filaTv");
+
   const { data, error } = await supabaseClient
     .from("fila_tv")
     .select("*")
     .eq("sala", SALA)
-    .in("status", ["tocando", "fila"]);
+    .order("id", { ascending: true });
 
   if(error){
     console.log(error);
     return;
   }
 
-  // deixa tocando no topo
-  data.sort((a, b) => {
+  if(!data || !data.length){
+    lista.innerHTML = `
+      <div class="fila-vazia">
+        Fila vazia
+      </div>
+    `;
+    return;
+  }
+
+  // coloca tocando no topo
+  data.sort((a,b) => {
 
     if(a.status === "tocando") return -1;
     if(b.status === "tocando") return 1;
 
     return a.id - b.id;
+
   });
 
-  filaAtual = data || [];
+  lista.innerHTML = data.map((item, i) => `
 
-  renderFila();
+    <div class="fila-item">
+
+      <div class="fila-numero">
+        ${i + 1}
+      </div>
+
+      <div class="fila-texto">
+
+        ${
+          item.status === "tocando"
+          ? "🎵 Tocando Agora:"
+          : "⏭️ Próxima:"
+        }
+
+        <br>
+
+        <b>${item.titulo}</b>
+
+      </div>
+
+    </div>
+
+  `).join("");
+
 }
 
 async function adicionarFilaYoutube(videoId, titulo){
@@ -470,7 +505,19 @@ supabaseClient
     }
 
   )
-
+supabaseClient
+  .channel("fila-tv-real")
+  .on(
+    "postgres_changes",
+    {
+      event: "*",
+      schema: "public",
+      table: "fila_tv"
+    },
+    () => {
+      carregarFilaSupabase();
+    }
+  )
   .subscribe();
 
 carregarFilaSupabase();
