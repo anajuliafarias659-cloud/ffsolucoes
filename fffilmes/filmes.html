@@ -3126,7 +3126,24 @@ function extrairVideoId(valor){
   return txt;
 }
 
-  
+  function garantirPlayerYoutube(videoId) {
+  videoId = extrairVideoId(videoId);
+
+  console.log("🎬 Tentando iniciar vídeo:", videoId);
+
+  if (!videoId) {
+    console.error("❌ video_id vazio");
+    return false;
+  }
+
+  if (window.YT && window.YT.Player) {
+    ytApiPronta = true;
+  }
+
+  if (!ytApiPronta || !window.YT || !window.YT.Player) {
+    console.warn("⏳ API do YouTube ainda não pronta");
+    return false;
+  }
 
   const playerBox = document.getElementById("overlayPlayer");
 
@@ -3165,14 +3182,8 @@ onStateChange: onYouTubePlayerStateChange
       }
     });
   } else {
-    ytPlayer.loadVideoById({
-  videoId: videoId,
-  startSeconds: Math.floor(
-    tempoAtualHero || 0
-  )
-});
-
-ytPlayer.playVideo();
+    ytPlayer.loadVideoById(videoId);
+    ytPlayer.playVideo();
   }
 
   return true;
@@ -3225,25 +3236,9 @@ if(existe && existe.length){
 
 }
   // 🔥 pausa vídeo da hero
-  // 🔥 pega tempo atual da hero
-
-let tempoAtualHero = 0;
-
-if(
-  heroPlayer &&
-  typeof heroPlayer.getCurrentTime === "function"
-){
-
-  try{
-
-    tempoAtualHero =
-      heroPlayer.getCurrentTime() || 0;
-
-    heroPlayer.mute();
-
-  }catch(e){}
-
-}
+  if (heroPlayer && typeof heroPlayer.pauseVideo === "function") {
+    heroPlayer.pauseVideo();
+  }
 
   const overlay = document.getElementById("playerOverlay");
   const overlayTitulo = document.getElementById("overlayTitulo");
@@ -3263,29 +3258,6 @@ if(
 document.body.style.overflow = "hidden";
 
 overlay.classList.add("show");
-// 🔥 usa o MESMO player da hero
-
-const heroBox =
-  document.getElementById(
-    "heroVideoBox"
-  );
-
-const playerArea =
-  document.getElementById(
-    "playerArea"
-  );
-
-if(heroBox && playerArea){
-
-  playerArea.appendChild(heroBox);
-
-  heroBox.style.position = "absolute";
-  heroBox.style.inset = "0";
-  heroBox.style.width = "100%";
-  heroBox.style.height = "100%";
-  heroBox.style.zIndex = "1";
-
-}
 document.getElementById(
   "codigoTVTopo"
 ).style.display = "none";
@@ -3299,7 +3271,23 @@ iniciarLegendasAleatorias();
 
     await iniciarPingAssistindo(filmeObj || filmeAtualPlayer);
 
-  
+    let tentativas = 0;
+
+const tentarAbrir = setInterval(() => {
+  tentativas++;
+
+  const abriu = garantirPlayerYoutube(videoId);
+
+  if(abriu || tentativas >= 10){
+    clearInterval(tentarAbrir);
+  }
+
+  if(tentativas >= 10 && !abriu){
+    console.error("❌ Não conseguiu iniciar o player do YouTube");
+  }
+}, 500);
+}
+   
 
   function toggleRepetir(){
   modoRepetir = !modoRepetir;
@@ -3421,27 +3409,7 @@ function tocarProximoDaLista(){
     pararLegendasAleatorias();
 
     try {
-    
-        if(
-  ytPlayer &&
-  heroPlayer &&
-  typeof ytPlayer.getCurrentTime === "function"
-){
-
-  try{
-
-    const tempo =
-      ytPlayer.getCurrentTime();
-
-    heroPlayer.seekTo(tempo, true);
-
-    heroPlayer.unMute();
-
-    heroPlayer.playVideo();
-
-  }catch(e){}
-
-}
+      if (ytPlayer && typeof ytPlayer.stopVideo === "function") {
         ytPlayer.stopVideo();
       }
     } catch (e) {}
@@ -3449,28 +3417,6 @@ function tocarProximoDaLista(){
 document.getElementById(
   "codigoTVTopo"
 ).style.display = "block";
-
-// 🔥 devolve player pro hero
-
-const hero =
-  document.querySelector(".hero");
-
-const heroBox =
-  document.getElementById(
-    "heroVideoBox"
-  );
-
-if(hero && heroBox){
-
-  hero.appendChild(heroBox);
-
-  heroBox.style.position = "";
-  heroBox.style.inset = "";
-  heroBox.style.width = "";
-  heroBox.style.height = "";
-  heroBox.style.zIndex = "";
-
-}
 
     overlay.classList.remove("show");
     document.body.style.overflow = "";
@@ -4142,8 +4088,7 @@ async function buscarNovela(){
       },
       events: {
         onReady: (event) => {
-          event.target.unMute();
-event.target.setVolume(100);
+          event.target.mute();
           event.target.playVideo();
         }
       }
