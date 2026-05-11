@@ -268,9 +268,38 @@ button{
       <input id="nomeSite" placeholder="Nome do site">
       <input id="bgLogin" placeholder="URL da imagem de fundo do login">
       <input type="file" id="logoFile" accept="image/*">
-<input type="file" id="uploadBanner">
-<button onclick="uploadBanner()">Enviar Banner</button>
-      <img id="previewLogoPlay" style="max-height:70px; display:none; margin-top:10px; border-radius:12px;">
+
+<img
+  id="previewLogoPlay"
+  style="
+    max-height:70px;
+    display:none;
+    margin-top:10px;
+    border-radius:12px;
+  "
+>
+
+<!-- 🔥 BANNER / MASCOTE TICKER -->
+
+<input
+  type="file"
+  id="uploadBanner"
+  accept="image/*"
+>
+
+<button onclick="uploadBanner()">
+  Enviar Banner
+</button>
+
+<img
+  id="previewBannerTicker"
+  style="
+    max-height:90px;
+    display:none;
+    margin-top:10px;
+    border-radius:12px;
+  "
+>
       <input id="corPrimaria" placeholder="Cor primária (#e50914)">
       <input id="corSecundaria" placeholder="Cor secundária (#b20710)">
       <input id="corFundo" placeholder="Cor do fundo (#020617)">
@@ -911,52 +940,88 @@ async function uploadLogo(file){
 
 async function uploadBanner(){
 
+  limparMsg();
+
   const file =
     document.getElementById("uploadBanner")
-    .files[0];
+    ?.files?.[0];
 
   if(!file){
-    alert("Escolha uma imagem");
+    mostrarMsg("Escolha uma imagem.");
     return;
   }
 
-  const nome =
-    Date.now() + "_" + file.name;
+  if(!adminId){
+    mostrarMsg("Admin inválido.");
+    return;
+  }
 
-  // bucket propagandas
+  const nomeArquivo =
+    `banner_${adminId}_${Date.now()}_${
+      file.name.replace(/\s+/g, "_")
+    }`;
+
+  // upload no bucket
   const { error: uploadError } =
     await supabaseClient.storage
       .from("propagandas")
-      .upload(nome, file);
+      .upload(nomeArquivo, file, {
+        cacheControl: "3600",
+        upsert: true
+      });
 
   if(uploadError){
-    alert(uploadError.message);
+    mostrarMsg(
+      "Erro upload banner: " +
+      uploadError.message
+    );
     return;
   }
 
+  // pega url pública
   const { data } =
     supabaseClient.storage
       .from("propagandas")
-      .getPublicUrl(nome);
+      .getPublicUrl(nomeArquivo);
 
   const url = data.publicUrl;
 
-  // salva no config
+  // salva config
   const { error } =
     await supabaseClient
       .from("config_filmes")
-      .update({
-        banner_lateral: url
-      })
-      .eq("admin_id", adminAtual.id);
+      .upsert({
+        admin_id: adminId,
+        imagem_ticker: url
+      }, {
+        onConflict: "admin_id"
+      });
 
   if(error){
-    alert(error.message);
+    mostrarMsg(
+      "Erro ao salvar banner: " +
+      error.message
+    );
     return;
   }
 
-  alert("Banner salvo!");
+  // preview
+  const preview =
+    document.getElementById(
+      "previewBannerTicker"
+    );
+
+  if(preview){
+    preview.src = url;
+    preview.style.display = "block";
+  }
+
+  mostrarMsg(
+    "Banner enviado com sucesso.",
+    "ok"
+  );
 }
+
 async function salvarTema(){
   limparMsg();
 
@@ -989,18 +1054,20 @@ const mensagens_ticker =
   }
 
   const payload = {
-    admin_id: adminId,
-    tema,
-    nome_site,
-    bg_login,
-    logo_play,
-    cor_primaria,
-    cor_secundaria,
-    cor_fundo,
-    cor_card,
-    cor_texto,
-mensagens_ticker
-  };
+  admin_id: adminId,
+  tema,
+  nome_site,
+  bg_login,
+  logo_play,
+  imagem_ticker:
+    temaAtual?.imagem_ticker || null,
+  cor_primaria,
+  cor_secundaria,
+  cor_fundo,
+  cor_card,
+  cor_texto,
+  mensagens_ticker
+};
 
   const { error } = await supabaseClient
     .from("config_filmes")
