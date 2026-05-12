@@ -1,5 +1,6 @@
 
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -610,13 +611,17 @@ right:auto;
     }
 
     .player-overlay{
-      position:fixed;
-      inset:0;
-      background:rgba(0,0,0,.97);
-      z-index:9999;
-      display:none;
-      flex-direction:column;
-    }
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.97);
+
+  backdrop-filter:blur(4px);
+
+  z-index:9999;
+
+  display:none;
+  flex-direction:column;
+}
 
     .player-overlay.show{display:flex}
 
@@ -680,18 +685,35 @@ right:auto;
     }
 
     .player-area{
-  position:relative;
-  flex:1;
+  position:fixed;
+
+  inset:0;
+
+  width:100vw;
+  height:100vh;
+
   background:#000;
+
+  z-index:9999;
+
+  overflow:hidden;
 }
 
     .player-area #overlayPlayer,
 .player-area iframe{
-  position:absolute;
-  inset:0;
+
+  position:fixed;
+
+  top:0;
+  left:0;
+
   width:100vw !important;
   height:100vh !important;
+
   border:none;
+
+  z-index:1;
+
 }
 
     .legenda-flutuante{
@@ -3158,10 +3180,18 @@ function extrairVideoId(valor){
       height: "100%",
       videoId: videoId,
       playerVars: {
-        autoplay: 1,
-        rel: 0,
-        playsinline: 1
-      },
+
+  autoplay: 1,
+
+  rel: 0,
+
+  controls: 1,
+
+  modestbranding: 1,
+
+  playsinline: 0
+
+}
       events: {
        onReady: async function(event){
 
@@ -3197,97 +3227,142 @@ onStateChange: onYouTubePlayerStateChange
     iniciarHeroPlayer(heroVideoPendente);
   }
 };
-  async function abrirPlayer(videoId, titulo = "", filmeId = null) {
+  
+  filmeAtualPlayer = filmesBase.find(
+  f => String(f.id) === String(filmeId)
+) || {
 
-// atualiza tocando agora na fila
-await supabaseClient
-  .from("fila_tv")
-  .update({ status: "fila" })
-  .eq("sala", SALA_TV)
-  .eq("status", "tocando");
+  id: filmeId,
+  video_id: videoId,
+  titulo: titulo
 
-// verifica se já existe esse vídeo
-const { data: existe } = await supabaseClient
-  .from("fila_tv")
-  .select("*")
-  .eq("sala", SALA_TV)
-  .eq("video_id", videoId)
-  .limit(1);
+};
 
-if(existe && existe.length){
+// 🔥 MEDIA SESSION
+if ("mediaSession" in navigator) {
 
-  await supabaseClient
-    .from("fila_tv")
-    .update({
-      status: "tocando"
-    })
-    .eq("id", existe[0].id);
+  navigator.mediaSession.metadata =
+    new MediaMetadata({
 
-} else {
+      title:
+        titulo || "FF Filmes",
 
-  await supabaseClient
-    .from("fila_tv")
-    .insert([{
-      sala: SALA_TV,
-      video_id: videoId,
-      titulo: titulo || "Sem título",
-      status: "tocando"
-    }]);
+      artist:
+        "FF Filmes",
+
+      artwork: [
+
+        {
+          src:
+            filmeAtualPlayer?.capa || "",
+
+          sizes:"512x512",
+
+          type:"image/png"
+        }
+
+      ]
+
+    });
+
+  navigator.mediaSession
+    .setActionHandler(
+      "play",
+      () => {
+
+        if(
+          ytPlayer &&
+          typeof ytPlayer.playVideo === "function"
+        ){
+
+          ytPlayer.playVideo();
+
+        }
+
+      }
+    );
+
+  navigator.mediaSession
+    .setActionHandler(
+      "pause",
+      () => {
+
+        if(
+          ytPlayer &&
+          typeof ytPlayer.pauseVideo === "function"
+        ){
+
+          ytPlayer.pauseVideo();
+
+        }
+
+      }
+    );
 
 }
-  // 🔥 pausa vídeo da hero
-  if (heroPlayer && typeof heroPlayer.pauseVideo === "function") {
-    heroPlayer.pauseVideo();
-  }
 
-  const overlay = document.getElementById("playerOverlay");
-  const overlayTitulo = document.getElementById("overlayTitulo");
-  const playerArea = document.getElementById("playerArea");
-
-  await salvarProgressoAtual(true);
-
-  filmeAtualPlayer = filmesBase.find(
-    f => String(f.id) === String(filmeId)
-  ) || {
-    id: filmeId,
-    video_id: videoId,
-    titulo: titulo
-  };
-
- 
 document.body.style.overflow = "hidden";
 
 overlay.classList.add("show");
+
 document.getElementById(
   "codigoTVTopo"
 ).style.display = "none";
 
 iniciarLegendasAleatorias();
 
-    const filmeObj = filmesBase.find(f => String(f.id) === String(filmeId));
-    if (filmeObj) {
-      await registrarHistorico(filmeObj);
+const filmeObj =
+  filmesBase.find(
+    f => String(f.id) === String(filmeId)
+  );
+
+if (filmeObj) {
+
+  await registrarHistorico(
+    filmeObj
+  );
+
+}
+
+await iniciarPingAssistindo(
+  filmeObj || filmeAtualPlayer
+);
+
+let tentativas = 0;
+
+const tentarAbrir =
+  setInterval(() => {
+
+    tentativas++;
+
+    const abriu =
+      garantirPlayerYoutube(videoId);
+
+    if(
+      abriu ||
+      tentativas >= 10
+    ){
+
+      clearInterval(
+        tentarAbrir
+      );
+
     }
 
-    await iniciarPingAssistindo(filmeObj || filmeAtualPlayer);
+    if(
+      tentativas >= 10 &&
+      !abriu
+    ){
 
-    let tentativas = 0;
+      console.error(
+        "❌ Não conseguiu iniciar o player do YouTube"
+      );
 
-const tentarAbrir = setInterval(() => {
-  tentativas++;
+    }
 
-  const abriu = garantirPlayerYoutube(videoId);
-
-  if(abriu || tentativas >= 10){
-    clearInterval(tentarAbrir);
-  }
-
-  if(tentativas >= 10 && !abriu){
-    console.error("❌ Não conseguiu iniciar o player do YouTube");
-  }
 }, 500);
-}
-   
+
+
 
   function toggleRepetir(){
   modoRepetir = !modoRepetir;
