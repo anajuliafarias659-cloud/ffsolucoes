@@ -3227,141 +3227,95 @@ onStateChange: onYouTubePlayerStateChange
     iniciarHeroPlayer(heroVideoPendente);
   }
 };
-  
-  filmeAtualPlayer = filmesBase.find(
-  f => String(f.id) === String(filmeId)
-) || {
+  async function abrirPlayer(videoId, titulo = "", filmeId = null) {
 
-  id: filmeId,
-  video_id: videoId,
-  titulo: titulo
+// atualiza tocando agora na fila
+await supabaseClient
+  .from("fila_tv")
+  .update({ status: "fila" })
+  .eq("sala", SALA_TV)
+  .eq("status", "tocando");
 
-};
+// verifica se já existe esse vídeo
+const { data: existe } = await supabaseClient
+  .from("fila_tv")
+  .select("*")
+  .eq("sala", SALA_TV)
+  .eq("video_id", videoId)
+  .limit(1);
 
-// 🔥 MEDIA SESSION
-if ("mediaSession" in navigator) {
+if(existe && existe.length){
 
-  navigator.mediaSession.metadata =
-    new MediaMetadata({
+  await supabaseClient
+    .from("fila_tv")
+    .update({
+      status: "tocando"
+    })
+    .eq("id", existe[0].id);
 
-      title:
-        titulo || "FF Filmes",
+} else {
 
-      artist:
-        "FF Filmes",
-
-      artwork: [
-
-        {
-          src:
-            filmeAtualPlayer?.capa || "",
-
-          sizes:"512x512",
-
-          type:"image/png"
-        }
-
-      ]
-
-    });
-
-  navigator.mediaSession
-    .setActionHandler(
-      "play",
-      () => {
-
-        if(
-          ytPlayer &&
-          typeof ytPlayer.playVideo === "function"
-        ){
-
-          ytPlayer.playVideo();
-
-        }
-
-      }
-    );
-
-  navigator.mediaSession
-    .setActionHandler(
-      "pause",
-      () => {
-
-        if(
-          ytPlayer &&
-          typeof ytPlayer.pauseVideo === "function"
-        ){
-
-          ytPlayer.pauseVideo();
-
-        }
-
-      }
-    );
+  await supabaseClient
+    .from("fila_tv")
+    .insert([{
+      sala: SALA_TV,
+      video_id: videoId,
+      titulo: titulo || "Sem título",
+      status: "tocando"
+    }]);
 
 }
+  // 🔥 pausa vídeo da hero
+  if (heroPlayer && typeof heroPlayer.pauseVideo === "function") {
+    heroPlayer.pauseVideo();
+  }
 
+  const overlay = document.getElementById("playerOverlay");
+  const overlayTitulo = document.getElementById("overlayTitulo");
+  const playerArea = document.getElementById("playerArea");
+
+  await salvarProgressoAtual(true);
+
+  filmeAtualPlayer = filmesBase.find(
+    f => String(f.id) === String(filmeId)
+  ) || {
+    id: filmeId,
+    video_id: videoId,
+    titulo: titulo
+  };
+
+ 
 document.body.style.overflow = "hidden";
 
 overlay.classList.add("show");
-
 document.getElementById(
   "codigoTVTopo"
 ).style.display = "none";
 
 iniciarLegendasAleatorias();
 
-const filmeObj =
-  filmesBase.find(
-    f => String(f.id) === String(filmeId)
-  );
-
-if (filmeObj) {
-
-  await registrarHistorico(
-    filmeObj
-  );
-
-}
-
-await iniciarPingAssistindo(
-  filmeObj || filmeAtualPlayer
-);
-
-let tentativas = 0;
-
-const tentarAbrir =
-  setInterval(() => {
-
-    tentativas++;
-
-    const abriu =
-      garantirPlayerYoutube(videoId);
-
-    if(
-      abriu ||
-      tentativas >= 10
-    ){
-
-      clearInterval(
-        tentarAbrir
-      );
-
+    const filmeObj = filmesBase.find(f => String(f.id) === String(filmeId));
+    if (filmeObj) {
+      await registrarHistorico(filmeObj);
     }
 
-    if(
-      tentativas >= 10 &&
-      !abriu
-    ){
+    await iniciarPingAssistindo(filmeObj || filmeAtualPlayer);
 
-      console.error(
-        "❌ Não conseguiu iniciar o player do YouTube"
-      );
+    let tentativas = 0;
 
-    }
+const tentarAbrir = setInterval(() => {
+  tentativas++;
 
+  const abriu = garantirPlayerYoutube(videoId);
+
+  if(abriu || tentativas >= 10){
+    clearInterval(tentarAbrir);
+  }
+
+  if(tentativas >= 10 && !abriu){
+    console.error("❌ Não conseguiu iniciar o player do YouTube");
+  }
 }, 500);
-  
 }
    
 
