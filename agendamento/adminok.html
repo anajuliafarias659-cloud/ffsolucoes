@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Admin Barbearia</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script type="module">
+
+import { supabase } from "../js/supabase.js";
+
+const {
+  data: { session }
+} = await supabase.auth.getSession();
+
+if(!session){
+  location.href = "../auth/login.html";
+}
+
+const { data: usuario } = await supabase
+  .from("usuarios")
+  .select("*")
+  .eq("id", session.user.id)
+  .single();
+
+if(!usuario){
+  alert("Usuário não encontrado");
+  location.href = "../auth/login.html";
+}
+
+if(usuario.sistema !== "barbearia"){
+  alert("Acesso negado");
+  location.href = "../auth/login.html";
+}
+
+window.usuarioSistema = usuario;
+window.db = supabase;
+
+</script>
+<style>
+
+body{
+    font-family:Arial,sans-serif;
+    background:#f5f5f5;
+    padding:20px;
+}
+
+.container{
+    max-width:1000px;
+    margin:auto;
+}
+
+.card{
+    background:#fff;
+    padding:20px;
+    border-radius:12px;
+    margin-bottom:20px;
+    box-shadow:0 2px 5px rgba(0,0,0,.1);
+}
+
+h1,h2,h3{
+    margin-top:0;
+}
+
+input,textarea,select{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border:1px solid #ddd;
+    border-radius:8px;
+    box-sizing:border-box;
+}
+
+button{
+    background:#0d8db8;
+    color:white;
+    border:none;
+    padding:12px 20px;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+button:hover{
+    opacity:.9;
+}
+
+.excluir{
+    background:#dc3545;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+
+th,td{
+    padding:12px;
+    border-bottom:1px solid #ddd;
+    text-align:left;
+}
+
+.logo-preview{
+    width:100px;
+    height:100px;
+    border-radius:50%;
+    object-fit:cover;
+    margin-top:10px;
+    border:2px solid #ddd;
+}
+
+</style>
+
+</head>
+<body>
+
+<div class="container">
+
+<h1>💈 Administração da Barbearia</h1>
+
+<!-- CONFIGURAÇÕES -->
+
+<div class="card">
+
+<h2>🏪 Dados da Barbearia</h2>
+
+<input
+id="nome_salao"
+placeholder="Nome da Barbearia">
+
+<input
+id="telefone_salao"
+placeholder="Telefone">
+
+<input
+id="endereco_salao"
+placeholder="Endereço">
+
+<input
+id="logo_url"
+placeholder="URL da Logo"
+oninput="atualizarPreview()">
+
+<img
+id="preview_logo"
+class="logo-preview"
+src="https://dummyimage.com/100x100/cccccc/000000.png" />
+
+<br><br>
+
+<h3>🎨 Tema do Site</h3>
+
+<select id="tema_site">
+
+  <option value="">Padrão</option>
+
+  <option value="barber-black">
+    Black Barber
+  </option>
+
+  <option value="gold">
+    Gold Premium
+  </option>
+
+  <option value="neon">
+    Neon
+  </option>
+
+  <option value="natal">
+    Natal
+  </option>
+
+  <option value="anonovo">
+    Ano Novo
+  </option>
+
+  <option value="capivara">
+    Capivara
+  </option>
+
+</select>
+
+<br><br>
+
+<button onclick="salvarConfig()">
+Salvar Dados
+</button>
+
+</div>
+
+<div class="card">
+
+<h2>👨‍💼 Cadastro de Profissionais</h2>
+
+<input
+id="prof_nome"
+placeholder="Nome do profissional">
+
+<input
+id="prof_especialidade"
+placeholder="Especialidade">
+
+<input
+id="prof_foto"
+placeholder="URL da foto">
+
+<br><br>
+
+<button onclick="salvarProfissional()">
+Salvar Profissional
+</button>
+
+</div>
+
+<div class="card">
+
+<h2>📋 Profissionais Cadastrados</h2>
+
+<table>
+
+<thead>
+<tr>
+<th>Nome</th>
+<th>Especialidade</th>
+<th>Ações</th>
+</tr>
+</thead>
+
+<tbody id="listaProfissionais">
+
+</tbody>
+
+</table>
+
+</div>
+
+
+<div class="card">
+
+<h2>✂️ Novo Serviço</h2>
+
+<input
+id="nome"
+placeholder="Nome do serviço">
+
+<input
+id="valor"
+type="number"
+step="0.01"
+placeholder="Valor">
+
+<input
+id="duracao"
+type="number"
+placeholder="Duração em minutos">
+
+<textarea
+id="descricao"
+placeholder="Descrição do serviço"></textarea>
+
+<br><br>
+
+<button onclick="salvarServico()">
+Salvar Serviço
+</button>
+
+</div>
+
+<!-- LISTA -->
+
+<div class="card">
+
+<h2>📋 Serviços Cadastrados</h2>
+
+<table>
+
+<thead>
+<tr>
+<th>Serviço</th>
+<th>Valor</th>
+<th>Duração</th>
+<th>Ações</th>
+</tr>
+</thead>
+
+<tbody id="listaServicos">
+
+</tbody>
+
+</table>
+
+</div>
+
+<div class="card">
+
+<h2>📅 Agendamentos</h2>
+
+<table>
+
+<thead>
+<tr>
+<th>Cliente</th>
+<th>Profissional</th>
+<th>Serviço</th>
+<th>Data</th>
+<th>Hora</th>
+<th>Ações</th>
+</tr>
+</thead>
+
+<tbody id="listaAgendamentos">
+
+</tbody>
+
+</table>
+
+</div>
+
+</div>
+
+<script>
+
+  
+async function carregarAgendamentos(){
+
+    const { data: agendamentos, error } = await db
+    .from("barbearia_agendamentos")
+.select("*")
+.eq("app_id", window.usuarioSistema.app_id)
+.order("id",{ascending:false});
+
+    if(error){
+        console.error(error);
+        return;
+    }
+
+    const { data: profissionais } = await db
+.from("barbearia_profissionais")
+.select("*")
+.eq("app_id", window.usuarioSistema.app_id);
+
+    const { data: servicos } = await db
+.from("barbearia_servicos")
+.select("*")
+.eq("app_id", window.usuarioSistema.app_id);
+
+    let html = "";
+
+    agendamentos.forEach(item => {
+
+        const profissional =
+            profissionais.find(
+                p => p.id == item.profissional_id
+            );
+
+        const servico =
+            servicos.find(
+                s => s.id == item.servico_id
+            );
+
+        const dataFormatada =
+            item.data_agendamento
+            ? item.data_agendamento.split("-").reverse().join("/")
+            : "";
+
+        html += `
+<tr>
+    <td>${item.cliente_nome || ''}</td>
+    <td>${profissional?.nome || 'Não encontrado'}</td>
+    <td>${servico?.nome || 'Não encontrado'}</td>
+    <td>${dataFormatada}</td>
+    <td>${item.hora_agendamento?.substring(0,5) || ''}</td>
+
+    <td>
+        <button
+        class="excluir"
+        onclick="excluirAgendamento(${item.id})">
+        Excluir
+        </button>
+    </td>
+</tr>
+`;
+    });
+
+    document.getElementById("listaAgendamentos").innerHTML = html;
+}
+
+function atualizarPreview(){
+
+    const url =
+    document.getElementById("logo_url").value;
+
+    document.getElementById("preview_logo").src =
+url || "https://dummyimage.com/100x100/cccccc/000000.png";
+}
+
+/* CONFIGURAÇÕES */
+
+async function carregarConfig(){
+
+  const { data, error } = await db
+    .from("barbearia_config")
+    .select("*");
+
+  if(error){
+    console.log(error);
+    return;
+  }
+
+  const config = data.find(
+    item => item.app_id === window.usuarioSistema.app_id
+  );
+
+  console.log("CONFIG ENCONTRADA", config);
+
+  if(!config) return;
+
+  document.getElementById("nome_salao").value =
+    config.nome_salao || "";
+
+  document.getElementById("telefone_salao").value =
+    config.telefone || "";
+
+  document.getElementById("endereco_salao").value =
+    config.endereco || "";
+
+  document.getElementById("logo_url").value =
+    config.logo_url || "";
+
+document.getElementById("tema_site").value =
+    config.tema_site || "";
+
+atualizarPreview();
+}
+
+async function salvarConfig(){
+
+    const nome_salao =
+    document.getElementById("nome_salao").value;
+
+    const telefone =
+    document.getElementById("telefone_salao").value;
+
+    const endereco =
+    document.getElementById("endereco_salao").value;
+
+    const logo_url =
+document.getElementById("logo_url").value;
+
+const tema_site =
+document.getElementById("tema_site").value;
+
+    const { data } = await db
+      .from("barbearia_config")
+      .select("*")
+      .eq("app_id", window.usuarioSistema.app_id)
+      .maybeSingle();
+
+    if(data){
+
+        const { error } = await db
+        .from("barbearia_config")
+        .update({
+    nome_salao,
+    telefone,
+    endereco,
+    logo_url,
+    tema_site
+})
+        .eq("id", data.id);
+
+        if(error){
+            alert(error.message);
+            return;
+        }
+
+    }else{
+
+        const { error } = await db
+        .from("barbearia_config")
+        .insert({
+    app_id: window.usuarioSistema.app_id,
+    nome_salao,
+    telefone,
+    endereco,
+    logo_url,
+    tema_site
+});
+
+        if(error){
+            alert(error.message);
+            return;
+        }
+
+    }
+
+    alert("Dados salvos com sucesso!");
+}
+
+/* SERVIÇOS */
+
+async function salvarServico(){
+
+    const nome = document.getElementById("nome").value.trim();
+    const valor = document.getElementById("valor").value;
+    const duracao = document.getElementById("duracao").value;
+    const descricao = document.getElementById("descricao").value;
+
+    if(!nome){
+        alert("Informe o nome do serviço");
+        return;
+    }
+
+    if(!valor){
+        alert("Informe o valor");
+        return;
+    }
+
+    if(!duracao){
+        alert("Informe a duração");
+        return;
+    }
+
+    const { data, error } = await db
+    .from("barbearia_servicos")
+    .insert({
+        app_id: window.usuarioSistema.app_id,
+        nome,
+        valor: Number(valor),
+        duracao_minutos: Number(duracao),
+        descricao,
+        ativo: true
+    })
+    .select();
+
+    console.log("SERVICO DATA", data);
+    console.log("SERVICO ERROR", error);
+
+    if(error){
+        alert(error.message);
+        return;
+    }
+
+    alert("Serviço cadastrado!");
+    carregarServicos();
+}
+
+async function carregarServicos(){
+
+    const { data, error } = await db
+    .from("barbearia_servicos")
+    .select("*")
+    .eq("app_id", window.usuarioSistema.app_id)
+    .order("id",{ascending:false});
+
+    if(error){
+        console.log(error);
+        return;
+    }
+
+    let html="";
+
+    data.forEach(item=>{
+
+        html += `
+        <tr>
+
+            <td>${item.nome}</td>
+
+            <td>
+                R$ ${Number(item.valor).toFixed(2)}
+            </td>
+
+            <td>
+                ${item.duracao_minutos} min
+            </td>
+
+            <td>
+
+                <button
+                class="excluir"
+                onclick="excluirServico(${item.id})">
+
+                Excluir
+
+                </button>
+
+            </td>
+
+        </tr>
+        `;
+    });
+
+    document.getElementById(
+        "listaServicos"
+    ).innerHTML = html;
+}
+
+
+async function salvarProfissional(){
+
+    const nome =
+    document.getElementById("prof_nome").value;
+
+    const especialidade =
+    document.getElementById("prof_especialidade").value;
+
+    const foto =
+    document.getElementById("prof_foto").value;
+
+    if(!nome){
+        alert("Informe o nome");
+        return;
+    }
+
+    const { error } = await db
+    .from("barbearia_profissionais")
+    .insert({
+    app_id: window.usuarioSistema.app_id,
+    nome,
+    especialidade,
+    foto,
+    ativo:true
+});
+
+    if(error){
+        alert(error.message);
+        return;
+    }
+
+    document.getElementById("prof_nome").value="";
+    document.getElementById("prof_especialidade").value="";
+    document.getElementById("prof_foto").value="";
+
+    carregarProfissionais();
+
+    alert("Profissional cadastrado!");
+}
+
+async function carregarProfissionais(){
+
+    const { data } = await db
+    .from("barbearia_profissionais")
+    .select("*")
+    .eq("app_id", window.usuarioSistema.app_id)
+    .order("id",{ascending:false});
+
+    let html="";
+
+    data.forEach(item=>{
+
+        html += `
+        <tr>
+            <td>${item.nome}</td>
+            <td>${item.especialidade || ''}</td>
+            <td>
+                <button
+                class="excluir"
+                onclick="excluirProfissional(${item.id})">
+                Excluir
+                </button>
+            </td>
+        </tr>
+        `;
+    });
+
+    document.getElementById(
+        "listaProfissionais"
+    ).innerHTML = html;
+}
+
+async function excluirProfissional(id){
+
+    if(!confirm("Excluir profissional?"))
+        return;
+
+    await db
+    .from("barbearia_profissionais")
+    .delete()
+    .eq("id",id);
+
+    carregarProfissionais();
+}
+
+
+async function excluirServico(id){
+
+    if(!confirm("Excluir serviço?"))
+        return;
+
+    const { error } = await db
+    .from("barbearia_servicos")
+    .delete()
+    .eq("id",id);
+
+    if(error){
+        alert(error.message);
+        return;
+    }
+
+    carregarServicos();
+}
+
+async function excluirAgendamento(id){
+
+    if(!confirm("Excluir este agendamento?")){
+        return;
+    }
+
+    const { error } = await db
+    .from("barbearia_agendamentos")
+    .delete()
+    .eq("id", id);
+
+    if(error){
+        alert(error.message);
+        console.log(error);
+        return;
+    }
+
+    alert("Agendamento excluído!");
+
+    carregarAgendamentos();
+}
+let db;
+
+async function iniciar(){
+
+  while(!window.usuarioSistema || !window.db){
+    await new Promise(r => setTimeout(r,100));
+  }
+
+  db = window.db;
+
+  console.log("USUARIO", window.usuarioSistema);
+  console.log("DB OK", db);
+
+  await carregarConfig();
+  await carregarServicos();
+  await carregarProfissionais();
+  await carregarAgendamentos();
+}
+
+iniciar();
+
+</script>
+
+</body>
+</html>
