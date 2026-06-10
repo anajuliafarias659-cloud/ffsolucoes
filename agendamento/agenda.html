@@ -131,16 +131,19 @@ const app_id =
 localStorage.getItem("barbeariaAppId") ||
 localStorage.getItem("app_id");
 
-const horariosPadrao = [
-"08:00",
-"09:00",
-"10:00",
-"11:00",
-"14:00",
-"15:00",
-"16:00",
-"17:00"
-];
+const horariosPadrao = [];
+
+for(let h=8; h<=18; h++){
+
+    for(let m=0; m<60; m+=10){
+
+        horariosPadrao.push(
+            String(h).padStart(2,"0") +
+            ":" +
+            String(m).padStart(2,"0")
+        );
+    }
+}
 
 function gerarCalendario(){
 
@@ -201,7 +204,7 @@ async function carregarHorarios(){
 
     let consulta = db
 .from("barbearia_agendamentos")
-.select("hora_agendamento")
+.select("hora_agendamento,duracao")
 .eq("app_id", app_id)
 .eq("data_agendamento", data);
 
@@ -226,10 +229,22 @@ await consulta;
 
     horariosPadrao.forEach(hora => {
 
-        const ocupado =
-        agendados?.some(
-            a => a.hora_agendamento.startsWith(hora)
-        );
+        const ocupado = agendados?.some(a => {
+
+    const inicioExistente =
+    a.hora_agendamento.substring(0,5);
+
+    const duracaoExistente =
+    a.duracao || 40;
+
+    return horariosConflitam(
+        hora,
+        duracaoServico,
+        inicioExistente,
+        duracaoExistente
+    );
+
+});
 
         let horarioPassado = false;
 
@@ -264,6 +279,22 @@ await consulta;
     document.getElementById("horarios").innerHTML = html;
 }
 
+function adicionarMinutos(hora, minutos){
+
+    const [h,m] = hora.split(":").map(Number);
+
+    const data = new Date();
+
+    data.setHours(h);
+    data.setMinutes(m + minutos);
+
+    return (
+        String(data.getHours()).padStart(2,"0") +
+        ":" +
+        String(data.getMinutes()).padStart(2,"0")
+    );
+}
+
 function selecionarData(data, elemento){
 
     document
@@ -277,6 +308,25 @@ function selecionarData(data, elemento){
 
     carregarHorarios();
 }
+
+function horariosConflitam(
+    inicio1,
+    duracao1,
+    inicio2,
+    duracao2
+){
+
+    const fim1 =
+    adicionarMinutos(inicio1, duracao1);
+
+    const fim2 =
+    adicionarMinutos(inicio2, duracao2);
+
+    return (
+        inicio1 < fim2 &&
+        fim1 > inicio2
+    );
+}
 function selecionarHorario(hora){
 
     localStorage.setItem(
@@ -285,9 +335,9 @@ function selecionarHorario(hora){
     );
 
     localStorage.setItem(
-        "horaSelecionada",
-        hora
-    );
+    "duracaoServico",
+    servico.duracao
+);
 
     location.href="confirmar.html";
 }
