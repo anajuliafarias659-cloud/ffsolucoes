@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Agenda da Equipe</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+body{
+    font-family:Arial,sans-serif;
+    background:#f5f5f5;
+    margin:0;
+    padding:20px;
+}
+
+.container{
+    max-width:1200px;
+    margin:auto;
+}
+
+.topo{
+    background:#fff;
+    padding:20px;
+    border-radius:12px;
+    margin-bottom:20px;
+    box-shadow:0 2px 5px rgba(0,0,0,.1);
+}
+
+h1{
+    margin:0;
+}
+
+.card{
+    background:#fff;
+    padding:15px;
+    border-radius:12px;
+    margin-bottom:12px;
+    box-shadow:0 2px 5px rgba(0,0,0,.1);
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+    gap:15px;
+}
+
+.cliente{
+    font-size:20px;
+    font-weight:bold;
+}
+
+.info{
+    margin-top:6px;
+}
+
+.status{
+    display:inline-block;
+    padding:6px 12px;
+    border-radius:20px;
+    color:white;
+    font-size:12px;
+    margin-top:10px;
+}
+
+.aguardando{
+    background:#f59e0b;
+}
+
+.atendimento{
+    background:#0d8db8;
+}
+
+.finalizado{
+    background:#16a34a;
+}
+
+.cancelado{
+    background:#dc2626;
+}
+
+select{
+    width:100%;
+    padding:10px;
+    border-radius:8px;
+    border:1px solid #ddd;
+}
+
+button{
+    border:none;
+    padding:10px;
+    border-radius:8px;
+    color:white;
+    cursor:pointer;
+    margin-top:8px;
+    width:100%;
+}
+
+.btn-atendimento{
+    background:#0d8db8;
+}
+
+.btn-finalizado{
+    background:#16a34a;
+}
+
+.btn-cancelado{
+    background:#dc2626;
+}
+
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<div class="topo">
+
+<h1 id="titulo">
+📅 Agenda da Barbearia
+</h1>
+
+<br>
+
+<select id="filtroProfissional"
+onchange="renderizarAgenda()">
+
+<option value="">
+Todos os profissionais
+</option>
+
+</select>
+
+</div>
+
+<div id="agenda" class="grid"></div>
+
+</div>
+
+<script>
+
+const db = window.supabase.createClient(
+"https://pdajixsoowcyhnjwhgpc.supabase.co",
+"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+let AGENDAMENTOS = [];
+let PROFISSIONAIS = [];
+let SERVICOS = [];
+
+const params =
+new URLSearchParams(location.search);
+
+const codigo =
+params.get("codigo");
+
+if(!codigo){
+
+    document.body.innerHTML =
+    "<h2>Código inválido.</h2>";
+
+    throw new Error();
+}
+
+async function carregar(){
+
+    const { data: config } = await db
+    .from("barbearia_config")
+    .select("*")
+    .eq("codigo_agenda", codigo)
+    .single();
+
+    if(!config){
+
+        document.body.innerHTML =
+        "<h2>Acesso não autorizado.</h2>";
+
+        return;
+    }
+
+    document.getElementById(
+        "titulo"
+    ).innerText =
+    "📅 " + (config.nome_salao || "Agenda");
+
+    const app_id = config.app_id;
+
+    const { data: profissionais } = await db
+    .from("barbearia_profissionais")
+    .select("*")
+    .eq("app_id", app_id);
+
+    const { data: servicos } = await db
+    .from("barbearia_servicos")
+    .select("*")
+    .eq("app_id", app_id);
+
+    const { data: agendamentos } = await db
+    .from("barbearia_agendamentos")
+    .select("*")
+    .eq("app_id", app_id)
+    .order("data_agendamento")
+    .order("hora_agendamento");
+
+    PROFISSIONAIS = profissionais || [];
+    SERVICOS = servicos || [];
+    AGENDAMENTOS = agendamentos || [];
+
+    preencherFiltro();
+
+    renderizarAgenda();
+}
+
+function preencherFiltro(){
+
+    const select =
+    document.getElementById(
+        "filtroProfissional"
+    );
+
+    select.innerHTML =
+    '<option value="">Todos os profissionais</option>';
+
+    PROFISSIONAIS.forEach(p=>{
+
+        select.innerHTML += `
+        <option value="${p.id}">
+        ${p.nome}
+        </option>
+        `;
+    });
+}
+
+function renderizarAgenda(){
+
+    const filtro =
+    document.getElementById(
+        "filtroProfissional"
+    ).value;
+
+    let html = "";
+
+    AGENDAMENTOS
+    .filter(item => {
+
+        if(!filtro) return true;
+
+        return item.profissional_id == filtro;
+    })
+    .forEach(item => {
+
+        const profissional =
+        PROFISSIONAIS.find(
+            p => p.id == item.profissional_id
+        );
+
+        const servico =
+        SERVICOS.find(
+            s => s.id == item.servico_id
+        );
+
+        const status =
+        item.status || "aguardando";
+
+        html += `
+        <div class="card">
+
+            <div class="cliente">
+                ${item.cliente_nome || ''}
+            </div>
+
+            <div class="info">
+                📞 ${item.telefone || ''}
+            </div>
+
+            <div class="info">
+                👨‍💼 ${profissional?.nome || ''}
+            </div>
+
+            <div class="info">
+                ✂️ ${servico?.nome || ''}
+            </div>
+
+            <div class="info">
+                📅 ${item.data_agendamento}
+            </div>
+
+            <div class="info">
+                ⏰ ${item.hora_agendamento}
+            </div>
+
+            <div class="status ${status}">
+                ${status.toUpperCase()}
+            </div>
+
+            <button
+            class="btn-atendimento"
+            onclick="alterarStatus(${item.id},'atendimento')">
+
+            Em Atendimento
+
+            </button>
+
+            <button
+            class="btn-finalizado"
+            onclick="alterarStatus(${item.id},'finalizado')">
+
+            Finalizado
+
+            </button>
+
+            <button
+            class="btn-cancelado"
+            onclick="alterarStatus(${item.id},'cancelado')">
+
+            Cancelado
+
+            </button>
+
+        </div>
+        `;
+    });
+
+    document.getElementById(
+        "agenda"
+    ).innerHTML = html;
+}
+
+async function alterarStatus(id,status){
+
+    await db
+    .from("barbearia_agendamentos")
+    .update({
+        status
+    })
+    .eq("id",id);
+
+    carregar();
+}
+
+carregar();
+
+setInterval(
+    carregar,
+    30000
+);
+
+</script>
+
+</body>
+</html>
