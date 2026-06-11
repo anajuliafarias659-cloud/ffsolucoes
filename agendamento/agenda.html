@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -131,20 +132,6 @@ const app_id =
 localStorage.getItem("barbeariaAppId") ||
 localStorage.getItem("app_id");
 
-const horariosPadrao = [];
-
-for(let h=8; h<=18; h++){
-
-    for(let m=0; m<60; m+=10){
-
-        horariosPadrao.push(
-            String(h).padStart(2,"0") +
-            ":" +
-            String(m).padStart(2,"0")
-        );
-    }
-}
-
 function gerarCalendario(){
 
     const hoje = new Date();
@@ -201,6 +188,35 @@ async function carregarHorarios(){
     document.getElementById("data").value;
 
     if(!data) return;
+const { data: barbearia } = await db
+.from("barbearias")
+.select("hora_abertura,hora_fechamento")
+.eq("app_id", app_id)
+.single();
+
+let horaInicio =
+barbearia?.hora_abertura || "08:00";
+
+let horaFim =
+barbearia?.hora_fechamento || "18:00";
+
+if(profissionalId !== "sem_preferencia"){
+
+    const { data: profissional } = await db
+    .from("barbearia_profissionais")
+    .select("hora_inicio,hora_fim")
+    .eq("id", profissionalId)
+    .single();
+
+    if(profissional){
+
+        horaInicio =
+        profissional.hora_inicio || horaInicio;
+
+        horaFim =
+        profissional.hora_fim || horaFim;
+    }
+}
 
     let consulta = db
 .from("barbearia_agendamentos")
@@ -222,6 +238,12 @@ const duracaoServico =
 parseInt(
     localStorage.getItem("duracaoServico")
 ) || 40;
+
+const horariosPadrao =
+gerarHorarios(
+    horaInicio,
+    horaFim
+);
 
 let html = "";
 
@@ -263,8 +285,19 @@ const agora = new Date();
             horarioPassado = hora <= horaAtual;
         }
 
-        const bloqueado =
-        ocupado || horarioPassado;
+        const fimServico =
+adicionarMinutos(
+    hora,
+    duracaoServico
+);
+
+const ultrapassaHorario =
+fimServico > horaFim;
+
+const bloqueado =
+ocupado ||
+horarioPassado ||
+ultrapassaHorario;
 
         html += `
         <div
@@ -299,6 +332,29 @@ function adicionarMinutos(hora, minutos){
         String(data.getMinutes()).padStart(2,"0")
     );
 }
+
+function gerarHorarios(
+    inicio,
+    fim
+){
+
+    const horarios = [];
+
+    let atual = inicio;
+
+    while(atual < fim){
+
+        horarios.push(atual);
+
+        atual = adicionarMinutos(
+            atual,
+            10
+        );
+    }
+
+    return horarios;
+}
+
 
 function selecionarData(data, elemento){
 
