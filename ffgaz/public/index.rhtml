@@ -1,6 +1,5 @@
 
 
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1702,6 +1701,9 @@
   z-index: 2001;
 }
   </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
 <body>
   <header class="topo">
@@ -1842,14 +1844,21 @@
   </div>
 
   <button type="button" id="btnLocalizacao" class="btn-secundario">
-    📍 Pegar localização
-  </button>
+  📍 Pegar localização
+</button>
 
-  <div id="statusLocalizacao" style="margin-top:8px;font-size:13px;color:#64748b"></div>
+<button type="button" id="btnAjustarLocalizacao" class="btn-secundario">
+  🗺️ Ajustar localização
+</button>
 
-  <input type="hidden" id="clienteLat">
-  <input type="hidden" id="clienteLng">
-  <input type="hidden" id="clienteMaps">
+<div id="statusLocalizacao"></div>
+
+<div id="mapaAjuste"
+style="display:none;height:350px;border-radius:15px;margin-top:10px;"></div>
+
+<input type="hidden" id="clienteLat">
+<input type="hidden" id="clienteLng">
+<input type="hidden" id="clienteMaps">
 
   <textarea id="clienteObs" placeholder="Observação do pedido, troco, gás no térreo, etc."></textarea>
 </div>
@@ -1971,10 +1980,17 @@ const slugPath = partes[partes.length - 1];
 
 let slugUrl = slugQuery || slugPath;
 
-// 🔥 FORÇAR MODO DISTRIBUIDORA (SEM SLUG)
+const PUBLICA_FFGAZ =
+  location.pathname.includes("ffgaz") ||
+  location.pathname.includes("gas");
+
 var APP_ID = null;
 var configLoja = null;
 var distribuidora = null;
+
+if(appIdUrl){
+  APP_ID = appIdUrl;
+}
 
 
 // 🔥 PEGAR PELO DOMÍNIO SE NÃO TIVER SLUG
@@ -2215,6 +2231,14 @@ if(inputCep){
 
     const btnLocalizacao = document.getElementById("btnLocalizacao");
 const statusLocalizacao = document.getElementById("statusLocalizacao");
+const btnAjustarLocalizacao =
+document.getElementById("btnAjustarLocalizacao");
+
+const mapaDiv =
+document.getElementById("mapaAjuste");
+
+let mapaLeaflet = null;
+let marcador = null;
     const buscaProduto = document.getElementById("buscaProduto");
     trocoParaWhatsapp?.addEventListener("input", renderizarCarrinho);
     const btnWhatsTopo = document.getElementById("btnWhatsTopo");
@@ -2394,54 +2418,38 @@ function calcularDistanciaKm(lat1, lon1, lat2, lon2){
 }
 
 function validarRaioEntrega(){
+  if(PUBLICA_FFGAZ && distribuidora){
+    const raio = Number(distribuidora.raio_atendimento_km || distribuidora.raio_entrega_km || 0);
 
-  const raio = numeroConfig(
-    "raio_atendimento_km",
-    "raio_entrega_km",
-    "raio_entrega"
-  );
+    const lojaLat = Number(distribuidora.latitude);
+    const lojaLng = Number(distribuidora.longitude);
 
-  const lojaLat = parseFloat(
-  String(configLoja?.loja_lat ?? "").replace(",", ".")
-);
+    const clienteLat = Number(document.getElementById("clienteLat").value);
+    const clienteLng = Number(document.getElementById("clienteLng").value);
 
-const lojaLng = parseFloat(
-  String(configLoja?.loja_lng ?? "").replace(",", ".")
-);
+    if(!clienteLat || !clienteLng){
+      alert("Clique em 📍 Pegar localização.");
+      return false;
+    }
 
-  const clienteLat = Number(document.getElementById("clienteLat").value);
-  const clienteLng = Number(document.getElementById("clienteLng").value);
+    if(!lojaLat || !lojaLng || !raio){
+      alert("Distribuidora sem localização ou raio cadastrado.");
+      return false;
+    }
 
-  console.log("RAIO:", raio);
-  console.log("LOJA LAT/LNG:", lojaLat, lojaLng);
-  console.log("CLIENTE LAT/LNG:", clienteLat, clienteLng);
+    const distancia = calcularDistanciaKm(lojaLat, lojaLng, clienteLat, clienteLng);
 
-  if(!lojaLat || !lojaLng){
-    alert("⚠️ A loja está sem latitude/longitude cadastrada corretamente.");
-    return false;
-  }
+    if(distancia > raio){
+      alert(
+        `🚫 Fora do raio de entrega\n\n` +
+        `Distribuidora: ${distribuidora.nome || "Distribuidora"}\n` +
+        `Distância: ${distancia.toFixed(1)} km\n` +
+        `Raio permitido: ${raio} km`
+      );
+      return false;
+    }
 
-  if(!raio){
-    alert("⚠️ O raio de entrega não está cadastrado.");
-    return false;
-  }
-
-  if(isNaN(clienteLat) || isNaN(clienteLng) || !clienteLat || !clienteLng){
-    alert("Clique em 📍 Pegar localização.");
-    return false;
-  }
-
-  const distancia = calcularDistanciaKm(lojaLat, lojaLng, clienteLat, clienteLng);
-
-  console.log("DISTANCIA:", distancia);
-
-  if(distancia > raio){
-    alert(
-      `🚫 Fora do raio de entrega\n\n` +
-      `Distância: ${distancia.toFixed(1)} km\n` +
-      `Raio permitido: ${raio} km`
-    );
-    return false;
+    return true;
   }
 
   return true;
@@ -2562,9 +2570,18 @@ window.adicionarSugestaoAoCarrinho = function(id){
   if(!produto) return;
 
   const variacaoPadrao = obterVariacaoPadrao(produto);
-  const variacaoFinal = variacaoPadrao ? String(variacaoPadrao.valor || "Padrão") : "Padrão";
-  const precoFinal = variacaoPadrao ? obterPrecoVariacao(produto, variacaoPadrao) : Number(produto.preco || 0);
-  
+
+  const variacaoFinal = variacaoPadrao
+    ? String(variacaoPadrao.valor || "Padrão")
+    : "Padrão";
+
+  const precoFinal = variacaoPadrao
+    ? obterPrecoVariacao(produto, variacaoPadrao)
+    : Number(produto.preco || 0);
+
+  const qtdMinimaFinal = variacaoPadrao
+    ? obterQtdMinimaVariacao(variacaoPadrao)
+    : 1;
 
   const existente = carrinho.find(i =>
     String(i.id) === String(produto.id) &&
@@ -2575,19 +2592,21 @@ window.adicionarSugestaoAoCarrinho = function(id){
     existente.qtd += qtdMinimaFinal;
   }else{
     carrinho.push({
-  ...produto,
-  qtd: qtd,
-  variacao: variacaoFinal,
-  preco: precoFinal,
-  qtd_minima: qtdMinimaFinal,
-  imagem: obterImagemProduto(produto)
-});
-
+      id: produto.id,
+      nome: produto.nome,
+      preco: precoFinal,
+      qtd: qtdMinimaFinal,
+      variacao: variacaoFinal,
+      imagem: obterImagemProduto(produto),
+      produtos_complementares: produto.produtos_complementares || "[]",
+      qtd_minima: qtdMinimaFinal
+    });
   }
 
   salvarCarrinho();
   renderizarCarrinho();
 };
+
 function atualizarTempoPromocao(){
   if(!configLoja?.promocao_fim){
     tempoCardPromocao.textContent = "";
@@ -2900,11 +2919,12 @@ function obterPrecoInicialProduto(produto){
       return;
     }
 
-    mostrarListaDistribuidoras(distribuidoras);
-    return;
-  }
+    distribuidora = distribuidoras[0];
+APP_ID = distribuidora.app_id;
+return;
+}
 
-  const { data: appData, error: appError } = await supabase
+const { data: appData, error: appError } = await supabase
     .from("config_site")
     .select("app_id")
     .eq("slug", slugUrl)
@@ -2929,19 +2949,58 @@ function obterPrecoInicialProduto(produto){
 async function carregarConfig(){
 
   // 🔥 MODO DISTRIBUIDORA (UBER)
-  if(distribuidora){
+ if(PUBLICA_FFGAZ){
+// APP_ID = "PUBLICA_FFGAZ";
 
-    configLoja = {
-      ...distribuidora,
-      nome_site: distribuidora.nome || "Distribuidora",
-      nome_loja: distribuidora.nome || "Distribuidora",
-      telefone: distribuidora.telefone || "",
-      whatsapp_numero: distribuidora.telefone || "",
-      cidade: distribuidora.cidade || "",
-      modo_exibicao: "aberta",
-      modo_venda: "whatsapp",
-      loja_fechada: false
-    };
+  if(PUBLICA_FFGAZ){
+  const APP_ID_GERAL_FFGAZ = "705255f3-9f5c-420d-9054-c620e1119545";
+
+  const { data, error } = await supabase
+    .from("config_site")
+    .select("*")
+    .eq("app_id", APP_ID_GERAL_FFGAZ)
+    .maybeSingle();
+
+  if(error){
+    console.error("Erro ao carregar config geral FFGaz:", error);
+  }
+
+  configLoja = data || {
+    nome_site: "FF Gás",
+    nome_loja: "FF Gás",
+    banner_descricao: "Peça gás e água perto de você",
+    modo_venda: "whatsapp",
+    modo_exibicao: "aberta",
+    loja_fechada: false
+  };
+
+  nomeLoja.textContent = configLoja.nome_site || "FF Gás";
+  heroTitulo.textContent = configLoja.nome_site || "FF Gás";
+  heroTexto.textContent = configLoja.banner_descricao || "Peça gás e água perto de você";
+
+  if(configLoja.logo_url){
+    logoLoja.src = configLoja.logo_url;
+    logoLoja.style.display = "block";
+  }else{
+    logoLoja.style.display = "none";
+  }
+
+  if(configLoja.banner_url){
+    bannerArea.innerHTML = `
+      <img src="${configLoja.banner_url}" alt="Banner">
+      <div class="banner-texto">${configLoja.banner_descricao || ""}</div>
+    `;
+  }else{
+    bannerArea.innerHTML = `
+      <div class="banner-texto">${configLoja.banner_descricao || "Peça gás e água perto de você"}</div>
+    `;
+  }
+
+  atualizarStatusLoja();
+  atualizarVisibilidadePagamento();
+
+  return;
+}
 
     atualizarStatusLoja();
 
@@ -2960,7 +3019,7 @@ async function carregarConfig(){
   const { data, error } = await supabase
     .from("config_site")
     .select("*")
-    .eq("app_id", APP_ID)
+    .in("categoria", ["gas", "agua"])
     .maybeSingle();
 
   if(error){
@@ -3110,79 +3169,89 @@ atualizarStatusLoja();
 mostrarPromocao();
     }
 
-    async function carregarProdutos(){
-      const { data, error } = await supabase
-        .from("produtos")
-        .select("*")
-        .eq("app_id", APP_ID)
-        .eq("ativo", true)
-        .order("created_at", { ascending: false });
+function criarCategorias(){
+  if(!listaCategorias) return;
 
-      if(error){
-        console.error(error);
-        listaProdutos.innerHTML = `<div class="vazio">Erro ao carregar produtos.</div>`;
-        return;
-      }
+  const categorias = ["Todos", ...new Set(
+    todosProdutos
+      .map(p => String(p.categoria || "").trim())
+      .filter(Boolean)
+  )];
 
-      todosProdutos = data || [];
-criarCategorias();
-renderizarProdutos();
-renderizarDestaques(); // 👈 FALTAVA ISSO
-    }
-
-   function renderizarDestaques(){
-  const lista = [...todosProdutos]
-    .sort(() => Math.random() - 0.5)
-    .slice(0,5);
-
-  const el = document.getElementById("produtosDestaque");
-  const titulo = document.getElementById("tituloDestaques");
-
-  if(!el) return;
-
-  if(lista.length){
-    const menorPreco = Math.min(...lista.map(p => obterPrecoInicialProduto(p)));
-    if(titulo){
-      titulo.textContent = `🔥 Oferta do dia a partir de ${formatarReal(menorPreco)}`;
-    }
-  }else{
-    if(titulo){
-      titulo.textContent = "🔥 Oferta do dia";
-    }
-  }
-
-  el.innerHTML = lista.map(p => `
-    <div class="card-destaque" onclick="irParaTodosProdutos('${p.id}')">
-      <img src="${obterImagemProduto(p) || ''}">
-      <div>${p.nome}</div>
-      <div class="preco">${formatarReal(obterPrecoInicialProduto(p))}</div>
-    </div>
+  listaCategorias.innerHTML = categorias.map(cat => `
+    <button
+      type="button"
+      class="${categoriaAtual === cat ? "ativo" : ""}"
+      onclick="selecionarCategoria('${cat.replace(/'/g, "\\'")}')"
+    >
+      ${cat}
+    </button>
   `).join("");
 }
 
-    function criarCategorias(){
-      const categorias = [
-        "Todos",
-        ...new Set(
-          todosProdutos
-            .map(p => String(p.categoria || "").trim())
-            .filter(Boolean)
-        )
-      ];
-
-      listaCategorias.innerHTML = categorias.map(cat => `
-        <button class="${cat === categoriaAtual ? "ativo" : ""}" onclick="filtrarCategoria('${cat.replace(/'/g, "\\'")}')">
-          ${cat}
-        </button>
-      `).join("");
-    }
-
-  window.filtrarCategoria = function(cat){
+window.selecionarCategoria = function(cat){
   categoriaAtual = cat;
   paginaAtual = 1;
-  criarCategorias();
   renderizarProdutos();
 };
+    async function carregarProdutos(){
+
+  let query = supabase
+    .from("produtos")
+    .select("*")
+    .eq("ativo", true)
+    .order("created_at", { ascending: false });
+
+  if(PUBLICA_FFGAZ){
+
+    const { data: distribuidoras, error: erroDist } = await supabase
+      .from("distribuidoras_gas")
+      .select("app_id")
+      .eq("ativo", true)
+      .eq("aberto", true);
+
+    if(erroDist){
+      console.error(erroDist);
+      listaProdutos.innerHTML = `<div class="vazio">Erro ao buscar distribuidoras.</div>`;
+      return;
+    }
+
+    const appIdsAbertos = (distribuidoras || [])
+      .map(d => d.app_id)
+      .filter(Boolean);
+
+    if(!appIdsAbertos.length){
+      todosProdutos = [];
+      listaProdutos.innerHTML = `<div class="vazio">Nenhuma distribuidora aberta no momento.</div>`;
+      renderizarDestaques();
+      return;
+    }
+
+    query = query
+      .in("app_id", appIdsAbertos)
+      .in("categoria", [
+        "gas", "gás", "Gas", "Gás",
+        "agua", "água", "Agua", "Água",
+        "Água Cristal", "Água Poá"
+      ]);
+
+  }else{
+    query = query.eq("app_id", APP_ID);
+  }
+
+  const { data, error } = await query;
+
+  if(error){
+    console.error(error);
+    listaProdutos.innerHTML = `<div class="vazio">Erro ao carregar produtos.</div>`;
+    return;
+  }
+
+  todosProdutos = data || [];
+  criarCategorias();
+renderizarProdutos();
+// renderizarDestaques(); ❌ remove só aqui
+}
 
     window.irParaTodosProdutos = function(id){
   categoriaAtual = "Todos";
@@ -3477,28 +3546,30 @@ window.adicionarModalAoCarrinho = function(){
   }
 
   const existente = carrinho.find(i =>
-    String(i.id) === String(produto.id) &&
-    String(i.variacao || "Padrão") === String(variacaoFinal)
-  );
+  String(i.id) === String(produto.id) &&
+  String(i.variacao || "Padrão") === String(variacaoFinal)
+);
 
-  if(existente){
-    existente.qtd += qtd;
-  }else{
+if(existente){
+  existente.qtd += qtdMinimaFinal;
+}else{
   carrinho.push({
-  ...produto,
-  qtd: qtd,
-  variacao: variacaoFinal,
-  preco: precoFinal,
-  qtd_minima: qtdMinimaFinal,
-  imagem: obterImagemProduto(produto)
-});
-  }
+    id: produto.id,
+    nome: produto.nome,
+    preco: precoFinal,
+    qtd: qtdMinimaFinal,
+    variacao: variacaoFinal,
+    imagem: obterImagemProduto(produto),
+    produtos_complementares: produto.produtos_complementares || "[]"
+  });
+}
 
-  salvarCarrinho();
-  renderizarCarrinho();
-  fecharModalProduto();
+salvarCarrinho();
+renderizarCarrinho();
+fecharModalProduto();
 };
-    window.adicionarAoCarrinho = function(id){
+
+window.adicionarAoCarrinho = function(id){
   if(!podeVenderAgora()){
     alert(
       modoExibicaoAtual(configLoja) === "vitrine"
@@ -3817,34 +3888,24 @@ window.fecharModalMotivacional = function(){
 }
 
 async function verificarStatusPagamento(pedidoId){
-  const { data: dadosDistribuidora, error: erroDistribuidora } = await supabase
+  const { data: distribuidoras, error: erroDist } = await supabase
   .from("distribuidoras_gas")
   .select("*")
   .eq("ativo", true)
-  .order("nome", { ascending:true })
-  .limit(1)
-  .maybeSingle();
+  .eq("aberto", true);
 
-  if(erroDistribuidora || !dadosDistribuidora) return;
+if(erroDist){
+  console.error(erroDist);
+  listaProdutos.innerHTML = `<div class="vazio">Erro ao buscar distribuidoras.</div>`;
+  return;
+}
 
-  const statusPagamento = String(dadosDistribuidora.pagamento_status || "").toLowerCase();
-
-  if(statusPagamento === "approved"){
-    alert("✅ Pagamento confirmado!");
-
-    carrinho = [];
-    salvarCarrinho();
-    renderizarCarrinho();
-    fecharCarrinho();
-
-    clearInterval(window.verificacaoPix);
-    localStorage.removeItem(ULTIMO_PEDIDO_KEY);
-    return;
-  }
-
-  if(statusPagamento === "pending"){
-    return;
-  }
+if(!distribuidoras || !distribuidoras.length){
+  todosProdutos = [];
+  listaProdutos.innerHTML = `<div class="vazio">Nenhuma distribuidora disponível no momento.</div>`;
+  renderizarDestaques();
+  return;
+}
 
   if(statusPagamento === "rejected" || statusPagamento === "cancelled"){
     clearInterval(window.verificacaoPix);
@@ -4012,10 +4073,10 @@ msg += `📌 Referência: ${referencia ? referencia : "Não informada (cliente n
       configLoja?.whatsapp_numero || configLoja?.telefone || ""
     );
 
-    if(!whatsapp){
-      alert("WhatsApp não configurado.");
-      return;
-    }
+    // if(!whatsapp){
+//   alert("WhatsApp não configurado.");
+//   return;
+// }
 
     const mensagem = montarTextoWhatsapp();
 
@@ -4050,7 +4111,7 @@ const codigoAcompanhamento = `PED${Date.now()}`;
 const { error: erroPedidoWhats } = await supabase
   .from("pedidos")
   .insert([{
-    app_id: APP_ID,
+    app_id: distribuidora?.app_id || null,
 
     cliente_nome: nome,
     cliente_telefone: telefone,
@@ -4071,6 +4132,7 @@ const { error: erroPedidoWhats } = await supabase
 
   itens: itensPedido,
 total: Number(totalCarrinho()),
+forma_pagamento: formaPagamentoSistema || formaPagamentoWhatsapp || "nao informado",
 
 status: "aguardando",
 status_entrega: "Aguardando distribuidora aceitar",
@@ -4092,21 +4154,25 @@ if(erroPedidoWhats){
   return;
 }
 
-await salvarClienteAutomatico({
-  nome,
-  telefone,
-  email,
-  cpf,
-  rua,
-  numero,
-  bairro,
-  cidade
-});
+alert("✅ Pedido enviado! Aguarde uma distribuidora aceitar.");
 
-window.open(
-  `https://wa.me/${whatsapp}?text=${encodeURIComponent(mensagem)}`,
-  "_blank"
-);
+// await salvarClienteAutomatico({
+//   nome,
+//   telefone,
+//   email,
+//   cpf,
+//   rua,
+//   numero,
+//   bairro,
+//   cidade,
+//   cep,
+//   referencia
+// });
+
+// window.open(
+//   `https://wa.me/${whatsapp}?text=${encodeURIComponent(mensagem)}`,
+//   "_blank"
+// );
 
     window.mudarPaginaProdutos = function(pagina){
   paginaAtual = pagina;
@@ -4179,17 +4245,30 @@ function mostrarListaDistribuidoras(lista){
 }
 
 async function init(){
+
+  // 🔥 BLOQUEIA A LOJA SE TEM PEDIDO
+  const pedidoSalvo = JSON.parse(localStorage.getItem("pedido_em_andamento") || "null");
+
+  if(pedidoSalvo?.id && pedidoSalvo?.codigo){
+    mostrarTelaAcompanhamento(pedidoSalvo.id, pedidoSalvo.codigo);
+    return;
+  }
+
   await resolverAppId();
-  if(!APP_ID) return;
+  if(!APP_ID && !PUBLICA_FFGAZ) return;
 
   CARRINHO_KEY = `carrinho_${APP_ID}`;
   ULTIMO_PEDIDO_KEY = `ultimo_pedido_${APP_ID}`;
   carrinho = JSON.parse(localStorage.getItem(CARRINHO_KEY) || "[]");
 
   salvarCarrinho();
-  await carregarConfig();
-  await carregarProdutos();
-  mostrarModalMotivacionalDoDia();
+
+  if(typeof carregarConfig === "function"){
+    await carregarConfig();
+  }
+
+ await carregarProdutos();
+mostrarModalMotivacionalDoDia();
 }
 
 init();
@@ -4427,11 +4506,10 @@ async function salvarClienteAutomatico(dados){
   const endereco = [dados.rua, dados.numero].filter(Boolean).join(", ");
 
   const { data: existente } = await supabase
-    .from("clientes")
-    .select("id")
-    .eq("app_id", APP_ID)
-    .eq("telefone", telefoneLimpo)
-    .maybeSingle();
+  .from("clientes")
+  .select("id")
+  .eq("telefone", telefoneLimpo)
+  .maybeSingle();
 
   if(existente?.id){
     await supabase
@@ -4708,8 +4786,154 @@ if(areaSecreta){
 window.abrirDistribuidora = function(appId){
   location.href = location.pathname + "?app_id=" + appId;
 };
-</script>
 
+function mostrarTelaAcompanhamento(pedidoId, codigo){
+  document.body.innerHTML = `
+    <div style="min-height:100vh;padding:24px;font-family:Arial;background:#f8fafc;text-align:center">
+      <h2>✅ Pedido enviado!</h2>
+
+      <p>Seu código de acompanhamento é:</p>
+
+      <div style="
+        font-size:30px;
+        font-weight:900;
+        background:#0ea5e9;
+        color:#fff;
+        padding:18px;
+        border-radius:18px;
+        margin:18px auto;
+        max-width:360px;
+      ">
+        ${codigo}
+      </div>
+
+      <p id="statusPedido" style="font-weight:bold;color:#334155">
+        Aguardando distribuidora aceitar...
+      </p>
+
+      <button
+        onclick="cancelarPedido('${pedidoId}')"
+        style="margin-top:20px;padding:14px 18px;border:none;border-radius:14px;background:#dc2626;color:#fff;font-weight:bold"
+      >
+        Cancelar pedido
+      </button>
+    </div>
+  `;
+
+  acompanharPedido(pedidoId);
+}
+
+function acompanharPedido(pedidoId){
+  supabase
+    .channel("pedido_" + pedidoId)
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "pedidos",
+      filter: `id=eq.${pedidoId}`
+    }, payload => {
+      const p = payload.new;
+
+      const statusEl = document.getElementById("statusPedido");
+      if(statusEl){
+        statusEl.innerText = p.status_entrega || p.status || "Atualizando...";
+      }
+
+      if(p.status === "finalizado" || p.status_entrega === "Pedido entregue"){
+        localStorage.removeItem("pedido_em_andamento");
+        alert("✅ Pedido entregue!");
+        location.reload();
+      }
+
+      if(p.status === "cancelado"){
+        localStorage.removeItem("pedido_em_andamento");
+        alert("Pedido cancelado.");
+        location.reload();
+      }
+    })
+    .subscribe();
+}
+
+window.cancelarPedido = async function(id){
+  if(!confirm("Cancelar pedido?")) return;
+
+  await supabase
+    .from("pedidos")
+    .update({
+      status: "cancelado",
+      status_entrega: "Cancelado pelo cliente",
+      pedido_aberto: false
+    })
+    .eq("id", id);
+
+  localStorage.removeItem("pedido_em_andamento");
+  location.reload();
+};
+
+btnAjustarLocalizacao.addEventListener("click", () => {
+
+    const lat =
+    parseFloat(document.getElementById("clienteLat").value);
+
+    const lng =
+    parseFloat(document.getElementById("clienteLng").value);
+
+    if(!lat || !lng){
+        alert("Primeiro clique em 📍 Pegar localização.");
+        return;
+    }
+
+    mapaDiv.style.display="block";
+
+    if(!mapaLeaflet){
+
+        mapaLeaflet = L.map("mapaAjuste").setView([lat,lng],18);
+
+        L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                maxZoom:20
+            }
+        ).addTo(mapaLeaflet);
+
+        marcador=L.marker(
+            [lat,lng],
+            {
+                draggable:true
+            }
+        ).addTo(mapaLeaflet);
+
+        marcador.on("dragend",function(){
+
+            const pos=marcador.getLatLng();
+
+            document.getElementById("clienteLat").value=pos.lat;
+
+            document.getElementById("clienteLng").value=pos.lng;
+
+            document.getElementById("clienteMaps").value=
+            `https://maps.google.com/?q=${pos.lat},${pos.lng}`;
+
+            statusLocalizacao.innerHTML=
+            "✅ Localização ajustada com sucesso.";
+
+        });
+
+    }else{
+
+        mapaLeaflet.setView([lat,lng],18);
+
+        marcador.setLatLng([lat,lng]);
+
+        setTimeout(()=>{
+            mapaLeaflet.invalidateSize();
+        },200);
+
+    }
+
+});
+
+</script>
 
 
 </body>
