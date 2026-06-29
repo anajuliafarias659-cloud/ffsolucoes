@@ -1,357 +1,759 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+<!DOCTYPE html>
+<html lang="pt-BR">
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization,apikey,content-type",
-  "Access-Control-Allow-Methods": "POST,OPTIONS",
-  "Content-Type": "application/json"
-};
+<head>
 
-Deno.serve(async (req) => {
+<meta charset="UTF-8">
 
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders
-    });
-  }
+<meta name="viewport"
+content="width=device-width,initial-scale=1">
 
-  try {
+<title>Pagamento Hotspot</title>
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-    const body = await req.json();
+<style>
 
-    const app_id = String(body.app_id || "");
-    const plano_id = String(body.plano_id || "");
-    const mac = String(body.mac || "");
-    const ip = String(body.ip || "");
-    const hostname = String(body.hostname || "");
+*{
 
-    if (!app_id)
-      throw new Error("APP_ID não informado.");
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,sans-serif;
 
-    if (!plano_id)
-      throw new Error("Plano não informado.");
+}
 
-    console.log("APP:", app_id);
-    console.log("PLANO:", plano_id);
+body{
 
-    // ==========================================
-    // CONFIGURAÇÃO DO HOTSPOT
-    // ==========================================
+background:#f3f4f6;
 
-    const { data: hotspot, error: erroHotspot } = await supabase
-      .from("hotspot_config")
-      .select("*")
-      .eq("app_id", app_id)
-      .single();
+}
 
-    if (erroHotspot || !hotspot)
-      throw new Error("Hotspot não encontrado.");
+.topo{
 
-    // ==========================================
-    // CONFIGURAÇÃO DA EMPRESA
-    // ==========================================
+background:#0d8db8;
+color:#fff;
+text-align:center;
+padding:25px;
 
-    const { data: empresa, error: erroEmpresa } = await supabase
-      .from("config_site")
-      .select("*")
-      .eq("app_id", app_id)
-      .single();
+}
 
-    if (erroEmpresa || !empresa)
-      throw new Error("Empresa não encontrada.");
+.logo{
 
-    const accessToken =
-      empresa.mercado_pago_token ||
-      empresa.access_token ||
-      empresa.mp_access_token;
+width:95px;
+height:95px;
+border-radius:18px;
+background:#fff;
+padding:6px;
+object-fit:cover;
+margin-bottom:10px;
 
-    if (!accessToken)
-      throw new Error("Mercado Pago não configurado.");
+}
 
-    console.log("Empresa:", empresa.nome_empresa);
+.banner{
 
-    // ==========================================
-    // PLANO
-    // ==========================================
+width:100%;
+max-height:220px;
+object-fit:cover;
 
-    const { data: plano, error: erroPlano } = await supabase
-      .from("hotspot_planos")
-      .select("*")
-      .eq("id", plano_id)
-      .eq("app_id", app_id)
-      .single();
+}
 
-    if (erroPlano || !plano)
-      throw new Error("Plano não encontrado.");
+.container{
 
-    console.log("Plano:", plano.nome);
-    // ==========================================
-    // CRIA O REGISTRO DO PAGAMENTO
-    // ==========================================
+max-width:650px;
+margin:auto;
+padding:20px;
 
-    const { data: pagamento, error: erroPagamento } = await supabase
-      .from("hotspot_pagamentos")
-      .insert({
+}
 
-        app_id,
+.card{
 
-        plano_id,
+background:#fff;
+padding:25px;
+border-radius:14px;
+box-shadow:0 5px 18px rgba(0,0,0,.08);
+margin-bottom:20px;
 
-        valor: Number(plano.valor),
+}
 
-        status: "pendente",
+.card h2{
 
-        payment_status: "pending",
+margin-bottom:20px;
+text-align:center;
 
-        cliente_mac: mac,
+}
 
-        cliente_ip: ip,
+.linha{
 
-        hostname,
+display:flex;
+justify-content:space-between;
+padding:10px 0;
+border-bottom:1px solid #ececec;
 
-        plano_nome: plano.nome,
+}
 
-        tempo_minutos: plano.tempo_minutos,
+.linha:last-child{
 
-        created_at: new Date().toISOString()
+border:none;
 
-      })
-      .select()
-      .single();
+}
 
-    if (erroPagamento || !pagamento) {
+.label{
 
-      console.error(erroPagamento);
+font-weight:bold;
 
-      throw new Error("Erro ao criar pagamento.");
+}
+
+.valor{
+
+font-size:42px;
+font-weight:bold;
+color:#0d8db8;
+text-align:center;
+margin:25px 0;
+
+}
+
+button{
+
+width:100%;
+padding:15px;
+border:none;
+border-radius:10px;
+background:#0d8db8;
+color:#fff;
+font-size:18px;
+cursor:pointer;
+transition:.2s;
+
+}
+
+button:hover{
+
+opacity:.92;
+
+}
+
+#pix{
+
+display:none;
+margin-top:25px;
+
+}
+
+#pix h3{
+
+text-align:center;
+margin-bottom:20px;
+
+}
+
+#qrcode{
+
+width:250px;
+display:block;
+margin:auto;
+
+}
+
+textarea{
+
+margin-top:20px;
+width:100%;
+height:95px;
+padding:10px;
+border:1px solid #ddd;
+border-radius:8px;
+resize:none;
+
+}
+
+.status{
+
+margin-top:20px;
+padding:15px;
+border-radius:10px;
+background:#fff7db;
+border:1px solid #ffe58f;
+text-align:center;
+font-weight:bold;
+display:none;
+
+}
+
+.sucesso{
+
+margin-top:20px;
+padding:20px;
+border-radius:12px;
+background:#ecfdf3;
+border:1px solid #34d399;
+display:none;
+text-align:center;
+
+}
+
+.sucesso h2{
+
+color:#16a34a;
+margin-bottom:10px;
+
+}
+
+.rodape{
+
+text-align:center;
+margin-top:25px;
+font-size:14px;
+color:#777;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="empresa"></div>
+
+<div class="container">
+
+<div class="card">
+
+<h2>
+
+Pagamento do Plano
+
+</h2>
+
+<div class="linha">
+
+<div class="label">
+
+Plano
+
+</div>
+
+<div id="nome">
+
+-
+
+</div>
+
+</div>
+
+<div class="linha">
+
+<div class="label">
+
+Descrição
+
+</div>
+
+<div id="descricao">
+
+-
+
+</div>
+
+</div>
+
+<div class="linha">
+
+<div class="label">
+
+Tempo
+
+</div>
+
+<div id="tempo">
+
+-
+
+</div>
+
+</div>
+
+<div class="valor"
+
+id="valor">
+
+R$ 0,00
+
+</div>
+
+<button
+
+id="btnPix"
+
+onclick="gerarPix()">
+
+Gerar PIX
+
+</button>
+
+<div id="pix">
+
+<h3>
+
+Pagamento via PIX
+
+</h3>
+
+<img id="qrcode">
+
+<textarea
+
+id="copiacola"
+
+readonly>
+
+</textarea>
+
+<br><br>
+
+<button
+
+onclick="copiarPix()">
+
+Copiar Código PIX
+
+</button>
+
+</div>
+
+<div
+
+class="status"
+
+id="statusPagamento">
+
+Aguardando pagamento...
+
+</div>
+
+<div
+
+class="sucesso"
+
+id="sucesso">
+
+<h2>
+
+Pagamento Aprovado
+
+</h2>
+
+<p>
+
+Seu acesso foi liberado.
+
+</p>
+
+</div>
+
+</div>
+
+<div
+
+class="rodape"
+
+id="rodape">
+
+FF Hotspot
+
+</div>
+
+</div>
+<script>
+
+const SUPABASE_URL="https://pdajixsoowcyhnjwhgpc.supabase.co";
+
+const SUPABASE_ANON_KEY="sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+
+const db=window.supabase.createClient(
+SUPABASE_URL,
+SUPABASE_ANON_KEY
+);
+
+const params=new URLSearchParams(location.search);
+
+const APP_ID=params.get("app_id");
+
+const planoId=params.get("plano");
+
+if(!APP_ID||!planoId){
+
+alert("APP_ID ou Plano inválido.");
+
+throw new Error("APP_ID inválido");
+
+}
+
+let planoAtual=null;
+
+let pagamentoId=null;
+
+async function carregarEmpresa(){
+
+const {data,error}=await db
+
+.from("hotspot_config")
+
+.select("*")
+
+.eq("app_id",APP_ID)
+
+.single();
+
+if(error){
+
+console.error(error);
+
+empresa.innerHTML="<h2>Hotspot não encontrado.</h2>";
+
+return;
+
+}
+
+empresa.innerHTML=`
+
+<div class="topo">
+
+<img
+
+class="logo"
+
+src="${data.logo || "/hotspot/img/logo.png"}">
+
+<h1>
+
+${data.nome_hotspot}
+
+</h1>
+
+<p>
+
+${data.descricao || ""}
+
+</p>
+
+</div>
+
+${data.banner ?
+
+`<img class="banner" src="${data.banner}">`
+
+:
+
+""}
+
+`;
+
+if(data.cor_primaria){
+
+document.querySelector(".topo").style.background=data.cor_primaria;
+
+document.querySelector("#btnPix").style.background=data.cor_primaria;
+
+document.querySelector(".valor").style.color=data.cor_primaria;
+
+}
+
+}
+
+async function carregarPlano(){
+
+const {data,error}=await db
+
+.from("hotspot_planos")
+
+.select("*")
+
+.eq("app_id",APP_ID)
+
+.eq("id",planoId)
+
+.single();
+
+if(error){
+
+alert(error.message);
+
+return;
+
+}
+
+planoAtual=data;
+
+nome.innerHTML=data.nome;
+
+descricao.innerHTML=data.descricao;
+
+tempo.innerHTML=data.tempo_minutos+" minutos";
+
+valor.innerHTML="R$ "+Number(data.valor).toFixed(2);
+
+}
+
+carregarEmpresa();
+
+carregarPlano();
+
+// ==========================================
+// GERA O PIX
+// ==========================================
+
+async function gerarPix(){
+
+    btnPix.disabled = true;
+
+    btnPix.innerHTML = "Gerando PIX...";
+
+    try{
+
+        const resposta = await fetch(
+
+            `${SUPABASE_URL}/functions/v1/criar-pix-hotspot`,
+
+            {
+
+                method:"POST",
+
+                headers:{
+
+                    "Content-Type":"application/json",
+
+                    "apikey":SUPABASE_ANON_KEY,
+
+                    "Authorization":"Bearer "+SUPABASE_ANON_KEY
+
+                },
+
+                body:JSON.stringify({
+
+                    app_id:APP_ID,
+
+                    plano_id:planoId,
+
+                    mac:"",
+
+                    ip:"",
+
+                    hostname:""
+
+                })
+
+            }
+
+        );
+
+        const retorno = await resposta.json();
+
+        console.log(retorno);
+
+        if(!resposta.ok){
+
+            alert(retorno.error || "Erro ao gerar PIX.");
+
+            btnPix.disabled=false;
+
+            btnPix.innerHTML="Gerar PIX";
+
+            return;
+
+        }
+
+        pagamentoId = retorno.payment_id;
+
+        document.getElementById("pix").style.display="block";
+
+        document.getElementById("statusPagamento").style.display="block";
+
+        document.getElementById("statusPagamento").innerHTML=
+
+        "Aguardando confirmação do pagamento...";
+
+        document.getElementById("qrcode").src=
+
+        "data:image/png;base64,"+
+
+        retorno.qr_code_base64;
+
+        document.getElementById("copiacola").value=
+
+        retorno.qr_code;
+
+        btnPix.innerHTML="PIX Gerado";
+
+        iniciarVerificacao();
+
+    }catch(e){
+
+        console.error(e);
+
+        alert("Erro ao conectar ao servidor.");
+
+        btnPix.disabled=false;
+
+        btnPix.innerHTML="Gerar PIX";
 
     }
 
-    console.log("Pagamento:", pagamento.id);
+}
 
-    // ==========================================
-    // REFERÊNCIA EXTERNA
-    // ==========================================
+// ==========================================
+// COPIAR PIX
+// ==========================================
 
-    const externalReference = String(pagamento.id);
+function copiarPix(){
 
-    // ==========================================
-    // MONTA O PIX
-    // ==========================================
+    const campo=document.getElementById("copiacola");
 
-    const payload = {
+    campo.select();
 
-      transaction_amount: Number(plano.valor),
+    campo.setSelectionRange(0,99999);
 
-      description: `Hotspot - ${plano.nome}`,
+    navigator.clipboard.writeText(campo.value);
 
-      payment_method_id: "pix",
+    alert("Código PIX copiado.");
 
-      external_reference: externalReference,
+}
+// ==========================================
+// VERIFICA PAGAMENTO
+// ==========================================
 
-      notification_url:
-        "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/gerar-pix-hotspot",
+let timerPagamento = null;
 
-      payer: {
+function iniciarVerificacao(){
 
-        email: "cliente@ffhotspot.com",
+    if(timerPagamento){
 
-        first_name: "Cliente",
-
-        last_name: "Hotspot"
-
-      }
-
-    };
-
-    console.log("Payload MP");
-
-    console.log(payload);
-    // ==========================================
-    // MERCADO PAGO
-    // ==========================================
-
-    const mpResponse = await fetch(
-      "https://api.mercadopago.com/v1/payments",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          "X-Idempotency-Key": crypto.randomUUID()
-        },
-        body: JSON.stringify(payload)
-      }
-    );
-
-    const mp = await mpResponse.json();
-
-    console.log("Resposta Mercado Pago:");
-
-    console.log(mp);
-
-    if (!mpResponse.ok) {
-
-      console.error(mp);
-
-      await supabase
-
-        .from("hotspot_pagamentos")
-
-        .update({
-
-          status: "erro",
-
-          payment_status: "error",
-
-          payload: mp,
-
-          updated_at: new Date().toISOString()
-
-        })
-
-        .eq("id", pagamento.id);
-
-      throw new Error(
-
-        mp.message ||
-
-        mp.error ||
-
-        "Erro ao gerar PIX."
-
-      );
+        clearInterval(timerPagamento);
 
     }
 
-    // ==========================================
-    // DADOS PIX
-    // ==========================================
+    timerPagamento = setInterval(verificarPagamento,5000);
 
-    const qrCode =
+}
 
-      mp.point_of_interaction
-        ?.transaction_data
-        ?.qr_code || "";
+// ==========================================
 
-    const qrCodeBase64 =
+async function verificarPagamento(){
 
-      mp.point_of_interaction
-        ?.transaction_data
-        ?.qr_code_base64 || "";
+    if(!pagamentoId){
 
-    const paymentId = String(mp.id);
-
-    const paymentStatus = mp.status || "pending";
-
-    console.log("PIX criado:", paymentId);
-
-    // ==========================================
-    // ATUALIZA PAGAMENTO
-    // ==========================================
-
-    const { error: erroAtualizar } = await supabase
-
-      .from("hotspot_pagamentos")
-
-      .update({
-
-        payment_id: paymentId,
-
-        payment_status: paymentStatus,
-
-        status: paymentStatus,
-
-        qr_code: qrCode,
-
-        qr_code_base64: qrCodeBase64,
-
-        payload: mp,
-
-        updated_at: new Date().toISOString()
-
-      })
-
-      .eq("id", pagamento.id);
-
-    if (erroAtualizar) {
-
-      console.error(erroAtualizar);
-
-      throw new Error("Erro ao salvar pagamento.");
+        return;
 
     }
 
-    console.log("Pagamento atualizado.");
-    // ==========================================
-    // RETORNO
-    // ==========================================
+    const {data,error}=await db
 
-    return new Response(
-      JSON.stringify({
+    .from("hotspot_pagamentos")
 
-        success: true,
+    .select("status,payment_status,liberado,data_liberacao")
 
-        payment_id: paymentId,
+    .eq("payment_id",pagamentoId)
 
-        external_reference: externalReference,
+    .single();
 
-        status: paymentStatus,
+    if(error){
 
-        valor: Number(plano.valor),
+        console.error(error);
 
-        plano: {
+        return;
 
-          id: plano.id,
+    }
 
-          nome: plano.nome,
+    console.log("STATUS:",data);
 
-          descricao: plano.descricao,
+    // Aguardando
 
-          tempo_minutos: plano.tempo_minutos
+    if(
 
-        },
+        data.status=="pending" ||
 
-        qr_code: qrCode,
+        data.payment_status=="pending"
 
-        qr_code_base64: qrCodeBase64
+    ){
 
-      }),
-      {
-        status: 200,
-        headers: corsHeaders
-      }
-    );
+        statusPagamento.innerHTML=
 
-  } catch (err) {
+        "⏳ Aguardando confirmação do pagamento...";
 
-    console.error("ERRO HOTSPOT:");
+        return;
 
-    console.error(err);
+    }
 
-    return new Response(
-      JSON.stringify({
+    // Pago
 
-        success: false,
+    if(
 
-        error: err instanceof Error
-          ? err.message
-          : String(err)
+        data.status=="approved" ||
 
-      }),
-      {
-        status: 500,
-        headers: corsHeaders
-      }
-    );
+        data.payment_status=="approved"
 
-  }
+    ){
 
-});
+        clearInterval(timerPagamento);
+
+        statusPagamento.style.display="none";
+
+        pix.style.display="none";
+
+        sucesso.style.display="block";
+
+        sucesso.innerHTML=`
+
+        <h2>
+
+        ✅ Pagamento Aprovado
+
+        </h2>
+
+        <p>
+
+        Seu acesso foi liberado.
+
+        </p>
+
+        <br>
+
+        <p>
+
+        Conectando...
+
+        </p>
+
+        `;
+
+        // redirecionamento opcional
+
+        setTimeout(()=>{
+
+            location.href="conectado.html";
+
+        },5000);
+
+    }
+
+    // Cancelado
+
+    if(
+
+        data.status=="cancelled" ||
+
+        data.status=="rejected"
+
+    ){
+
+        clearInterval(timerPagamento);
+
+        statusPagamento.innerHTML=
+
+        "❌ Pagamento cancelado.";
+
+    }
+
+}
