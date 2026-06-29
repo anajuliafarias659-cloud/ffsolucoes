@@ -1,306 +1,357 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-
-<title>Pagamento</title>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<style>
-
-*{
-margin:0;
-padding:0;
-box-sizing:border-box;
-font-family:Arial,sans-serif;
-}
-
-body{
-background:#f3f4f6;
-padding:20px;
-}
-
-.card{
-
-max-width:500px;
-margin:auto;
-background:#fff;
-padding:25px;
-border-radius:12px;
-box-shadow:0 5px 15px rgba(0,0,0,.1);
-
-}
-
-h1{
-
-text-align:center;
-margin-bottom:20px;
-
-}
-
-.info{
-
-margin-bottom:20px;
-
-}
-
-.info p{
-
-margin:8px 0;
-
-}
-
-.valor{
-
-font-size:40px;
-font-weight:bold;
-color:#0d8db8;
-text-align:center;
-margin:20px 0;
-
-}
-
-button{
-
-width:100%;
-padding:16px;
-border:none;
-border-radius:10px;
-background:#0d8db8;
-color:#fff;
-font-size:18px;
-cursor:pointer;
-
-}
-
-button:hover{
-
-opacity:.9;
-
-}
-
-#pix{
-
-display:none;
-margin-top:20px;
-text-align:center;
-
-}
-
-textarea{
-
-width:100%;
-height:90px;
-padding:10px;
-
-}
-
-img{
-
-max-width:250px;
-margin:auto;
-display:block;
-
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="card">
-
-<h1>Pagamento</h1>
-
-<div class="info">
-
-<p><strong>Plano:</strong> <span id="nome"></span></p>
-
-<p><strong>Descrição:</strong> <span id="descricao"></span></p>
-
-<p><strong>Tempo:</strong> <span id="tempo"></span></p>
-
-</div>
-
-<div class="valor" id="valor">
-
-R$ 0,00
-
-</div>
-
-<button onclick="gerarPix()">
-
-Gerar PIX
-
-</button>
-
-<div id="pix">
-
-<h3>Pagamento PIX</h3>
-
-<img id="qrcode">
-
-<br><br>
-
-<textarea id="copiacola"></textarea>
-
-<br><br>
-
-<button onclick="copiarPix()">
-
-Copiar Código PIX
-
-</button>
-
-</div>
-
-</div>
-
-<script>
-
-const SUPABASE_URL = "https://pdajixsoowcyhnjwhgpc.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
-
-const db = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY
-);
-
-const params = new URLSearchParams(window.location.search);
-
-const APP_ID = params.get("app_id");
-const planoId = params.get("plano");
-
-if (!APP_ID || !planoId) {
-    alert("Parâmetros inválidos.");
-    throw new Error("APP_ID ou plano não informado.");
-}
-
-async function carregarPlano(){
-
-    const { data, error } = await db
-        .from("hotspot_planos")
-        .select("*")
-        .eq("id", planoId)
-        .eq("app_id", APP_ID)
-        .single();
-
-    if(error){
-        alert(error.message);
-        return;
-    }
-
-    document.getElementById("nome").innerHTML = data.nome;
-    document.getElementById("descricao").innerHTML = data.descricao;
-    document.getElementById("tempo").innerHTML = data.tempo_minutos + " minutos";
-    document.getElementById("valor").innerHTML = "R$ " + Number(data.valor).toFixed(2);
-
-}
-
-async function gerarPix(){
-
-    // Busca o plano
-    const { data: plano, error } = await db
-        .from("hotspot_planos")
-        .select("*")
-        .eq("id", planoId)
-        .eq("app_id", APP_ID)
-        .single();
-
-    if(error){
-        alert(error.message);
-        return;
-    }
-
-    // Cria a venda
-    const { data: venda, error: erroVenda } = await db
-        .from("hotspot_vendas")
-        .insert({
-            app_id: APP_ID,
-            plano_id: plano.id,
-            valor: plano.valor,
-            status: "aguardando_pagamento",
-            pagamento_status: "pending"
-        })
-        .select("id")
-        .single();
-
-    if(erroVenda){
-        alert(erroVenda.message);
-        return;
-    }
-
-    // Gera o PIX usando a mesma função da loja
-    const resposta = await fetch(
-        `${SUPABASE_URL}/functions/v1/criar-pix-loja`,
-        {
-            method:"POST",
-            headers:{
-                "Content-Type":"application/json",
-                "apikey":SUPABASE_ANON_KEY
-            },
-            body:JSON.stringify({
-
-                appId: String(APP_ID),
-
-                pedidoId: String(venda.id),
-
-                transaction_amount: Number(plano.valor),
-
-                description: `Hotspot - ${plano.nome}`,
-
-                payerEmail: "cliente@hotspot.com"
-
-            })
-        }
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization,apikey,content-type",
+  "Access-Control-Allow-Methods": "POST,OPTIONS",
+  "Content-Type": "application/json"
+};
+
+Deno.serve(async (req) => {
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders
+    });
+  }
+
+  try {
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const pix = await resposta.json();
+    const body = await req.json();
 
-    console.log(pix);
+    const app_id = String(body.app_id || "");
+    const plano_id = String(body.plano_id || "");
+    const mac = String(body.mac || "");
+    const ip = String(body.ip || "");
+    const hostname = String(body.hostname || "");
 
-    if(!resposta.ok){
-        alert(pix.erro || pix.message || "Erro ao gerar PIX");
-        return;
+    if (!app_id)
+      throw new Error("APP_ID não informado.");
+
+    if (!plano_id)
+      throw new Error("Plano não informado.");
+
+    console.log("APP:", app_id);
+    console.log("PLANO:", plano_id);
+
+    // ==========================================
+    // CONFIGURAÇÃO DO HOTSPOT
+    // ==========================================
+
+    const { data: hotspot, error: erroHotspot } = await supabase
+      .from("hotspot_config")
+      .select("*")
+      .eq("app_id", app_id)
+      .single();
+
+    if (erroHotspot || !hotspot)
+      throw new Error("Hotspot não encontrado.");
+
+    // ==========================================
+    // CONFIGURAÇÃO DA EMPRESA
+    // ==========================================
+
+    const { data: empresa, error: erroEmpresa } = await supabase
+      .from("config_site")
+      .select("*")
+      .eq("app_id", app_id)
+      .single();
+
+    if (erroEmpresa || !empresa)
+      throw new Error("Empresa não encontrada.");
+
+    const accessToken =
+      empresa.mercado_pago_token ||
+      empresa.access_token ||
+      empresa.mp_access_token;
+
+    if (!accessToken)
+      throw new Error("Mercado Pago não configurado.");
+
+    console.log("Empresa:", empresa.nome_empresa);
+
+    // ==========================================
+    // PLANO
+    // ==========================================
+
+    const { data: plano, error: erroPlano } = await supabase
+      .from("hotspot_planos")
+      .select("*")
+      .eq("id", plano_id)
+      .eq("app_id", app_id)
+      .single();
+
+    if (erroPlano || !plano)
+      throw new Error("Plano não encontrado.");
+
+    console.log("Plano:", plano.nome);
+    // ==========================================
+    // CRIA O REGISTRO DO PAGAMENTO
+    // ==========================================
+
+    const { data: pagamento, error: erroPagamento } = await supabase
+      .from("hotspot_pagamentos")
+      .insert({
+
+        app_id,
+
+        plano_id,
+
+        valor: Number(plano.valor),
+
+        status: "pendente",
+
+        payment_status: "pending",
+
+        cliente_mac: mac,
+
+        cliente_ip: ip,
+
+        hostname,
+
+        plano_nome: plano.nome,
+
+        tempo_minutos: plano.tempo_minutos,
+
+        created_at: new Date().toISOString()
+
+      })
+      .select()
+      .single();
+
+    if (erroPagamento || !pagamento) {
+
+      console.error(erroPagamento);
+
+      throw new Error("Erro ao criar pagamento.");
+
     }
 
-    // Salva os dados retornados
-    await db
-        .from("hotspot_vendas")
+    console.log("Pagamento:", pagamento.id);
+
+    // ==========================================
+    // REFERÊNCIA EXTERNA
+    // ==========================================
+
+    const externalReference = String(pagamento.id);
+
+    // ==========================================
+    // MONTA O PIX
+    // ==========================================
+
+    const payload = {
+
+      transaction_amount: Number(plano.valor),
+
+      description: `Hotspot - ${plano.nome}`,
+
+      payment_method_id: "pix",
+
+      external_reference: externalReference,
+
+      notification_url:
+        "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/gerar-pix-hotspot",
+
+      payer: {
+
+        email: "cliente@ffhotspot.com",
+
+        first_name: "Cliente",
+
+        last_name: "Hotspot"
+
+      }
+
+    };
+
+    console.log("Payload MP");
+
+    console.log(payload);
+    // ==========================================
+    // MERCADO PAGO
+    // ==========================================
+
+    const mpResponse = await fetch(
+      "https://api.mercadopago.com/v1/payments",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": crypto.randomUUID()
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const mp = await mpResponse.json();
+
+    console.log("Resposta Mercado Pago:");
+
+    console.log(mp);
+
+    if (!mpResponse.ok) {
+
+      console.error(mp);
+
+      await supabase
+
+        .from("hotspot_pagamentos")
+
         .update({
 
-            pagamento_status: pix.status || "pending",
+          status: "erro",
 
-            mp_payment_id: pix.id,
+          payment_status: "error",
 
-            mp_qr_code:
-                pix.pix_copia_cola ||
-                pix.qr_code ||
-                pix.pixCode
+          payload: mp,
+
+          updated_at: new Date().toISOString()
 
         })
-        .eq("id", venda.id);
 
-    document.getElementById("pix").style.display = "block";
+        .eq("id", pagamento.id);
 
-    document.getElementById("qrcode").src =
-        "data:image/png;base64," +
-        (pix.qr_code_base64 || pix.base64);
+      throw new Error(
 
-    document.getElementById("copiacola").value =
-        pix.pix_copia_cola ||
-        pix.qr_code ||
-        pix.pixCode ||
-        "";
-}
+        mp.message ||
 
-carregarPlano();
+        mp.error ||
 
-</script>
+        "Erro ao gerar PIX."
 
-</body>
-</html>
+      );
+
+    }
+
+    // ==========================================
+    // DADOS PIX
+    // ==========================================
+
+    const qrCode =
+
+      mp.point_of_interaction
+        ?.transaction_data
+        ?.qr_code || "";
+
+    const qrCodeBase64 =
+
+      mp.point_of_interaction
+        ?.transaction_data
+        ?.qr_code_base64 || "";
+
+    const paymentId = String(mp.id);
+
+    const paymentStatus = mp.status || "pending";
+
+    console.log("PIX criado:", paymentId);
+
+    // ==========================================
+    // ATUALIZA PAGAMENTO
+    // ==========================================
+
+    const { error: erroAtualizar } = await supabase
+
+      .from("hotspot_pagamentos")
+
+      .update({
+
+        payment_id: paymentId,
+
+        payment_status: paymentStatus,
+
+        status: paymentStatus,
+
+        qr_code: qrCode,
+
+        qr_code_base64: qrCodeBase64,
+
+        payload: mp,
+
+        updated_at: new Date().toISOString()
+
+      })
+
+      .eq("id", pagamento.id);
+
+    if (erroAtualizar) {
+
+      console.error(erroAtualizar);
+
+      throw new Error("Erro ao salvar pagamento.");
+
+    }
+
+    console.log("Pagamento atualizado.");
+    // ==========================================
+    // RETORNO
+    // ==========================================
+
+    return new Response(
+      JSON.stringify({
+
+        success: true,
+
+        payment_id: paymentId,
+
+        external_reference: externalReference,
+
+        status: paymentStatus,
+
+        valor: Number(plano.valor),
+
+        plano: {
+
+          id: plano.id,
+
+          nome: plano.nome,
+
+          descricao: plano.descricao,
+
+          tempo_minutos: plano.tempo_minutos
+
+        },
+
+        qr_code: qrCode,
+
+        qr_code_base64: qrCodeBase64
+
+      }),
+      {
+        status: 200,
+        headers: corsHeaders
+      }
+    );
+
+  } catch (err) {
+
+    console.error("ERRO HOTSPOT:");
+
+    console.error(err);
+
+    return new Response(
+      JSON.stringify({
+
+        success: false,
+
+        error: err instanceof Error
+          ? err.message
+          : String(err)
+
+      }),
+      {
+        status: 500,
+        headers: corsHeaders
+      }
+    );
+
+  }
+
+});
