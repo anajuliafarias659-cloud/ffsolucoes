@@ -203,19 +203,58 @@ async function carregarPlano(){
 
 async function gerarPix(){
 
+    // Busca o plano
+    const { data: plano, error } = await db
+        .from("hotspot_planos")
+        .select("*")
+        .eq("id", planoId)
+        .eq("app_id", APP_ID)
+        .single();
+
+    if(error){
+        alert(error.message);
+        return;
+    }
+
+    // Cria a venda
+    const { data: venda, error: erroVenda } = await db
+        .from("hotspot_vendas")
+        .insert({
+            app_id: APP_ID,
+            plano_id: plano.id,
+            valor: plano.valor,
+            status: "aguardando_pagamento",
+            pagamento_status: "pending"
+        })
+        .select("id")
+        .single();
+
+    if(erroVenda){
+        alert(erroVenda.message);
+        return;
+    }
+
+    // Gera o PIX usando a mesma função da loja
     const resposta = await fetch(
-        `${SUPABASE_URL}/functions/v1/gerar-pix`,
+        `${SUPABASE_URL}/functions/v1/criar-pix-loja`,
         {
-            method: "POST",
+            method:"POST",
             headers:{
                 "Content-Type":"application/json",
-                "apikey": SUPABASE_ANON_KEY,
-                "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+                "apikey":SUPABASE_ANON_KEY
             },
-            body: JSON.stringify({
-                app_id: APP_ID,
-                plano_id: planoId,
-                tipo: "hotspot"
+            body:JSON.stringify({
+
+                appId: String(APP_ID),
+
+                pedidoId: String(venda.id),
+
+                transaction_amount: Number(plano.valor),
+
+                description: `Hotspot - ${plano.nome}`,
+
+                payerEmail: "cliente@hotspot.com"
+
             })
         }
     );
@@ -225,30 +264,38 @@ async function gerarPix(){
     console.log(pix);
 
     if(!resposta.ok){
-        alert(pix.message || pix.error || "Erro ao gerar PIX.");
+        alert(pix.erro || pix.message || "Erro ao gerar PIX");
         return;
     }
+
+    // Salva os dados retornados
+    await db
+        .from("hotspot_vendas")
+        .update({
+
+            pagamento_status: pix.status || "pending",
+
+            mp_payment_id: pix.id,
+
+            mp_qr_code:
+                pix.pix_copia_cola ||
+                pix.qr_code ||
+                pix.pixCode
+
+        })
+        .eq("id", venda.id);
 
     document.getElementById("pix").style.display = "block";
 
     document.getElementById("qrcode").src =
-        "data:image/png;base64," + pix.qr_code_base64;
+        "data:image/png;base64," +
+        (pix.qr_code_base64 || pix.base64);
 
     document.getElementById("copiacola").value =
-        pix.qr_code;
-
-}
-
-function copiarPix(){
-
-    const txt = document.getElementById("copiacola");
-
-    txt.select();
-
-    document.execCommand("copy");
-
-    alert("PIX copiado.");
-
+        pix.pix_copia_cola ||
+        pix.qr_code ||
+        pix.pixCode ||
+        "";
 }
 
 carregarPlano();
