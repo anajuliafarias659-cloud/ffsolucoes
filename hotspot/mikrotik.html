@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>MikroTik Hotspot</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,sans-serif;
+}
+
+body{
+background:#f3f4f6;
+}
+
+.topo{
+background:#0d8db8;
+color:#fff;
+padding:18px;
+font-size:24px;
+font-weight:bold;
+}
+
+.container{
+max-width:1000px;
+margin:25px auto;
+}
+
+.card{
+background:#fff;
+padding:20px;
+margin-bottom:20px;
+border-radius:12px;
+box-shadow:0 4px 12px rgba(0,0,0,.08);
+}
+
+.grid{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+gap:15px;
+}
+
+label{
+display:block;
+font-weight:bold;
+margin-top:12px;
+}
+
+input,select{
+width:100%;
+padding:12px;
+border:1px solid #ddd;
+border-radius:8px;
+margin-top:6px;
+}
+
+button{
+width:100%;
+padding:15px;
+background:#16a34a;
+color:#fff;
+border:none;
+border-radius:10px;
+font-size:17px;
+font-weight:bold;
+cursor:pointer;
+margin-top:20px;
+}
+
+.status{
+padding:15px;
+border-radius:10px;
+margin-top:20px;
+background:#f1f5f9;
+}
+
+.ok{
+color:#16a34a;
+font-weight:bold;
+}
+
+.erro{
+color:#dc2626;
+font-weight:bold;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="topo">
+
+🌐 Configuração MikroTik
+
+</div>
+
+<div class="container">
+
+<div class="card">
+
+<h2>Servidor MikroTik</h2>
+
+<div class="grid">
+
+<div>
+
+<label>IP</label>
+
+<input id="ip">
+
+</div>
+
+<div>
+
+<label>Porta API</label>
+
+<input id="porta" value="8728">
+
+</div>
+
+<div>
+
+<label>Usuário</label>
+
+<input id="usuario">
+
+</div>
+
+<div>
+
+<label>Senha</label>
+
+<input id="senha" type="password">
+
+</div>
+
+<div>
+
+<label>Servidor Hotspot</label>
+
+<input id="servidor">
+
+</div>
+
+<div>
+
+<label>Profile Padrão</label>
+
+<input id="profile">
+
+</div>
+
+</div>
+
+<button onclick="salvar()">
+
+Salvar Configuração
+
+</button>
+
+<button onclick="testar()">
+
+Testar Conexão
+
+</button>
+
+<div id="status" class="status">
+
+Aguardando...
+
+</div>
+
+</div>
+
+</div>
+<script>
+
+const db = window.supabase.createClient(
+"https://pdajixsoowcyhnjwhgpc.supabase.co",
+"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const APP_ID = new URLSearchParams(location.search).get("app_id");
+
+if(!APP_ID){
+    alert("APP_ID não informado.");
+    throw new Error("APP_ID ausente");
+}
+
+async function carregar(){
+
+    const {data,error}=await db
+
+    .from("hotspot_config")
+
+    .select("*")
+
+    .eq("app_id",APP_ID)
+
+    .maybeSingle();
+
+    if(error){
+        console.error(error);
+        return;
+    }
+
+    if(!data){
+
+        await db
+
+        .from("hotspot_config")
+
+        .insert({
+            app_id:APP_ID
+        });
+
+        return carregar();
+
+    }
+
+    ip.value=data.mikrotik_ip || "";
+    porta.value=data.mikrotik_porta || 8728;
+    usuario.value=data.mikrotik_usuario || "";
+    senha.value=data.mikrotik_senha || "";
+    servidor.value=data.mikrotik_hotspot || "";
+    profile.value=data.profile_mikrotik || "";
+
+}
+
+async function salvar(){
+
+    const {error}=await db
+
+    .from("hotspot_config")
+
+    .update({
+
+        mikrotik_ip:ip.value.trim(),
+
+        mikrotik_porta:Number(porta.value),
+
+        mikrotik_usuario:usuario.value.trim(),
+
+        mikrotik_senha:senha.value,
+
+        mikrotik_hotspot:servidor.value.trim(),
+
+        profile_mikrotik:profile.value.trim()
+
+    })
+
+    .eq("app_id",APP_ID);
+
+    if(error){
+
+        status.innerHTML="<span class='erro'>"+error.message+"</span>";
+
+        console.error(error);
+
+        return;
+
+    }
+
+    status.innerHTML="<span class='ok'>Configuração salva com sucesso.</span>";
+
+}
+
+async function testar(){
+
+    status.innerHTML="Testando conexão...";
+
+    const {data,error}=await db.functions.invoke(
+
+        "mikrotik-test",
+
+        {
+
+            body:{
+
+                ip:ip.value,
+
+                porta:Number(porta.value),
+
+                usuario:usuario.value,
+
+                senha:senha.value
+
+            }
+
+        }
+
+    );
+
+    if(error){
+
+        status.innerHTML="<span class='erro'>"+error.message+"</span>";
+
+        return;
+
+    }
+
+    if(data && data.ok){
+
+        status.innerHTML="<span class='ok'>Conectado ao MikroTik.</span>";
+
+    }else{
+
+        status.innerHTML="<span class='erro'>Não foi possível conectar.</span>";
+
+    }
+
+}
+
+carregar();
+
+</script>
+
+</body>
+</html>
