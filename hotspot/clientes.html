@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Clientes Hotspot</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,sans-serif;
+}
+
+body{
+background:#f3f4f6;
+}
+
+.topo{
+background:#0d8db8;
+color:#fff;
+padding:18px;
+font-size:24px;
+font-weight:bold;
+}
+
+.container{
+max-width:1200px;
+margin:25px auto;
+}
+
+.card{
+background:#fff;
+padding:20px;
+border-radius:12px;
+box-shadow:0 4px 12px rgba(0,0,0,.08);
+margin-bottom:20px;
+}
+
+.grid{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+gap:15px;
+}
+
+label{
+display:block;
+font-weight:bold;
+margin-top:12px;
+}
+
+input,
+select{
+
+width:100%;
+padding:12px;
+border:1px solid #ddd;
+border-radius:8px;
+margin-top:5px;
+
+}
+
+button{
+
+padding:13px 18px;
+border:none;
+border-radius:10px;
+cursor:pointer;
+font-weight:bold;
+
+}
+
+.btnSalvar{
+
+background:#16a34a;
+color:#fff;
+width:100%;
+margin-top:20px;
+
+}
+
+.btnEditar{
+
+background:#2563eb;
+color:#fff;
+
+}
+
+.btnExcluir{
+
+background:#dc2626;
+color:#fff;
+
+}
+
+.btnBloquear{
+
+background:#f59e0b;
+color:#fff;
+
+}
+
+table{
+
+width:100%;
+border-collapse:collapse;
+
+}
+
+th,td{
+
+padding:12px;
+border-bottom:1px solid #eee;
+text-align:left;
+
+}
+
+th{
+
+background:#f8fafc;
+
+}
+
+.statusAtivo{
+
+color:#16a34a;
+font-weight:bold;
+
+}
+
+.statusBloqueado{
+
+color:#dc2626;
+font-weight:bold;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="topo">
+
+👥 Clientes Hotspot
+
+</div>
+
+<div class="container">
+
+<div class="card">
+
+<h2>Novo Cliente</h2>
+
+<div class="grid">
+
+<div>
+
+<label>Nome</label>
+
+<input id="nome">
+
+</div>
+
+<div>
+
+<label>Usuário</label>
+
+<input id="usuario">
+
+</div>
+
+<div>
+
+<label>Senha</label>
+
+<input id="senha">
+
+</div>
+
+<div>
+
+<label>Plano</label>
+
+<select id="plano"></select>
+
+</div>
+
+<div>
+
+<label>Telefone</label>
+
+<input id="telefone">
+
+</div>
+
+<div>
+
+<label>Status</label>
+
+<select id="ativo">
+
+<option value="true">Ativo</option>
+
+<option value="false">Bloqueado</option>
+
+</select>
+
+</div>
+
+</div>
+
+<button class="btnSalvar" onclick="salvarCliente()">
+
+Salvar Cliente
+
+</button>
+
+</div>
+
+<div class="card">
+
+<input id="pesquisa"
+
+placeholder="Pesquisar cliente..."
+
+onkeyup="listarClientes()">
+
+<br><br>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>Nome</th>
+
+<th>Usuário</th>
+
+<th>Plano</th>
+
+<th>Status</th>
+
+<th>Ações</th>
+
+</tr>
+
+</thead>
+
+<tbody id="listaClientes">
+
+<tr>
+
+<td colspan="5">
+
+Carregando...
+
+</td>
+
+</tr>
+
+</tbody>
+
+</table>
+
+</div>
+
+</div>
+<script>
+
+const db = window.supabase.createClient(
+"https://pdajixsoowcyhnjwhgpc.supabase.co",
+"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const APP_ID = new URLSearchParams(location.search).get("app_id");
+
+if(!APP_ID){
+    alert("APP_ID não informado.");
+    throw new Error("APP_ID ausente");
+}
+
+let editando=null;
+
+async function carregarPlanos(){
+
+    const {data,error}=await db
+    .from("hotspot_planos")
+    .select("id,nome")
+    .eq("app_id",APP_ID)
+    .eq("ativo",true)
+    .order("nome");
+
+    if(error){
+        console.error(error);
+        return;
+    }
+
+    plano.innerHTML="<option value=''>Selecione...</option>";
+
+    (data||[]).forEach(p=>{
+
+        plano.innerHTML+=`
+        <option value="${p.id}">
+            ${p.nome}
+        </option>`;
+
+    });
+
+}
+
+async function listarClientes(){
+
+    let busca=pesquisa.value.trim();
+
+    let consulta=db
+
+    .from("hotspot_clientes")
+
+    .select(`
+        *,
+        hotspot_planos(nome)
+    `)
+
+    .eq("app_id",APP_ID)
+
+    .order("nome");
+
+    if(busca){
+
+        consulta=consulta.ilike("nome","%"+busca+"%");
+
+    }
+
+    const {data,error}=await consulta;
+
+    if(error){
+
+        console.error(error);
+
+        listaClientes.innerHTML=
+        "<tr><td colspan='5'>Erro ao carregar.</td></tr>";
+
+        return;
+
+    }
+
+    if(!data || data.length==0){
+
+        listaClientes.innerHTML=
+        "<tr><td colspan='5'>Nenhum cliente.</td></tr>";
+
+        return;
+
+    }
+
+    listaClientes.innerHTML=data.map(c=>`
+
+<tr>
+
+<td>${c.nome}</td>
+
+<td>${c.usuario}</td>
+
+<td>${c.hotspot_planos?.nome || "-"}</td>
+
+<td>
+
+<span class="${
+c.ativo
+?'statusAtivo'
+:'statusBloqueado'
+}">
+
+${c.ativo?"ATIVO":"BLOQUEADO"}
+
+</span>
+
+</td>
+
+<td>
+
+<button
+class="btnEditar"
+onclick="editarCliente('${c.id}')">
+
+Editar
+
+</button>
+
+<button
+class="btnExcluir"
+onclick="excluirCliente('${c.id}')">
+
+Excluir
+
+</button>
+
+</td>
+
+</tr>
+
+`).join("");
+
+}
+
+async function salvarCliente(){
+
+    const dados={
+
+        app_id:APP_ID,
+
+        nome:nome.value.trim(),
+
+        usuario:usuario.value.trim(),
+
+        senha:senha.value.trim(),
+
+        plano_id:plano.value,
+
+        telefone:telefone.value.trim(),
+
+        ativo:ativo.value==="true"
+
+    };
+
+    if(!dados.nome){
+
+        alert("Informe o nome.");
+
+        return;
+
+    }
+
+    if(!dados.usuario){
+
+        alert("Informe o usuário.");
+
+        return;
+
+    }
+
+    if(editando){
+
+        const {error}=await db
+
+        .from("hotspot_clientes")
+
+        .update(dados)
+
+        .eq("id",editando);
+
+        if(error){
+
+            alert(error.message);
+
+            return;
+
+        }
+
+        editando=null;
+
+    }else{
+
+        const {error}=await db
+
+        .from("hotspot_clientes")
+
+        .insert(dados);
+
+        if(error){
+
+            alert(error.message);
+
+            return;
+
+        }
+
+    }
+
+    nome.value="";
+    usuario.value="";
+    senha.value="";
+    telefone.value="";
+    plano.value="";
+    ativo.value="true";
+
+    listarClientes();
+
+}
+  async function editarCliente(id){
+
+    const {data,error}=await db
+
+    .from("hotspot_clientes")
+
+    .select("*")
+
+    .eq("id",id)
+
+    .single();
+
+    if(error){
+
+        alert(error.message);
+
+        return;
+
+    }
+
+    editando=id;
+
+    nome.value=data.nome || "";
+    usuario.value=data.usuario || "";
+    senha.value=data.senha || "";
+    telefone.value=data.telefone || "";
+    plano.value=data.plano_id || "";
+    ativo.value=String(data.ativo);
+
+    window.scrollTo({
+
+        top:0,
+
+        behavior:"smooth"
+
+    });
+
+}
+
+async function excluirCliente(id){
+
+    if(!confirm("Deseja excluir este cliente?")){
+
+        return;
+
+    }
+
+    const {error}=await db
+
+    .from("hotspot_clientes")
+
+    .delete()
+
+    .eq("id",id);
+
+    if(error){
+
+        alert(error.message);
+
+        return;
+
+    }
+
+    listarClientes();
+
+}
+
+carregarPlanos();
+
+listarClientes();
+
+</script>
+
+</body>
+</html>
