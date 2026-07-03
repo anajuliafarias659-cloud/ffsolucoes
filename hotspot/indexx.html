@@ -129,22 +129,169 @@ Carregando...
 
 </div>
 
-console.log("1");
+<script>
 
 const db = window.supabase.createClient(
 "https://pdajixsoowcyhnjwhgpc.supabase.co",
 "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-console.log("2");
+const params = new URLSearchParams(window.location.search);
 
-const params = new URLSearchParams(location.search);
-
-console.log("3");
+const MAC = params.get("mac") || "";
+const IP = params.get("ip") || "";
+const LINK_LOGIN = params.get("link-login") || "";
+const LINK_ORIG = params.get("link-orig") || "";
+const CHAP_ID = params.get("chap-id") || "";
+const CHAP = params.get("chap-challenge") || "";
 
 const APP_ID = params.get("app_id");
+const PAGINA_ATUAL = location.pathname.split("/").pop();
 
-console.log("4");
+if (!APP_ID) {
+    document.body.innerHTML = `
+        <div style="padding:40px;text-align:center">
+            <h2>Hotspot não encontrado</h2>
+            <p>APP_ID não informado.</p>
+        </div>
+    `;
+    throw new Error("APP_ID não informado");
+}
+
+async function carregarEmpresa(){
+
+    const { data, error } = await db
+        .from("hotspot_config")
+        .select("*")
+        .eq("app_id", APP_ID)
+        .single();
+
+    console.log("EMPRESA:", data);
+    console.log("ERRO EMPRESA:", error);
+
+    if(error){
+        document.getElementById("empresa").innerHTML = "Hotspot não encontrado.";
+        return;
+    }
+
+    document.getElementById("empresa").innerHTML = `
+<div class="topo">
+
+<img
+class="logo"
+src="${data.logo || '/hotspot/img/logo.png'}">
+
+<h1>${data.nome_hotspot}</h1>
+
+<p>Internet Wi-Fi Oficial</p>
+
+</div>
+`;
+}
+
+async function carregarPlanos(){
+
+    const { data, error } = await db
+    .from("hotspot_planos")
+    .select("*")
+    .eq("app_id", APP_ID)
+    .eq("ativo", true)
+    .order("valor");
+
+    console.log("PLANOS:", data);
+    console.log("ERRO:", error);
+
+    if(error){
+        document.getElementById("planos").innerHTML = error.message;
+        return;
+    }
+
+    if(!data || data.length === 0){
+        document.getElementById("planos").innerHTML = "Nenhum plano encontrado.";
+        return;
+    }
+
+    let html = "";
+
+    data.forEach(plano => {
+
+        html += `
+<div class="plano">
+
+<h3>${plano.nome}</h3>
+
+<div class="valor">
+R$ ${Number(plano.valor).toFixed(2)}
+</div>
+
+<p>${plano.tempo_minutos} minutos</p>
+
+<button class="btn"
+onclick="comprar('${plano.id}')">
+
+📶 Conectar
+
+</button>
+
+</div>
+`;
+
+    });
+
+    document.getElementById("planos").innerHTML = html;
+
+}
+
+
+function comprar(id){
+
+    window.location.href =
+`pagamentos.html?app_id=${APP_ID}
+&plano=${id}
+&mac=${encodeURIComponent(MAC)}
+&ip=${encodeURIComponent(IP)}
+&link_login=${encodeURIComponent(LINK_LOGIN)}
+&link_orig=${encodeURIComponent(LINK_ORIG)}
+&chap_id=${encodeURIComponent(CHAP_ID)}
+&chap=${encodeURIComponent(CHAP)}`;
+
+}
+
+
+async function iniciar(){
+
+    const { data, error } = await db
+        .from("hotspot_config")
+        .select("modelo")
+        .eq("app_id", APP_ID)
+        .single();
+
+    if(error){
+        console.error(error);
+        return;
+    }
+
+    if(
+        data?.modelo &&
+        data.modelo !== PAGINA_ATUAL
+    ){
+
+        location.replace(
+            data.modelo + location.search
+        );
+
+        return;
+    }
+
+    carregarEmpresa();
+
+    carregarPlanos();
+
+}
+
+iniciar();
+console.log("FIM DO SCRIPT");
+</script>
 
 </body>
 
