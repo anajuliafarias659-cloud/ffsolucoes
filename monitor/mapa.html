@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Mapa da Rede - FF Infra</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Inter,sans-serif;
+}
+
+body{
+
+background:#0b1020;
+overflow:hidden;
+color:white;
+
+}
+
+header{
+
+height:65px;
+
+background:#151d31;
+
+display:flex;
+
+align-items:center;
+
+justify-content:space-between;
+
+padding:0 25px;
+
+border-bottom:1px solid #26324e;
+
+}
+
+header h2{
+
+font-size:22px;
+
+}
+
+#mapa{
+
+position:relative;
+
+width:100vw;
+
+height:calc(100vh - 65px);
+
+overflow:auto;
+
+cursor:grab;
+
+background-image:
+
+linear-gradient(#1d2742 1px, transparent 1px),
+
+linear-gradient(90deg,#1d2742 1px,transparent 1px);
+
+background-size:40px 40px;
+
+}
+
+#svg{
+
+position:absolute;
+
+top:0;
+
+left:0;
+
+width:5000px;
+
+height:5000px;
+
+pointer-events:none;
+
+}
+
+.card{
+
+position:absolute;
+
+width:190px;
+
+min-height:80px;
+
+background:#17233b;
+
+border-radius:12px;
+
+border:1px solid #32466b;
+
+padding:12px;
+
+box-shadow:0 0 15px rgba(0,0,0,.45);
+
+transition:.25s;
+
+cursor:pointer;
+
+}
+
+.card:hover{
+
+transform:scale(1.03);
+
+}
+
+.gateway{
+
+background:#12355f;
+
+}
+
+.online{
+
+border-left:6px solid #00d26a;
+
+}
+
+.offline{
+
+border-left:6px solid #ff4b4b;
+
+}
+
+.warning{
+
+border-left:6px solid orange;
+
+}
+
+.nome{
+
+font-size:15px;
+
+font-weight:bold;
+
+margin-bottom:8px;
+
+}
+
+.info{
+
+font-size:13px;
+
+opacity:.8;
+
+line-height:20px;
+
+}
+
+.toolbar{
+
+position:absolute;
+
+right:20px;
+
+top:20px;
+
+z-index:999;
+
+display:flex;
+
+gap:10px;
+
+}
+
+.toolbar button{
+
+height:40px;
+
+padding:0 18px;
+
+background:#0099ff;
+
+color:white;
+
+border:none;
+
+border-radius:8px;
+
+cursor:pointer;
+
+font-weight:bold;
+
+}
+
+.toolbar button:hover{
+
+background:#00b5ff;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<header>
+
+<h2>
+
+🌐 FF Infra - Mapa da Rede
+
+</h2>
+
+</header>
+
+<div id="mapa">
+
+<div class="toolbar">
+
+<button onclick="carregarMapa()">
+
+Atualizar
+
+</button>
+
+</div>
+
+<svg id="svg"></svg>
+
+</div>
+
+<script>
+
+const SUPABASE_URL="COLE_AQUI";
+
+const SUPABASE_KEY="COLE_AQUI";
+
+const supabase=window.supabase.createClient(
+
+SUPABASE_URL,
+
+SUPABASE_KEY
+
+);
+
+const APP_ID=new URLSearchParams(location.search).get("app_id");
+
+let gateways=[];
+
+let equipamentos=[];
+
+const mapa=document.getElementById("mapa");
+
+const svg=document.getElementById("svg");
+
+function statusClasse(status){
+
+if(status=="online")
+return"online";
+
+if(status=="warning")
+return"warning";
+
+return"offline";
+
+}
+
+async function carregarMapa(){
+
+svg.innerHTML="";
+
+document.querySelectorAll(".card").forEach(c=>c.remove());
+
+const g=await supabase
+
+.from("monitor_gateways")
+
+.select("*")
+
+.eq("app_id",APP_ID)
+
+.order("nome");
+
+gateways=g.data||[];
+
+const e=await supabase
+
+.from("monitor_equipamentos")
+
+.select("*")
+
+.eq("app_id",APP_ID)
+
+.order("nome");
+
+equipamentos=e.data||[];
+
+let coluna=0;
+
+for(const gateway of gateways){
+
+let gx=120+(coluna*420);
+
+let gy=80;
+
+const card=document.createElement("div");
+
+card.className="card gateway "+statusClasse(gateway.status);
+
+card.style.left=gx+"px";
+
+card.style.top=gy+"px";
+
+card.id="gw-"+gateway.id;
+
+card.innerHTML=`
+
+<div class="nome">
+
+🛰 ${gateway.nome}
+
+</div>
+
+<div class="info">
+
+IP VPN: ${gateway.ip_vpn || "-"}
+
+<br>
+
+CPU: ${gateway.cpu_load || 0}%
+
+</div>
+
+`;
+
+mapa.appendChild(card);
+
+let linha=0;
+
+const lista=equipamentos.filter(
+
+x=>x.gateway_id==gateway.id
+
+);
+for(const eq of lista){
+
+let ex=gx;
+
+let ey=220+(linha*130);
+
+const equipamento=document.createElement("div");
+
+equipamento.className="card "+statusClasse(eq.status);
+
+equipamento.style.left=ex+"px";
+
+equipamento.style.top=ey+"px";
+
+equipamento.id="eq-"+eq.id;
+
+equipamento.innerHTML=`
+
+<div class="nome">
+
+${icone(eq.tipo)} ${eq.nome}
+
+</div>
+
+<div class="info">
+
+IP: ${eq.ip || "-"}
+
+<br>
+
+Ping: ${eq.latencia || 0} ms
+
+<br>
+
+Perda: ${eq.perda || 0} %
+
+</div>
+
+`;
+
+mapa.appendChild(equipamento);
+
+desenharLinha(
+
+gx+95,
+
+gy+80,
+
+ex+95,
+
+ey
+
+);
+
+linha++;
+
+}
+
+coluna++;
+
+}
+
+}
+
+function desenharLinha(x1,y1,x2,y2){
+
+const linha=document.createElementNS(
+
+"http://www.w3.org/2000/svg",
+
+"path"
+
+);
+
+const curva=`
+
+M ${x1} ${y1}
+
+C ${x1} ${(y1+y2)/2},
+
+${x2} ${(y1+y2)/2},
+
+${x2} ${y2}
+
+`;
+
+linha.setAttribute("d",curva);
+
+linha.setAttribute("fill","none");
+
+linha.setAttribute("stroke","#00c3ff");
+
+linha.setAttribute("stroke-width","3");
+
+linha.setAttribute("stroke-linecap","round");
+
+svg.appendChild(linha);
+
+}
+
+function icone(tipo){
+
+switch(tipo){
+
+case"Servidor":
+
+return"🖥";
+
+case"Switch":
+
+return"🔀";
+
+case"ONU":
+
+return"📦";
+
+case"📡 Rádio PTP":
+
+return"📡";
+
+case"📡 Rádio Setorial":
+
+return"📶";
+
+case"Câmera":
+
+return"📷";
+
+case"Impressora":
+
+return"🖨";
+
+case"Nobreak":
+
+return"🔋";
+
+default:
+
+return"⚙";
+
+}
+
+}
+
+setInterval(carregarMapa,5000);
+
+carregarMapa();
+// ================================
+// ARRASTAR (já preparado)
+// ================================
+
+let selecionado=null;
+
+let offsetX=0;
+
+let offsetY=0;
+
+mapa.addEventListener("mousedown",(e)=>{
+
+const card=e.target.closest(".card");
+
+if(!card)return;
+
+selecionado=card;
+
+offsetX=e.offsetX;
+
+offsetY=e.offsetY;
+
+});
+
+window.addEventListener("mousemove",(e)=>{
+
+if(!selecionado)return;
+
+const rect=mapa.getBoundingClientRect();
+
+selecionado.style.left=(e.clientX-rect.left-offsetX)+"px";
+
+selecionado.style.top=(e.clientY-rect.top-offsetY)+"px";
+
+});
+
+window.addEventListener("mouseup",()=>{
+
+selecionado=null;
+
+});
+
+// ================================
+// ZOOM
+// ================================
+
+let zoom=1;
+
+mapa.addEventListener("wheel",(e)=>{
+
+e.preventDefault();
+
+zoom+=e.deltaY>0?-0.05:0.05;
+
+if(zoom<0.40)zoom=0.40;
+
+if(zoom>2)zoom=2;
+
+mapa.style.transform="scale("+zoom+")";
+
+mapa.style.transformOrigin="0 0";
+
+});
+
+// ================================
+// MOVER O MAPA
+// ================================
+
+let movendo=false;
+
+let inicioX=0;
+
+let inicioY=0;
+
+mapa.addEventListener("contextmenu",e=>e.preventDefault());
+
+mapa.addEventListener("mousedown",(e)=>{
+
+if(e.button!=2)return;
+
+movendo=true;
+
+inicioX=e.clientX;
+
+inicioY=e.clientY;
+
+});
+
+window.addEventListener("mouseup",()=>{
+
+movendo=false;
+
+});
+
+window.addEventListener("mousemove",(e)=>{
+
+if(!movendo)return;
+
+mapa.scrollLeft-=e.clientX-inicioX;
+
+mapa.scrollTop-=e.clientY-inicioY;
+
+inicioX=e.clientX;
+
+inicioY=e.clientY;
+
+});
+
+// ================================
+// FIM
+// ================================
+
+</script>
+
+</body>
+
+</html>
