@@ -10,9 +10,9 @@
 
 const supabase = window.supabase.createClient(
 
-    "SUA_URL_SUPABASE",
+    "https://pdajixsoowcyhnjwhgpc.supabase.co",
 
-    "SUA_ANON_KEY"
+    "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 
 );
 
