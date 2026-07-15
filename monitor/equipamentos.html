@@ -802,9 +802,8 @@ Atualizar
 <th>Gateway</th>
 
 <th>Ping</th>
-<th>Latência</th>
-<th>Perda</th>
-<th>Última Resposta</th>
+
+<th>Última Atualização</th>
 
 <th width="220">
 
@@ -946,15 +945,27 @@ Gateway
 
 MAC Address
 
-</label>
+<div>
+
+<label>IP (Opcional)</label>
 
 <input
-
-id="mac"
-
-placeholder="AA:BB:CC:DD:EE:FF"
-
+id="ip"
+placeholder="172.16.3.10"
 type="text">
+
+</div>
+
+<div>
+
+<label>MAC (Opcional)</label>
+
+<input
+id="mac"
+placeholder="AA:BB:CC:DD:EE:FF"
+type="text">
+
+</div>
 
 </div>
 
@@ -1159,29 +1170,93 @@ function atualizarCards(){
 
 }
 
-/*===============================
-DESENHA TABELA
-===============================*/
+
+function corLatencia(latencia){
+
+    if(latencia == null)
+        return "#999";
+
+    if(latencia <= 20)
+        return "#2ecc71";
+
+    if(latencia <= 80)
+        return "#f1c40f";
+
+    if(latencia <= 150)
+        return "#ff9800";
+
+    return "#ff5252";
+
+}
+
+function calcularStatus(eq){
+
+    if(!eq.ping || eq.ping == 0)
+        return "offline";
+
+    if((eq.perda ?? 0) >= 50)
+        return "offline";
+
+    if((eq.latencia ?? 0) > 5000)
+        return "offline";
+
+    if((eq.latencia ?? 0) > 300 || (eq.perda ?? 0) > 20)
+        return "warning";
+
+    return "online";
+
+}
+
+function corLatencia(latencia){
+
+    if(latencia == null)
+        return "#999";
+
+    if(latencia <= 20)
+        return "#2ecc71";
+
+    if(latencia <= 80)
+        return "#f1c40f";
+
+    if(latencia <= 150)
+        return "#ff9800";
+
+    return "#ff5252";
+
+}
+
+function corPerda(perda){
+
+    if(perda == null)
+        return "#999";
+
+    if(perda == 0)
+        return "#2ecc71";
+
+    if(perda <= 10)
+        return "#f1c40f";
+
+    if(perda <= 30)
+        return "#ff9800";
+
+    return "#ff5252";
+
+}
 
 function desenharTabela(lista = equipamentos){
 
-    const tbody=document.getElementById("tabelaEquipamentos");
+    const tbody = document.getElementById("tabelaEquipamentos");
 
-    tbody.innerHTML="";
+    tbody.innerHTML = "";
 
-    if(lista.length==0){
+    if(lista.length == 0){
 
-        tbody.innerHTML=`
+        tbody.innerHTML = `
         <tr>
-
-        <td colspan="9">
-
-        Nenhum equipamento cadastrado.
-
-        </td>
-
-        </tr>
-        `;
+            <td colspan="11">
+                Nenhum equipamento cadastrado.
+            </td>
+        </tr>`;
 
         return;
 
@@ -1189,78 +1264,60 @@ function desenharTabela(lista = equipamentos){
 
     lista.forEach(eq=>{
 
-        tbody.innerHTML+=`
+        const status = calcularStatus(eq);
+
+        tbody.innerHTML += `
 
 <tr>
 
 <td>
-
-<span class="status ${eq.status||'offline'}"></span>
-
+    <span class="status ${status}"></span>
 </td>
 
 <td>
-
-${eq.nome}
-
+    ${eq.nome}
 </td>
 
 <td>
-
-${eq.tipo||''}
-
+    ${eq.tipo || "-"}
 </td>
 
 <td>
-
-${eq.mac}
-
+    ${eq.mac || "-"}
 </td>
 
 <td>
-
-${eq.ip||'-'}
-
+    ${eq.ip || "-"}
 </td>
 
 <td>
-
-${gateways.find(g=>g.id===eq.gateway_id)?.nome || ""}
-
+    ${gateways.find(g=>g.id===eq.gateway_id)?.nome || "-"}
 </td>
 
 <td>
+    ${eq.ping ?? 0}/3
+</td>
 
-${eq.ping || 0}/3
+<td style="
+    color:${corLatencia(eq.latencia)};
+    font-weight:bold;
+">
+    ${eq.latencia != null ? eq.latencia+" ms" : "-"}
+</td>
 
+<td style="
+    color:${corPerda(eq.perda)};
+    font-weight:bold;
+">
+    ${eq.perda != null ? eq.perda+" %" : "-"}
 </td>
 
 <td>
-
-${eq.latencia ? eq.latencia + " ms" : "-"}
-
-</td>
-
-<td>
-
-${eq.perda ?? "-"}
-
-%
-
-</td>
-
-<td>
-
-${eq.ultima_resposta ?
-
-new Date(eq.ultima_resposta).toLocaleString("pt-BR")
-
-:
-
-"-"
-
-}
-
+    ${
+        eq.ultima_resposta
+        ? new Date(eq.ultima_resposta).toLocaleString("pt-BR")
+        : "-"
+    }
 </td>
 
 <td>
@@ -1268,33 +1325,21 @@ new Date(eq.ultima_resposta).toLocaleString("pt-BR")
 <div class="acoes">
 
 <button
-
 class="btnMonitorar"
-
 onclick="monitorar('${eq.id}')">
-
 Ping
-
 </button>
 
 <button
-
 class="btnEditar"
-
 onclick="editar('${eq.id}')">
-
 Editar
-
 </button>
 
 <button
-
 class="btnExcluir"
-
 onclick="excluirEquipamento('${eq.id}')">
-
 Excluir
-
 </button>
 
 </div>
@@ -1317,6 +1362,7 @@ async function salvarEquipamento(){
     const gateway=document.getElementById("gateway").value;
 
     const mac=document.getElementById("mac").value.toUpperCase();
+const ip=document.getElementById("ip").value.trim();
 
     const observacao=document.getElementById("descricao").value;
 
@@ -1328,18 +1374,25 @@ async function salvarEquipamento(){
         return;
 
     }
+if(!ip && !mac){
+
+    alert("Informe um IP ou um MAC.");
+
+    return;
+
+}
 
     const dados={
 
-        gateway_id:gateway,
+    gateway_id:gateway,
 
-        nome,
+    nome,
 
-        tipo,
+    tipo,
 
-        mac,
+    mac,
 
-        ip:"",
+    ip,
 
         fabricante:"",
 
@@ -1431,9 +1484,10 @@ function filtrarEquipamentos(){
     const lista = equipamentos.filter(e => {
 
         const okBusca =
-            !busca ||
-            (e.nome || "").toLowerCase().includes(busca) ||
-            (e.mac || "").toLowerCase().includes(busca);
+    !busca ||
+    (e.nome || "").toLowerCase().includes(busca) ||
+    (e.mac || "").toLowerCase().includes(busca) ||
+    (e.ip || "").toLowerCase().includes(busca);
 
         const okGateway =
             !gateway ||
