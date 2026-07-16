@@ -21,36 +21,52 @@ font-family:Arial,sans-serif;
 }
 
 html,body{
-
 width:100%;
 height:100%;
-background:#0b1020;
 overflow:hidden;
-
+background:#0b1020;
+color:white;
 }
 
 header{
 
 height:60px;
+background:#151c2f;
 display:flex;
 align-items:center;
 justify-content:space-between;
 padding:0 20px;
-background:#151c2f;
-border-bottom:1px solid #30415d;
-color:white;
+border-bottom:1px solid #2d3f5d;
+
+}
+
+header h2{
+
+font-size:20px;
+
+}
+
+.menu{
+
+display:flex;
+gap:10px;
 
 }
 
 button{
 
-padding:8px 15px;
+background:#16a34a;
 border:none;
+color:white;
+padding:8px 16px;
 border-radius:6px;
 cursor:pointer;
-background:#16a34a;
-color:white;
-margin-left:10px;
+
+}
+
+button:hover{
+
+background:#15803d;
 
 }
 
@@ -58,6 +74,32 @@ margin-left:10px;
 
 width:100%;
 height:calc(100vh - 60px);
+
+}
+
+#painel{
+
+position:absolute;
+top:70px;
+right:10px;
+width:300px;
+background:#151c2f;
+border:1px solid #30415d;
+border-radius:10px;
+padding:15px;
+display:none;
+
+}
+
+#painel h3{
+
+margin-bottom:15px;
+
+}
+
+.info{
+
+margin-bottom:8px;
 
 }
 
@@ -69,13 +111,9 @@ height:calc(100vh - 60px);
 
 <header>
 
-<div>
+<h2>🌐 FF Infra - Topologia</h2>
 
-🌐 FF Infra - Topologia
-
-</div>
-
-<div>
+<div class="menu">
 
 <button id="editar">
 
@@ -95,9 +133,29 @@ height:calc(100vh - 60px);
 
 <div id="network"></div>
 
+<div id="painel">
+
+<h3 id="tituloEquipamento">
+
+Equipamento
+
+</h3>
+
+<div class="info" id="status"></div>
+
+<div class="info" id="ip"></div>
+
+<div class="info" id="tipo"></div>
+
+<div class="info" id="cpu"></div>
+
+<div class="info" id="ping"></div>
+
+</div>
+
 <script>
 
-const db=window.supabase.createClient(
+const db = window.supabase.createClient(
 
 "https://pdajixsoowcyhnjwhgpc.supabase.co",
 
@@ -108,6 +166,212 @@ const db=window.supabase.createClient(
 let network;
 
 let editando=false;
+
+const nodes=new vis.DataSet();
+
+const edges=new vis.DataSet();
+async function carregar(){
+
+    const { data, error } = await db
+        .from("monitor_equipamentos")
+        .select("*");
+
+    if(error){
+
+        alert(error.message);
+        return;
+
+    }
+
+    nodes.clear();
+    edges.clear();
+
+    data.forEach(eq=>{
+
+        nodes.add({
+
+            id:eq.id,
+
+            label:eq.nome,
+
+            shape:"box",
+
+            x:eq.posicao_x ?? 0,
+
+            y:eq.posicao_y ?? 0,
+
+            physics:false,
+
+            fixed:!editando,
+
+            color:{
+                background:eq.status=="online"
+                    ? "#16a34a"
+                    : "#dc2626",
+                border:"#ffffff"
+            },
+
+            font:{
+                color:"#ffffff",
+                size:16
+            }
+
+        });
+
+        if(eq.equipamento_pai){
+
+            edges.add({
+
+                from:eq.equipamento_pai,
+
+                to:eq.id,
+
+                color:{
+                    color:"#4b5563"
+                },
+
+                width:2
+
+            });
+
+        }
+
+    });
+
+    if(network){
+
+        network.destroy();
+
+    }
+
+    network = new vis.Network(
+
+        document.getElementById("network"),
+
+        {
+
+            nodes:nodes,
+
+            edges:edges
+
+        },
+
+        {
+
+            physics:false,
+
+            interaction:{
+                dragNodes:editando,
+                dragView:true,
+                zoomView:true
+            }
+
+        }
+
+    );
+
+    network.on("dragEnd",async function(e){
+
+        if(!editando) return;
+
+        if(!e.nodes.length) return;
+
+        const id=e.nodes[0];
+
+        const pos=network.getPositions([id])[id];
+
+        await db
+        .from("monitor_equipamentos")
+        .update({
+
+            posicao_x:Math.round(pos.x),
+
+            posicao_y:Math.round(pos.y)
+
+        })
+        .eq("id",id);
+
+    });
+
+}
+document.getElementById("editar").onclick=function(){
+
+    editando=!editando;
+
+    this.innerHTML=editando
+        ?"💾 Salvar"
+        :"✏ Editar";
+
+    carregar();
+
+};
+
+networkClick();
+
+function networkClick(){
+
+    const espera=setInterval(()=>{
+
+        if(!network)return;
+
+        clearInterval(espera);
+
+        network.on("click",function(e){
+
+            if(!e.nodes.length)return;
+
+            const id=e.nodes[0];
+
+            mostrarPainel(id);
+
+        });
+
+    },200);
+
+}
+
+async function mostrarPainel(id){
+
+    const {data}=await db
+    .from("monitor_equipamentos")
+    .select("*")
+    .eq("id",id)
+    .single();
+
+    if(!data)return;
+
+    document.getElementById("painel").style.display="block";
+
+    document.getElementById("tituloEquipamento").innerHTML=data.nome;
+
+    document.getElementById("status").innerHTML=
+        "Status: "+(data.status||"-");
+
+    document.getElementById("ip").innerHTML=
+        "IP: "+(data.ip||"-");
+
+    document.getElementById("tipo").innerHTML=
+        "Tipo: "+(data.tipo||"-");
+
+    document.getElementById("cpu").innerHTML=
+        "CPU: "+(data.cpu_load||0)+"%";
+
+    document.getElementById("ping").innerHTML=
+        "Ping: "+(data.ping||"-");
+
+}
+
+setInterval(()=>{
+
+    if(!editando){
+
+        carregar();
+
+    }
+
+},5000);
+
+carregar();
 
 </script>
 
