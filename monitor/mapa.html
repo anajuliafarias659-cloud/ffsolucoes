@@ -11,89 +11,52 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
+<body>
+
+<header>
+
+<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;background:#151c2f;border-bottom:1px solid #2d3f5d">
+
+<div style="font-size:22px;font-weight:bold">
+
+🌐 FF Infra - Topologia
+
+</div>
+
+<div>
+
+<button id="editar">✏ Editar</button>
+
+<button onclick="carregar()">🔄 Atualizar</button>
+
+</div>
+
+</div>
+
+</header>
+
+<div id="network"></div>
+
 <style>
 
-*{
+html,body{
+
+width:100%;
+height:100%;
 margin:0;
-padding:0;
-box-sizing:border-box;
-font-family:Arial,sans-serif;
-}
-
-body{
+overflow:hidden;
 background:#0b1020;
-color:#fff;
-}
-
-header{
-height:70px;
-background:#151c2f;
-display:flex;
-align-items:center;
-padding:0 25px;
-font-size:22px;
-font-weight:bold;
-border-bottom:1px solid #2d3f5d;
-}
-
-#mapa{
-padding:25px;
-display:flex;
-flex-wrap:wrap;
-gap:20px;
-}
-
-.gateway{
-
-width:320px;
-background:#151c2f;
-border-radius:12px;
-padding:18px;
-border:1px solid #30415d;
 
 }
 
-.gateway h2{
+#network{
 
-margin-bottom:15px;
-font-size:22px;
-
-}
-
-.info{
-
-margin:6px 0;
-font-size:14px;
-
-}
-
-.equipamento{
-
-margin-top:10px;
-padding:10px;
-background:#0e1628;
-border-left:4px solid #00c26f;
-border-radius:8px;
-
-}
-
-.online{
-
-color:#00d26a;
-
-}
-
-.offline{
-
-color:#ff5757;
+width:100%;
+height:calc(100vh - 70px);
 
 }
 
 </style>
-
-</head>
-
-<body>
 
 <header>
 
@@ -109,111 +72,117 @@ Carregando...
 
 <script>
 const db = window.supabase.createClient(
-    "https://pdajixsoowcyhnjwhgpc.supabase.co",
-    "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+"https://pdajixsoowcyhnjwhgpc.supabase.co",
+"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
-function icone(tipo){
-
-    switch(tipo){
-
-        case "Internet": return "🌎";
-        case "Servidor": return "🖥️";
-        case "Gateway": return "🛰️";
-        case "Switch": return "🔀";
-        case "Rádio PTP": return "📡";
-        case "Rádio Setorial": return "📶";
-        case "ONU": return "📦";
-        case "Câmera": return "📷";
-        case "Nobreak": return "🔋";
-
-        default: return "⚙️";
-
-    }
-
-}
+let network;
 
 async function carregar(){
 
-    const mapa = document.getElementById("mapa");
+const {data,error}=await db
+.from("monitor_equipamentos")
+.select("*");
 
-    const { data, error } = await db
-        .from("monitor_equipamentos")
-        .select("*");
+if(error){
 
-    if(error){
+alert(error.message);
 
-        mapa.innerHTML = error.message;
-        console.log(error);
-        return;
-
-    }
-
-    const nodes = [];
-    const edges = [];
-
-    data.forEach(eq=>{
-
-        nodes.push({
-
-            id: eq.id,
-
-            label: icone(eq.tipo)+" "+eq.nome,
-
-            shape: "box",
-
-            color: eq.status=="online"
-                ? "#00b96b"
-                : "#ff4444"
-
-        });
-
-        if(eq.equipamento_pai){
-
-            edges.push({
-
-                from:eq.equipamento_pai,
-                to:eq.id
-
-            });
-
-        }
-
-    });
-
-    const network = new vis.Network(
-
-        mapa,
-
-        {
-
-            nodes:new vis.DataSet(nodes),
-
-            edges:new vis.DataSet(edges)
-
-        },
-
-        {
-
-            layout:{
-
-                hierarchical:{
-
-                    enabled:true,
-
-                    direction:"UD"
-
-                }
-
-            },
-
-            physics:false
-
-        }
-
-    );
+return;
 
 }
+
+const nodes=[];
+const edges=[];
+
+data.forEach(eq=>{
+
+nodes.push({
+
+id:eq.id,
+
+label:eq.nome,
+
+shape:"box",
+
+x:eq.posicao_x||0,
+
+y:eq.posicao_y||0,
+
+physics:false,
+
+color:eq.status=="online"
+?"#16a34a"
+:"#dc2626"
+
+});
+
+if(eq.equipamento_pai){
+
+edges.push({
+
+from:eq.equipamento_pai,
+
+to:eq.id
+
+});
+
+}
+
+});
+
+network=new vis.Network(
+
+document.getElementById("network"),
+
+{
+
+nodes:new vis.DataSet(nodes),
+
+edges:new vis.DataSet(edges)
+
+},
+
+{
+
+physics:false,
+
+interaction:{
+
+dragNodes:true
+
+}
+
+}
+
+);
+
+network.on("dragEnd",async function(e){
+
+if(!e.nodes.length)return;
+
+const id=e.nodes[0];
+
+const pos=network.getPositions([id])[id];
+
+await db
+
+.from("monitor_equipamentos")
+
+.update({
+
+posicao_x:Math.round(pos.x),
+
+posicao_y:Math.round(pos.y)
+
+})
+
+.eq("id",id);
+
+});
+
+}
+
 carregar();
 
 setInterval(carregar,5000);
