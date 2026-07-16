@@ -1,18 +1,14 @@
-
-"https://pdajixsoowcyhnjwhgpc.supabase.co",
-"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 <!DOCTYPE html>
 <html lang="pt-BR">
 
 <head>
 
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>FF Infra - Topologia</title>
+<title>Mapa da Rede</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
 <style>
 
@@ -20,392 +16,347 @@
 margin:0;
 padding:0;
 box-sizing:border-box;
-font-family:Arial,sans-serif;
+font-family:Inter,sans-serif;
 }
 
-html,body{
-width:100%;
-height:100%;
-overflow:hidden;
+body{
+
 background:#0b1020;
 color:white;
+
 }
 
 header{
 
-height:60px;
-background:#151c2f;
+height:70px;
+
 display:flex;
+
 align-items:center;
-justify-content:space-between;
-padding:0 20px;
-border-bottom:1px solid #2d3f5d;
+
+padding:0 25px;
+
+background:#141b2d;
+
+border-bottom:1px solid #28344d;
+
+font-size:24px;
+
+font-weight:bold;
 
 }
 
-header h2{
+#mapa{
+
+padding:40px;
+
+display:flex;
+
+gap:40px;
+
+flex-wrap:wrap;
+
+align-items:flex-start;
+
+}
+
+.gateway{
+
+width:280px;
+
+background:#141b2d;
+
+border:1px solid #2c3d60;
+
+border-radius:15px;
+
+padding:20px;
+
+transition:.25s;
+
+}
+
+.gateway:hover{
+
+transform:translateY(-5px);
+
+border-color:#00b96b;
+
+}
+
+.nome{
 
 font-size:20px;
 
-}
-
-.menu{
-
-display:flex;
-gap:10px;
-
-}
-
-button{
-
-background:#16a34a;
-border:none;
-color:white;
-padding:8px 16px;
-border-radius:6px;
-cursor:pointer;
-
-}
-
-button:hover{
-
-background:#15803d;
-
-}
-
-#network{
-
-width:100%;
-height:calc(100vh - 60px);
-
-}
-
-#painel{
-
-position:absolute;
-top:70px;
-right:10px;
-width:300px;
-background:#151c2f;
-border:1px solid #30415d;
-border-radius:10px;
-padding:15px;
-display:none;
-
-}
-
-#painel h3{
+font-weight:bold;
 
 margin-bottom:15px;
 
 }
 
-.info{
+.item{
 
-margin-bottom:8px;
+margin:8px 0;
+
+color:#c7d1df;
 
 }
 
-</style>
+.online{
 
+color:#2ecc71;
+
+}
+
+.offline{
+
+color:#ff5252;
+
+}
 </head>
 
 <body>
 
 <header>
 
-<h2>🌐 FF Infra - Topologia</h2>
-
-<div class="menu">
-
-<button id="editar">
-
-✏ Editar
-
-</button>
-
-<button onclick="carregar()">
-
-🔄 Atualizar
-
-</button>
-
-</div>
+🌐 FF Infra - Mapa da Rede
 
 </header>
 
-<div id="network"></div>
+<div id="mapa">
 
-<div id="painel">
-
-<h3 id="tituloEquipamento">
-
-Equipamento
-
-</h3>
-
-<div class="info" id="status"></div>
-
-<div class="info" id="ip"></div>
-
-<div class="info" id="tipo"></div>
-
-<div class="info" id="cpu"></div>
-
-<div class="info" id="ping"></div>
+Carregando...
 
 </div>
+.equipamento{
+
+display:flex;
+
+align-items:center;
+
+gap:12px;
+
+padding:10px;
+
+margin-bottom:8px;
+
+background:#0d1628;
+
+border-radius:10px;
+
+border-left:4px solid #00b96b;
+
+}
+
+.icone{
+
+font-size:24px;
+
+width:35px;
+
+text-align:center;
+
+}
+</style>
 
 <script>
 
-const db = window.supabase.createClient(
+const SUPABASE_URL="https://pdajixsoowcyhnjwhgpc.supabase.co";
 
-"https://pdajixsoowcyhnjwhgpc.supabase.co",
+const SUPABASE_KEY="sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
 
-"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+const supabase=window.supabase.createClient(
+
+SUPABASE_URL,
+
+SUPABASE_KEY
 
 );
 
-let network;
 
-let editando=false;
-
-const nodes=new vis.DataSet();
-
-const edges=new vis.DataSet();
 async function carregar(){
 
-    const { data, error } = await db
-        .from("monitor_equipamentos")
-        .select("*");
+const mapa=document.getElementById("mapa");
 
-    if(error){
+mapa.innerHTML="";
 
-        alert(error.message);
-        return;
+const {data:gateways,error}=await supabase
 
-    }
+.from("monitor_gateways")
 
-    nodes.clear();
-    edges.clear();
+.select("*")
 
-    data.forEach(eq=>{
+.order("nome");
 
-        nodes.add({
+if(error){
 
-            id:eq.id,
+mapa.innerHTML=error.message;
 
-            label:eq.nome,
+return;
 
-            shape:"box",
+}
 
-            x:eq.posicao_x ?? 0,
+const {data:equipamentos}=await supabase
 
-            y:eq.posicao_y ?? 0,
+.from("monitor_equipamentos")
 
-            physics:false,
+.select("*")
 
-            fixed:{
-    x:!editando,
-    y:!editando
-},
+.order("nome");
 
-            color:{
-                background:eq.status=="online"
-                    ? "#16a34a"
-                    : "#dc2626",
-                border:"#ffffff"
-            },
+gateways.forEach(g=>{
 
-            font:{
-                color:"#ffffff",
-                size:16
-            }
+const filhos=equipamentos.filter(
 
-        });
+e=>e.gateway_id===g.id
 
-        if(eq.equipamento_pai){
+);
 
-            edges.add({
+const div=document.createElement("div");
 
-                from:eq.equipamento_pai,
+div.className="gateway";
 
-                to:eq.id,
+let html=`
 
-                color:{
-                    color:"#4b5563"
-                },
+<div class="nome">
 
-                width:2
+🛰 ${g.nome}
 
-            });
+</div>
 
-        }
+<div class="item">
 
-    });
+VPN<br>
 
+${g.ip_vpn||"-"}
 
-    if(!network){
+</div>
 
-    network = new vis.Network(
+<div class="item">
 
-        document.getElementById("network"),
+CPU<br>
 
-        {
-            nodes:nodes,
-            edges:edges
-        },
+${g.cpu_load||0} %
 
-        {
-            physics:false,
+</div>
 
-            interaction:{
-                dragNodes:editando,
-                dragView:true,
-                zoomView:true
-            }
+<div class="item">
 
-        }
+Status<br>
 
-    );
+<span class="${g.status}">
+
+${g.status}
+
+</span>
+
+</div>
+
+<hr style="margin:15px 0;border:1px solid #293850;">
+
+<div style="font-weight:bold;margin-bottom:10px">
+
+Equipamentos
+
+</div>
+
+`;
+
+if(filhos.length==0){
+
+html+=`
+
+<div style="opacity:.6">
+
+Nenhum equipamento
+
+</div>
+
+`;
 
 }else{
 
-    network.setData({
+filhos.forEach(eq=>{
 
-        nodes:nodes,
-        edges:edges
+html+=`
 
-    });
+<div class="equipamento">
 
-}
+<div class="icone">
 
-        document.getElementById("network"),
+${icone(eq.tipo)}
 
-        {
+</div>
 
-            nodes:nodes,
+<div>
 
-            edges:edges
+<div>
 
-        },
+${eq.nome}
 
-        {
+</div>
 
-            physics:false,
+<div style="font-size:12px;opacity:.7">
 
-            interaction:{
-                dragNodes:editando,
-                dragView:true,
-                zoomView:true
-            }
+${eq.ip||"-"}
 
-        }
+</div>
 
-    );
+</div>
 
-    network.on("dragEnd",async function(e){
+</div>
 
-        if(!editando) return;
+`;
 
-        if(!e.nodes.length) return;
-
-        const id=e.nodes[0];
-
-        const pos=network.getPositions([id])[id];
-
-        await db
-        .from("monitor_equipamentos")
-        .update({
-
-            posicao_x:Math.round(pos.x),
-
-            posicao_y:Math.round(pos.y)
-
-        })
-        .eq("id",id);
-
-    });
-
-}
-document.getElementById("editar").onclick=function(){
-
-    editando=!editando;
-
-    this.innerHTML=editando
-        ?"💾 Salvar"
-        :"✏ Editar";
-
-    carregar();
-
-};
-
-networkClick();
-
-function networkClick(){
-
-    const espera=setInterval(()=>{
-
-        if(!network)return;
-
-        clearInterval(espera);
-
-        network.on("click",function(e){
-
-            if(!e.nodes.length)return;
-
-            const id=e.nodes[0];
-
-            mostrarPainel(id);
-
-        });
-
-    },200);
+});
 
 }
 
-async function mostrarPainel(id){
+div.innerHTML=html;
 
-    const {data}=await db
-    .from("monitor_equipamentos")
-    .select("*")
-    .eq("id",id)
-    .single();
+mapa.appendChild(div);
 
-    if(!data)return;
-
-    document.getElementById("painel").style.display="block";
-
-    document.getElementById("tituloEquipamento").innerHTML=data.nome;
-
-    document.getElementById("status").innerHTML=
-        "Status: "+(data.status||"-");
-
-    document.getElementById("ip").innerHTML=
-        "IP: "+(data.ip||"-");
-
-    document.getElementById("tipo").innerHTML=
-        "Tipo: "+(data.tipo||"-");
-
-    document.getElementById("cpu").innerHTML=
-        "CPU: "+(data.cpu_load||0)+"%";
-
-    document.getElementById("ping").innerHTML=
-        "Ping: "+(data.ping||"-");
+});
 
 }
 
-setInterval(()=>{
+function icone(tipo){
 
-    if(!editando){
+switch(tipo){
 
-        carregar();
+case "Servidor":
+return "🖥️";
 
-    }
+case "Switch":
+return "🔀";
 
-},5000);
+case "ONU":
+return "📦";
 
+case "📡 Rádio PTP":
+return "📡";
+
+case "📡 Rádio Setorial":
+return "📶";
+
+case "Câmera":
+return "📷";
+
+case "Nobreak":
+return "🔋";
+
+case "Impressora":
+return "🖨️";
+
+default:
+return "⚙️";
+
+}
+
+}
 carregar();
+
+setInterval(carregar,5000);
 
 </script>
 
