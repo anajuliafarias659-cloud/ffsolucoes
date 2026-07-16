@@ -6,9 +6,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>Mapa da Rede</title>
+<title>Mapa da Rede - FF Infra</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+console.log("SUPABASE:", window.supabase);
+</script>
 
 <style>
 
@@ -22,95 +26,186 @@ font-family:Inter,sans-serif;
 body{
 
 background:#0b1020;
+overflow:hidden;
 color:white;
 
 }
 
 header{
 
-height:70px;
+height:65px;
+
+background:#151d31;
 
 display:flex;
 
 align-items:center;
 
+justify-content:space-between;
+
 padding:0 25px;
 
-background:#141b2d;
+border-bottom:1px solid #26324e;
 
-border-bottom:1px solid #28344d;
+}
 
-font-size:24px;
+header h2{
 
-font-weight:bold;
+font-size:22px;
 
 }
 
 #mapa{
 
-padding:40px;
+position:relative;
 
-display:flex;
+width:100vw;
 
-gap:40px;
+height:calc(100vh - 65px);
 
-flex-wrap:wrap;
+overflow:auto;
 
-align-items:flex-start;
+cursor:grab;
+
+background-image:
+
+linear-gradient(#1d2742 1px, transparent 1px),
+
+linear-gradient(90deg,#1d2742 1px,transparent 1px);
+
+background-size:40px 40px;
+
+}
+
+#svg{
+
+position:absolute;
+
+top:0;
+
+left:0;
+
+width:5000px;
+
+height:5000px;
+
+pointer-events:none;
+
+}
+
+.card{
+
+position:absolute;
+
+width:190px;
+
+min-height:80px;
+
+background:#17233b;
+
+border-radius:12px;
+
+border:1px solid #32466b;
+
+padding:12px;
+
+box-shadow:0 0 15px rgba(0,0,0,.45);
+
+transition:.25s;
+
+cursor:pointer;
+
+}
+
+.card:hover{
+
+transform:scale(1.03);
 
 }
 
 .gateway{
 
-width:280px;
-
-background:#141b2d;
-
-border:1px solid #2c3d60;
-
-border-radius:15px;
-
-padding:20px;
-
-transition:.25s;
-
-}
-
-.gateway:hover{
-
-transform:translateY(-5px);
-
-border-color:#00b96b;
-
-}
-
-.nome{
-
-font-size:20px;
-
-font-weight:bold;
-
-margin-bottom:15px;
-
-}
-
-.item{
-
-margin:8px 0;
-
-color:#c7d1df;
+background:#12355f;
 
 }
 
 .online{
 
-color:#2ecc71;
+border-left:6px solid #00d26a;
 
 }
 
 .offline{
 
-color:#ff5252;
+border-left:6px solid #ff4b4b;
+
+}
+
+.warning{
+
+border-left:6px solid orange;
+
+}
+
+.nome{
+
+font-size:15px;
+
+font-weight:bold;
+
+margin-bottom:8px;
+
+}
+
+.info{
+
+font-size:13px;
+
+opacity:.8;
+
+line-height:20px;
+
+}
+
+.toolbar{
+
+position:absolute;
+
+right:20px;
+
+top:20px;
+
+z-index:999;
+
+display:flex;
+
+gap:10px;
+
+}
+
+.toolbar button{
+
+height:40px;
+
+padding:0 18px;
+
+background:#0099ff;
+
+color:white;
+
+border:none;
+
+border-radius:8px;
+
+cursor:pointer;
+
+font-weight:bold;
+
+}
+
+.toolbar button:hover{
+
+background:#00b5ff;
 
 }
 
@@ -122,47 +217,31 @@ color:#ff5252;
 
 <header>
 
+<h2>
+
 🌐 FF Infra - Mapa da Rede
+
+</h2>
 
 </header>
 
 <div id="mapa">
 
-Carregando...
+<div class="toolbar">
+
+<button onclick="carregarMapa()">
+
+Atualizar
+
+</button>
 
 </div>
-.equipamento{
 
-display:flex;
+<svg id="svg"></svg>
 
-align-items:center;
-
-gap:12px;
-
-padding:10px;
-
-margin-bottom:8px;
-
-background:#0d1628;
-
-border-radius:10px;
-
-border-left:4px solid #00b96b;
-
-}
-
-.icone{
-
-font-size:24px;
-
-width:35px;
-
-text-align:center;
-
-}
+</div>
 
 <script>
-
 const SUPABASE_URL="https://pdajixsoowcyhnjwhgpc.supabase.co";
 
 const SUPABASE_KEY="sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
@@ -175,216 +254,202 @@ SUPABASE_KEY
 
 );
 
+const APP_ID=new URLSearchParams(location.search).get("app_id");
 
-async function carregar(){
+let gateways=[];
+
+let equipamentos=[];
 
 const mapa=document.getElementById("mapa");
 
-mapa.innerHTML="";
+const svg=document.getElementById("svg");
 
-const {data:gateways,error}=await supabase
+function statusClasse(status){
+
+if(status=="online")
+return"online";
+
+if(status=="warning")
+return"warning";
+
+return"offline";
+
+}
+
+async function carregarMapa(){
+
+svg.innerHTML="";
+
+document.querySelectorAll(".card").forEach(c=>c.remove());
+
+const g=await supabase
 
 .from("monitor_gateways")
 
 .select("*")
 
+.eq("app_id",APP_ID)
+
 .order("nome");
 
-if(error){
+gateways=g.data||[];
 
-mapa.innerHTML=error.message;
-
-return;
-
-}
-
-const {data:equipamentos}=await supabase
+const e=await supabase
 
 .from("monitor_equipamentos")
 
 .select("*")
 
+.eq("app_id",APP_ID)
+
 .order("nome");
 
-gateways.forEach(g=>{
+equipamentos=e.data||[];
 
-const filhos=equipamentos.filter(
+let coluna=0;
 
-e=>e.gateway_id===g.id
+for(const gateway of gateways){
+
+let gx=120+(coluna*420);
+
+let gy=80;
+
+const card=document.createElement("div");
+
+card.className="card gateway "+statusClasse(gateway.status);
+
+card.style.left=gx+"px";
+
+card.style.top=gy+"px";
+
+card.id="gw-"+gateway.id;
+
+card.innerHTML=`
+
+<div class="nome">
+
+🛰 ${gateway.nome}
+
+</div>
+
+<div class="info">
+
+IP VPN: ${gateway.ip_vpn || "-"}
+
+<br>
+
+CPU: ${gateway.cpu_load || 0}%
+
+</div>
+
+`;
+
+mapa.appendChild(card);
+
+let linha=0;
+
+const lista=equipamentos.filter(
+
+x=>x.gateway_id==gateway.id
+
+);
+for(const eq of lista){
+
+let ex=gx;
+
+let ey=220+(linha*130);
+
+const equipamento=document.createElement("div");
+
+equipamento.className="card "+statusClasse(eq.status);
+
+equipamento.style.left=ex+"px";
+
+equipamento.style.top=ey+"px";
+
+equipamento.id="eq-"+eq.id;
+
+equipamento.innerHTML=`
+
+<div class="nome">
+
+${icone(eq.tipo)} ${eq.nome}
+
+</div>
+
+<div class="info">
+
+IP: ${eq.ip || "-"}
+
+<br>
+
+Ping: ${eq.latencia || 0} ms
+
+<br>
+
+Perda: ${eq.perda || 0} %
+
+</div>
+
+`;
+
+mapa.appendChild(equipamento);
+
+desenharLinha(
+
+gx+95,
+
+gy+80,
+
+ex+95,
+
+ey
 
 );
 
-const div=document.createElement("div");
-
-div.className="gateway";
-
-let html=`
-
-<div class="nome">
-
-🛰 ${g.nome}
-
-</div>
-
-<div class="item">
-
-VPN<br>
-
-${g.ip_vpn||"-"}
-
-</div>
-
-<div class="item">
-
-CPU<br>
-
-${g.cpu_load||0} %
-
-</div>
-
-<div class="item">
-
-Status<br>
-
-<span class="${g.status}">
-
-${g.status}
-
-</span>
-
-</div>
-
-<hr style="margin:15px 0;border:1px solid #293850;">
-
-<div style="font-weight:bold;margin-bottom:10px">
-
-Equipamentos
-
-</div>
-
-`;
-
-if(filhos.length==0){
-
-html+=`
-
-<div style="opacity:.6">
-
-Nenhum equipamento
-
-</div>
-
-`;
-
-}else{
-
-filhos.forEach(eq=>{
-
-html+=`
-
-<div class="equipamento">
-
-<div class="icone">
-
-${icone(eq.tipo)}
-
-</div>
-
-<div>
-
-<div>
-
-${eq.nome}
-
-</div>
-
-<div style="font-size:12px;opacity:.7">
-
-${eq.ip||"-"}
-
-</div>
-
-</div>
-
-</div>
-
-`;
-
-});
+linha++;
 
 }
 
-div.innerHTML=html;
-
-mapa.appendChild(div);
-
-});
+coluna++;
 
 }
 
-data.forEach(g=>{
+}
 
-const div=document.createElement("div");
+function desenharLinha(x1,y1,x2,y2){
 
-div.className="gateway";
+const linha=document.createElementNS(
 
-div.innerHTML=`
+"http://www.w3.org/2000/svg",
 
-<div class="nome">
+"path"
 
-🛰 ${g.nome}
+);
 
-</div>
+const curva=`
 
-<div class="item">
+M ${x1} ${y1}
 
-VPN
+C ${x1} ${(y1+y2)/2},
 
-<br>
+${x2} ${(y1+y2)/2},
 
-${g.ip_vpn||"-"}
-
-</div>
-
-<div class="item">
-
-CPU
-
-<br>
-
-${g.cpu_load||0} %
-
-</div>
-
-<div class="item">
-
-RAM
-
-<br>
-
-${Math.round((g.memoria_livre||0)/1024/1024)} MB Livre
-
-</div>
-
-<div class="item">
-
-Status
-
-<br>
-
-<span class="${g.status}">
-
-${g.status}
-
-</span>
-
-</div>
+${x2} ${y2}
 
 `;
 
-mapa.appendChild(div);
+linha.setAttribute("d",curva);
 
-});
+linha.setAttribute("fill","none");
+
+linha.setAttribute("stroke","#00c3ff");
+
+linha.setAttribute("stroke-width","3");
+
+linha.setAttribute("stroke-linecap","round");
+
+svg.appendChild(linha);
 
 }
 
@@ -392,39 +457,160 @@ function icone(tipo){
 
 switch(tipo){
 
-case "Servidor":
-return "🖥️";
+case"Servidor":
 
-case "Switch":
-return "🔀";
+return"🖥";
 
-case "ONU":
-return "📦";
+case"Switch":
 
-case "📡 Rádio PTP":
-return "📡";
+return"🔀";
 
-case "📡 Rádio Setorial":
-return "📶";
+case"ONU":
 
-case "Câmera":
-return "📷";
+return"📦";
 
-case "Nobreak":
-return "🔋";
+case"📡 Rádio PTP":
 
-case "Impressora":
-return "🖨️";
+return"📡";
+
+case"📡 Rádio Setorial":
+
+return"📶";
+
+case"Câmera":
+
+return"📷";
+
+case"Impressora":
+
+return"🖨";
+
+case"Nobreak":
+
+return"🔋";
 
 default:
-return "⚙️";
+
+return"⚙";
 
 }
 
 }
-carregar();
 
-setInterval(carregar,5000);
+setInterval(carregarMapa,5000);
+
+carregarMapa();
+// ================================
+// ARRASTAR (já preparado)
+// ================================
+
+let selecionado=null;
+
+let offsetX=0;
+
+let offsetY=0;
+
+mapa.addEventListener("mousedown",(e)=>{
+
+const card=e.target.closest(".card");
+
+if(!card)return;
+
+selecionado=card;
+
+offsetX=e.offsetX;
+
+offsetY=e.offsetY;
+
+});
+
+window.addEventListener("mousemove",(e)=>{
+
+if(!selecionado)return;
+
+const rect=mapa.getBoundingClientRect();
+
+selecionado.style.left=(e.clientX-rect.left-offsetX)+"px";
+
+selecionado.style.top=(e.clientY-rect.top-offsetY)+"px";
+
+});
+
+window.addEventListener("mouseup",()=>{
+
+selecionado=null;
+
+});
+
+// ================================
+// ZOOM
+// ================================
+
+let zoom=1;
+
+mapa.addEventListener("wheel",(e)=>{
+
+e.preventDefault();
+
+zoom+=e.deltaY>0?-0.05:0.05;
+
+if(zoom<0.40)zoom=0.40;
+
+if(zoom>2)zoom=2;
+
+mapa.style.transform="scale("+zoom+")";
+
+mapa.style.transformOrigin="0 0";
+
+});
+
+// ================================
+// MOVER O MAPA
+// ================================
+
+let movendo=false;
+
+let inicioX=0;
+
+let inicioY=0;
+
+mapa.addEventListener("contextmenu",e=>e.preventDefault());
+
+mapa.addEventListener("mousedown",(e)=>{
+
+if(e.button!=2)return;
+
+movendo=true;
+
+inicioX=e.clientX;
+
+inicioY=e.clientY;
+
+});
+
+window.addEventListener("mouseup",()=>{
+
+movendo=false;
+
+});
+
+window.addEventListener("mousemove",(e)=>{
+
+if(!movendo)return;
+
+mapa.scrollLeft-=e.clientX-inicioX;
+
+mapa.scrollTop-=e.clientY-inicioY;
+
+inicioX=e.clientX;
+
+inicioY=e.clientY;
+
+});
+
+// ================================
+// FIM
+// ================================
 
 </script>
 
