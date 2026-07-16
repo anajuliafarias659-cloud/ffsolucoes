@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
 
 <meta charset="UTF-8">
@@ -8,6 +9,7 @@
 <title>FF Infra - Mapa</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
 <style>
 
@@ -99,167 +101,122 @@ color:#ff5757;
 
 </header>
 
-<div id="mapa">
+<div id="mapa" style="width:100%;height:900px;">
 
 Carregando...
 
 </div>
 
 <script>
-
 const db = window.supabase.createClient(
-"https://pdajixsoowcyhnjwhgpc.supabase.co",
-"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+    "https://pdajixsoowcyhnjwhgpc.supabase.co",
+    "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
 function icone(tipo){
 
-switch(tipo){
+    switch(tipo){
 
-case "Internet": return "🌎";
-case "Servidor": return "🖥️";
-case "Gateway": return "🛰️";
-case "Switch": return "🔀";
-case "Rádio PTP": return "📡";
-case "Rádio Setorial": return "📶";
-case "ONU": return "📦";
-case "Câmera": return "📷";
-case "Nobreak": return "🔋";
-default: return "⚙️";
+        case "Internet": return "🌎";
+        case "Servidor": return "🖥️";
+        case "Gateway": return "🛰️";
+        case "Switch": return "🔀";
+        case "Rádio PTP": return "📡";
+        case "Rádio Setorial": return "📶";
+        case "ONU": return "📦";
+        case "Câmera": return "📷";
+        case "Nobreak": return "🔋";
 
-}
+        default: return "⚙️";
+
+    }
 
 }
 
 async function carregar(){
 
-const mapa=document.getElementById("mapa");
+    const mapa = document.getElementById("mapa");
 
-mapa.innerHTML="Carregando...";
+    const { data, error } = await db
+        .from("monitor_equipamentos")
+        .select("*");
 
-const gw=await db
-.from("monitor_gateways")
-.select("*")
-.order("nome");
+    if(error){
 
-if(gw.error){
+        mapa.innerHTML = error.message;
+        console.log(error);
+        return;
 
-mapa.innerHTML=gw.error.message;
+    }
 
-console.log(gw.error);
+    const nodes = [];
+    const edges = [];
 
-return;
+    data.forEach(eq=>{
 
-}
+        nodes.push({
 
-const eq=await db
-.from("monitor_equipamentos")
-.select("*")
-.order("nome");
+            id: eq.id,
 
-if(eq.error){
+            label: icone(eq.tipo)+" "+eq.nome,
 
-mapa.innerHTML=eq.error.message;
+            shape: "box",
 
-console.log(eq.error);
+            color: eq.status=="online"
+                ? "#00b96b"
+                : "#ff4444"
 
-return;
+        });
 
-}
+        if(eq.equipamento_pai){
 
-mapa.innerHTML="";
+            edges.push({
 
-gw.data.forEach(g=>{
+                from:eq.equipamento_pai,
+                to:eq.id
 
-const card=document.createElement("div");
+            });
 
-card.className="gateway";
+        }
 
-let html=`
+    });
 
-<h2>🛰 ${g.nome}</h2>
+    const network = new vis.Network(
 
-<div class="info">
+        mapa,
 
-<b>VPN:</b> ${g.ip_vpn || "-"}
+        {
 
-</div>
+            nodes:new vis.DataSet(nodes),
 
-<div class="info">
+            edges:new vis.DataSet(edges)
 
-<b>CPU:</b> ${g.cpu_load || 0}%
+        },
 
-</div>
+        {
 
-<div class="info">
+            layout:{
 
-<b>Status:</b>
+                hierarchical:{
 
-<span class="${g.status}">
+                    enabled:true,
 
-${g.status || "-"}
+                    direction:"UD"
 
-</span>
+                }
 
-</div>
+            },
 
-<hr style="margin:15px 0;border-color:#2d3f5d;">
+            physics:false
 
-`;
+        }
 
-const filhos=eq.data.filter(x=>x.gateway_id==g.id);
-
-if(filhos.length==0){
-
-html+="Nenhum equipamento";
-
-}else{
-
-filhos.forEach(e=>{
-
-html+=`
-
-<div class="equipamento">
-
-<div>
-
-${icone(e.tipo)}
-<b>${e.nome}</b>
-
-</div>
-
-<div>
-
-${e.ip || "-"}
-
-</div>
-
-<div class="${e.status}">
-
-${e.status || ""}
-
-</div>
-
-</div>
-
-`;
-
-});
+    );
 
 }
-
-card.innerHTML=html;
-
-mapa.appendChild(card);
-
-});
-
-}
-
 carregar();
 
 setInterval(carregar,5000);
-
 </script>
 
 </body>
