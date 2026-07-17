@@ -252,22 +252,23 @@ Excluir Banner
 
 <div class="card">
 
-<h2>Mikrotik</h2>
+<h2>🌐 MikroTiks</h2>
 
-<label>IP</label>
-<input id="ip">
+<button
+type="button"
+onclick="novoMikrotik()">
 
-<label>Porta API</label>
-<input id="porta">
+➕ Adicionar MikroTik
 
-<label>Usuário</label>
-<input id="usuario">
+</button>
 
-<label>Senha</label>
-<input id="senha" type="password">
+<br><br>
 
-<label>Nome Hotspot</label>
-<input id="hotspot">
+<div id="listaMikrotiks">
+
+Nenhum MikroTik cadastrado.
+
+</div>
 
 </div>
 
@@ -296,10 +297,6 @@ readonly></textarea>
 </button>
 
 <br><br>
-
-<button onclick="gerarVPN()">
-Gerar Configuração VPN
-</button>
 
 </div>
 
@@ -351,6 +348,52 @@ Salvar Configurações
 </button>
 
 </div>
+<div
+class="modal"
+id="modalMikrotik">
+
+<div class="janela">
+
+<h2>MikroTik</h2>
+
+<label>Nome</label>
+<input id="mk_nome">
+
+<label>IP</label>
+<input id="mk_ip">
+
+<label>Porta</label>
+<input id="mk_porta" value="8728">
+
+<label>Usuário</label>
+<input id="mk_usuario">
+
+<label>Senha</label>
+<input id="mk_senha">
+
+<label>Hotspot</label>
+<input id="mk_hotspot">
+
+<br><br>
+
+<button onclick="salvarMikrotik()">
+
+Salvar
+
+</button>
+
+<button
+type="button"
+style="background:#666;margin-top:10px"
+onclick="fecharModalMikrotik()">
+
+Cancelar
+
+</button>
+
+</div>
+
+</div>
 
 <script>
 
@@ -375,12 +418,6 @@ const corbotao = document.getElementById("corbotao");
 const token = document.getElementById("token");
 const publickey = document.getElementById("publickey");
 
-const ip = document.getElementById("ip");
-const porta = document.getElementById("porta");
-const usuario = document.getElementById("usuario");
-const senha = document.getElementById("senha");
-const hotspot = document.getElementById("hotspot");
-
 const vpn_ip = document.getElementById("vpn_ip");
 const scriptvpn = document.getElementById("scriptvpn");
 
@@ -389,6 +426,15 @@ const pix = document.getElementById("pix");
 const voucher = document.getElementById("voucher");
 const mac = document.getElementById("mac");
 const ativo = document.getElementById("ativo");
+const mk_nome = document.getElementById("mk_nome");
+const mk_ip = document.getElementById("mk_ip");
+const mk_porta = document.getElementById("mk_porta");
+const mk_usuario = document.getElementById("mk_usuario");
+const mk_senha = document.getElementById("mk_senha");
+const mk_hotspot = document.getElementById("mk_hotspot");
+const modalMikrotik = document.getElementById("modalMikrotik");
+
+let mikrotikEditando = null;
 
 console.log("APP_ID:", APP_ID);
 
@@ -397,6 +443,248 @@ if (!APP_ID) {
     throw new Error("APP_ID ausente");
 }
 
+async function carregarMikrotiks(){
+
+    const { data, error } = await db
+
+        .from("hotspot_mikrotiks")
+
+        .select("*")
+
+        .eq("app_id", APP_ID)
+
+        .order("nome");
+
+    if(error){
+
+        console.error(error);
+
+        return;
+
+    }
+
+    const lista = document.getElementById("listaMikrotiks");
+
+    lista.innerHTML = "";
+
+    if(!data || data.length==0){
+
+        lista.innerHTML="Nenhum MikroTik cadastrado.";
+
+        return;
+
+    }
+
+    data.forEach(mk=>{
+
+        lista.innerHTML += `
+
+<div style="border:1px solid #ddd;border-radius:10px;padding:15px;margin-bottom:15px">
+
+<b>${mk.nome}</b>
+
+<br>
+
+IP: ${mk.ip}
+
+<br>
+
+VPN:
+${mk.vpn_ip || "Não gerada"}
+
+<br><br>
+
+<button
+type="button"
+onclick="gerarVPN('${mk.id}')">
+
+Gerar VPN
+
+</button>
+
+<button
+type="button"
+style="background:#ff9800;margin-top:8px"
+onclick="editarMikrotik('${mk.id}')">
+
+Editar
+
+</button>
+
+<button
+type="button"
+style="background:#d32f2f;margin-top:8px"
+onclick="excluirMikrotik('${mk.id}')">
+
+Excluir
+
+</button>
+
+</div>
+
+`;
+
+    });
+
+}
+
+function novoMikrotik(){
+
+    mikrotikEditando = null;
+
+    mk_nome.value="";
+
+    mk_ip.value="";
+
+    mk_porta.value="8728";
+
+    mk_usuario.value="";
+
+    mk_senha.value="";
+
+    mk_hotspot.value="";
+
+    modalMikrotik.style.display="flex";
+
+}
+
+function fecharModalMikrotik(){
+
+    modalMikrotik.style.display="none";
+
+}
+
+async function salvarMikrotik(){
+
+    const dados={
+
+        app_id:APP_ID,
+
+        nome:mk_nome.value.trim(),
+
+        ip:mk_ip.value.trim(),
+
+        porta:Number(mk_porta.value),
+
+        usuario:mk_usuario.value.trim(),
+
+        senha:mk_senha.value,
+
+        hotspot:mk_hotspot.value.trim()
+
+    };
+
+    if(!dados.nome){
+
+        alert("Informe o nome.");
+
+        return;
+
+    }
+
+    if(mikrotikEditando){
+
+        const { error } = await db
+
+            .from("hotspot_mikrotiks")
+
+            .update(dados)
+
+            .eq("id",mikrotikEditando);
+
+        if(error){
+
+            alert(error.message);
+
+            return;
+
+        }
+
+    }else{
+
+        const { error } = await db
+
+            .from("hotspot_mikrotiks")
+
+            .insert(dados);
+
+        if(error){
+
+            alert(error.message);
+
+            return;
+
+        }
+
+    }
+
+    fecharModalMikrotik();
+
+    carregarMikrotiks();
+
+}
+
+async function editarMikrotik(id){
+
+    const { data,error } = await db
+
+        .from("hotspot_mikrotiks")
+
+        .select("*")
+
+        .eq("id",id)
+
+        .single();
+
+    if(error){
+
+        alert(error.message);
+
+        return;
+
+    }
+
+    mikrotikEditando=id;
+
+    mk_nome.value=data.nome||"";
+
+    mk_ip.value=data.ip||"";
+
+    mk_porta.value=data.porta||8728;
+
+    mk_usuario.value=data.usuario||"";
+
+    mk_senha.value=data.senha||"";
+
+    mk_hotspot.value=data.hotspot||"";
+
+    modalMikrotik.style.display="flex";
+
+}
+
+async function excluirMikrotik(id){
+
+    if(!confirm("Excluir este MikroTik?")) return;
+
+    const { error } = await db
+
+        .from("hotspot_mikrotiks")
+
+        .delete()
+
+        .eq("id",id);
+
+    if(error){
+
+        alert(error.message);
+
+        return;
+
+    }
+
+    carregarMikrotiks();
+
+}
 async function carregar() {
 
     const { data, error } = await db
@@ -444,12 +732,6 @@ if (data.banner) {
 
     token.value = data.mercado_pago_token || "";
     publickey.value = data.mercado_pago_public_key || "";
-
-    ip.value = data.mikrotik_ip || "";
-    porta.value = data.mikrotik_porta || 8728;
-    usuario.value = data.mikrotik_usuario || "";
-    senha.value = data.mikrotik_senha || "";
-    hotspot.value = data.mikrotik_hotspot || "";
 
     pix.checked = !!data.login_por_pix;
     voucher.checked = !!data.login_por_voucher;
@@ -574,12 +856,6 @@ const nomeArquivo = `${APP_ID}/banner.${extensao}`;
             mercado_pago_token: token.value.trim(),
             mercado_pago_public_key: publickey.value.trim(),
 
-            mikrotik_ip: ip.value,
-            mikrotik_porta: Number(porta.value),
-            mikrotik_usuario: usuario.value,
-            mikrotik_senha: senha.value,
-            mikrotik_hotspot: hotspot.value,
-
             login_por_pix: pix.checked,
             login_por_voucher: voucher.checked,
             login_por_mac: mac.checked,
@@ -603,7 +879,7 @@ const nomeArquivo = `${APP_ID}/banner.${extensao}`;
     carregar();
 }
 
-async function gerarVPN() {
+async function gerarVPN(id){
 
     const resp = await fetch("https://hotspot.ffsolucoes.com.br/vpn/criar-peer", {
 
@@ -619,9 +895,11 @@ async function gerarVPN() {
 
         body: JSON.stringify({
 
-            app_id: APP_ID
+    app_id: APP_ID,
 
-        })
+    mikrotik_id:id
+
+})
 
     });
 
@@ -725,6 +1003,9 @@ async function excluirBanner() {
 }
 
 carregar();
+
+carregarMikrotiks();
+
 </script>
 
 </body>
