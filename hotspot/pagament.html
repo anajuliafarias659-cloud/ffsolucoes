@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width,initial-scale=1">
+
+<title>Pagamento Hotspot</title>
+
+<script src="js/supabase.js"></script>
+
+<style>
+
+*{
+
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,sans-serif;
+
+}
+
+body{
+
+background:#f3f4f6;
+
+}
+
+.topo{
+
+background:#0d8db8;
+color:#fff;
+text-align:center;
+padding:25px;
+
+}
+
+.logo{
+
+width:95px;
+height:95px;
+border-radius:18px;
+background:#fff;
+padding:6px;
+object-fit:cover;
+margin-bottom:10px;
+
+}
+
+.banner{
+
+width:100%;
+max-height:220px;
+object-fit:cover;
+
+}
+
+.container{
+
+max-width:650px;
+margin:auto;
+padding:20px;
+
+}
+
+.card{
+
+background:#fff;
+padding:25px;
+border-radius:14px;
+box-shadow:0 5px 18px rgba(0,0,0,.08);
+margin-bottom:20px;
+
+}
+
+.card h2{
+
+margin-bottom:20px;
+text-align:center;
+
+}
+
+.linha{
+
+display:flex;
+justify-content:space-between;
+padding:10px 0;
+border-bottom:1px solid #ececec;
+
+}
+
+.linha:last-child{
+
+border:none;
+
+}
+
+.label{
+
+font-weight:bold;
+
+}
+
+.valor{
+
+font-size:42px;
+font-weight:bold;
+color:#0d8db8;
+text-align:center;
+margin:25px 0;
+
+}
+
+button{
+
+width:100%;
+padding:15px;
+border:none;
+border-radius:10px;
+background:#0d8db8;
+color:#fff;
+font-size:18px;
+cursor:pointer;
+transition:.2s;
+
+}
+
+button:hover{
+
+opacity:.92;
+
+}
+
+#pix{
+
+display:none;
+margin-top:25px;
+
+}
+
+#pix h3{
+
+text-align:center;
+margin-bottom:20px;
+
+}
+
+#qrcode{
+
+width:250px;
+display:block;
+margin:auto;
+
+}
+
+textarea{
+
+margin-top:20px;
+width:100%;
+height:95px;
+padding:10px;
+border:1px solid #ddd;
+border-radius:8px;
+resize:none;
+
+}
+
+.status{
+
+margin-top:20px;
+padding:15px;
+border-radius:10px;
+background:#fff7db;
+border:1px solid #ffe58f;
+text-align:center;
+font-weight:bold;
+display:none;
+
+}
+
+.sucesso{
+
+margin-top:20px;
+padding:20px;
+border-radius:12px;
+background:#ecfdf3;
+border:1px solid #34d399;
+display:none;
+text-align:center;
+
+}
+
+.sucesso h2{
+
+color:#16a34a;
+margin-bottom:10px;
+
+}
+
+.rodape{
+
+text-align:center;
+margin-top:25px;
+font-size:14px;
+color:#777;
+
+}
+.alerta{
+    display:none;
+    padding:18px;
+    margin-bottom:20px;
+    border-radius:12px;
+    font-weight:bold;
+    line-height:1.6;
+}
+</style>
+
+</head>
+
+<body>
+
+<div id="empresa"></div>
+
+<div class="container">
+
+<div class="card">
+
+<h2>
+
+Pagamento do Plano
+
+</h2>
+
+<div class="linha">
+
+<div class="label">
+
+Plano
+
+</div>
+
+<div id="nome">
+
+-
+
+</div>
+
+</div>
+
+<div class="linha">
+
+<div class="label">
+
+Descrição
+
+</div>
+
+<div id="descricao">
+
+-
+
+</div>
+
+</div>
+
+<div class="linha">
+
+<div class="label">
+
+Tempo
+
+</div>
+
+<div id="tempo">
+
+-
+
+</div>
+
+</div>
+
+<div class="valor" id="valor">
+R$ 0,00
+</div>
+
+<div id="alertaTeste"></div>
+
+<button
+id="btnPix"
+onclick="gerarPix()">
+Gerar PIX
+
+<div id="alertaTeste" class="alerta"></div>
+</button>
+
+<div id="pix">
+
+<h3>
+
+Pagamento via PIX
+
+</h3>
+
+<img id="qrcode">
+
+<textarea
+
+id="copiacola"
+
+readonly>
+
+</textarea>
+
+<br><br>
+
+<button
+
+onclick="copiarPix()">
+
+Copiar Código PIX
+
+</button>
+
+</div>
+
+<div
+
+class="status"
+
+id="statusPagamento">
+
+Aguardando pagamento...
+
+</div>
+
+<div
+
+class="sucesso"
+
+id="sucesso">
+
+<h2>
+
+Pagamento Aprovado
+
+</h2>
+
+<p>
+
+Seu acesso foi liberado.
+
+</p>
+
+</div>
+
+</div>
+
+<div
+
+class="rodape"
+
+id="rodape">
+
+FF Hotspot
+
+</div>
+
+</div>
+<script>
+
+const SUPABASE_URL="https://pdajixsoowcyhnjwhgpc.supabase.co";
+
+const SUPABASE_ANON_KEY="sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+
+const db=window.supabase.createClient(
+SUPABASE_URL,
+SUPABASE_ANON_KEY
+);
+
+const params=new URLSearchParams(location.search);
+
+const APP_ID=params.get("app_id");
+
+const planoId=params.get("plano");
+const MAC = params.get("mac") || "";
+const IP = params.get("ip") || "";
+const LINK_LOGIN = params.get("link_login") || "";
+const LINK_ORIG = params.get("link_orig") || "";
+const CHAP_ID = params.get("chap_id") || "";
+const CHAP = params.get("chap") || "";
+
+if(!APP_ID||!planoId){
+
+alert("APP_ID ou Plano inválido.");
+
+throw new Error("APP_ID inválido");
+
+}
+
+let planoAtual=null;
+
+let pagamentoId=null;
+
+async function carregarEmpresa(){
+
+const {data,error}=await db
+
+.from("hotspot_config")
+
+.select("*")
+
+.eq("app_id",APP_ID)
+
+.single();
+
+if(error){
+
+console.error(error);
+
+empresa.innerHTML="<h2>Hotspot não encontrado.</h2>";
+
+return;
+
+}
+
+empresa.innerHTML=`
+
+<div class="topo">
+
+<img
+
+class="logo"
+
+src="${data.logo || "/hotspot/img/logo.png"}">
+
+<h1>
+
+${data.nome_hotspot}
+
+</h1>
+
+<p>
+
+${data.descricao || ""}
+
+</p>
+
+</div>
+
+${data.banner ?
+
+`<img class="banner" src="${data.banner}">`
+
+:
+
+""}
+
+`;
+
+if(data.cor_primaria){
+
+document.querySelector(".topo").style.background=data.cor_primaria;
+
+document.querySelector("#btnPix").style.background=data.cor_primaria;
+
+document.querySelector(".valor").style.color=data.cor_primaria;
+
+}
+
+}
+
+async function carregarPlano(){
+
+const {data,error}=await db
+
+.from("hotspot_planos")
+
+.select("*")
+
+.eq("app_id",APP_ID)
+
+.eq("id",planoId)
+
+.single();
+
+if(error){
+
+alert(error.message);
+
+return;
+
+}
+
+planoAtual=data;
+
+nome.innerHTML=data.nome;
+
+descricao.innerHTML=data.descricao;
+
+tempo.innerHTML=data.tempo_minutos+" minutos";
+
+valor.innerHTML="R$ "+Number(data.valor).toFixed(2);
+
+}
+
+carregarEmpresa();
+
+carregarPlano();
+
+// ==========================================
+// GERA O PIX
+// ==========================================
+
+async function gerarPix(){
+
+    btnPix.disabled = true;
+
+    btnPix.innerHTML = "Gerando PIX...";
+
+    try{
+
+        const resposta = await fetch(
+
+            `${SUPABASE_URL}/functions/v1/gerar-pix-hotspot`,
+
+            {
+
+                method:"POST",
+
+                headers:{
+
+                    "Content-Type":"application/json",
+
+                    "apikey":SUPABASE_ANON_KEY,
+
+                    "Authorization":"Bearer "+SUPABASE_ANON_KEY
+
+                },
+
+                body:JSON.stringify({
+
+                    app_id:APP_ID,
+
+                    plano_id:planoId,
+
+                    mac:"",
+
+                    ip:"",
+
+                    hostname:""
+
+                })
+
+            }
+
+        );
+
+        const retorno = await resposta.json();
+
+console.log(retorno);
+
+// MOSTRAR O AVISO
+const tentativas = retorno.tentativas;
+
+if(tentativas==0){
+    alertaTeste.style.display="block";
+    alertaTeste.style.background="#e8fff1";
+    alertaTeste.style.color="#0f7a38";
+    alertaTeste.innerHTML="🎁 Primeiro teste gratuito.<br>Você possui 5 minutos para realizar o pagamento.";
+}
+
+if(tentativas==1){
+    alertaTeste.style.display="block";
+    alertaTeste.style.background="#fff8d9";
+    alertaTeste.style.color="#8a6500";
+    alertaTeste.innerHTML="⚠ Segundo teste gratuito.<br>Resta apenas mais uma tentativa.";
+}
+
+if(tentativas==2){
+    alertaTeste.style.display="block";
+    alertaTeste.style.background="#ffe6e6";
+    alertaTeste.style.color="#b30000";
+    alertaTeste.innerHTML="🚫 Última tentativa.<br>Caso não pague, será necessário gerar o PIX em outro celular para liberar o acesso.";
+}
+
+if(!resposta.ok){
+
+    alert(retorno.error || "Erro ao gerar PIX.");
+
+    ...
+}
+
+// ==========================================
+// COPIAR PIX
+// ==========================================
+
+async function copiarPix(){
+
+    try{
+
+        await navigator.clipboard.writeText(copiacola.value);
+
+        alert("Código PIX copiado.");
+
+    }catch{
+
+        copiacola.select();
+
+        document.execCommand("copy");
+
+        alert("Código PIX copiado.");
+
+    }
+
+}
+// ==========================================
+// VERIFICA PAGAMENTO
+// ==========================================
+
+let timerPagamento = null;
+
+function iniciarVerificacao(){
+
+    if(timerPagamento){
+
+        clearInterval(timerPagamento);
+
+    }
+
+    timerPagamento = setInterval(verificarPagamento,5000);
+
+}
+
+// ==========================================
+
+async function verificarPagamento() {
+
+    if (!pagamentoId) {
+        return;
+    }
+
+    const { data, error } = await db
+    .from("hotspot_pagamentos")
+    .select("*")
+    .eq("payment_id", String(pagamentoId))
+    .maybeSingle();
+
+console.log("Payment ID:", pagamentoId);
+console.log("DATA:", data);
+console.log("ERROR:", error);
+
+    if (error) {
+        console.error(error);
+        return;
+    }
+
+    if (!data) {
+        console.log("Pagamento ainda não encontrado:", pagamentoId);
+        return;
+    }
+
+    console.log("STATUS:", data.status);
+
+    if (
+    data.status === "approved" ||
+    data.payment_status === "approved"
+) {
+
+    clearInterval(timerPagamento);
+    clearInterval(timerPix);
+
+    localStorage.setItem("nomePlano", planoAtual.nome);
+    localStorage.setItem("tempoPlano", planoAtual.tempo_minutos + " minutos");
+
+    window.location.href =
+window.location.href =
+`sucesso.html?
+app_id=${APP_ID}
+&mac=${encodeURIComponent(MAC)}
+&ip=${encodeURIComponent(IP)}
+&link_login=${encodeURIComponent(LINK_LOGIN)}
+&link_orig=${encodeURIComponent(LINK_ORIG)}
+&chap_id=${encodeURIComponent(CHAP_ID)}
+&chap=${encodeURIComponent(CHAP)}`;
+
+return;
+}
+
+    console.log("Ainda pendente...");
+}
+let tempoRestante = 30 * 60;
+let timerPix = null;
+
+function iniciarContador(){
+
+    if(timerPix){
+        clearInterval(timerPix);
+    }
+
+    tempoRestante = 30 * 60;
+
+    atualizarContador();
+
+    timerPix = setInterval(()=>{
+
+        tempoRestante--;
+
+        atualizarContador();
+
+        if(tempoRestante<=0){
+
+            clearInterval(timerPix);
+
+            clearInterval(timerPagamento);
+
+            statusPagamento.innerHTML=`
+            ⌛ PIX expirado
+            <br><br>
+            <button onclick="novoPix()">
+            Gerar Novo PIX
+            </button>`;
+
+        }
+
+    },1000);
+
+}
+
+function atualizarContador(){
+
+    const min=Math.floor(tempoRestante/60);
+
+    const seg=tempoRestante%60;
+
+    statusPagamento.innerHTML=`
+    ⏳ Aguardando pagamento...
+    <br><br>
+    Tempo restante:
+    <strong>
+    ${String(min).padStart(2,"0")}:
+    ${String(seg).padStart(2,"0")}
+    </strong>
+    `;
+
+}
+
+function novoPix(){
+
+    clearInterval(timerPix);
+
+    clearInterval(timerPagamento);
+
+    pix.style.display="none";
+
+    btnPix.disabled=false;
+
+    btnPix.innerHTML="Gerar PIX";
+
+    gerarPix();
+
+}
+</script>
+
+</body>
+
+</html>
