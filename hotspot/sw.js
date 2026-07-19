@@ -1,4 +1,4 @@
-const CACHE = "ffhotspot-v1";
+const CACHE = "ffhotspot-v2";
 
 const arquivos = [
   "/hotspot/",
