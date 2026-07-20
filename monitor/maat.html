@@ -1007,50 +1007,78 @@ function gerarEventos(){
 
         if(!anterior) return;
 
+        const statusAnterior = (anterior.status || "").toLowerCase();
+        const statusAtual = (eq.status || "").toLowerCase();
+
         const gateway = gateways.find(g => g.id === eq.gateway_id);
 
-        if(anterior.status=="online" && eq.status=="offline"){
+        // EQUIPAMENTO FICOU OFFLINE
+        if(statusAnterior == "online" && statusAtual == "offline"){
 
-    historicoOffline[eq.id] = Date.now();
+            historicoOffline[eq.id] = Date.now();
 
-    const gateway = gateways.find(g => g.id === eq.gateway_id);
+            eventos.unshift({
+                hora:new Date().toLocaleTimeString(),
+                nivel:"critico",
+                texto:`
+                    <b>📍 ${gateway?.nome}</b><br>
+                    🔴 ${eq.nome} ficou OFFLINE
+                `
+            });
 
-    eventos.unshift({
-        hora:new Date().toLocaleTimeString(),
-        nivel:"critico",
-        texto:`
-            <b>📍 ${gateway?.nome}</b><br>
-            🔴 ${eq.nome} ficou OFFLINE
-        `
+        }
+
+        // EQUIPAMENTO VOLTOU ONLINE
+        if(statusAnterior == "offline" && statusAtual == "online"){
+
+            let tempo = "";
+
+            if(historicoOffline[eq.id]){
+
+                const segundos = Math.floor(
+                    (Date.now() - historicoOffline[eq.id]) / 1000
+                );
+
+                tempo = ` após ${segundos}s`;
+
+                delete historicoOffline[eq.id];
+            }
+
+            eventos.unshift({
+                hora:new Date().toLocaleTimeString(),
+                nivel:"info",
+                texto:`
+                    <b>📍 ${gateway?.nome}</b><br>
+                    🟢 ${eq.nome} voltou ONLINE${tempo}
+                `
+            });
+
+        }
+
+        // LATÊNCIA
+        const latAnterior = Number(anterior.latencia || 0);
+        const latAtual = Number(eq.latencia || 0);
+
+        if(latAnterior < 30 && latAtual >= 30){
+
+            eventos.unshift({
+                hora:new Date().toLocaleTimeString(),
+                nivel:"alerta",
+                texto:`
+                    <b>📍 ${gateway?.nome}</b><br>
+                    🟠 ${eq.nome}<br>
+                    Latência alta: ${latAtual.toFixed(1)} ms
+                `
+            });
+
+        }
+
     });
 
-}
-
-if(anterior.status=="offline" && eq.status=="online"){
-
-    const gateway = gateways.find(g => g.id === eq.gateway_id);
-
-    let tempo = "";
-
-    if(historicoOffline[eq.id]){
-
-        const segundos = Math.floor(
-            (Date.now() - historicoOffline[eq.id]) / 1000
-        );
-
-        tempo = ` após ${segundos}s`;
-
-        delete historicoOffline[eq.id];
+    // Mantém apenas os últimos 100 eventos
+    if(eventos.length > 100){
+        eventos = eventos.slice(0,100);
     }
-
-    eventos.unshift({
-        hora:new Date().toLocaleTimeString(),
-        nivel:"info",
-        texto:`
-            <b>📍 ${gateway?.nome}</b><br>
-            🟢 ${eq.nome} voltou ONLINE${tempo}
-        `
-    });
 
 }
 
