@@ -1367,7 +1367,7 @@ async function salvarEquipamento() {
         document.getElementById("gateway").value;
 
     const mac =
-        document.getElementById("mac").value.toUpperCase();
+        document.getElementById("mac").value.trim().toUpperCase();
 
     const ip =
         document.getElementById("ip").value.trim();
@@ -1427,10 +1427,11 @@ async function salvarEquipamento() {
         usuario_pppoe,
         regiao,
 
-        ip: ip || neighborSelecionado?.ip || "",
-        mac: mac || neighborSelecionado?.mac || "",
+        ip: ip || neighborSelecionado?.endereco || "",
+        mac: mac || neighborSelecionado?.caller_id || "",
 
         interface: neighborSelecionado?.interface || editando?.interface || "",
+        uptime: neighborSelecionado?.uptime || editando?.uptime || "",
 
         porta: neighborSelecionado
             ? traduzirInterface(neighborSelecionado.interface)
@@ -1468,7 +1469,7 @@ async function salvarEquipamento() {
 
     fecharModal();
 
-    carregarEquipamentos();
+    await carregarEquipamentos();
 
 }
 window.onload=async()=>{
@@ -1528,31 +1529,20 @@ function editar(id){
 }
 async function excluirEquipamento(id){
 
-    console.log("ID recebido:", id);
+    if(!confirm("Deseja excluir este cliente?"))
+        return;
 
-    const { data, error } = await window.supabaseClient
-    .from("monitor_pppoe")
-    .select("*")
-    .ilike("usuario", usuario_pppoe + "%")
-    .limit(1)
-    .maybeSingle();
-
-    console.log("Data:", data);
-    console.log("Error:", error);
+    const { error } = await window.supabaseClient
+        .from("monitor_clientes")
+        .delete()
+        .eq("id", id);
 
     if(error){
         alert(error.message);
         return;
     }
 
-    if(!data || data.length === 0){
-        alert("Nenhum registro foi excluído.");
-        return;
-    }
-
-    alert("Excluído!");
-
-    await carregarEquipamentos();
+    carregarEquipamentos();
 
 }
 
@@ -1610,15 +1600,21 @@ function filtrarEquipamentos(){
 
 }
 
-async function buscarEquipamento(){
+async function buscarEquipamento() {
 
     const gateway = document.getElementById("gateway").value;
-    const usuario_pppoe =
-        document.getElementById("usuario_pppoe").value.trim();
+    const usuario_pppoe = document.getElementById("usuario_pppoe").value.trim();
 
-    if(!usuario_pppoe){
+    if (!usuario_pppoe) {
+
         neighborSelecionado = null;
+
+        document.getElementById("nome").value = "";
+        document.getElementById("ip").value = "";
+        document.getElementById("mac").value = "";
+
         return;
+
     }
 
     let consulta = window.supabaseClient
@@ -1626,8 +1622,8 @@ async function buscarEquipamento(){
         .select("*")
         .ilike("usuario", usuario_pppoe + "%");
 
-    // Só filtra por gateway se um gateway foi selecionado
-    if(gateway){
+    // Se um gateway foi selecionado, filtra por ele
+    if (gateway) {
         consulta = consulta.eq("gateway_id", gateway);
     }
 
@@ -1635,27 +1631,38 @@ async function buscarEquipamento(){
         .limit(1)
         .maybeSingle();
 
-    console.log(data, error);
+    console.log("Resultado:", data);
+    console.log("Erro:", error);
 
-    if(error){
+    if (error) {
         console.error(error);
         return;
     }
 
-    if(!data){
+    if (!data) {
+
         neighborSelecionado = null;
+
+        document.getElementById("nome").value = "";
         document.getElementById("ip").value = "";
         document.getElementById("mac").value = "";
+
         return;
+
     }
 
     neighborSelecionado = data;
 
-    // Preenche automaticamente o gateway encontrado
-    document.getElementById("gateway").value = data.gateway_id;
-
+    // Preenche automaticamente os campos
+    document.getElementById("gateway").value = data.gateway_id || "";
+    document.getElementById("nome").value = data.usuario || "";
     document.getElementById("ip").value = data.endereco || "";
     document.getElementById("mac").value = data.caller_id || "";
+
+    // Guarda informações para o salvarEquipamento()
+    neighborSelecionado.interface = data.interface || "";
+    neighborSelecionado.uptime = data.uptime || "";
+
 }
 </script>
 
