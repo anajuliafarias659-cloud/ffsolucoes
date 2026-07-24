@@ -618,7 +618,7 @@ Administrador
 
 <div>
 
-<h1>Equipamentos</h1>
+<h1>Clientes PPPoE</h1>
 
 <p>
 
@@ -632,7 +632,7 @@ Cadastro e Monitoramento Automático
 
 <button class="btnNovo" onclick="abrirNovo()">
 
-＋ Novo Equipamento
+＋ Novo Cliente
 
 </button>
 
@@ -722,7 +722,7 @@ id="pesquisa"
 
 type="text"
 
-placeholder="Pesquisar equipamento"
+placeholder="Pesquisar cliente, usuário PPPoE, MAC ou IP"
 
 onkeyup="filtrarEquipamentos()"
 
@@ -737,31 +737,8 @@ Todos os Gateways
 </option>
 
 </select>
-
-<select id="filtroTipo">
-
-    <option value="">
-        Todos os Tipos
-    </option>
-
-    <option>Servidor</option>
-
-<option>Switch</option>
-
-<option>ONU</option>
-
-<option>📡 Rádio Setorial</option>
-
-<option>📡 Rádio PTP</option>
-
-<option>Impressora</option>
-
-<option>Câmera</option>
-
-<option>Nobreak</option>
-
-<option>Outro</option>
-
+<select id="filtroRegiao">
+    <option value="">Todas as Regiões</option>
 </select>
 <div>
 
@@ -784,17 +761,14 @@ Atualizar
 <tr>
 
 <th>Status</th>
-<th>Nome</th>
-<th>Tipo</th>
-<th>Perfil</th>
+<th>Cliente</th>
+<th>Usuário PPPoE</th>
+<th>Região</th>
 <th>MAC</th>
-<th>IP Atual</th>
+<th>IP</th>
 <th>Gateway</th>
 <th>Interface</th>
-<th>Ping</th>
-<th>Latência</th>
-<th>Perda</th>
-<th>Última Resposta</th>
+<th>Uptime</th>
 <th width="220">Ações</th>
 
 </tr>
@@ -827,7 +801,7 @@ id="modal">
 
 <h2>
 
-Novo Equipamento
+Novo Cliente
 
 </h2>
 
@@ -850,38 +824,6 @@ type="text">
 </div>
 
 <div>
-
-<div>
-
-    <label>Tipo</label>
-
-    <select id="tipo">
-        <option>Servidor</option>
-        <option>Switch</option>
-        <option>ONU</option>
-        <option>📡 Rádio Setorial</option>
-        <option>📡 Rádio PTP</option>
-        <option>Impressora</option>
-        <option>Câmera</option>
-        <option>Nobreak</option>
-        <option>Outro</option>
-    </select>
-
-</div>
-
-<div>
-
-    <label>Perfil de Sinal</label>
-
-    <select id="perfil_sinal">
-        <option value="">Nenhum</option>
-        <option value="CLIENTE">Cliente</option>
-        <option value="PTP">PTP</option>
-        <option value="SETORIAL">Setorial</option>
-        <option value="ONU">ONU</option>
-    </select>
-
-</div>
 
 <div>
 
@@ -951,36 +893,6 @@ type="text">
 </div>
 
 <div class="col2">
-
-    <label>Método</label>
-<select id="metodo">
-    <option value="ping">Somente Ping</option>
-    <option value="ssh">SSH</option>
-    <option value="api">API MikroTik</option>
-    <option value="snmp">SNMP</option>
-    <option value="http">HTTP</option>
-    <option value="https">HTTPS</option>
-</select>
-
-<label>Porta de Acesso</label>
-<input id="porta_acesso" value="22">
-
-<label>Usuário</label>
-<input id="usuario">
-
-<label>Senha</label>
-<input id="senha" type="password">
-
-<label>Comunidade SNMP</label>
-<input id="snmp" value="public">
-
-<label>Chave SSH</label>
-<textarea id="ssh_key"></textarea>
-
-<label>
-    <input type="checkbox" id="usar_ip_publico">
-    Usar IP Público
-</label>
 
 <label>
 
@@ -1064,24 +976,20 @@ let neighborSelecionado = null;
 ABRIR MODAL
 ===============================*/
 
-function abrirNovo(){
+function abrirNovo() {
 
     editando = null;
 
-    document.getElementById("modal").style.display="flex";
+    document.getElementById("modal").style.display = "flex";
 
-    document.getElementById("nome").value="";
-document.getElementById("perfil_sinal").value = "";
-    document.getElementById("mac").value="";
-    document.getElementById("descricao").value="";
-document.getElementById("metodo").value="ping";
-document.getElementById("porta_acesso").value="22";
-document.getElementById("usuario").value="";
-document.getElementById("senha").value="";
-document.getElementById("snmp").value="public";
-document.getElementById("ssh_key").value="";
-document.getElementById("usar_ip_publico").checked=false;
-document.getElementById("usuario_pppoe").value = "";
+    document.getElementById("nome").value = "";
+    document.getElementById("usuario_pppoe").value = "";
+    document.getElementById("regiao").value = "";
+    document.getElementById("gateway").value = "";
+    document.getElementById("ip").value = "";
+    document.getElementById("mac").value = "";
+    document.getElementById("descricao").value = "";
+
 }
 
 async function atualizarTudo(){
@@ -1174,42 +1082,77 @@ async function carregarEquipamentos(){
         return;
     }
 
-    // Ordena por Gateway -> Tipo -> Nome
+    // Ordena por Gateway -> Região -> Nome
     equipamentos = (data || []).sort((a, b) => {
 
-        const gatewayA = gateways.find(g => g.id == a.gateway_id)?.nome || "";
-        const gatewayB = gateways.find(g => g.id == b.gateway_id)?.nome || "";
+        const gatewayA =
+            gateways.find(g => g.id == a.gateway_id)?.nome || "";
+
+        const gatewayB =
+            gateways.find(g => g.id == b.gateway_id)?.nome || "";
 
         let comparacao = gatewayA.localeCompare(gatewayB);
+
         if(comparacao !== 0) return comparacao;
 
-        comparacao = (a.tipo || "").localeCompare(b.tipo || "");
+        comparacao = (a.regiao || "").localeCompare(b.regiao || "");
+
         if(comparacao !== 0) return comparacao;
 
         return (a.nome || "").localeCompare(b.nome || "");
 
     });
 
-atualizarCards();
+    atualizarCards();
 
-filtrarEquipamentos();
+    carregarFiltroRegioes();
+
+    filtrarEquipamentos();
 
 }
+
 
 /*===============================
 ATUALIZA CARDS
 ===============================*/
+function carregarFiltroRegioes(){
+
+    const select = document.getElementById("filtroRegiao");
+
+    if(!select) return;
+
+    const atual = select.value;
+
+    const regioes = [...new Set(
+        equipamentos
+            .map(e => e.regiao)
+            .filter(Boolean)
+    )].sort();
+
+    select.innerHTML =
+        '<option value="">Todas as Regiões</option>';
+
+    regioes.forEach(regiao => {
+
+        select.innerHTML +=
+            `<option value="${regiao}">${regiao}</option>`;
+
+    });
+
+    select.value = atual;
+
+}
 
 function atualizarCards(){
 
     let online = 0;
     let offline = 0;
 
-    equipamentos.forEach(eq=>{
+    equipamentos.forEach(cliente => {
 
-        const status = calcularStatus(eq);
+        const status = calcularStatus(cliente);
 
-        if(status=="online")
+        if(status === "online")
             online++;
         else
             offline++;
@@ -1226,11 +1169,13 @@ function atualizarCards(){
         offline;
 
     document.getElementById("equipamentosDescoberta").innerHTML =
-        equipamentos.filter(e=>e.ip).length;
+        new Set(
+            equipamentos
+                .map(c => c.regiao)
+                .filter(Boolean)
+        ).size;
 
 }
-
-
 function calcularStatus(eq){
 
     const ping = Number(eq.ping || 0);
@@ -1328,8 +1273,8 @@ function desenharTabela(lista = equipamentos){
 
         tbody.innerHTML = `
         <tr>
-            <td colspan="11">
-                Nenhum equipamento cadastrado.
+            <td colspan="10">
+                Nenhum cliente cadastrado.
             </td>
         </tr>`;
 
@@ -1339,11 +1284,9 @@ function desenharTabela(lista = equipamentos){
 
     lista.forEach(eq=>{
 
-    console.log(eq);
+        const status = calcularStatus(eq);
 
-    const status = calcularStatus(eq);
-
-    tbody.innerHTML += `
+        tbody.innerHTML += `
 
 <tr>
 
@@ -1352,15 +1295,15 @@ function desenharTabela(lista = equipamentos){
 </td>
 
 <td>
-    ${eq.nome}
+    ${eq.nome || "-"}
 </td>
 
 <td>
-    ${eq.tipo || "-"}
+    ${eq.usuario_pppoe || "-"}
 </td>
 
 <td>
-    ${eq.perfil_sinal || "-"}
+    ${eq.regiao || "-"}
 </td>
 
 <td>
@@ -1376,44 +1319,16 @@ function desenharTabela(lista = equipamentos){
 </td>
 
 <td>
-    ${eq.porta || traduzirInterface(neighborSelecionado?.interface)}
+    ${eq.interface || "-"}
 </td>
 
 <td>
-    ${eq.ping ?? 0}/3
-</td>
-
-<td style="
-    color:${corLatencia(eq.latencia)};
-    font-weight:bold;
-">
-    ${eq.latencia != null ? eq.latencia+" ms" : "-"}
-</td>
-
-<td style="
-    color:${corPerda(eq.perda)};
-    font-weight:bold;
-">
-    ${eq.perda != null ? eq.perda+" %" : "-"}
-</td>
-
-<td>
-    ${
-        eq.ultima_resposta
-        ? new Date(eq.ultima_resposta).toLocaleString("pt-BR")
-        : "-"
-    }
+    ${eq.uptime || "-"}
 </td>
 
 <td>
 
 <div class="acoes">
-
-<button
-class="btnMonitorar"
-onclick="monitorar('${eq.id}')">
-Ping
-</button>
 
 <button
 class="btnEditar"
@@ -1438,30 +1353,32 @@ Excluir
     });
 
 }
-async function salvarEquipamento(){
+async function salvarEquipamento() {
 
-    const nome=document.getElementById("nome").value.trim();
+    const nome = document.getElementById("nome").value.trim();
 
-    const tipo=document.getElementById("tipo").value;
-    const perfil_sinal=document.getElementById("perfil_sinal").value;
-    const gateway=document.getElementById("gateway").value;
+    const usuario_pppoe =
+        document.getElementById("usuario_pppoe").value.trim();
 
-    const mac=document.getElementById("mac").value.toUpperCase();
-    const ip=document.getElementById("ip").value.trim();
+    const regiao =
+        document.getElementById("regiao").value.trim();
 
-    const observacao=document.getElementById("descricao").value;
-    const metodo=document.getElementById("metodo").value;
-    const porta_acesso=Number(document.getElementById("porta_acesso").value);
-    const usuario=document.getElementById("usuario").value;
-    const senha=document.getElementById("senha").value;
-    const snmp=document.getElementById("snmp").value;
-    const ssh_key=document.getElementById("ssh_key").value;
-    const usar_ip_publico=document.getElementById("usar_ip_publico").checked;
+    const gateway =
+        document.getElementById("gateway").value;
+
+    const mac =
+        document.getElementById("mac").value.toUpperCase();
+
+    const ip =
+        document.getElementById("ip").value.trim();
+
+    const observacao =
+        document.getElementById("descricao").value.trim();
 
     // ===========================
     // VERIFICA MAC DUPLICADO
     // ===========================
-    if(mac){
+    if (mac) {
 
         let consulta = window.supabaseClient
             .from("monitor_equipamentos")
@@ -1469,87 +1386,74 @@ async function salvarEquipamento(){
             .eq("app_id", APP_ID)
             .eq("mac", mac);
 
-        // Se estiver editando, ignora o próprio registro
-        if(editando){
+        if (editando) {
             consulta = consulta.neq("id", editando.id);
         }
 
         const { data: existente, error: erroMac } =
             await consulta.maybeSingle();
 
-        if(erroMac){
+        if (erroMac) {
             alert(erroMac.message);
             return;
         }
 
-        if(existente){
-            alert(`Já existe um equipamento cadastrado com este MAC.\n\nEquipamento: ${existente.nome}`);
+        if (existente) {
+            alert(
+                `Já existe um cliente cadastrado com este MAC.\n\nCliente: ${existente.nome}`
+            );
             return;
         }
 
     }
 
-    // VALIDAÇÃO
-    if(!gateway){
-
+    if (!gateway) {
         alert("Selecione um gateway.");
         return;
-
     }
 
-    if(!ip && !mac){
-
-        alert("Informe um IP ou um MAC.");
+    if (!usuario_pppoe) {
+        alert("Informe o usuário PPPoE.");
         return;
-
     }
 
     const dados = {
 
         app_id: APP_ID,
+
         gateway_id: gateway,
 
         nome,
-        tipo,
-        perfil_sinal,
+        usuario_pppoe,
+        regiao,
 
         ip: ip || neighborSelecionado?.ip || "",
         mac: mac || neighborSelecionado?.mac || "",
 
         interface: neighborSelecionado?.interface_nome || editando?.interface || "",
+
         porta: neighborSelecionado
             ? traduzirInterface(neighborSelecionado.interface)
             : (editando?.porta || ""),
 
-        fabricante: "",
-        modelo: "",
-        serial: "",
-
         status: "offline",
+
         monitorar: true,
 
-        observacao,
-        metodo,
-        porta_acesso,
-        usuario,
-        senha,
-        snmp,
-        ssh_key,
-        usar_ip_publico
-usuario_pppoe,
+        observacao
 
     };
 
     let error;
 
-    if(editando){
+    if (editando) {
 
         ({ error } = await window.supabaseClient
             .from("monitor_equipamentos")
             .update(dados)
             .eq("id", editando.id));
 
-    }else{
+    } else {
 
         ({ error } = await window.supabaseClient
             .from("monitor_equipamentos")
@@ -1557,14 +1461,13 @@ usuario_pppoe,
 
     }
 
-    if(error){
-
+    if (error) {
         alert(error.message);
         return;
-
     }
 
     fecharModal();
+
     carregarEquipamentos();
 
 }
@@ -1596,29 +1499,33 @@ function editar(id){
 
     neighborSelecionado = null;
 
-    document.getElementById("nome").value = editando.nome || "";
-    document.getElementById("tipo").value = editando.tipo || "";
-document.getElementById("perfil_sinal").value =
-    editando.perfil_sinal || "";
-    document.getElementById("gateway").value = editando.gateway_id || "";
-    document.getElementById("ip").value = editando.ip || "";
-    document.getElementById("mac").value = editando.mac || "";
-    document.getElementById("descricao").value = editando.observacao || "";
-    document.getElementById("metodo").value = editando.metodo || "ping";
-document.getElementById("porta_acesso").value = editando.porta_acesso || 22;
-document.getElementById("usuario").value = editando.usuario || "";
-document.getElementById("senha").value = editando.senha || "";
-document.getElementById("snmp").value = editando.snmp || "public";
-document.getElementById("ssh_key").value = editando.ssh_key || "";
-document.getElementById("usar_ip_publico").checked = !!editando.usar_ip_publico;
+    document.getElementById("nome").value =
+        editando.nome || "";
 
-    document.querySelector(".janela h2").innerText = "Editar Equipamento";
+    document.getElementById("usuario_pppoe").value =
+        editando.usuario_pppoe || "";
+
+    document.getElementById("regiao").value =
+        editando.regiao || "";
+
+    document.getElementById("gateway").value =
+        editando.gateway_id || "";
+
+    document.getElementById("ip").value =
+        editando.ip || "";
+
+    document.getElementById("mac").value =
+        editando.mac || "";
+
+    document.getElementById("descricao").value =
+        editando.observacao || "";
+
+    document.querySelector(".janela h2").innerText =
+        "Editar Cliente";
 
     document.getElementById("modal").style.display = "flex";
-document.getElementById("usuario_pppoe").value =
-    editando.usuario_pppoe || "";
-}
 
+}
 async function excluirEquipamento(id){
 
     console.log("ID recebido:", id);
@@ -1650,34 +1557,51 @@ async function excluirEquipamento(id){
 
 function filtrarEquipamentos(){
 
-    const busca = document.getElementById("pesquisa").value.toLowerCase();
-    const gateway = document.getElementById("filtroGateway").value;
-    const tipo = document.getElementById("filtroTipo").value;
+    const busca =
+        document.getElementById("pesquisa").value.toLowerCase();
+
+    const gateway =
+        document.getElementById("filtroGateway").value;
+
+    const regiao =
+        document.getElementById("filtroRegiao").value;
 
     const lista = equipamentos.filter(e => {
 
         const nomeGateway =
-    gateways.find(g => g.id === e.gateway_id)?.nome.toLowerCase() || "";
+            gateways.find(g => g.id === e.gateway_id)?.nome.toLowerCase() || "";
 
-const okBusca =
-    !busca ||
-    (e.nome || "").toLowerCase().includes(busca) ||
-    (e.mac || "").toLowerCase().includes(busca) ||
-    (e.ip || "").toLowerCase().includes(busca) ||
-    (e.tipo || "").toLowerCase().includes(busca) ||
-    (e.perfil_sinal || "").toLowerCase().includes(busca) ||
-    (e.porta || "").toLowerCase().includes(busca) ||
-    nomeGateway.includes(busca);
+        const okBusca =
+
+            !busca ||
+
+            (e.nome || "").toLowerCase().includes(busca) ||
+
+            (e.usuario_pppoe || "").toLowerCase().includes(busca) ||
+
+            (e.regiao || "").toLowerCase().includes(busca) ||
+
+            (e.mac || "").toLowerCase().includes(busca) ||
+
+            (e.ip || "").toLowerCase().includes(busca) ||
+
+            (e.interface || "").toLowerCase().includes(busca) ||
+
+            nomeGateway.includes(busca);
 
         const okGateway =
+
             !gateway ||
+
             e.gateway_id === gateway;
 
-        const okTipo =
-            !tipo ||
-            e.tipo === tipo;
+        const okRegiao =
 
-        return okBusca && okGateway && okTipo;
+            !regiao ||
+
+            e.regiao === regiao;
+
+        return okBusca && okGateway && okRegiao;
 
     });
 
@@ -1690,8 +1614,7 @@ async function buscarEquipamento(){
     const gateway = document.getElementById("gateway").value;
 const usuario_pppoe =
     document.getElementById("usuario_pppoe").value.trim();
-const usuario_pppoe =
-    document.getElementById("usuario_pppoe").value.trim();
+
     const ip = document.getElementById("ip").value.trim();
     const mac = document.getElementById("mac").value.trim().toUpperCase();
 
