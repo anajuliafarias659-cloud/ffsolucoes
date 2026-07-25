@@ -75,50 +75,130 @@ async function carregarGateways(){
 }
 
 async function carregarRegioes(){
- const {data}=await supabaseClient.from("monitor_regioes").select("*,monitor_gateways(nome)");
- const tb=document.getElementById("tabelaRegioes");
- tb.innerHTML="";
- (data||[]).forEach(r=>{
-   tb.innerHTML+=`<tr>
-   <td>${r.nome}</td>
-   <td>${r.monitor_gateways?.nome||""}</td>
-   <td>${r.limite_offline}</td>
-   <td>${r.tempo_alerta}</td>
-   <td>${r.telegram?"Sim":"Não"}</td>
-   <td><button onclick="editar('${r.id}')">Editar</button>
-   <button onclick="excluirRegiao('${r.id}')">Excluir</button></td>
-   </tr>`;
- });
+
+    const { data: regioes, error } = await supabaseClient
+        .from("monitor_regioes")
+        .select("*")
+        .order("nome");
+
+    if(error){
+        console.error(error);
+        return;
+    }
+
+    const { data: gateways } = await supabaseClient
+        .from("monitor_gateways")
+        .select("id,nome");
+
+    const mapa = {};
+
+    (gateways || []).forEach(g=>{
+        mapa[g.id]=g.nome;
+    });
+
+    const tb=document.getElementById("tabelaRegioes");
+
+    tb.innerHTML="";
+
+    (regioes || []).forEach(r=>{
+
+        tb.innerHTML += `
+        <tr>
+
+            <td>${r.nome}</td>
+
+            <td>${mapa[r.gateway_id] || "-"}</td>
+
+            <td>${r.limite_offline}</td>
+
+            <td>${r.tempo_alerta} min</td>
+
+            <td>${r.telegram ? "Sim" : "Não"}</td>
+
+            <td>
+
+                <button onclick="editar('${r.id}')">
+                    Editar
+                </button>
+
+                <button onclick="excluirRegiao('${r.id}')">
+                    Excluir
+                </button>
+
+            </td>
+
+        </tr>
+        `;
+
+    });
+
 }
 
-async function salvarRegiao(){
- const payload={
-  nome:nome.value,
-  gateway_id:gateway.value,
-  limite_offline:Number(limite.value),
-  tempo_alerta:Number(tempo.value),
-  telegram:telegram.value==="true"
- };
- if(editando){
-   await supabaseClient.from("monitor_regioes").update(payload).eq("id",editando);
- }else{
-   await supabaseClient.from("monitor_regioes").insert(payload);
- }
- fecharModal();
- carregarRegioes();
+async function salvarRegiao() {
+
+    const payload = {
+
+        app_id: APP_ID, // ou a variável que você usa no sistema
+
+        nome: document.getElementById("nome").value.trim(),
+
+        gateway_id: document.getElementById("gateway").value,
+
+        limite_queda: Number(document.getElementById("limite").value),
+
+        telegram: document.getElementById("telegram").value === "true",
+
+        ativo: true,
+
+        alerta_ativo: false,
+
+        ultimo_total: 0
+
+    };
+
+    let erro;
+
+    if (editando) {
+
+        ({ error: erro } = await supabaseClient
+            .from("monitor_regioes")
+            .update(payload)
+            .eq("id", editando));
+
+    } else {
+
+        ({ error: erro } = await supabaseClient
+            .from("monitor_regioes")
+            .insert(payload));
+
+    }
+
+    if (erro) {
+        console.error(erro);
+        alert(erro.message);
+        return;
+    }
+
+    fecharModal();
+
+    carregarRegioes();
+
 }
 
-function editar(id){ editando=id; abrirModal(); }
+window.onload = async () => {
 
-async function excluirRegiao(id){
- if(!confirm("Excluir região?")) return;
- await supabaseClient.from("monitor_regioes").delete().eq("id",id);
- carregarRegioes();
-}
+    try {
 
-window.onload=async()=>{
- await carregarGateways();
- await carregarRegioes();
+        await carregarGateways();
+
+        await carregarRegioes();
+
+    } catch (e) {
+
+        console.error(e);
+
+    }
+
 }
 </script>
 </body>
