@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 
@@ -842,12 +843,11 @@ type="text">
 
 <div>
 
-    <label>Região</label>
+<label>Região</label>
 
-    <input
-        id="regiao"
-        type="text"
-        placeholder="Ex.: Centro">
+<select id="regiao">
+    <option value="">Selecione uma região</option>
+</select>
 
 </div>
 
@@ -979,6 +979,40 @@ function abrirNovo() {
 
 }
 
+async function carregarRegioes() {
+
+    let consulta = window.supabaseClient
+        .from("monitor_regioes")
+        .select("id,nome")
+        .order("nome");
+
+    if (APP_ID) {
+        consulta = consulta.eq("app_id", APP_ID);
+    }
+
+    const { data, error } = await consulta;
+
+    if (error) {
+        console.error(error);
+        return;
+    }
+
+    const combo = document.getElementById("regiao");
+
+    combo.innerHTML =
+        '<option value="">Selecione uma região</option>';
+
+    (data || []).forEach(r => {
+
+        combo.innerHTML += `
+            <option value="${r.nome}">
+                ${r.nome}
+            </option>
+        `;
+
+    });
+
+}
 async function atualizarTudo(){
 
     await carregarGateways();
@@ -1362,6 +1396,38 @@ async function salvarEquipamento() {
     const observacao =
         document.getElementById("descricao").value.trim();
 
+    // ===========================
+    // VERIFICA MAC DUPLICADO
+    // ===========================
+    if (mac) {
+
+        let consulta = window.supabaseClient
+            .from("monitor_clientes")
+            .select("id,nome")
+            .eq("app_id", APP_ID)
+            .eq("mac", mac);
+
+        if (editando) {
+            consulta = consulta.neq("id", editando.id);
+        }
+
+        const { data: existente, error: erroMac } =
+            await consulta.maybeSingle();
+
+        if (erroMac) {
+            alert(erroMac.message);
+            return;
+        }
+
+        if (existente) {
+            alert(
+                `Já existe um cliente cadastrado com este MAC.\n\nCliente: ${existente.nome}`
+            );
+            return;
+        }
+
+    }
+
     if (!gateway) {
         alert("Selecione um gateway.");
         return;
@@ -1372,48 +1438,44 @@ async function salvarEquipamento() {
         return;
     }
 
-    const dados = {
+const dados = {
 
-        app_id: APP_ID,
+    app_id: APP_ID,
 
-        gateway_id: gateway,
+    gateway_id: gateway,
 
-        nome,
+    nome,
+    usuario_pppoe,
+    regiao,
 
-        usuario_pppoe,
+    ip: ip || neighborSelecionado?.endereco || "",
+    mac: mac || neighborSelecionado?.caller_id || "",
 
-        regiao,
+    interface: neighborSelecionado?.interface || editando?.interface || "",
+    uptime: neighborSelecionado?.uptime || editando?.uptime || "",
 
-        ip: ip || "",
+porta: neighborSelecionado
+    ? traduzirInterface(neighborSelecionado.interface)
+    : (editando?.porta || ""),
 
-        mac: mac || "",
+status: (neighborSelecionado || editando?.uptime)
+    ? "online"
+    : "offline",
 
-        observacao
+monitorar: true,
 
-    };
+    observacao
 
-    // Verifica se já existe cadastro deste cliente
-    const { data: existente, error: erroBusca } =
-        await window.supabaseClient
-            .from("monitor_clientes")
-            .select("id")
-            .eq("gateway_id", gateway)
-            .eq("usuario_pppoe", usuario_pppoe)
-            .maybeSingle();
-
-    if (erroBusca) {
-        alert(erroBusca.message);
-        return;
-    }
+};
 
     let error;
 
-    if (existente) {
+    if (editando) {
 
         ({ error } = await window.supabaseClient
             .from("monitor_clientes")
             .update(dados)
-            .eq("id", existente.id));
+            .eq("id", editando.id));
 
     } else {
 
@@ -1428,19 +1490,20 @@ async function salvarEquipamento() {
         return;
     }
 
-    alert("Cliente salvo com sucesso!");
-
     fecharModal();
 
     await carregarEquipamentos();
 
 }
-window.onload=async()=>{
+window.onload = async () => {
 
     await carregarGateways();
 
+    await carregarRegioes();
+
     await carregarEquipamentos();
-setInterval(carregarEquipamentos,5000);
+
+    setInterval(carregarEquipamentos, 5000);
 
 };
 async function monitorar(id){
