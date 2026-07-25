@@ -1,0 +1,125 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FF Infra • Regiões</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{font-family:Arial,sans-serif;background:#0f172a;color:#fff;margin:0}
+header{background:#111827;padding:16px 24px;font-size:24px;font-weight:bold}
+.container{padding:24px}
+button{padding:10px 16px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}
+table{width:100%;border-collapse:collapse;margin-top:20px}
+th,td{padding:12px;border:1px solid #374151}
+thead{background:#1f2937}
+.modal{display:none;position:fixed;inset:0;background:#0008}
+.box{background:#111827;width:600px;max-width:95%;margin:60px auto;padding:20px;border-radius:12px}
+input,select{width:100%;padding:10px;margin:8px 0;background:#0f172a;color:#fff;border:1px solid #374151;border-radius:8px}
+</style>
+</head>
+<body>
+<header>📍 FF Infra - Regiões</header>
+
+<div class="container">
+<button onclick="abrirModal()">Nova Região</button>
+
+<table>
+<thead>
+<tr>
+<th>Região</th>
+<th>Gateway</th>
+<th>Offline</th>
+<th>Tempo</th>
+<th>Telegram</th>
+<th>Ações</th>
+</tr>
+</thead>
+<tbody id="tabelaRegioes">
+<tr><td colspan="6">Carregando...</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="modal" id="modal">
+<div class="box">
+<h2>Região</h2>
+<input id="nome" placeholder="Nome">
+<select id="gateway"></select>
+<input id="limite" type="number" placeholder="Limite Offline">
+<input id="tempo" type="number" placeholder="Tempo de alerta">
+<select id="telegram">
+<option value="true">Telegram Ativado</option>
+<option value="false">Telegram Desativado</option>
+</select>
+<br><br>
+<button onclick="salvarRegiao()">Salvar</button>
+<button onclick="fecharModal()">Cancelar</button>
+</div>
+</div>
+
+<script>
+const SUPABASE_URL="https://pdajixsoowcyhnjwhgpc.supabase.co";
+const SUPABASE_KEY="sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw";
+const supabaseClient=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+let editando=null;
+
+function abrirModal(){modal.style.display="block";}
+function fecharModal(){modal.style.display="none";editando=null;}
+
+async function carregarGateways(){
+ const {data}=await supabaseClient.from("monitor_gateways").select("id,nome").order("nome");
+ gateway.innerHTML="";
+ (data||[]).forEach(g=>gateway.innerHTML+=`<option value="${g.id}">${g.nome}</option>`);
+}
+
+async function carregarRegioes(){
+ const {data}=await supabaseClient.from("monitor_regioes").select("*,monitor_gateways(nome)");
+ const tb=document.getElementById("tabelaRegioes");
+ tb.innerHTML="";
+ (data||[]).forEach(r=>{
+   tb.innerHTML+=`<tr>
+   <td>${r.nome}</td>
+   <td>${r.monitor_gateways?.nome||""}</td>
+   <td>${r.limite_offline}</td>
+   <td>${r.tempo_alerta}</td>
+   <td>${r.telegram?"Sim":"Não"}</td>
+   <td><button onclick="editar('${r.id}')">Editar</button>
+   <button onclick="excluirRegiao('${r.id}')">Excluir</button></td>
+   </tr>`;
+ });
+}
+
+async function salvarRegiao(){
+ const payload={
+  nome:nome.value,
+  gateway_id:gateway.value,
+  limite_offline:Number(limite.value),
+  tempo_alerta:Number(tempo.value),
+  telegram:telegram.value==="true"
+ };
+ if(editando){
+   await supabaseClient.from("monitor_regioes").update(payload).eq("id",editando);
+ }else{
+   await supabaseClient.from("monitor_regioes").insert(payload);
+ }
+ fecharModal();
+ carregarRegioes();
+}
+
+function editar(id){ editando=id; abrirModal(); }
+
+async function excluirRegiao(id){
+ if(!confirm("Excluir região?")) return;
+ await supabaseClient.from("monitor_regioes").delete().eq("id",id);
+ carregarRegioes();
+}
+
+window.onload=async()=>{
+ await carregarGateways();
+ await carregarRegioes();
+}
+</script>
+</body>
+</html>
