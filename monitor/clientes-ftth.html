@@ -1,6 +1,5 @@
 
-<!DOCTYPE html>
-<html lang="pt-BR">
+<!DOCTYPE html><html lang="pt-BR">
 
 <head>
 
@@ -791,37 +790,54 @@ Carregando
 </table>
 
 </div>
+
 <div class="modal" id="modalOnu">
 
-<div class="janela">
+    <div class="janela">
 
-<h2>Vincular ONU</h2>
+        <h2>Vincular ONU</h2>
 
-<select id="listaOnus"></select>
+        <input
+            id="pesquisaOnu"
+            type="text"
+            placeholder="Pesquisar Serial, Porta ou ONU..."
+            onkeyup="filtrarOnus()"
+            style="
+                width:100%;
+                padding:12px;
+                margin-bottom:15px;
+                background:#0b1020;
+                border:1px solid #2d3852;
+                border-radius:8px;
+                color:#fff;">
 
-<div class="rodape">
+        <div
+            id="listaOnus"
+            style="
+                max-height:420px;
+                overflow-y:auto;">
+        </div>
 
-<button
-class="cancelar"
-onclick="document.getElementById('modalOnu').style.display='none'">
+        <div class="rodape">
 
-Cancelar
+            <button
+                class="cancelar"
+                onclick="document.getElementById('modalOnu').style.display='none'">
+                Cancelar
+            </button>
 
-</button>
+            <button
+                class="salvar"
+                onclick="salvarOnu()">
+                Vincular
+            </button>
 
-<button
-class="salvar"
-onclick="salvarOnu()">
+        </div>
 
-Vincular
-
-</button>
+    </div>
 
 </div>
 
-</div>
-
-</div>
 <div class="modal"
 
 id="modal">
@@ -1782,36 +1798,14 @@ document.getElementById("ip").value = data.endereco || "";
 document.getElementById("mac").value = data.caller_id || "";
 }
 
-async function pesquisarOnu(texto = "") {
-
-    let consulta = window.supabaseClient
-        .from("monitor_onus")
-        .select("*")
-        .eq("gateway_id", clienteSelecionado.gateway_id);
-
-    if (texto) {
-
-        consulta = consulta.or(
-            `serial.ilike.%${texto}%,porta.ilike.%${texto}%`
-        );
-
-    }
-
-    const { data, error } = await consulta
-        .order("porta")
-        .order("onu");
-
-    if (error) {
-        alert(error.message);
-        return;
-    }
-
-    preencherLista(data);
-}
+        
+let clienteSelecionado = null;
+let listaOnus = [];
+let onuSelecionada = null;
 
 async function abrirOnu(id){
 
-    clienteSelecionado = equipamentos.find(e => e.id == id);
+    clienteSelecionado = equipamentos.find(e => e.id === id);
 
     console.log("CLIENTE:", clienteSelecionado);
 
@@ -1819,7 +1813,7 @@ async function abrirOnu(id){
         .from("monitor_onus")
         .select("*");
 
-    // Tenta filtrar pelo gateway
+    // Filtra pelo gateway
     if (clienteSelecionado.gateway_id) {
         consulta = consulta.eq("gateway_id", clienteSelecionado.gateway_id);
     }
@@ -1833,10 +1827,10 @@ async function abrirOnu(id){
         return;
     }
 
-    // Se não encontrou nenhuma, carrega todas
+    // Se não encontrou pelo gateway, busca todas
     if (!data || data.length === 0) {
 
-        console.warn("Nenhuma ONU encontrada para o gateway. Carregando todas.");
+        console.warn("Nenhuma ONU encontrada para este gateway.");
 
         const retorno = await window.supabaseClient
             .from("monitor_onus")
@@ -1845,36 +1839,148 @@ async function abrirOnu(id){
             .order("onu");
 
         data = retorno.data || [];
+
     }
 
-    console.log("ONUS:", data);
+    listaOnus = data;
+    onuSelecionada = null;
 
-    const combo = document.getElementById("listaOnus");
+    document.getElementById("pesquisaOnu").value = "";
 
-    combo.innerHTML = "";
+    renderizarOnus(listaOnus);
 
-    if (data.length === 0) {
+    document.getElementById("modalOnu").style.display = "flex";
 
-        combo.innerHTML =
-            "<option>Nenhuma ONU encontrada</option>";
+}
 
-    } else {
 
-        data.forEach(o => {
+function renderizarOnus(lista){
 
-            combo.innerHTML += `
-                <option value="${o.id}">
-                    ${o.serial || "Sem Serial"} |
-                    ${o.porta}:${o.onu} |
-                    RX ${o.rx_power ?? "-"}
-                </option>
-            `;
+    const div = document.getElementById("listaOnus");
+
+    div.innerHTML = "";
+
+    if(lista.length === 0){
+
+        div.innerHTML = `
+            <div style="
+                padding:20px;
+                text-align:center;
+                color:#999;">
+                Nenhuma ONU encontrada.
+            </div>
+        `;
+
+        return;
+
+    }
+
+    lista.forEach(o=>{
+
+        div.innerHTML += `
+
+<div
+class="itemOnu"
+onclick="selecionarOnu('${o.id}',this)"
+style="
+padding:12px;
+margin-bottom:8px;
+border:1px solid #2d3852;
+border-radius:8px;
+cursor:pointer;
+display:flex;
+align-items:center;
+gap:12px;
+transition:.2s;">
+
+<input
+type="radio"
+name="onuSelecionada"
+value="${o.id}">
+
+<div>
+
+<b>${o.serial || "Sem Serial"}</b><br>
+
+<b>${o.porta}</b>
+&nbsp;&nbsp;ONU ${o.onu}
+
+<br>
+
+RX:
+<b>${o.rx_power ?? "-"}</b>
+
+</div>
+
+</div>
+
+`;
+
+    });
+
+}
+
+
+function filtrarOnus(){
+
+    const texto = document
+        .getElementById("pesquisaOnu")
+        .value
+        .toLowerCase();
+
+    const filtradas = listaOnus.filter(o=>{
+
+        return (
+
+            (o.serial || "")
+            .toLowerCase()
+            .includes(texto)
+
+            ||
+
+            (o.porta || "")
+            .toLowerCase()
+            .includes(texto)
+
+            ||
+
+            String(o.onu)
+            .includes(texto)
+
+        );
+
+    });
+
+    renderizarOnus(filtradas);
+
+}
+
+
+function selecionarOnu(id, elemento){
+
+    onuSelecionada = id;
+
+    document
+        .querySelectorAll(".itemOnu")
+        .forEach(item=>{
+
+            item.style.border="1px solid #2d3852";
+            item.style.background="transparent";
+
+            const radio = item.querySelector("input");
+
+            if(radio)
+                radio.checked=false;
 
         });
 
-    }
+    elemento.style.border="2px solid #00b96b";
+    elemento.style.background="#162238";
 
-    document.getElementById("modalOnu").style.display = "flex";
+    const radio = elemento.querySelector("input");
+
+    if(radio)
+        radio.checked=true;
 
 }
 </script>
