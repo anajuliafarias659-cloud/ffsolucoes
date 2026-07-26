@@ -1857,25 +1857,74 @@ ${o.porta}:${o.onu}
     document.getElementById("modalOnu")
         .style.display="flex";
 
-}async function abrirOnu(id){
+let clienteSelecionado = null;
+
+async function abrirOnu(id){
 
     clienteSelecionado = equipamentos.find(e => e.id == id);
 
-    console.log("CLIENTE");
-    console.log(clienteSelecionado);
+    console.log("CLIENTE:", clienteSelecionado);
 
-    const { data, error } = await window.supabaseClient
+    let consulta = window.supabaseClient
         .from("monitor_onus")
-        .select("*")
-        .eq("gateway_id", clienteSelecionado.gateway_id);
+        .select("*");
 
-    console.log("ERRO");
-    console.log(error);
+    // Tenta filtrar pelo gateway
+    if (clienteSelecionado.gateway_id) {
+        consulta = consulta.eq("gateway_id", clienteSelecionado.gateway_id);
+    }
 
-    console.log("ONUS");
-    console.log(data);
+    let { data, error } = await consulta
+        .order("porta")
+        .order("onu");
 
-    document.getElementById("modalOnu").style.display="flex";
+    if (error) {
+        alert(error.message);
+        return;
+    }
+
+    // Se não encontrou nenhuma, carrega todas
+    if (!data || data.length === 0) {
+
+        console.warn("Nenhuma ONU encontrada para o gateway. Carregando todas.");
+
+        const retorno = await window.supabaseClient
+            .from("monitor_onus")
+            .select("*")
+            .order("porta")
+            .order("onu");
+
+        data = retorno.data || [];
+    }
+
+    console.log("ONUS:", data);
+
+    const combo = document.getElementById("listaOnus");
+
+    combo.innerHTML = "";
+
+    if (data.length === 0) {
+
+        combo.innerHTML =
+            "<option>Nenhuma ONU encontrada</option>";
+
+    } else {
+
+        data.forEach(o => {
+
+            combo.innerHTML += `
+                <option value="${o.id}">
+                    ${o.serial || "Sem Serial"} |
+                    ${o.porta}:${o.onu} |
+                    RX ${o.rx_power ?? "-"}
+                </option>
+            `;
+
+        });
+
+    }
+
+    document.getElementById("modalOnu").style.display = "flex";
 
 }
 </script>
