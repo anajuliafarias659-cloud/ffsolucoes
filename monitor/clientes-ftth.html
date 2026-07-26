@@ -762,6 +762,7 @@ Atualizar
 <th>Região</th>
 <th>ONU</th>
 <th>RX</th>
+<th>TX</th>
 <th>MAC</th>
 <th>IP</th>
 <th>Gateway</th>
@@ -1155,7 +1156,14 @@ const { data: pppoe, error } = await consulta;
     // Clientes cadastrados
 let consultaClientes = window.supabaseClient
     .from("monitor_clientes")
-    .select("usuario_pppoe,regiao");
+.select(`
+    usuario_pppoe,
+    regiao,
+    onu_id,
+    onu,
+    porta_onu,
+    onu_mac
+`)
 
 if (APP_ID) {
     consultaClientes = consultaClientes.eq("app_id", APP_ID);
@@ -1163,6 +1171,9 @@ if (APP_ID) {
 
 const { data: clientes, error: erroClientes } =
     await consultaClientes;
+const { data: onus } = await window.supabaseClient
+    .from("monitor_onus")
+    .select("*");
 
     if (erroClientes) {
         console.error(erroClientes);
@@ -1175,26 +1186,34 @@ const { data: clientes, error: erroClientes } =
             c.usuario_pppoe === cliente.usuario
         );
 
-        return {
+      const onu = (onus || []).find(o => o.id === cadastro?.onu_id);
 
-            id: cliente.id,
-            gateway_id: cliente.gateway_id,
+return {
 
-            nome: cliente.usuario,
-            usuario_pppoe: cliente.usuario,
+    id: cliente.id,
+    gateway_id: cliente.gateway_id,
 
-            // Busca a região cadastrada
-            regiao: cadastro?.regiao || "",
+    nome: cliente.usuario,
+    usuario_pppoe: cliente.usuario,
 
-            ip: cliente.endereco,
-            mac: cliente.caller_id,
+    regiao: cadastro?.regiao || "",
 
-            interface: cliente.interface,
-            uptime: cliente.uptime,
+    ip: cliente.endereco,
 
-            status: cliente.uptime ? "online" : "offline"
+    // MAC do roteador
+    mac: cliente.caller_id,
 
-        };
+    // ONU
+    onu_mac: cadastro?.onu_mac || "-",
+    rx_power: onu?.rx_power ?? "-",
+    tx_power: onu?.tx_power ?? "-",
+
+    interface: cliente.interface,
+    uptime: cliente.uptime,
+
+    status: cliente.uptime ? "online" : "offline"
+
+};
 
     }).sort((a, b) => {
 
@@ -1405,6 +1424,14 @@ function desenharTabela(lista = equipamentos){
 
 <td>
     ${eq.regiao || "-"}
+</td>
+
+<td>
+    ${eq.onu_mac || "-"}
+</td>
+
+<td>
+    ${eq.rx_power ?? "-"} dBm
 </td>
 
 <td>
