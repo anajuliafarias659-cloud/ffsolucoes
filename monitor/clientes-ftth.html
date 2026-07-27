@@ -1133,40 +1133,83 @@ CARREGA EQUIPAMENTOS
 
 async function carregarEquipamentos(){
 
-    let consulta = window.supabaseClient
+    let consultaEquip = window.supabaseClient
         .from("monitor_equipamentos")
         .select("*");
 
     if(APP_ID){
-        consulta = consulta.eq("app_id", APP_ID);
+        consultaEquip = consultaEquip.eq("app_id", APP_ID);
     }
 
-    const { data, error } = await consulta;
+    let consultaOlt = window.supabaseClient
+        .from("monitor_olts")
+        .select("*");
 
-    if(error){
-        console.error(error);
+    if(APP_ID){
+        consultaOlt = consultaOlt.eq("app_id", APP_ID);
+    }
+
+    const [
+        { data: equipamentosData, error: erroEquip },
+        { data: oltsData, error: erroOlt }
+    ] = await Promise.all([
+        consultaEquip,
+        consultaOlt
+    ]);
+
+    if(erroEquip){
+        console.error(erroEquip);
         return;
     }
 
-    // Ordena por Gateway -> Tipo -> Nome
-    equipamentos = (data || []).sort((a, b) => {
+    if(erroOlt){
+        console.error(erroOlt);
+        return;
+    }
 
-        const gatewayA = gateways.find(g => g.id == a.gateway_id)?.nome || "";
-        const gatewayB = gateways.find(g => g.id == b.gateway_id)?.nome || "";
+    const olts = (oltsData || []).map(o => ({
+    id: o.id,
+    app_id: o.app_id,
+    gateway_id: o.gateway_id,
+    nome: o.nome,
+    tipo: "OLT",
+    perfil_sinal: "",
+    mac: o.mac || "",
+    ip: o.ip_gerencia || "",
+    porta: "",
+    ping: o.ping || 0,
+    latencia: o.latencia || 0,
+    perda: o.perda || 0,
+    ultima_resposta: o.ultima_resposta || o.updated_at,
+    observacao: "",
+    monitorar: true,
+    tabela: "monitor_olts"
+}));
 
-        let comparacao = gatewayA.localeCompare(gatewayB);
-        if(comparacao !== 0) return comparacao;
+    equipamentos = [
+        ...(equipamentosData || []).map(e => ({
+            ...e,
+            tabela: "monitor_equipamentos"
+        })),
+        ...olts
+    ];
 
-        comparacao = (a.tipo || "").localeCompare(b.tipo || "");
-        if(comparacao !== 0) return comparacao;
+    equipamentos.sort((a,b)=>{
 
-        return (a.nome || "").localeCompare(b.nome || "");
+        const ga = gateways.find(g=>g.id==a.gateway_id)?.nome || "";
+        const gb = gateways.find(g=>g.id==b.gateway_id)?.nome || "";
 
+        let c = ga.localeCompare(gb);
+        if(c) return c;
+
+        c = (a.tipo||"").localeCompare(b.tipo||"");
+        if(c) return c;
+
+        return (a.nome||"").localeCompare(b.nome||"");
     });
 
-atualizarCards();
-
-filtrarEquipamentos();
+    atualizarCards();
+    filtrarEquipamentos();
 
 }
 
@@ -1613,30 +1656,28 @@ document.getElementById("usar_ip_publico").checked = !!editando.usar_ip_publico;
 
 async function excluirEquipamento(id){
 
-    console.log("ID recebido:", id);
+    const equipamento = equipamentos.find(e => e.id === id);
 
-    const { data, error } = await window.supabaseClient
-        .from("monitor_equipamentos")
+    if(!equipamento){
+        alert("Equipamento não encontrado.");
+        return;
+    }
+
+    const tabela = equipamento.tabela || "monitor_equipamentos";
+
+    const { error } = await window.supabaseClient
+        .from(tabela)
         .delete()
-        .eq("id", id)
-        .select();
-
-    console.log("Data:", data);
-    console.log("Error:", error);
+        .eq("id", id);
 
     if(error){
         alert(error.message);
         return;
     }
 
-    if(!data || data.length === 0){
-        alert("Nenhum registro foi excluído.");
-        return;
-    }
+    alert("Excluído com sucesso!");
 
-    alert("Excluído!");
-
-    await carregarEquipamentos();
+    carregarEquipamentos();
 
 }
 
