@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html><html lang="pt-BR">
 
 <head>
@@ -471,9 +472,8 @@ tbody tr:hover{
 }
 
 .grid textarea{
-
-    resize:none;
-
+    resize:vertical;
+    min-height:120px;
 }
 
 .rodape{
@@ -555,24 +555,30 @@ tbody tr:hover{
 }
 
 .janela{
+
     width:1200px;
     max-width:95vw;
     max-height:92vh;
-    background:#141b2d;
-    border-radius:18px;
-    padding:30px;
-    overflow-y:auto;
 
-    /* novos */
     display:flex;
     flex-direction:column;
+
+    background:#141b2d;
+    border-radius:18px;
 }
 
 .rodape{
-    position:sticky;
-    bottom:-30px;
-    background:#141b2d;
+    display:flex;
+    justify-content:flex-end;
+    gap:15px;
+
     padding-top:20px;
+
+    border-top:1px solid #2d3852;
+
+    background:#141b2d;
+
+    flex-shrink:0;
 }
 
 .grid input,
@@ -711,7 +717,13 @@ Descobertos
 </div>
 
 <div class="barra">
-
+<select id="porPagina" onchange="alterarQuantidade()">
+    <option value="10">10</option>
+    <option value="20" selected>20</option>
+    <option value="50">50</option>
+    <option value="100">100</option>
+    <option value="100000">Todos</option>
+</select>
 <input
 
 id="pesquisa"
@@ -720,7 +732,7 @@ type="text"
 
 placeholder="Pesquisar cliente, usuário PPPoE, MAC ou IP"
 
-onkeyup="filtrarEquipamentos()"
+onkeyup="pesquisarServidor()"
 
 >
 
@@ -778,7 +790,7 @@ Atualizar
 
 <tr>
 
-<td colspan="9">
+<td colspan="13">
 
 Carregando
 
@@ -789,6 +801,26 @@ Carregando
 </tbody>
 
 </table>
+<div id="paginacao"
+style="display:flex;
+justify-content:center;
+align-items:center;
+gap:15px;
+margin-top:20px;">
+
+<button onclick="paginaAnterior()">
+◀ Anterior
+</button>
+
+<span id="textoPagina">
+Página 1
+</span>
+
+<button onclick="proximaPagina()">
+Próxima ▶
+</button>
+
+</div>
 
 </div>
 
@@ -818,9 +850,9 @@ Carregando
                 max-height:420px;
                 overflow-y:auto;">
         </div>
-
+<div class="conteudoModal">
         <div class="rodape">
-
+</div>
             <button
                 class="cancelar"
                 onclick="document.getElementById('modalOnu').style.display='none'">
@@ -1002,12 +1034,32 @@ if(!APP_ID){
 
 }
 
+let timerPesquisa;
+
+function pesquisarServidor(){
+
+    clearTimeout(timerPesquisa);
+
+    timerPesquisa = setTimeout(async()=>{
+
+        pagina = 1;
+
+        await carregarEquipamentos();
+
+    },300);
+
+}
+
 console.log("APP_ID:", APP_ID);
 
 let equipamentos = [];
 let gateways = [];
 let editando = null;
 let neighborSelecionado = null;
+// PAGINAÇÃO
+let pagina = 1;
+let porPagina = 20;
+let totalRegistros = 0;
 /*===============================
 ABRIR MODAL
 ===============================*/
@@ -1132,15 +1184,40 @@ CARREGA EQUIPAMENTOS
 async function carregarEquipamentos() {
 
     // Clientes online
-    let consulta = window.supabaseClient
-    .from("monitor_pppoe")
-    .select("*");
+const inicio = (pagina - 1) * porPagina;
+const fim = inicio + porPagina - 1;
+
+let consulta = window.supabaseClient
+.from("monitor_pppoe")
+.select("*", { count: "exact" })
+.range(inicio, fim);
+
+const busca = document
+    .getElementById("pesquisa")
+    .value
+    .trim();
+
+if(busca){
+
+    consulta = consulta.or(
+        `usuario.ilike.%${busca}%,
+        endereco.ilike.%${busca}%,
+        caller_id.ilike.%${busca}%`
+    );
+
+}
 
 if (APP_ID) {
     consulta = consulta.eq("app_id", APP_ID);
 }
 
-const { data: pppoe, error } = await consulta;
+const {
+    data: pppoe,
+    error,
+    count
+} = await consulta;
+
+totalRegistros = count || 0;
 
     if (error) {
         console.error(error);
@@ -1151,6 +1228,7 @@ const { data: pppoe, error } = await consulta;
 let consultaClientes = window.supabaseClient
     .from("monitor_clientes")
 .select(`
+    id,
     usuario_pppoe,
     regiao,
     onu_id,
@@ -1158,7 +1236,6 @@ let consultaClientes = window.supabaseClient
     porta_onu,
     onu_mac
 `)
-
 if (APP_ID) {
     consultaClientes = consultaClientes.eq("app_id", APP_ID);
 }
@@ -1241,8 +1318,9 @@ equipamentos = (pppoe || []).map(cliente => {
     });
 
     atualizarCards();
-    carregarFiltroRegioes();
-    filtrarEquipamentos();
+carregarFiltroRegioes();
+filtrarEquipamentos();
+atualizarPaginacao();
 
 }
 /*===============================
@@ -1447,17 +1525,9 @@ function desenharTabela(lista = equipamentos){
     ${eq.mac || "-"}
 </td>
 
-<td>
-    ${eq.ip || "-"}
-</td>
+<td>${eq.ip || "-"}</td>
 
-<td>
-    ${eq.ip || "-"}
-</td>
-
-<td>
-    ${gateways.find(g=>g.id===eq.gateway_id)?.nome || "-"}
-</td>
+<td>${gateways.find(g=>g.id===eq.gateway_id)?.nome || "-"}</td>
 
 <td>
     ${eq.interface || "-"}
@@ -1478,16 +1548,6 @@ Editar
 </button>
 
 <button
-class="btnExcluir"
-onclick="excluirEquipamento('${eq.id}')">
-Excluir
-</button><button
-class="btnEditar"
-onclick="editar('${eq.id}')">
-Editar
-</button>
-
-<button
 style="background:#8e44ad"
 onclick="abrirOnu('${eq.id}')">
 ONU
@@ -1500,6 +1560,8 @@ Excluir
 </button>
 
 </div>
+
+
 
 </td>
 
@@ -2080,6 +2142,49 @@ console.log(error);
     alert("ONU vinculada com sucesso!");
 
 }
+
+function atualizarPaginacao(){
+
+    const totalPaginas =
+        Math.ceil(totalRegistros / porPagina);
+
+    document.getElementById("textoPagina").innerHTML =
+        `Página ${pagina} de ${totalPaginas}`;
+}
+
+async function proximaPagina(){
+
+    if(pagina * porPagina >= totalRegistros)
+        return;
+
+    pagina++;
+
+    await carregarEquipamentos();
+
+}
+
+async function paginaAnterior(){
+
+    if(pagina == 1)
+        return;
+
+    pagina--;
+
+    await carregarEquipamentos();
+
+}
+
+async function alterarQuantidade(){
+
+    porPagina =
+        Number(document.getElementById("porPagina").value);
+
+    pagina = 1;
+
+    await carregarEquipamentos();
+
+}
+
 </script>
 
 </body>
