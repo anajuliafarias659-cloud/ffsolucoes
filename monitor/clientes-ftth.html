@@ -743,11 +743,9 @@ Todos os Gateways
 
 </option>
 
-</select>
 <select id="filtroRegiao">
-    <option value="">Todas as Regiões</option>
+    <option value="">Todas as Regiões / CTOs</option>
 </select>
-<div>
 
 <label>
 
@@ -770,10 +768,8 @@ Atualizar
 <th>Status</th>
 <th>Cliente</th>
 <th>Usuário PPPoE</th>
-<th>Região</th>
+<th>Região / CTO</th>
 <th>ONU</th>
-<th>RX</th>
-<th>TX</th>
 <th>MAC</th>
 <th>IP</th>
 <th>Gateway</th>
@@ -827,31 +823,38 @@ Próxima ▶
 
     <div class="janela">
 
-        <h2>Vincular ONU</h2>
+        <h2>Informações da ONU</h2>
 
-        <input
-            id="pesquisaOnu"
-            type="text"
-            placeholder="Pesquisar MAC, Porta ou ONU..."
-            onkeyup="filtrarOnus()"
-            style="
-                width:100%;
-                padding:12px;
-                margin-bottom:15px;
-                background:#0b1020;
-                border:1px solid #2d3852;
-                border-radius:8px;
-                color:#fff;">
+        <div class="grid">
 
-        <div
-            id="listaOnus"
-            style="
-                max-height:420px;
-                overflow-y:auto;">
+            <div>
+                <label>Número da ONU</label>
+                <input
+                    id="onuNumero"
+                    type="text"
+                    placeholder="Ex: 12">
+            </div>
+
+            <div>
+                <label>MAC da ONU</label>
+                <input
+                    id="onuMac"
+                    type="text"
+                    placeholder="AA:BB:CC:DD:EE:FF">
+            </div>
+
+            <div>
+                <label>Nível do Sinal (RX)</label>
+                <input
+                    id="onuRx"
+                    type="text"
+                    placeholder="-22.50">
+            </div>
+
         </div>
-<div class="conteudoModal">
+
         <div class="rodape">
-</div>
+
             <button
                 class="cancelar"
                 onclick="document.getElementById('modalOnu').style.display='none'">
@@ -861,7 +864,7 @@ Próxima ▶
             <button
                 class="salvar"
                 onclick="salvarOnu()">
-                Vincular
+                Salvar
             </button>
 
         </div>
@@ -923,10 +926,10 @@ type="text">
 
 <div>
 
-<label>Região</label>
+<label>Região / CTO</label>
 
 <select id="regiao">
-    <option value="">Selecione uma região</option>
+    <option value="">Selecione uma Região ou CTO</option>
 </select>
 
 </div>
@@ -1099,8 +1102,8 @@ async function carregarRegioes() {
 
     const combo = document.getElementById("regiao");
 
-    combo.innerHTML =
-        '<option value="">Selecione uma região</option>';
+combo.innerHTML =
+    '<option value="">Selecione uma Região ou CTO</option>';
 
     (data || []).forEach(r => {
 
@@ -1245,50 +1248,22 @@ const {
     error: erroClientes
 } = await consultaClientes;
 
-const {
-    data: onus,
-    error: erroOnus
-} = await window.supabaseClient
-    .from("monitor_onus")
-    .select("id,porta,onu,mac,mac_cliente,rx_power,tx_power,gateway_id");
 
 if (erroClientes) {
     console.error(erroClientes);
     return;
 }
 
-if (erroOnus) {
-    console.error(erroOnus);
-    return;
-}
-
 const mapaClientes = {};
-const mapaOnusCliente = {};
 
 (clientes || []).forEach(c => {
     mapaClientes[(c.usuario_pppoe || "").trim()] = c;
-});
-
-(onus || []).forEach(o => {
-
-    if (!o.mac_cliente) return;
-
-    mapaOnusCliente[
-        o.mac_cliente.toUpperCase()
-    ] = o;
-
 });
 
 equipamentos = (pppoe || []).map(cliente => {
 
 const cadastro = mapaClientes[
     (cliente.usuario || "").trim()
-];
-
-const onu = mapaOnusCliente[
-    (cliente.caller_id || "")
-        .trim()
-        .toUpperCase()
 ];
 
  console.log(
@@ -1313,14 +1288,11 @@ const onu = mapaOnusCliente[
         // MAC do roteador
         mac: cliente.caller_id,
 
-        // Dados da ONU
-onu: onu?.onu || cadastro?.onu || "-",
+        onu: cadastro?.onu || "-",
 
-porta_onu: onu?.porta || cadastro?.porta_onu || "-",
+onu_mac: cadastro?.onu_mac || "-",
 
-onu_mac: onu?.mac || cadastro?.onu_mac || "-",
-        rx_power: onu?.rx_power ?? "-",
-        tx_power: onu?.tx_power ?? "-",
+rx_power: cadastro?.rx_power || "-",
 
         interface: cliente.interface,
         uptime: cliente.uptime,
@@ -1374,7 +1346,7 @@ function carregarFiltroRegioes(){
     )].sort();
 
     select.innerHTML =
-        '<option value="">Todas as Regiões</option>';
+        '<option value="">Todas as Regiões / CTOs</option>';
 
     regioes.forEach(regiao => {
 
@@ -1509,7 +1481,7 @@ function desenharTabela(lista = equipamentos){
 
         tbody.innerHTML = `
         <tr>
-            <td colspan="10">
+            <td colspan="11">
                 Nenhum cliente cadastrado.
             </td>
         </tr>`;
@@ -1544,14 +1516,6 @@ function desenharTabela(lista = equipamentos){
 
 <td>
     ${eq.onu || "-"}
-</td>
-
-<td>
-    ${eq.rx_power ?? "-"} dBm
-</td>
-
-<td>
-    ${eq.tx_power ?? "-"} dBm
 </td>
 
 <td>
@@ -1935,198 +1899,28 @@ document.getElementById("mac").value = data.caller_id || "";
 
         
 let clienteSelecionado = null;
-let listaOnus = [];
-let onuSelecionada = null;
 
 async function abrirOnu(id){
 
     clienteSelecionado = equipamentos.find(e => e.id === id);
 
-    console.log("CLIENTE:", clienteSelecionado);
-
-    let consulta = window.supabaseClient
-        .from("monitor_onus")
-        .select("*");
-
-    // Filtra pelo gateway
-    if (clienteSelecionado.gateway_id) {
-        consulta = consulta.eq("gateway_id", clienteSelecionado.gateway_id);
-    }
-
-    let { data, error } = await consulta
-.order("onu", { ascending: true })
-    if (error) {
-        alert(error.message);
+    if(!clienteSelecionado){
         return;
     }
 
-    // Se não encontrou pelo gateway, busca todas
-    if (!data || data.length === 0) {
+    document.getElementById("onuNumero").value =
+        clienteSelecionado.onu || "";
 
-    console.warn("Nenhuma ONU encontrada para este gateway.");
+    document.getElementById("onuMac").value =
+        clienteSelecionado.onu_mac || "";
 
-    listaOnus = [];
-    renderizarOnus(listaOnus);
-
-    document.getElementById("modalOnu").style.display = "flex";
-
-    return;
-
-}
-
-    listaOnus = data;
-    onuSelecionada = null;
-
-    document.getElementById("pesquisaOnu").value = "";
-
-    renderizarOnus(listaOnus);
+    document.getElementById("onuRx").value =
+        clienteSelecionado.rx_power || "";
 
     document.getElementById("modalOnu").style.display = "flex";
 
 }
 
-
-function renderizarOnus(lista){
-
-    const div = document.getElementById("listaOnus");
-
-    div.innerHTML = "";
-
-    if(lista.length === 0){
-
-        div.innerHTML = `
-            <div style="
-                padding:20px;
-                text-align:center;
-                color:#999;">
-                Nenhuma ONU encontrada.
-            </div>
-        `;
-
-        return;
-
-    }
-
-    lista.forEach(o=>{
-
-        div.innerHTML += `
-
-<div
-class="itemOnu"
-onclick="selecionarOnu('${o.id}',this)"
-style="
-padding:14px;
-margin-bottom:10px;
-border:1px solid #2d3852;
-border-radius:10px;
-cursor:pointer;
-background:#101827;
-transition:.2s;">
-
-<input
-type="radio"
-name="onuSelecionada"
-value="${o.id}"
-style="display:none;">
-
-<div style="font-size:15px;">
-
-<div style="
-font-weight:bold;
-color:#fff;
-margin-bottom:6px;">
-
-📡 ${o.porta} • ONU ${o.onu}
-
-</div>
-
-<div style="color:#9ecbff;">
-🖧 ${o.mac || "MAC não informado"}
-</div>
-
-<div style="margin-top:6px;color:#ddd;">
-
-📶 RX:
-<b>${o.rx_power ?? "-"}</b> dBm
-
-&nbsp;&nbsp;&nbsp;
-
-📡 TX:
-<b>${o.tx_power ?? "-"}</b> dBm
-
-</div>
-
-</div>
-
-</div>
-
-`;
-
-    });
-
-}
-
-function filtrarOnus(){
-
-    const texto = document
-        .getElementById("pesquisaOnu")
-        .value
-        .toLowerCase();
-
-    const filtradas = listaOnus.filter(o=>{
-
-        return (
-
-            (o.mac || "")
-            .toLowerCase()
-            .includes(texto)
-
-            ||
-
-            (o.porta || "")
-            .toLowerCase()
-            .includes(texto)
-
-            ||
-
-            String(o.onu)
-            .includes(texto)
-
-        );
-
-    });
-
-    renderizarOnus(filtradas);
-
-}
-
-function selecionarOnu(id, elemento){
-
-    onuSelecionada = id;
-
-    document
-        .querySelectorAll(".itemOnu")
-        .forEach(item=>{
-
-            item.style.border="1px solid #2d3852";
-            item.style.background="transparent";
-
-            const radio = item.querySelector("input");
-
-            if(radio)
-                radio.checked=false;
-
-        });
-
-    elemento.style.border="2px solid #00b96b";
-    elemento.style.background="#162238";
-
-    const radio = elemento.querySelector("input");
-
-    if(radio)
-        radio.checked=true;
-
-}
 
 async function salvarOnu() {
 
@@ -2135,33 +1929,18 @@ async function salvarOnu() {
         return;
     }
 
-    if (!onuSelecionada) {
-        alert("Selecione uma ONU.");
-        return;
-    }
+    const numero = document.getElementById("onuNumero").value.trim();
+    const mac = document.getElementById("onuMac").value.trim().toUpperCase();
+    const rx = document.getElementById("onuRx").value.trim();
 
-    const onu = listaOnus.find(o => o.id === onuSelecionada);
-
-    if (!onu) {
-        alert("ONU não encontrada.");
-        return;
-    }
-
-const { data, error } = await window.supabaseClient
-    .from("monitor_clientes")
-    .update({
-        onu_id: onu.id,
-        porta_onu: onu.porta,
-        onu: onu.onu,
-        onu_mac: onu.mac,
-        rx_power: onu.rx_power,
-        tx_power: onu.tx_power
-    })
-    .eq("id", clienteSelecionado.id)
-    .select();
-
-console.log(data);
-console.log(error);
+    const { error } = await window.supabaseClient
+        .from("monitor_clientes")
+        .update({
+            onu: numero,
+            onu_mac: mac,
+            rx_power: rx
+        })
+        .eq("id", clienteSelecionado.id);
 
     if (error) {
         alert(error.message);
@@ -2172,7 +1951,7 @@ console.log(error);
 
     await carregarEquipamentos();
 
-    alert("ONU vinculada com sucesso!");
+    alert("ONU salva com sucesso!");
 
 }
 
