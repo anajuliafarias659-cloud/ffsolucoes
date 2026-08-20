@@ -100,190 +100,639 @@ Aceito os termos de uso e autorizo o recebimento de novidades e promoções dos 
 
 <script>
 const db = window.supabase.createClient(
-"https://pdajixsoowcyhnjwhgpc.supabase.co",
-"sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+    "https://pdajixsoowcyhnjwhgpc.supabase.co",
+    "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
 );
 
 const params = new URLSearchParams(window.location.search);
+
+/*
+ * O MikroTik envia estes parâmetros para a página:
+ * mac, ip, link-login e link-orig.
+ */
 const MAC = params.get("mac") || "";
 const IP = params.get("ip") || "";
 const LINK_LOGIN = params.get("link-login") || "";
 const LINK_ORIG = params.get("link-orig") || "";
-const APP_ID = params.get("app_id") || "FESTA_LOCAL_01";
 
-function mostrarErro(msg){
-const el = document.getElementById("mensagem-erro");
-el.textContent = msg || "";
-el.style.display = msg ? "block" : "none";
+/*
+ * O APP_ID precisa ser o mesmo usado no hotspot_config
+ * e em hotspot_patrocinadores.
+ */
+const APP_ID =
+    params.get("app_id") ||
+    "e56fa5a4-0d73-4299-9d3c-b671d191ffba";
+
+
+function mostrarErro(mensagem) {
+
+    const el = document.getElementById("mensagem-erro");
+
+    el.textContent = mensagem || "";
+
+    el.style.display =
+        mensagem ? "block" : "none";
 }
 
-async function carregarConfiguracoes(){
-try{
-const {data,error} = await db
-.from("hotspot_config")
-.select("nome_hotspot,descricao,logo,evento_nome,evento_descricao,patrocinador_master_nome,patrocinador_master_url,patrocinador_master_banner,exibir_patrocinadores")
-.eq("app_id",APP_ID)
-.maybeSingle();
 
-if(error){
-console.warn("Erro ao carregar configuração:",error);
-return;
+/* =========================================================
+   CONFIGURAÇÃO DO EVENTO
+========================================================= */
+
+async function carregarConfiguracoes() {
+
+    try {
+
+        const { data, error } = await db
+            .from("hotspot_config")
+            .select(`
+                nome_hotspot,
+                descricao,
+                logo,
+                evento_nome,
+                evento_descricao,
+                patrocinador_master_nome,
+                patrocinador_master_url,
+                patrocinador_master_banner,
+                exibir_patrocinadores
+            `)
+            .eq("app_id", APP_ID)
+            .maybeSingle();
+
+
+        if (error) {
+
+            console.error(
+                "Erro ao carregar hotspot_config:",
+                error
+            );
+
+            return;
+        }
+
+
+        if (!data) {
+
+            console.warn(
+                "Nenhuma configuração encontrada para APP_ID:",
+                APP_ID
+            );
+
+            return;
+        }
+
+
+        /* NOME DO EVENTO */
+
+        document.getElementById("nome-festa").textContent =
+            data.evento_nome ||
+            data.nome_hotspot ||
+            "Festejos de São Raimundo Nonato";
+
+
+        /* DESCRIÇÃO */
+
+        document.getElementById("descricao-festa").textContent =
+            data.evento_descricao ||
+            data.descricao ||
+            "Conecte-se gratuitamente oferecido por nossos patrocinadores.";
+
+
+        /* LOGO */
+
+        if (data.logo) {
+
+            document.getElementById(
+                "logo-cidade"
+            ).src = data.logo;
+
+        }
+
+
+        /*
+         * Se estiver desativado, não mostra patrocinadores.
+         */
+
+        if (data.exibir_patrocinadores === false) {
+
+            document.getElementById(
+                "bloco-master"
+            ).style.display = "none";
+
+            document.getElementById(
+                "bloco-apoio"
+            ).style.display = "none";
+
+            return;
+        }
+
+
+        /* =====================================================
+           PATROCINADOR MASTER
+        ===================================================== */
+
+        const blocoMaster =
+            document.getElementById("bloco-master");
+
+        const bannerMaster =
+            document.getElementById("banner-master");
+
+        const nomeMaster =
+            document.getElementById("nome-master");
+
+        const linkMaster =
+            document.getElementById("link-master");
+
+
+        if (data.patrocinador_master_banner) {
+
+            bannerMaster.src =
+                data.patrocinador_master_banner;
+
+            blocoMaster.style.display =
+                "block";
+
+        } else {
+
+            blocoMaster.style.display =
+                "none";
+
+        }
+
+
+        if (data.patrocinador_master_nome) {
+
+            nomeMaster.textContent =
+                data.patrocinador_master_nome;
+
+        } else {
+
+            nomeMaster.textContent = "";
+
+        }
+
+
+        if (data.patrocinador_master_url) {
+
+            linkMaster.href =
+                data.patrocinador_master_url;
+
+            linkMaster.target =
+                "_blank";
+
+            linkMaster.rel =
+                "noopener noreferrer";
+
+        } else {
+
+            linkMaster.removeAttribute("href");
+
+        }
+
+    } catch (erro) {
+
+        console.error(
+            "Erro inesperado ao carregar configuração:",
+            erro
+        );
+
+    }
 }
 
-if(!data) return;
 
-document.getElementById("nome-festa").textContent =
-data.evento_nome || data.nome_hotspot || "Festejos de São Raimundo Nonato";
+/* =========================================================
+   PATROCINADORES / APOIO
+========================================================= */
 
-document.getElementById("descricao-festa").textContent =
-data.evento_descricao || data.descricao ||
-"Conecte-se gratuitamente oferecido por nossos patrocinadores.";
+async function carregarPatrocinadores() {
 
-if(data.logo){
-document.getElementById("logo-cidade").src = data.logo;
+    try {
+
+        /*
+         * IMPORTANTE:
+         *
+         * A tabela atual usa:
+         * id
+         * app_id
+         * nome
+         * url
+         * banner
+         * ordem
+         *
+         * Não usar:
+         * ativo
+         * tipo
+         * url_imagem
+         * url_destino
+         */
+
+        const { data, error } = await db
+            .from("hotspot_patrocinadores")
+            .select(`
+                id,
+                app_id,
+                nome,
+                url,
+                banner,
+                ordem
+            `)
+            .eq("app_id", APP_ID)
+            .order("ordem", {
+                ascending: true
+            });
+
+
+        if (error) {
+
+            console.error(
+                "Erro ao carregar hotspot_patrocinadores:",
+                error
+            );
+
+            return;
+        }
+
+
+        const blocoApoio =
+            document.getElementById(
+                "bloco-apoio"
+            );
+
+        const grid =
+            document.getElementById(
+                "grid-apoio"
+            );
+
+
+        grid.innerHTML = "";
+
+
+        if (!data || data.length === 0) {
+
+            blocoApoio.style.display =
+                "none";
+
+            return;
+        }
+
+
+        data.forEach(patrocinador => {
+
+            /*
+             * Sem imagem não cria o card.
+             */
+
+            if (!patrocinador.banner) {
+                return;
+            }
+
+
+            const box =
+                document.createElement("div");
+
+            box.className =
+                "logo-parceiro";
+
+
+            const img =
+                document.createElement("img");
+
+            img.src =
+                patrocinador.banner;
+
+            img.alt =
+                patrocinador.nome ||
+                "Patrocinador";
+
+            img.loading =
+                "lazy";
+
+
+            box.appendChild(img);
+
+
+            /*
+             * Se tiver URL, o logo fica clicável.
+             */
+
+            if (patrocinador.url) {
+
+                box.style.cursor =
+                    "pointer";
+
+                box.title =
+                    patrocinador.nome ||
+                    "Abrir patrocinador";
+
+
+                box.addEventListener(
+                    "click",
+                    function () {
+
+                        window.open(
+                            patrocinador.url,
+                            "_blank",
+                            "noopener,noreferrer"
+                        );
+
+                    }
+                );
+
+            }
+
+
+            grid.appendChild(box);
+
+        });
+
+
+        if (grid.children.length > 0) {
+
+            blocoApoio.style.display =
+                "block";
+
+        } else {
+
+            blocoApoio.style.display =
+                "none";
+
+        }
+
+    } catch (erro) {
+
+        console.error(
+            "Erro inesperado ao carregar patrocinadores:",
+            erro
+        );
+
+    }
 }
 
-if(data.exibir_patrocinadores === false){
-document.getElementById("bloco-master").style.display="none";
-document.getElementById("bloco-apoio").style.display="none";
-return;
+
+/* =========================================================
+   REGISTRAR CLIENTE
+========================================================= */
+
+async function registrarLead(
+    nome,
+    whatsapp
+) {
+
+    /*
+     * Não deixamos a conexão do cliente depender
+     * da tabela de leads.
+     */
+
+    try {
+
+        const { error } = await db
+            .from("hotspot_leads")
+            .insert([{
+
+                app_id: APP_ID,
+
+                nome: nome,
+
+                whatsapp: whatsapp,
+
+                mac: MAC,
+
+                ip: IP,
+
+                criado_em:
+                    new Date().toISOString()
+
+            }]);
+
+
+        if (error) {
+
+            console.warn(
+                "Lead não registrado:",
+                error.message
+            );
+
+        }
+
+    } catch (erro) {
+
+        console.warn(
+            "Tabela de leads indisponível:",
+            erro
+        );
+
+    }
 }
 
-if(data.patrocinador_master_banner){
-document.getElementById("banner-master").src = data.patrocinador_master_banner;
-document.getElementById("bloco-master").style.display="block";
+
+/* =========================================================
+   LIBERAR INTERNET
+========================================================= */
+
+async function liberarInternet(event) {
+
+    event.preventDefault();
+
+
+    const nome =
+        document.getElementById(
+            "txt-nome"
+        ).value.trim();
+
+
+    const whatsapp =
+        document.getElementById(
+            "txt-whatsapp"
+        ).value.trim();
+
+
+    const termos =
+        document.getElementById(
+            "chk-termos"
+        ).checked;
+
+
+    const btn =
+        document.getElementById(
+            "btn-entrar"
+        );
+
+
+    mostrarErro("");
+
+
+    if (!nome) {
+
+        mostrarErro(
+            "Informe seu nome."
+        );
+
+        return;
+    }
+
+
+    if (!whatsapp) {
+
+        mostrarErro(
+            "Informe seu WhatsApp."
+        );
+
+        return;
+    }
+
+
+    if (!termos) {
+
+        mostrarErro(
+            "Aceite os termos para continuar."
+        );
+
+        return;
+    }
+
+
+    btn.disabled =
+        true;
+
+    btn.textContent =
+        "CONECTANDO...";
+
+
+    /*
+     * Registro é secundário.
+     * Mesmo se falhar, tentamos liberar.
+     */
+
+    await registrarLead(
+        nome,
+        whatsapp
+    );
+
+
+    /*
+     * Modo Hotspot MikroTik.
+     */
+
+    if (LINK_LOGIN) {
+
+        try {
+
+            const form =
+                document.createElement(
+                    "form"
+                );
+
+            form.method =
+                "POST";
+
+            form.action =
+                LINK_LOGIN;
+
+
+            /*
+             * Usuário especial usado
+             * pelo fluxo gratuito patrocinado.
+             */
+
+            const campos = {
+
+                username:
+                    "GRATUITO_PATROCINADO",
+
+                password:
+                    "",
+
+                dst:
+                    LINK_ORIG,
+
+                popup:
+                    "true"
+
+            };
+
+
+            Object.keys(campos)
+                .forEach(nomeCampo => {
+
+                    const input =
+                        document.createElement(
+                            "input"
+                        );
+
+                    input.type =
+                        "hidden";
+
+                    input.name =
+                        nomeCampo;
+
+                    input.value =
+                        campos[nomeCampo];
+
+                    form.appendChild(
+                        input
+                    );
+
+                });
+
+
+            document.body.appendChild(
+                form
+            );
+
+
+            form.submit();
+
+            return;
+
+        } catch (erro) {
+
+            console.error(
+                "Erro ao enviar login MikroTik:",
+                erro
+            );
+
+            mostrarErro(
+                "Não foi possível liberar o Wi-Fi. Tente novamente."
+            );
+
+        }
+
+    } else {
+
+        /*
+         * Quando aberto fora do portal do MikroTik.
+         */
+
+        mostrarErro(
+            "Página aberta fora do portal do Wi-Fi."
+        );
+
+    }
+
+
+    btn.disabled =
+        false;
+
+    btn.textContent =
+        "📶 LIBERAR WI-FI GRÁTIS";
 }
 
-if(data.patrocinador_master_url){
-document.getElementById("link-master").href = data.patrocinador_master_url;
-}else{
-document.getElementById("link-master").removeAttribute("href");
+
+/* =========================================================
+   INICIALIZAÇÃO
+========================================================= */
+
+async function iniciar() {
+
+    await carregarConfiguracoes();
+
+    await carregarPatrocinadores();
+
 }
 
-if(data.patrocinador_master_nome){
-document.getElementById("nome-master").textContent = data.patrocinador_master_nome;
-}
-}catch(err){
-console.warn("Configuração visual padrão utilizada:",err);
-}
-}
-
-async function carregarPatrocinadores(){
-try{
-const {data,error} = await db
-.from("hotspot_patrocinadores")
-.select("id,nome,url,banner,ordem")
-.eq("app_id",APP_ID)
-.order("ordem",{ascending:true});
-
-if(error){
-console.warn("Não foi possível carregar patrocinadores:",error);
-return;
-}
-
-if(!data || data.length===0) return;
-
-const grid=document.getElementById("grid-apoio");
-grid.innerHTML="";
-
-data.forEach(p=>{
-if(!p.banner) return;
-
-const box=document.createElement("div");
-box.className="logo-parceiro";
-
-const img=document.createElement("img");
-img.src=p.banner;
-img.alt=p.nome || "Patrocinador";
-img.loading="lazy";
-box.appendChild(img);
-
-if(p.url){
-box.style.cursor="pointer";
-box.addEventListener("click",()=>window.open(p.url,"_blank","noopener"));
-}
-
-grid.appendChild(box);
-});
-
-if(grid.children.length){
-document.getElementById("bloco-apoio").style.display="block";
-}
-}catch(err){
-console.warn("Patrocinadores não carregados:",err);
-}
-}
-
-async function registrarLead(nome,whatsapp){
-try{
-const {error}=await db.from("hotspot_leads").insert([{
-app_id:APP_ID,
-nome:nome,
-whatsapp:whatsapp,
-mac:MAC,
-ip:IP,
-criado_em:new Date().toISOString()
-}]);
-
-if(error) console.warn("Lead não registrado:",error.message);
-}catch(err){
-console.warn("Tabela de leads indisponível:",err);
-}
-}
-
-async function liberarInternet(event){
-event.preventDefault();
-
-const nome=document.getElementById("txt-nome").value.trim();
-const whatsapp=document.getElementById("txt-whatsapp").value.trim();
-const btn=document.getElementById("btn-entrar");
-
-if(!nome || !whatsapp){
-mostrarErro("Informe seu nome e WhatsApp.");
-return;
-}
-
-btn.disabled=true;
-btn.textContent="CONECTANDO...";
-mostrarErro("");
-
-await registrarLead(nome,whatsapp);
-
-if(LINK_LOGIN){
-const formDestino=document.createElement("form");
-formDestino.method="POST";
-formDestino.action=LINK_LOGIN;
-
-const inputs={
-username:"GRATUITO_PATROCINADO",
-password:"",
-dst:LINK_ORIG,
-popup:"true"
-};
-
-for(const key in inputs){
-const input=document.createElement("input");
-input.type="hidden";
-input.name=key;
-input.value=inputs[key];
-formDestino.appendChild(input);
-}
-
-document.body.appendChild(formDestino);
-formDestino.submit();
-}else{
-alert("Sucesso! Em um ambiente Wi-Fi real, sua internet seria liberada agora.");
-btn.disabled=false;
-btn.textContent="📶 LIBERAR WI-FI GRÁTIS";
-}
-}
-
-async function iniciar(){
-await carregarConfiguracoes();
-await carregarPatrocinadores();
-}
 
 iniciar();
+
 </script>
 </body>
 </html>
