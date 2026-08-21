@@ -323,6 +323,28 @@ grid-template-columns:repeat(2,1fr);
 
 }
 
+
+/* ===== CLIENTES X PATROCINADORES ===== */
+#listaClientesPatrocinadores td{
+    vertical-align:middle;
+}
+.badge-patrocinador-admin{
+    display:inline-block;
+    padding:5px 8px;
+    border-radius:999px;
+    background:#eaf8ef;
+    color:#167344;
+    font-weight:700;
+    font-size:12px;
+}
+@media(max-width:768px){
+    #listaClientesPatrocinadores td,
+    #listaClientesPatrocinadores th{
+        padding:9px 7px;
+        font-size:12px;
+    }
+}
+
 </style>
 <link rel="manifest" href="/hotspot/manifest.json">
 <meta name="theme-color" content="#0d8db8">
@@ -476,6 +498,106 @@ Nenhum pagamento.
 </details>
 
 </div>
+
+
+<!-- =========================================================
+     CLIENTES X PATROCINADORES
+     ========================================================= -->
+<details class="painel">
+<summary>
+    👥 Clientes e Patrocinadores
+</summary>
+
+<div style="padding:15px;background:#fff;">
+
+    <div style="
+        display:flex;
+        gap:10px;
+        flex-wrap:wrap;
+        margin-bottom:15px;
+        align-items:center;
+    ">
+        <input
+            id="filtroClientePatrocinador"
+            type="text"
+            placeholder="🔎 Buscar nome ou WhatsApp..."
+            style="
+                flex:1;
+                min-width:220px;
+                padding:11px 13px;
+                border:1px solid #d8e4ec;
+                border-radius:10px;
+                outline:none;
+            "
+        >
+
+        <select
+            id="filtroPatrocinador"
+            style="
+                min-width:210px;
+                padding:11px 13px;
+                border:1px solid #d8e4ec;
+                border-radius:10px;
+                background:#fff;
+                outline:none;
+            "
+        >
+            <option value="">Todos os patrocinadores</option>
+        </select>
+
+        <button
+            type="button"
+            id="btnAtualizarClientesPatrocinadores"
+            style="white-space:nowrap;"
+        >
+            🔄 Atualizar
+        </button>
+    </div>
+
+    <div style="
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+        gap:10px;
+        margin-bottom:15px;
+    ">
+        <div style="background:#f0f9ff;padding:12px;border-radius:10px;">
+            <small>Clientes registrados</small>
+            <strong
+                id="totalClientesPatrocinadores"
+                style="display:block;font-size:24px;color:#0d8db8;"
+            >0</strong>
+        </div>
+
+        <div style="background:#f0fdf4;padding:12px;border-radius:10px;">
+            <small>Visitas registradas</small>
+            <strong
+                id="totalVisitasPatrocinadores"
+                style="display:block;font-size:24px;color:#16834a;"
+            >0</strong>
+        </div>
+    </div>
+
+    <div class="tabela" style="margin:0;box-shadow:none;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Cliente</th>
+                    <th>WhatsApp</th>
+                    <th>Patrocinador visitado</th>
+                    <th>Data/Hora</th>
+                </tr>
+            </thead>
+
+            <tbody id="listaClientesPatrocinadores">
+                <tr>
+                    <td colspan="4">Carregando...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+</details>
 
 <details class="painel">
 
@@ -792,6 +914,322 @@ async function atualizarTotalOnline(){
 
 }
 
+
+/* =========================================================
+   CLIENTES X PATROCINADORES
+   ========================================================= */
+let dadosClientesPatrocinadores = [];
+
+function escaparHtmlAdmin(valor){
+    return String(valor ?? "")
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;")
+        .replace(/'/g,"&#039;");
+}
+
+function formatarDataAdmin(valor){
+    if(!valor) return "-";
+
+    const d = new Date(valor);
+
+    if(isNaN(d.getTime())) return valor;
+
+    return new Intl.DateTimeFormat(
+        "pt-BR",
+        {
+            timeZone:"America/Sao_Paulo",
+            dateStyle:"short",
+            timeStyle:"short"
+        }
+    ).format(d);
+}
+
+function obterNomePatrocinadorRegistro(item){
+    return (
+        item.patrocinador_nome ||
+        item.nome_patrocinador ||
+        item.patrocinador ||
+        "Não informado"
+    );
+}
+
+async function carregarClientesPatrocinadores(){
+
+    const tbody =
+        document.getElementById(
+            "listaClientesPatrocinadores"
+        );
+
+    if(!tbody) return;
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="4">Carregando...</td>
+        </tr>
+    `;
+
+    /*
+     * Tabela criada para registrar:
+     * cliente + WhatsApp + patrocinador + data/hora.
+     */
+    const { data, error } = await db
+        .from("hotspot_acessos_patrocinadores")
+        .select("*")
+        .eq("app_id", APP_ID)
+        .order("created_at", { ascending:false });
+
+    if(error){
+
+        console.error(
+            "Erro ao carregar clientes/patrocinadores:",
+            error
+        );
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4">
+                    ⚠️ Não foi possível carregar os registros.
+                    Verifique se a tabela
+                    <b>hotspot_acessos_patrocinadores</b>
+                    foi criada no Supabase.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+    dadosClientesPatrocinadores =
+        data || [];
+
+    preencherFiltroPatrocinadores();
+    renderizarClientesPatrocinadores();
+}
+
+function preencherFiltroPatrocinadores(){
+
+    const select =
+        document.getElementById(
+            "filtroPatrocinador"
+        );
+
+    if(!select) return;
+
+    const atual =
+        select.value;
+
+    const nomes =
+        [...new Set(
+            dadosClientesPatrocinadores
+                .map(obterNomePatrocinadorRegistro)
+                .filter(Boolean)
+        )]
+        .sort((a,b) =>
+            a.localeCompare(
+                b,
+                "pt-BR"
+            )
+        );
+
+    select.innerHTML =
+        `<option value="">Todos os patrocinadores</option>`;
+
+    nomes.forEach(nome => {
+
+        const option =
+            document.createElement("option");
+
+        option.value = nome;
+        option.textContent = nome;
+
+        select.appendChild(option);
+    });
+
+    if(
+        nomes.includes(atual)
+    ){
+        select.value = atual;
+    }
+}
+
+function renderizarClientesPatrocinadores(){
+
+    const tbody =
+        document.getElementById(
+            "listaClientesPatrocinadores"
+        );
+
+    if(!tbody) return;
+
+    const busca =
+        (
+            document.getElementById(
+                "filtroClientePatrocinador"
+            )?.value || ""
+        )
+        .trim()
+        .toLowerCase();
+
+    const patrocinadorFiltro =
+        document.getElementById(
+            "filtroPatrocinador"
+        )?.value || "";
+
+    const filtrados =
+        dadosClientesPatrocinadores.filter(item => {
+
+            const nome =
+                String(
+                    item.nome_cliente ||
+                    item.nome ||
+                    item.cliente_nome ||
+                    ""
+                );
+
+            const whatsapp =
+                String(
+                    item.whatsapp ||
+                    item.telefone ||
+                    ""
+                );
+
+            const patrocinador =
+                obterNomePatrocinadorRegistro(item);
+
+            const texto =
+                (
+                    nome +
+                    " " +
+                    whatsapp
+                ).toLowerCase();
+
+            return (
+                (!busca || texto.includes(busca)) &&
+                (
+                    !patrocinadorFiltro ||
+                    patrocinador === patrocinadorFiltro
+                )
+            );
+        });
+
+    document.getElementById(
+        "totalClientesPatrocinadores"
+    ).textContent =
+        new Set(
+            dadosClientesPatrocinadores.map(item =>
+                String(
+                    item.whatsapp ||
+                    item.telefone ||
+                    item.nome_cliente ||
+                    item.nome ||
+                    item.id
+                )
+            )
+        ).size;
+
+    document.getElementById(
+        "totalVisitasPatrocinadores"
+    ).textContent =
+        dadosClientesPatrocinadores.length;
+
+    if(!filtrados.length){
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4">
+                    Nenhum registro encontrado.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+    tbody.innerHTML =
+        filtrados.map(item => {
+
+            const nome =
+                item.nome_cliente ||
+                item.nome ||
+                item.cliente_nome ||
+                "-";
+
+            const whatsapp =
+                item.whatsapp ||
+                item.telefone ||
+                "-";
+
+            const patrocinador =
+                obterNomePatrocinadorRegistro(item);
+
+            const data =
+                item.created_at ||
+                item.data_hora ||
+                item.data_visita;
+
+            return `
+                <tr>
+                    <td>
+                        <b>${escaparHtmlAdmin(nome)}</b>
+                    </td>
+
+                    <td>
+                        ${escaparHtmlAdmin(whatsapp)}
+                    </td>
+
+                    <td>
+                        <span class="badge-patrocinador-admin">
+                            ⭐ ${escaparHtmlAdmin(patrocinador)}
+                        </span>
+                    </td>
+
+                    <td>
+                        ${escaparHtmlAdmin(
+                            formatarDataAdmin(data)
+                        )}
+                    </td>
+                </tr>
+            `;
+
+        }).join("");
+}
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function(){
+
+        document
+            .getElementById(
+                "filtroClientePatrocinador"
+            )
+            ?.addEventListener(
+                "input",
+                renderizarClientesPatrocinadores
+            );
+
+        document
+            .getElementById(
+                "filtroPatrocinador"
+            )
+            ?.addEventListener(
+                "change",
+                renderizarClientesPatrocinadores
+            );
+
+        document
+            .getElementById(
+                "btnAtualizarClientesPatrocinadores"
+            )
+            ?.addEventListener(
+                "click",
+                carregarClientesPatrocinadores
+            );
+    }
+);
+
+
 async function iniciar(){
 
     const ok = await carregarAppId();
@@ -812,10 +1250,12 @@ document.getElementById("linkAparencia").href  = `${BASE}aparencia.html${QS}`;
     await carregarDashboard();
     await carregarClientesOnline();
     await carregarUltimosPagamentos();
+    await carregarClientesPatrocinadores();
 
     setInterval(carregarDashboard,30000);
     setInterval(carregarClientesOnline,1000);
     setInterval(carregarUltimosPagamentos,5000);
+    setInterval(carregarClientesPatrocinadores,10000);
 }
 
 iniciar();
