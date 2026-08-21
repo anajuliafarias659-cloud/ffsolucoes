@@ -1241,6 +1241,22 @@ body.modo-patrocinadores #tela-patrocinadores .titulo-patrocinadores{
     pointer-events:auto !important;
 }
 
+
+/* Apenas os 2 patrocinadores do fluxo pós-cadastro são clicáveis. */
+#bloco-apoio .logo-parceiro,
+#tela-patrocinadores .card-patrocinador{
+    pointer-events:none !important;
+    cursor:default !important;
+}
+#lista-clique-patrocinadores .item-clique-patrocinador{
+    pointer-events:auto !important;
+    cursor:pointer !important;
+}
+.item-clique-patrocinador.processando{
+    opacity:.72;
+    pointer-events:none !important;
+}
+
 </style>
 </head>
 <body>
@@ -1394,6 +1410,7 @@ const APP_ID =
 
 let patrocinadoresCarregados = [];
 let patrocinadorClicadoParaLiberar = false;
+let clienteCadastroId = null;
 
 const TOTAL_PATROCINADORES_EXIGIDOS = 1;
 let patrocinadoresVisitados = new Set();
@@ -1445,29 +1462,46 @@ function atualizarContadorPatrocinadores(){
     }
 }
 
-function registrarVisitaPatrocinador(patrocinador){
-    if(!patrocinador || !patrocinador.id) return;
+async function registrarVisitaPatrocinador(patrocinador){
 
-    const id = String(patrocinador.id);
+    if(!patrocinador || !patrocinador.id) return false;
+
+    const id=String(patrocinador.id);
     patrocinadoresVisitados.add(id);
 
     try{
-        sessionStorage.setItem(chaveVisitaPatrocinador(id), "1");
+        sessionStorage.setItem(chaveVisitaPatrocinador(id),"1");
     }catch(e){}
 
-    const item = document.querySelector(
+    const item=document.querySelector(
         `[data-patrocinador-id="${CSS.escape(id)}"]`
     );
 
     if(item){
         item.classList.add("visitado");
-        const status = item.querySelector(".item-clique-status");
-        if(status) status.textContent = "✓ Visitado";
+        const status=item.querySelector(".item-clique-status");
+        if(status) status.textContent="✓ Visitado";
     }
 
     atualizarContadorPatrocinadores();
-}
 
+    if(clienteCadastroId){
+        const {error}=await db
+            .from("hotspot_acessos_patrocinadores")
+            .update({
+                patrocinador_id: patrocinador.id,
+                patrocinador_nome: patrocinador.nome || "Patrocinador",
+                patrocinador_url: patrocinador.url || "",
+                visitado_em: new Date().toISOString()
+            })
+            .eq("id",clienteCadastroId)
+            .eq("app_id",APP_ID);
+
+        if(error) console.error("Erro ao registrar patrocinador visitado:",error);
+    }
+
+    return true;
+}
 
 function mostrarAvisoSeguirPatrocinador(){
 
@@ -1629,39 +1663,34 @@ function renderCliquePatrocinadores(lista){
          */
         item.addEventListener(
             "click",
-            function(){
+            async function(){
 
-                registrarVisitaPatrocinador(
-                    patrocinador
-                );
+                if(item.classList.contains("processando")) return;
 
-                /*
-                 * Um clique é suficiente.
-                 * Primeiro abre a rede social do patrocinador.
-                 * Depois libera o acesso pelo MikroTik.
-                 */
+                item.classList.add("processando");
+
+                /* Abre a rede social no gesto do usuário. */
                 if(patrocinador.url){
-
-                    const janela =
-                        window.open(
-                            patrocinador.url,
-                            "_blank",
-                            "noopener,noreferrer"
-                        );
+                    const janela=window.open(
+                        patrocinador.url,
+                        "_blank",
+                        "noopener,noreferrer"
+                    );
 
                     if(!janela){
-                        console.log(
-                            "O navegador bloqueou a abertura da rede social."
-                        );
+                        console.log("O navegador bloqueou a abertura da rede social.");
                     }
                 }
 
+                await registrarVisitaPatrocinador(patrocinador);
+
                 mostrarAvisoSeguirPatrocinador();
 
-                patrocinadorClicadoParaLiberar = true;
+                /* Um clique basta para liberar. */
+                patrocinadorClicadoParaLiberar=true;
 
-                liberarInternet({
-                    preventDefault: function(){}
+                await liberarInternet({
+                    preventDefault:function(){}
                 });
             }
         );
@@ -2375,219 +2404,139 @@ function abrirAba(aba){
    LIBERAR INTERNET
 ========================================================= */
 
-async function liberarInternet(event) {
+async function salvarCadastroCliente(nome,whatsapp){
 
-    event.preventDefault();
+    const {data,error}=await db
+        .from("hotspot_acessos_patrocinadores")
+        .insert({
+            app_id:APP_ID,
+            nome_cliente:nome,
+            whatsapp:whatsapp
+        })
+        .select("id")
+        .single();
 
-
-    const nome =
-        document.getElementById(
-            "txt-nome"
-        ).value.trim();
-
-
-    const whatsapp =
-        document.getElementById(
-            "txt-whatsapp"
-        ).value.trim();
-
-
-    const termos =
-        document.getElementById(
-            "chk-termos"
-        ).checked;
-
-
-    const btn =
-        document.getElementById(
-            "btn-entrar"
-        );
-
-
-    mostrarErro("");
-
-
-    if (!nome) {
-
-        mostrarErro(
-            "Informe seu nome."
-        );
-
-        return;
+    if(error){
+        console.error("Erro ao salvar cliente:",error);
+        return {ok:false,error};
     }
 
-
-    if (!whatsapp) {
-
-        mostrarErro(
-            "Informe seu WhatsApp."
-        );
-
-        return;
-    }
-
-
-    if (!termos) {
-
-        mostrarErro(
-            "Aceite os termos para continuar."
-        );
-
-        return;
-    }
-
-
-    /*
-     * Primeiro envio do formulário:
-     * não libera ainda. Mostra os 2 patrocinadores.
-     *
-     * Depois que o cliente clicar em um deles,
-     * patrocinadorClicadoParaLiberar vira true e
-     * a mesma função continua para o login MikroTik.
-     */
-    if(!patrocinadorClicadoParaLiberar){
-
-        const etapa =
-            document.getElementById(
-                "etapa-patrocinadores"
-            );
-
-        if(etapa){
-            etapa.style.display = "block";
-        }
-
-        mostrarPatrocinadoresAposDados();
-
-        mostrarErro("");
-
-        btn.disabled = false;
-        btn.textContent =
-            "📶 LIBERAR WI-FI GRÁTIS";
-
-        return;
-    }
-
-
-    patrocinadorClicadoParaLiberar = false;
-
-    btn.disabled =
-        true;
-
-    btn.textContent =
-        "CONECTANDO...";
-
-
-    /*
-     * Modo Hotspot MikroTik.
-     */
-
-    if (LINK_LOGIN) {
-
-        try {
-
-            const form =
-                document.createElement(
-                    "form"
-                );
-
-            form.method =
-                "POST";
-
-            form.action =
-                LINK_LOGIN;
-
-
-            /*
-             * Usuário especial usado
-             * pelo fluxo gratuito patrocinado.
-             */
-
-            const campos = {
-
-                username:
-                    "GRATUITO_PATROCINADO",
-
-                password:
-                    "",
-
-                dst:
-                    LINK_ORIG,
-
-                popup:
-                    "true"
-
-            };
-
-
-            Object.keys(campos)
-                .forEach(nomeCampo => {
-
-                    const input =
-                        document.createElement(
-                            "input"
-                        );
-
-                    input.type =
-                        "hidden";
-
-                    input.name =
-                        nomeCampo;
-
-                    input.value =
-                        campos[nomeCampo];
-
-                    form.appendChild(
-                        input
-                    );
-
-                });
-
-
-            document.body.appendChild(
-                form
-            );
-
-
-            form.submit();
-
-            return;
-
-        } catch (erro) {
-
-            console.error(
-                "Erro ao enviar login MikroTik:",
-                erro
-            );
-
-            mostrarErro(
-                "Não foi possível liberar o Wi-Fi. Tente novamente."
-            );
-
-        }
-
-    } else {
-
-        /*
-         * Quando aberto fora do portal do MikroTik.
-         */
-
-        mostrarErro(
-            "Esta página precisa ser aberta pelo portal do Wi-Fi."
-        );
-
-    }
-
-
-    btn.disabled =
-        false;
-
-    btn.textContent =
-        "📶 LIBERAR WI-FI GRÁTIS";
+    return {ok:true,id:data.id};
 }
 
 
 /* =========================================================
-   INICIALIZAÇÃO
+   LIBERAR INTERNET
+========================================================= */
+
+async function liberarInternet(event){
+
+    if(event && typeof event.preventDefault==="function"){
+        event.preventDefault();
+    }
+
+    const nome=document.getElementById("txt-nome").value.trim();
+    const whatsapp=document.getElementById("txt-whatsapp").value.trim();
+    const termos=document.getElementById("chk-termos").checked;
+    const btn=document.getElementById("btn-entrar");
+
+    mostrarErro("");
+
+    if(!nome){
+        mostrarErro("Informe seu nome.");
+        return;
+    }
+
+    if(!whatsapp){
+        mostrarErro("Informe seu WhatsApp.");
+        return;
+    }
+
+    if(!termos){
+        mostrarErro("Aceite os termos para continuar.");
+        return;
+    }
+
+    /* Primeiro passo: salva cliente e mostra os 2 patrocinadores. */
+    if(!clienteCadastroId){
+
+        btn.disabled=true;
+        btn.textContent="REGISTRANDO...";
+
+        const cadastro=await salvarCadastroCliente(nome,whatsapp);
+
+        if(!cadastro.ok){
+            btn.disabled=false;
+            btn.textContent="📶 LIBERAR WI-FI GRÁTIS";
+            mostrarErro("Não foi possível registrar seus dados. Tente novamente.");
+            return;
+        }
+
+        clienteCadastroId=cadastro.id;
+
+        btn.disabled=false;
+        btn.textContent="📶 LIBERAR WI-FI GRÁTIS";
+
+        mostrarPatrocinadoresAposDados();
+        return;
+    }
+
+    /* Segundo passo: só chega aqui depois do clique no patrocinador. */
+    if(!patrocinadorClicadoParaLiberar){
+        mostrarErro("Siga 1 de nossos patrocinadores para liberar a sua internet.");
+        return;
+    }
+
+    patrocinadorClicadoParaLiberar=false;
+
+    btn.disabled=true;
+    btn.textContent="CONECTANDO...";
+
+    if(LINK_LOGIN){
+
+        try{
+
+            const form=document.createElement("form");
+            form.method="POST";
+            form.action=LINK_LOGIN;
+
+            const campos={
+                username:"GRATUITO_PATROCINADO",
+                password:"",
+                dst:LINK_ORIG,
+                popup:"true"
+            };
+
+            Object.keys(campos).forEach(nomeCampo=>{
+                const input=document.createElement("input");
+                input.type="hidden";
+                input.name=nomeCampo;
+                input.value=campos[nomeCampo];
+                form.appendChild(input);
+            });
+
+            document.body.appendChild(form);
+            form.submit();
+            return;
+
+        }catch(erro){
+
+            console.error("Erro ao enviar login MikroTik:",erro);
+            mostrarErro("Não foi possível liberar o Wi-Fi. Tente novamente.");
+        }
+
+    }else{
+
+        mostrarErro("Esta página precisa ser aberta pelo portal do Wi-Fi.");
+    }
+
+    btn.disabled=false;
+    btn.textContent="📶 LIBERAR WI-FI GRÁTIS";
+}
+
+
+/* =========================================================
+
 ========================================================= */
 
 async function iniciar() {
