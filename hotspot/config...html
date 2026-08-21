@@ -203,6 +203,21 @@ transform:translateX(26px);
     .patrocinador-grid{grid-template-columns:1fr;}
 }
 
+
+/* ===== CONFIGURAÇÃO DOS MASTERS ROTATIVOS ===== */
+.master-config-topo{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.master-config-topo h3{margin-bottom:4px}
+.master-config-topo p{margin:0;color:#6b7378;font-size:12px;line-height:1.4}
+.badge-rotacao{white-space:nowrap;background:#fff5c7;color:#745c00;border:1px solid #f0d76a;border-radius:20px;padding:6px 10px;font-size:10px;font-weight:800}
+.master-item{border:1px solid #dce7ea;border-radius:12px;background:#fff;padding:14px;margin-bottom:12px}
+.master-item-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.master-item-top strong{color:#07546d;font-size:13px}
+.master-item-num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#fff2b8;color:#715800;font-weight:900;font-size:12px}
+.master-preview{width:100%;max-height:190px;object-fit:contain;border-radius:10px;background:#f6f8f9;border:1px solid #edf0f1;margin:6px 0 10px;display:none}
+.master-acoes{display:flex;gap:8px}
+.master-acoes button{font-size:13px;padding:10px}
+.master-vazio{padding:18px;border:1px dashed #cbdde2;border-radius:10px;background:#f8fbfc;color:#728087;text-align:center;font-size:12px;margin-bottom:12px}
+@media(max-width:650px){.master-config-topo{flex-direction:column}.badge-rotacao{white-space:normal}.master-acoes{flex-direction:column}}
 </style>
 
 </head>
@@ -294,20 +309,18 @@ Excluir Banner
     <label>Descrição da Tela de Entrada</label>
     <textarea id="evento_descricao" placeholder="Conecte-se gratuitamente oferecido por nossos patrocinadores."></textarea>
 
-    <div class="patrocinador-card">
-        <h3>⭐ Patrocinador Master (Destaque Principal)</h3>
+    <div class="patrocinador-card master-config-card">
+        <div class="master-config-topo">
+            <div>
+                <h3>⭐ Patrocinadores Master</h3>
+                <p>Cadastre vários Masters. A página pública mostrará um por vez e fará a troca automática.</p>
+            </div>
+            <span class="badge-rotacao">🔄 Rotação automática: 6s</span>
+        </div>
 
-        <label>Nome do Patrocinador Master</label>
-        <input id="patrocinador_master_nome" placeholder="Ex: Supermercado Aliança">
+        <div id="listaMasters"></div>
 
-        <label>Instagram ou Site</label>
-        <input id="patrocinador_master_url" placeholder="https://instagram.com/empresa">
-
-        <label>Banner Comercial</label>
-        <input type="file" id="patrocinadorMasterFile" accept="image/*" style="display:none">
-        <img id="previewMaster" class="preview-patrocinador">
-        <button type="button" onclick="patrocinadorMasterFile.click()">Alterar Banner Master</button>
-        <button type="button" class="btn-perigo" style="margin-top:8px" onclick="excluirPatrocinadorMaster()">Excluir Banner Master</button>
+        <button type="button" onclick="adicionarMaster()">➕ Adicionar Patrocinador Master</button>
     </div>
 
     <div class="patrocinador-card">
@@ -532,12 +545,10 @@ const modalMikrotik = document.getElementById("modalMikrotik");
 
 const evento_nome = document.getElementById("evento_nome");
 const evento_descricao = document.getElementById("evento_descricao");
-const patrocinadorMasterFile = document.getElementById("patrocinadorMasterFile");
-const previewMaster = document.getElementById("previewMaster");
 const exibir_patrocinadores = document.getElementById("exibir_patrocinadores");
 
 let patrocinadores = [];
-
+let masters = [];
 
 let mikrotikEditando = null;
 
@@ -804,9 +815,60 @@ function previewImagemPatrocinador(input, img){
     }
 }
 
-patrocinadorMasterFile.addEventListener("change", () =>
-    previewImagemPatrocinador(patrocinadorMasterFile, previewMaster)
-);
+function separarMastersConfig(valor){
+    if(valor === null || valor === undefined) return [];
+    const texto = String(valor).trim();
+    if(!texto) return [];
+    try{
+        const json = JSON.parse(texto);
+        if(Array.isArray(json)) return json.map(v => String(v || "").trim());
+    }catch(e){}
+    return texto.split("||").map(v => v.trim());
+}
+
+function renderMasters(){
+    const lista = document.getElementById("listaMasters");
+    if(!lista) return;
+    lista.innerHTML = "";
+    if(!masters.length){
+        lista.innerHTML = `<div class="master-vazio">⭐ Nenhum Patrocinador Master cadastrado.<br>Clique em <b>Adicionar Patrocinador Master</b> para começar.</div>`;
+        return;
+    }
+    masters.forEach((m,index) => {
+        const div = document.createElement("div");
+        div.className = "master-item";
+        div.innerHTML = `
+            <div class="master-item-top"><strong><span class="master-item-num">${index+1}</span> Patrocinador Master ${index+1}</strong></div>
+            <label>Nome do Patrocinador</label>
+            <input data-master-campo="nome" data-master-index="${index}" value="${escapeHtml(m.nome || "")}" placeholder="Ex: Prefeitura Municipal de São Raimundo Nonato">
+            <label>Instagram ou Site</label>
+            <input data-master-campo="url" data-master-index="${index}" value="${escapeHtml(m.url || "")}" placeholder="https://instagram.com/empresa">
+            <label>Banner Comercial do Master</label>
+            <input type="file" accept="image/*" data-master-file="${index}">
+            <img class="master-preview" id="previewMaster${index}" src="${escapeAttr(m.banner || "")}" style="${m.banner ? "display:block" : "display:none"}">
+            <div class="master-acoes"><button type="button" class="btn-perigo" data-master-remover="${index}">🗑️ Excluir este Master</button></div>
+        `;
+        lista.appendChild(div);
+    });
+    lista.querySelectorAll("[data-master-campo]").forEach(el => el.addEventListener("input", () => {
+        const i = Number(el.dataset.masterIndex); masters[i][el.dataset.masterCampo] = el.value;
+    }));
+    lista.querySelectorAll("[data-master-file]").forEach(el => el.addEventListener("change", () => {
+        const i = Number(el.dataset.masterFile); const img = document.getElementById("previewMaster" + i);
+        masters[i].file = el.files && el.files[0] ? el.files[0] : null; previewImagemPatrocinador(el, img);
+    }));
+    lista.querySelectorAll("[data-master-remover]").forEach(el => el.addEventListener("click", () => {
+        const i = Number(el.dataset.masterRemover); if(!confirm(`Excluir o Patrocinador Master ${i+1}?`)) return; masters.splice(i,1); renderMasters();
+    }));
+}
+
+function adicionarMaster(){
+    masters.push({nome:"",url:"",banner:"",file:null});
+    renderMasters();
+    const itens = document.querySelectorAll("#listaMasters .master-item");
+    const ultimo = itens[itens.length - 1];
+    if(ultimo) ultimo.scrollIntoView({behavior:"smooth",block:"center"});
+}
 
 function renderPatrocinadores(){
     const lista = document.getElementById("listaPatrocinadores");
@@ -884,22 +946,6 @@ function adicionarPatrocinador(){
     patrocinadores.push({nome:"", url:"", banner:""});
     renderPatrocinadores();
 }
-
-async function excluirPatrocinadorMaster(){
-    if(!confirm("Excluir o banner do patrocinador master?")) return;
-
-    await db.storage.from("hotspot").remove([
-        `${APP_ID}/patrocinador-master.jpg`,
-        `${APP_ID}/patrocinador-master.jpeg`,
-        `${APP_ID}/patrocinador-master.png`,
-        `${APP_ID}/patrocinador-master.webp`
-    ]);
-
-    previewMaster.src = "";
-    previewMaster.style.display = "none";
-    patrocinadorMasterFile.value = "";
-}
-
 
 async function carregarPatrocinadores(){
     patrocinadores = [];
@@ -980,13 +1026,16 @@ modelo.checked = data.modelo === "indexx.html";
 
     evento_nome.value = data.evento_nome || data.nome_hotspot || "";
     evento_descricao.value = data.evento_descricao || data.descricao || "";
-    document.getElementById("patrocinador_master_nome").value = data.patrocinador_master_nome || "";
-    document.getElementById("patrocinador_master_url").value = data.patrocinador_master_url || "";
-    exibir_patrocinadores.checked = data.exibir_patrocinadores !== false;
-    if(data.patrocinador_master_banner){
-        previewMaster.src = data.patrocinador_master_banner;
-        previewMaster.style.display = "block";
+    const nomesMaster = separarMastersConfig(data.patrocinador_master_nome);
+    const urlsMaster = separarMastersConfig(data.patrocinador_master_url);
+    const bannersMaster = separarMastersConfig(data.patrocinador_master_banner);
+    const totalMasters = Math.max(nomesMaster.length, urlsMaster.length, bannersMaster.length);
+    masters = [];
+    for(let i = 0; i < totalMasters; i++) {
+        masters.push({nome:nomesMaster[i] || "", url:urlsMaster[i] || "", banner:bannersMaster[i] || "", file:null});
     }
+    renderMasters();
+    exibir_patrocinadores.checked = data.exibir_patrocinadores !== false;
 }
 
 async function salvar() {
@@ -1088,36 +1137,39 @@ const nomeArquivo = `${APP_ID}/banner.${extensao}`;
 }
 
     /* =======================
-       PATROCINADOR MASTER
+       PATROCINADORES MASTER ROTATIVOS
        ======================= */
-    let masterURL = null;
-    const { data: configAtual } = await db
-        .from("hotspot_config")
-        .select("patrocinador_master_banner")
-        .eq("app_id", APP_ID)
-        .maybeSingle();
+    const masterNomes = [];
+    const masterUrls = [];
+    const masterBanners = [];
 
-    masterURL = configAtual?.patrocinador_master_banner || null;
+    for(let i = 0; i < masters.length; i++){
+        const m = masters[i];
+        let banner = m.banner || "";
 
-    if (patrocinadorMasterFile.files.length > 0) {
-        const arquivo = patrocinadorMasterFile.files[0];
-        const extensao = arquivo.name.split(".").pop().toLowerCase();
-        await db.storage.from("hotspot").remove([
-            `${APP_ID}/patrocinador-master.jpg`,
-            `${APP_ID}/patrocinador-master.jpeg`,
-            `${APP_ID}/patrocinador-master.png`,
-            `${APP_ID}/patrocinador-master.webp`
-        ]);
-        const nomeArquivo = `${APP_ID}/patrocinador-master.${extensao}`;
-        const { error: erroMaster } = await db.storage
-            .from("hotspot")
-            .upload(nomeArquivo, arquivo, {upsert:true});
-        if (erroMaster) {
-            alert("Erro no banner master: " + erroMaster.message);
-            return;
+        if(m.file){
+            const ext = m.file.name.split(".").pop().toLowerCase();
+            const path = `${APP_ID}/patrocinador-master-${i}.${ext}`;
+            const { error: erroMaster } = await db.storage.from("hotspot").upload(path, m.file, {upsert:true});
+            if(erroMaster){
+                alert(`Erro no banner do Master ${i+1}: ` + erroMaster.message);
+                return;
+            }
+            banner = db.storage.from("hotspot").getPublicUrl(path).data.publicUrl + "?v=" + Date.now();
         }
-        masterURL = db.storage.from("hotspot").getPublicUrl(nomeArquivo).data.publicUrl + "?v=" + Date.now();
+
+        if((m.nome || "").trim() || banner || (m.url || "").trim()){
+            masterNomes.push((m.nome || "").trim());
+            masterUrls.push((m.url || "").trim());
+            masterBanners.push(banner);
+        }
+        m.banner = banner;
+        m.file = null;
     }
+
+    const masterNomeValor = masterNomes.length ? masterNomes.join("||") : null;
+    const masterUrlValor = masterUrls.length ? masterUrls.join("||") : null;
+    const masterBannerValor = masterBanners.length ? masterBanners.join("||") : null;
 
     const dadosConfig = {
         nome_hotspot: nome.value,
@@ -1136,9 +1188,9 @@ const nomeArquivo = `${APP_ID}/banner.${extensao}`;
         modelo: modelo.checked ? "indexx.html" : "index.html",
         evento_nome: evento_nome.value,
         evento_descricao: evento_descricao.value,
-        patrocinador_master_nome: document.getElementById("patrocinador_master_nome").value,
-        patrocinador_master_url: document.getElementById("patrocinador_master_url").value,
-        patrocinador_master_banner: masterURL,
+        patrocinador_master_nome: masterNomeValor,
+        patrocinador_master_url: masterUrlValor,
+        patrocinador_master_banner: masterBannerValor,
         exibir_patrocinadores: exibir_patrocinadores.checked
     };
 
