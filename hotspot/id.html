@@ -472,6 +472,47 @@ button,input{font:inherit}
     .card-patrocinador-logo{height:105px}
 }
 
+
+/* ===== CLIQUE E SIGA 3 PATROCINADORES ===== */
+.etapa-patrocinadores{margin:12px 0 13px;padding:12px;background:linear-gradient(180deg,#f8fcfd,#eef8fa);border:1px solid #d8edf2;border-radius:12px}
+.etapa-titulo{text-align:center;color:#07546d;font-size:13px;font-weight:900;margin:0 0 3px}
+.etapa-subtitulo{text-align:center;color:#718086;font-size:9px;margin:0 0 10px}
+.contador-patrocinadores{text-align:center;font-size:10px;font-weight:900;color:#087ea4;margin-bottom:9px}
+.lista-clique-patrocinadores{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.item-clique-patrocinador{min-width:0;border:1px solid #dce7ea;background:#fff;border-radius:10px;padding:7px 5px;text-align:center;cursor:pointer;transition:.18s;box-shadow:0 2px 7px rgba(20,50,60,.05)}
+.item-clique-patrocinador:hover{transform:translateY(-1px)}
+.item-clique-patrocinador.visitado{border-color:#27c86a;background:#f1fff6}
+.item-clique-logo{height:42px;display:flex;align-items:center;justify-content:center;margin-bottom:4px}
+.item-clique-logo img{max-width:100%;max-height:40px;object-fit:contain}
+.item-clique-inicial{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#eaf8fc;color:#087ea4;font-weight:900;font-size:16px}
+.item-clique-nome{color:#35434a;font-size:9px;font-weight:900;line-height:1.15;min-height:21px;display:flex;align-items:center;justify-content:center}
+.item-clique-status{margin-top:4px;color:#087ea4;font-size:8px;font-weight:900}
+.item-clique-patrocinador.visitado .item-clique-status{color:#18a952}
+.aviso-clique{display:none;margin-top:8px;padding:7px 8px;border-radius:8px;background:#fff8df;color:#806500;font-size:9px;text-align:center;font-weight:700}
+.aviso-clique.mostrar{display:block}
+#btn-entrar.bloqueado{opacity:.48;cursor:not-allowed;filter:grayscale(.15)}
+@media(max-width:360px){.lista-clique-patrocinadores{gap:5px}.item-clique-patrocinador{padding:6px 3px}.item-clique-nome{font-size:8px}}
+
+
+.btn-localizacao{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+    width:100%;
+    min-height:32px;
+    margin-top:6px;
+    padding:0 6px;
+    border-radius:8px;
+    background:#eef8f1;
+    color:#16834a;
+    border:1px solid #ccebd9;
+    text-decoration:none;
+    font-size:10px;
+    font-weight:900;
+}
+.btn-localizacao:hover{background:#e1f5e9}
+
 </style>
 </head>
 <body>
@@ -515,6 +556,14 @@ style="display:none">
 </div>
 <h2>Acesso Gratuito à Internet</h2>
 <div class="subtitulo-login">Preencha seus dados para entrar na rede</div>
+<div id="etapa-patrocinadores" class="etapa-patrocinadores" style="display:none">
+    <div class="etapa-titulo">🎁 Clique e siga nossos patrocinadores</div>
+    <div class="etapa-subtitulo">Visite 3 patrocinadores para liberar o acesso gratuito.</div>
+    <div id="contador-patrocinadores" class="contador-patrocinadores">0 de 3 visitados</div>
+    <div id="lista-clique-patrocinadores" class="lista-clique-patrocinadores"></div>
+    <div id="aviso-clique" class="aviso-clique">Visite os 3 patrocinadores acima para liberar o Wi-Fi.</div>
+</div>
+
 <div id="mensagem-erro"></div>
 
 <form id="form-hotspot" onsubmit="liberarInternet(event)">
@@ -602,6 +651,163 @@ const APP_ID =
     "e56fa5a4-0d73-4299-9d3c-b671d191ffba";
 
 let patrocinadoresCarregados = [];
+
+const TOTAL_PATROCINADORES_EXIGIDOS = 3;
+let patrocinadoresVisitados = new Set();
+
+function chaveVisitaPatrocinador(id){
+    return "festejos_patrocinador_" + APP_ID + "_" + id;
+}
+
+function carregarVisitasPatrocinadores(){
+    patrocinadoresVisitados = new Set();
+    try{
+        patrocinadoresCarregados.forEach(p => {
+            if(!p || !p.id) return;
+            if(sessionStorage.getItem(chaveVisitaPatrocinador(p.id)) === "1"){
+                patrocinadoresVisitados.add(String(p.id));
+            }
+        });
+    }catch(e){}
+}
+
+function quantidadeVisitas(){
+    return patrocinadoresVisitados.size;
+}
+
+function atualizarContadorPatrocinadores(){
+    const contador = document.getElementById("contador-patrocinadores");
+    const aviso = document.getElementById("aviso-clique");
+    const btn = document.getElementById("btn-entrar");
+    if(!contador) return;
+
+    const qtd = quantidadeVisitas();
+
+    contador.textContent =
+        qtd >= TOTAL_PATROCINADORES_EXIGIDOS
+        ? "✓ 3 de 3 visitados — acesso liberado"
+        : `${qtd} de ${TOTAL_PATROCINADORES_EXIGIDOS} visitados`;
+
+    if(qtd >= TOTAL_PATROCINADORES_EXIGIDOS){
+        if(aviso) aviso.classList.remove("mostrar");
+        if(btn){
+            btn.classList.remove("bloqueado");
+            btn.title = "Liberar Wi-Fi grátis";
+        }
+    }else{
+        if(btn){
+            btn.classList.add("bloqueado");
+            btn.title = "Visite 3 patrocinadores antes de liberar o Wi-Fi";
+        }
+    }
+}
+
+function registrarVisitaPatrocinador(patrocinador){
+    if(!patrocinador || !patrocinador.id) return;
+
+    const id = String(patrocinador.id);
+    patrocinadoresVisitados.add(id);
+
+    try{
+        sessionStorage.setItem(chaveVisitaPatrocinador(id), "1");
+    }catch(e){}
+
+    const item = document.querySelector(
+        `[data-patrocinador-id="${CSS.escape(id)}"]`
+    );
+
+    if(item){
+        item.classList.add("visitado");
+        const status = item.querySelector(".item-clique-status");
+        if(status) status.textContent = "✓ Visitado";
+    }
+
+    atualizarContadorPatrocinadores();
+}
+
+function renderCliquePatrocinadores(lista){
+    const etapa = document.getElementById("etapa-patrocinadores");
+    const listaEl = document.getElementById("lista-clique-patrocinadores");
+    if(!etapa || !listaEl) return;
+
+    const disponiveis = (lista || []).filter(
+        p => p && p.id && p.url && (p.nome || p.banner)
+    );
+
+    etapa.style.display = disponiveis.length ? "block" : "none";
+    listaEl.innerHTML = "";
+
+    disponiveis.forEach(p => {
+        const item = document.createElement("div");
+        item.className = "item-clique-patrocinador";
+        item.dataset.patrocinadorId = String(p.id);
+
+        const logo = document.createElement("div");
+        logo.className = "item-clique-logo";
+
+        if(p.banner){
+            const img = document.createElement("img");
+            img.src = p.banner + (p.banner.includes("?") ? "&" : "?") + "v=" + Date.now();
+            img.alt = p.nome || "Patrocinador";
+            logo.appendChild(img);
+        }else{
+            const inicial = document.createElement("div");
+            inicial.className = "item-clique-inicial";
+            inicial.textContent = (p.nome || "P").trim().charAt(0).toUpperCase();
+            logo.appendChild(inicial);
+        }
+
+        item.appendChild(logo);
+
+        const nome = document.createElement("div");
+        nome.className = "item-clique-nome";
+        nome.textContent = p.nome || "Patrocinador";
+        item.appendChild(nome);
+
+        const status = document.createElement("div");
+        status.className = "item-clique-status";
+
+        const jaVisitado = patrocinadoresVisitados.has(String(p.id));
+        item.classList.toggle("visitado", jaVisitado);
+        status.textContent = jaVisitado ? "✓ Visitado" : "👆 Clique e siga";
+
+        item.appendChild(status);
+
+
+        if(p.localizacao){
+            const local = document.createElement("a");
+            local.className = "btn-localizacao";
+            local.href = p.localizacao;
+            local.target = "_blank";
+            local.rel = "noopener noreferrer";
+            local.textContent = "📍 Localização";
+            local.addEventListener("click", function(event){
+                event.stopPropagation();
+            });
+            item.appendChild(local);
+        }
+
+        item.addEventListener("click", function(){
+            if(!p.url) return;
+
+            const janela = window.open(
+                p.url,
+                "_blank",
+                "noopener,noreferrer"
+            );
+
+            registrarVisitaPatrocinador(p);
+
+            if(!janela){
+                window.location.href = p.url;
+            }
+        });
+
+        listaEl.appendChild(item);
+    });
+
+    atualizarContadorPatrocinadores();
+}
 
 
 function mostrarErro(mensagem) {
@@ -895,7 +1101,11 @@ async function carregarPatrocinadores() {
 
         patrocinadoresCarregados = data || [];
 
+        carregarVisitasPatrocinadores();
+
         renderTelaPatrocinadores(patrocinadoresCarregados);
+
+        renderCliquePatrocinadores(patrocinadoresCarregados);
 
         if (!data || data.length === 0) {
 
@@ -969,6 +1179,20 @@ async function carregarPatrocinadores() {
                 "Patrocinador";
 
             box.appendChild(nome);
+
+
+            if(patrocinador.localizacao){
+                const local = document.createElement("a");
+                local.className = "btn-localizacao";
+                local.href = patrocinador.localizacao;
+                local.target = "_blank";
+                local.rel = "noopener noreferrer";
+                local.textContent = "📍 Localização";
+                local.addEventListener("click", function(event){
+                    event.stopPropagation();
+                });
+                box.appendChild(local);
+            }
 
             if (patrocinador.url) {
 
@@ -1167,6 +1391,20 @@ function renderTelaPatrocinadores(lista){
         }
 
 
+
+        if(p.localizacao){
+            const local = document.createElement("a");
+            local.className = "btn-localizacao";
+            local.href = p.localizacao;
+            local.target = "_blank";
+            local.rel = "noopener noreferrer";
+            local.innerHTML = "📍 Ver localização";
+            local.addEventListener("click", function(event){
+                event.stopPropagation();
+            });
+            card.appendChild(local);
+        }
+
         grade.appendChild(card);
 
     });
@@ -1290,6 +1528,28 @@ async function liberarInternet(event) {
 
         mostrarErro(
             "Aceite os termos para continuar."
+        );
+
+        return;
+    }
+
+
+    if(
+        quantidadeVisitas() <
+        TOTAL_PATROCINADORES_EXIGIDOS
+    ){
+
+        const aviso =
+            document.getElementById(
+                "aviso-clique"
+            );
+
+        if(aviso){
+            aviso.classList.add("mostrar");
+        }
+
+        mostrarErro(
+            "Para liberar o Wi-Fi, visite os 3 patrocinadores."
         );
 
         return;
@@ -1421,6 +1681,8 @@ async function iniciar() {
     await carregarConfiguracoes();
 
     await carregarPatrocinadores();
+
+    atualizarContadorPatrocinadores();
 
 }
 
