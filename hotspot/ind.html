@@ -587,6 +587,61 @@ button,input{font:inherit}
     }
 }
 
+
+/* ===== TOPO: SOMENTE O BANNER DO EVENTO ===== */
+#empresa{display:none !important}
+#bloco-banner-evento{
+    position:sticky;
+    top:0;
+    z-index:1000;
+    width:100%;
+    margin:0;
+    padding:6px 7px 8px;
+    background:linear-gradient(135deg,#07546d,#087ea4);
+    border:0;
+    border-radius:0 0 16px 16px;
+    box-shadow:0 5px 18px rgba(0,55,75,.25);
+}
+#bloco-banner-evento .banner-evento{
+    display:block;
+    width:min(100%,900px);
+    height:auto;
+    max-height:240px;
+    min-height:0;
+    margin:0 auto;
+    object-fit:contain;
+    border-radius:12px;
+    background:#fff;
+    box-shadow:0 4px 14px rgba(0,0,0,.16);
+}
+#bloco-banner-evento::before,
+#bloco-banner-evento::after{display:none}
+.container{
+    width:min(100% - 16px,520px);
+    padding-top:10px;
+}
+/* ===== MASTER ROTATIVO ===== */
+#bloco-master{overflow:hidden}
+.master-conteudo{transition:opacity .35s ease,transform .35s ease}
+.master-conteudo.trocando{opacity:0;transform:scale(.985)}
+.master-indicadores{display:flex;justify-content:center;gap:5px;margin-top:8px}
+.master-indicador{width:7px;height:7px;border-radius:50%;background:#d8e0e3}
+.master-indicador.ativo{width:18px;border-radius:10px;background:var(--ouro)}
+@media(max-width:520px){
+    #bloco-banner-evento{
+        padding:4px 4px 6px;
+        border-radius:0 0 13px 13px;
+    }
+    #bloco-banner-evento .banner-evento{
+        max-height:205px;
+        border-radius:9px;
+    }
+    .container{
+        width:min(100% - 14px,430px);
+        padding-top:8px;
+    }
+}
+
 </style>
 </head>
 <body>
@@ -618,10 +673,13 @@ style="display:none">
 
 <div class="patrocinador-master" id="bloco-master" style="display:none">
 <div class="tag-master">Patrocinador Master</div>
+<div id="master-conteudo" class="master-conteudo">
 <a id="link-master" href="#" target="_blank" rel="noopener noreferrer">
 <img class="banner-patrocinio" id="banner-master" alt="Patrocinador Master">
 </a>
 <div class="nome-master" id="nome-master"></div>
+</div>
+<div id="master-indicadores" class="master-indicadores"></div>
 </div>
 
 <div class="card-login">
@@ -899,6 +957,151 @@ function mostrarErro(mensagem) {
    CONFIGURAÇÃO DO EVENTO
 ========================================================= */
 
+
+let mastersRotativos = [];
+let masterAtual = 0;
+let timerMaster = null;
+
+/*
+ * O patrocinador master continua usando os campos atuais do hotspot_config.
+ * Para cadastrar vários sem mudar o banco:
+ *
+ * Nome:   Loja A||Loja B||Loja C
+ * Link:   https://link-a||https://link-b||https://link-c
+ * Banner: https://banner-a||https://banner-b||https://banner-c
+ *
+ * O sistema troca automaticamente a cada 6 segundos.
+ */
+function separarMasters(valor){
+    if(valor === null || valor === undefined) return [];
+
+    const texto=String(valor).trim();
+    if(!texto) return [];
+
+    try{
+        const json=JSON.parse(texto);
+        if(Array.isArray(json)){
+            return json.map(v=>String(v||"").trim()).filter(Boolean);
+        }
+    }catch(e){}
+
+    return texto.split("||").map(v=>v.trim()).filter(Boolean);
+}
+
+function montarMasters(config){
+    const nomes=separarMasters(config.patrocinador_master_nome);
+    const urls=separarMasters(config.patrocinador_master_url);
+    const banners=separarMasters(config.patrocinador_master_banner);
+
+    const total=Math.max(nomes.length,urls.length,banners.length);
+    const lista=[];
+
+    for(let i=0;i<total;i++){
+        const item={
+            nome:nomes[i] || nomes[0] || "Patrocinador Master",
+            url:urls[i] || urls[0] || "",
+            banner:banners[i] || banners[0] || ""
+        };
+
+        if(item.banner || item.nome) lista.push(item);
+    }
+
+    return lista;
+}
+
+function renderIndicadoresMaster(){
+    const el=document.getElementById("master-indicadores");
+    if(!el) return;
+
+    el.innerHTML="";
+
+    if(mastersRotativos.length<=1) return;
+
+    mastersRotativos.forEach((_,i)=>{
+        const dot=document.createElement("span");
+        dot.className="master-indicador"+(i===masterAtual?" ativo":"");
+        el.appendChild(dot);
+    });
+}
+
+function mostrarMaster(index,animar=true){
+    const bloco=document.getElementById("bloco-master");
+    const conteudo=document.getElementById("master-conteudo");
+    const banner=document.getElementById("banner-master");
+    const nome=document.getElementById("nome-master");
+    const link=document.getElementById("link-master");
+
+    if(!bloco || !conteudo || !banner || !nome || !link) return;
+
+    if(!mastersRotativos.length){
+        bloco.style.display="none";
+        return;
+    }
+
+    masterAtual=(index+mastersRotativos.length)%mastersRotativos.length;
+    const master=mastersRotativos[masterAtual];
+
+    const aplicar=()=>{
+        if(master.banner){
+            banner.src=master.banner;
+            banner.style.display="block";
+        }else{
+            banner.removeAttribute("src");
+            banner.style.display="none";
+        }
+
+        nome.textContent=master.nome || "";
+
+        if(master.url){
+            link.href=master.url;
+            link.style.pointerEvents="auto";
+            link.style.cursor="pointer";
+        }else{
+            link.removeAttribute("href");
+            link.style.pointerEvents="none";
+        }
+
+        bloco.style.display="block";
+        renderIndicadoresMaster();
+    };
+
+    if(animar){
+        conteudo.classList.add("trocando");
+        setTimeout(()=>{
+            aplicar();
+            requestAnimationFrame(()=>{
+                conteudo.classList.remove("trocando");
+            });
+        },220);
+    }else{
+        aplicar();
+    }
+}
+
+function iniciarRotacaoMaster(config){
+    if(timerMaster){
+        clearInterval(timerMaster);
+        timerMaster=null;
+    }
+
+    mastersRotativos=montarMasters(config);
+    masterAtual=0;
+
+    if(!mastersRotativos.length){
+        const bloco=document.getElementById("bloco-master");
+        if(bloco) bloco.style.display="none";
+        return;
+    }
+
+    mostrarMaster(0,false);
+
+    if(mastersRotativos.length>1){
+        timerMaster=setInterval(()=>{
+            mostrarMaster(masterAtual+1,true);
+        },6000);
+    }
+}
+
 async function carregarConfiguracoes() {
 
     try {
@@ -920,182 +1123,63 @@ async function carregarConfiguracoes() {
             .eq("app_id", APP_ID)
             .maybeSingle();
 
-
-        if (error) {
-
-            console.error(
-                "Erro ao carregar hotspot_config:",
-                error
-            );
-
+        if(error){
+            console.error("Erro ao carregar hotspot_config:", error);
             return;
         }
 
-
-        if (!data) {
-
-            console.warn(
-                "Nenhuma configuração encontrada para APP_ID:",
-                APP_ID
-            );
-
+        if(!data){
+            console.warn("Nenhuma configuração encontrada para APP_ID:", APP_ID);
             return;
         }
-
-
-        /* NOME DO EVENTO */
 
         document.getElementById("nome-festa").textContent =
             data.evento_nome ||
             data.nome_hotspot ||
             "Festejos de São Raimundo Nonato";
 
-
-        /* DESCRIÇÃO */
-
         document.getElementById("descricao-festa").textContent =
             data.evento_descricao ||
             data.descricao ||
             "Conecte-se gratuitamente oferecido por nossos patrocinadores.";
 
+        const logoCidade=document.getElementById("logo-cidade");
 
-        /* LOGO */
-
-        const logoCidade =
-            document.getElementById("logo-cidade");
-
-        if (data.logo) {
-
-            logoCidade.src = data.logo + (data.logo.includes("?") ? "&" : "?") + "v=" + Date.now();
-            logoCidade.style.display = "block";
-
-            logoCidade.onerror = function () {
-                console.warn("Não foi possível carregar o logo salvo no banco:", data.logo);
-                this.style.display = "none";
-            };
-
-        } else {
-
-            logoCidade.style.display = "none";
-
+        if(data.logo){
+            logoCidade.src=data.logo;
+            logoCidade.style.display="block";
+        }else{
+            logoCidade.style.display="none";
         }
 
+        const bannerEvento=document.getElementById("banner-evento");
+        const blocoBannerEvento=document.getElementById("bloco-banner-evento");
 
-        /* =====================================================
-           BANNER PRINCIPAL DO EVENTO
-           Vem de hotspot_config.banner
-        ===================================================== */
+        if(data.banner){
+            bannerEvento.src=data.banner;
+            bannerEvento.style.display="block";
+            blocoBannerEvento.style.display="block";
 
-        const bannerEvento =
-            document.getElementById("banner-evento");
-
-        const blocoBannerEvento =
-            document.getElementById("bloco-banner-evento");
-
-        if (data.banner) {
-
-            bannerEvento.src = data.banner + (data.banner.includes("?") ? "&" : "?") + "v=" + Date.now();
-            bannerEvento.style.display = "block";
-            blocoBannerEvento.style.display = "block";
-
-            bannerEvento.onerror = function () {
-                console.warn("Não foi possível carregar o banner salvo no banco:", data.banner);
-                this.style.display = "none";
-                blocoBannerEvento.style.display = "none";
+            bannerEvento.onerror=function(){
+                console.warn("Não foi possível carregar o banner:",data.banner);
+                this.style.display="none";
+                blocoBannerEvento.style.display="none";
             };
-
-        } else {
-
+        }else{
             bannerEvento.removeAttribute("src");
-            bannerEvento.style.display = "none";
-            blocoBannerEvento.style.display = "none";
-
+            bannerEvento.style.display="none";
+            blocoBannerEvento.style.display="none";
         }
 
-
-        /*
-         * Se estiver desativado, não mostra patrocinadores.
-         */
-
-        if (data.exibir_patrocinadores === false) {
-
-            document.getElementById(
-                "bloco-master"
-            ).style.display = "none";
-
-            document.getElementById(
-                "bloco-apoio"
-            ).style.display = "none";
-
+        if(data.exibir_patrocinadores===false){
+            document.getElementById("bloco-master").style.display="none";
+            document.getElementById("bloco-apoio").style.display="none";
             return;
         }
 
+        iniciarRotacaoMaster(data);
 
-        /* =====================================================
-           PATROCINADOR MASTER
-        ===================================================== */
-
-        const blocoMaster =
-            document.getElementById("bloco-master");
-
-        const bannerMaster =
-            document.getElementById("banner-master");
-
-        const nomeMaster =
-            document.getElementById("nome-master");
-
-        const linkMaster =
-            document.getElementById("link-master");
-
-
-        if (data.patrocinador_master_banner) {
-
-            bannerMaster.src =
-                data.patrocinador_master_banner +
-                (data.patrocinador_master_banner.includes("?") ? "&" : "?") +
-                "v=" + Date.now();
-
-            blocoMaster.style.display =
-                "block";
-
-        } else {
-
-            blocoMaster.style.display =
-                "none";
-
-        }
-
-
-        if (data.patrocinador_master_nome) {
-
-            nomeMaster.textContent =
-                data.patrocinador_master_nome;
-
-        } else {
-
-            nomeMaster.textContent = "";
-
-        }
-
-
-        if (data.patrocinador_master_url) {
-
-            linkMaster.href =
-                data.patrocinador_master_url;
-
-            linkMaster.target =
-                "_blank";
-
-            linkMaster.rel =
-                "noopener noreferrer";
-
-        } else {
-
-            linkMaster.removeAttribute("href");
-
-        }
-
-    } catch (erro) {
+    } catch(erro) {
 
         console.error(
             "Erro inesperado ao carregar configuração:",
