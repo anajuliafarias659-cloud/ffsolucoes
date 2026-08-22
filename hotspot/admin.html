@@ -1104,62 +1104,75 @@ async function carregarUltimosPagamentos(){
 }
 
 async function carregarClientesOnline(){
-    const tbody=document.getElementById("clientesOnline");
+
+    const tbody = document.getElementById("clientesOnline");
     if(!tbody) return;
 
-    const {data,error}=await db
-        .from("hotspot_pagamentos")
-        .select("cliente_mac, plano_nome, expira_em, status_acesso")
-        .eq("app_id",APP_ID)
-        .eq("status_acesso","ativo")
-        .order("expira_em",{ascending:true});
+    try {
+        const { data, error } = await db
+            .from("hotspot_pagamentos")
+            .select("cliente_mac, plano_nome, expira_em, status_acesso, online")
+            .eq("app_id", APP_ID)
+            .order("expira_em", { ascending:true })
+            .limit(1000);
 
-    if(error){
-        console.error("[CLIENTES ONLINE] Erro ao buscar:",error);
-        tbody.innerHTML=`<tr><td colspan="4">Erro ao carregar clientes online.</td></tr>`;
-        return;
+        if(error){
+            console.error("[CLIENTES ONLINE] Erro:", error);
+            tbody.innerHTML = `<tr><td colspan="4">Erro ao carregar clientes online.</td></tr>`;
+            return;
+        }
+
+        const agora = Date.now();
+        const mapa = new Map();
+
+        (data || []).forEach(c => {
+            const expira = Date.parse(c.expira_em);
+            const aindaValido = !isNaN(expira) && expira > agora;
+            const estaOnline = c.online === true || c.status_acesso === "ativo";
+
+            if(!aindaValido || !estaOnline) return;
+
+            const mac = String(c.cliente_mac || "").trim().toLowerCase();
+            if(!mac) return;
+
+            if(!mapa.has(mac)) mapa.set(mac, c);
+        });
+
+        const clientes = [...mapa.values()];
+        tbody.innerHTML = "";
+
+        if(!clientes.length){
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">Nenhum cliente online.</td></tr>`;
+            const el = document.getElementById("online");
+            if(el) el.textContent = "0";
+            return;
+        }
+
+        clientes.forEach(c => {
+            const restante = Math.max(0, Date.parse(c.expira_em) - Date.now());
+            const total = Math.floor(restante / 1000);
+            const horas = Math.floor(total / 3600);
+            const minutos = Math.floor((total % 3600) / 60);
+            const segundos = total % 60;
+            const tempo = horas > 0
+                ? `${String(horas).padStart(2,"0")}:${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`
+                : `${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`;
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${escaparHtmlAdmin(c.cliente_mac || "-")}</td>
+                    <td>${escaparHtmlAdmin(c.plano_nome || "-")}</td>
+                    <td>${tempo}</td>
+                    <td>🟢 Online</td>
+                </tr>`;
+        });
+
+        const el = document.getElementById("online");
+        if(el) el.textContent = String(clientes.length);
+
+    } catch(e){
+        console.error("[CLIENTES ONLINE] Erro inesperado:", e);
     }
-
-    const agora=Date.now();
-    const mapa=new Map();
-
-    (data||[]).forEach(c=>{
-        const expira=Date.parse(c.expira_em);
-        if(isNaN(expira)||expira<=agora) return;
-
-        const mac=String(c.cliente_mac||"").trim().toLowerCase();
-        const chave=mac || `${c.plano_nome||""}|${c.expira_em||""}`;
-
-        if(!mapa.has(chave)) mapa.set(chave,c);
-    });
-
-    const clientes=[...mapa.values()];
-    tbody.innerHTML="";
-
-    if(!clientes.length){
-        tbody.innerHTML=`<tr><td colspan="4" style="text-align:center;">Nenhum cliente online.</td></tr>`;
-        return;
-    }
-
-    clientes.forEach(c=>{
-        const restante=Math.max(0,Date.parse(c.expira_em)-Date.now());
-        const total=Math.floor(restante/1000);
-        const horas=Math.floor(total/3600);
-        const minutos=Math.floor((total%3600)/60);
-        const segundos=total%60;
-
-        const tempo=horas>0
-            ? `${String(horas).padStart(2,"0")}:${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`
-            : `${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`;
-
-        tbody.innerHTML+=`
-            <tr>
-                <td>${escaparHtmlAdmin(c.cliente_mac||"-")}</td>
-                <td>${escaparHtmlAdmin(c.plano_nome||"-")}</td>
-                <td>${tempo}</td>
-                <td>🟢 Online</td>
-            </tr>`;
-    });
 }
 
 async function atualizarTotalOnline(){
@@ -1215,106 +1228,88 @@ function obterNomePatrocinadorRegistro(item){
 
 async function carregarClientesPatrocinadores(){
 
-    const tbody =
-        document.getElementById(
-            "listaClientesPatrocinadores"
-        );
-
+    const tbody = document.getElementById("listaClientesPatrocinadores");
     if(!tbody) return;
 
-    tbody.innerHTML = `
-        <tr>
-            <td colspan="4">Carregando...</td>
-        </tr>
-    `;
+    tbody.innerHTML = `<tr><td colspan="4">Carregando...</td></tr>`;
 
-    /*
-     * Tabela criada para registrar:
-     * cliente + WhatsApp + patrocinador + data/hora.
-     */
-    const { data, error } = await db
-        .from("hotspot_acessos_patrocinadores")
-        .select("*")
-        .eq("app_id", APP_ID)
-        .order("created_at", { ascending:false });
-
-    if(error){
-
-        console.error(
-            "Erro ao carregar clientes/patrocinadores:",
-            error
-        );
-
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="4">
-                    ⚠️ Não foi possível carregar os registros.
-                    Verifique se a tabela
-                    <b>hotspot_acessos_patrocinadores</b>
-                    foi criada no Supabase.
-                </td>
-            </tr>
-        `;
-
-        return;
-    }
-
-    dadosClientesPatrocinadores = data || [];
-
-    // Alguns registros de visita podem não carregar o nome.
-    // Busca também nos pagamentos para recuperar o nome pelo MAC/WhatsApp.
-    mapaNomesClientesAdmin = {};
-
-    const { data: pagamentosComNomes, error: erroPagamentosNomes } = await db
-        .from("hotspot_pagamentos")
-        .select("*")
-        .eq("app_id", APP_ID)
-        .order("created_at", { ascending: false })
-        .limit(1000);
-
-    if(erroPagamentosNomes){
-        console.warn(
-            "[PATROCINADORES] Não foi possível buscar nomes nos pagamentos:",
-            erroPagamentosNomes
-        );
-    }else{
-        (pagamentosComNomes || []).forEach(p => {
-            const nome = obterNomeClienteRegistro(p);
-            const chave = chaveContatoCliente(p);
-
-            if(nome && chave && !mapaNomesClientesAdmin[chave]){
-                mapaNomesClientesAdmin[chave] = nome;
-            }
-        });
-    }
-
-    mapaPatrocinadoresAdmin = {};
-    const idsPatrocinadores = [...new Set(
-        dadosClientesPatrocinadores
-            .map(item => item.patrocinador_id)
-            .filter(Boolean)
-            .map(id => String(id))
-    )];
-
-    if(idsPatrocinadores.length){
-        const { data: patrocinadores, error: erroPatrocinadores } = await db
-            .from("hotspot_patrocinadores")
-            .select("id,nome,url")
+    try {
+        const { data, error } = await db
+            .from("hotspot_acessos_patrocinadores")
+            .select("*")
             .eq("app_id", APP_ID)
-            .in("id", idsPatrocinadores);
+            .order("created_at", { ascending:false });
 
-        console.log("[PATROCINADORES] CADASTRADOS:", patrocinadores);
-        if(erroPatrocinadores){
-            console.error("[PATROCINADORES] ERRO AO BUSCAR CADASTRADOS:", erroPatrocinadores);
-        }else{
-            (patrocinadores || []).forEach(p => {
-                mapaPatrocinadoresAdmin[String(p.id)] = p;
-            });
+        if(error){
+            console.error("[PATROCINADORES] Erro:", error);
+            tbody.innerHTML = `<tr><td colspan="4">⚠️ Erro ao carregar registros.</td></tr>`;
+            return;
         }
-    }
 
-    preencherFiltroPatrocinadores();
-    renderizarClientesPatrocinadores();
+        dadosClientesPatrocinadores = data || [];
+        mapaPatrocinadoresAdmin = {};
+        mapaNomesClientesAdmin = {};
+
+        // Busca os patrocinadores, mas nunca deixa essa consulta impedir
+        // a exibição dos clientes.
+        const idsPatrocinadores = [...new Set(
+            dadosClientesPatrocinadores
+                .map(item => item.patrocinador_id)
+                .filter(Boolean)
+                .map(id => String(id))
+        )];
+
+        if(idsPatrocinadores.length){
+            const { data: patrocinadores, error: erroPatrocinadores } = await db
+                .from("hotspot_patrocinadores")
+                .select("id,nome,url")
+                .eq("app_id", APP_ID)
+                .in("id", idsPatrocinadores);
+
+            if(!erroPatrocinadores){
+                (patrocinadores || []).forEach(p => {
+                    mapaPatrocinadoresAdmin[String(p.id)] = p;
+                });
+            }else{
+                console.warn("[PATROCINADORES] Erro ao buscar nomes:", erroPatrocinadores);
+            }
+        }
+
+        console.log("[PATROCINADORES] REGISTROS:", dadosClientesPatrocinadores);
+
+        // Mostra imediatamente os registros que já temos.
+        preencherFiltroPatrocinadores();
+        renderizarClientesPatrocinadores();
+
+        // O nome do cliente pode estar no pagamento. Busca em segundo plano.
+        // Se essa consulta falhar, a tabela continua funcionando normalmente.
+        try {
+            const { data: pagamentosComNomes, error: erroPagamentosNomes } = await db
+                .from("hotspot_pagamentos")
+                .select("*")
+                .eq("app_id", APP_ID)
+                .order("created_at", { ascending:false })
+                .limit(1000);
+
+            if(!erroPagamentosNomes){
+                (pagamentosComNomes || []).forEach(p => {
+                    const nome = obterNomeClienteRegistro(p);
+                    const chave = chaveContatoCliente(p);
+                    if(nome && chave && !mapaNomesClientesAdmin[chave]){
+                        mapaNomesClientesAdmin[chave] = nome;
+                    }
+                });
+
+                renderizarClientesPatrocinadores();
+            }
+        } catch(e){
+            console.warn("[PATROCINADORES] Fallback de nomes ignorado:", e);
+        }
+
+    } catch(e){
+        console.error("[PATROCINADORES] Erro inesperado:", e);
+        tbody.innerHTML = `<tr><td colspan="4">⚠️ Erro inesperado ao carregar.</td></tr>`;
+    }
 }
 
 function preencherFiltroPatrocinadores(){
@@ -1896,7 +1891,7 @@ document.getElementById("linkAparencia").href  = `${BASE}aparencia.html${QS}`;
     await carregarClientesOnline();
     await atualizarTotalOnline();
     await carregarUltimosPagamentos();
-    await carregarClientesPatrocinadores();
+    carregarClientesPatrocinadores();
 
     setInterval(carregarDashboard,30000);
     setInterval(carregarClientesOnline,1000);
