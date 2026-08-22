@@ -599,7 +599,7 @@ Nenhum pagamento.
         margin-bottom:15px;
     ">
         <div style="background:#f0f9ff;padding:12px;border-radius:10px;">
-            <small>Clientes registrados</small>
+            <small>Clientes válidos</small>
             <strong
                 id="totalClientesPatrocinadores"
                 style="display:block;font-size:24px;color:#0d8db8;"
@@ -1200,25 +1200,25 @@ function selecionarRegistroCliente(registros){
 }
 
 function obterClientesUnicosPatrocinadores(){
+    const mapa = new Map();
 
-    return [...(dadosClientesPatrocinadores || [])]
+    (dadosClientesPatrocinadores || []).forEach(item => {
+        const chave = chaveClientePatrocinador(item);
+        if(!chave) return;
+
+        if(!mapa.has(chave)){
+            mapa.set(chave, [item]);
+        }else{
+            mapa.get(chave).push(item);
+        }
+    });
+
+    return [...mapa.values()]
+        .map(selecionarRegistroCliente)
         .filter(Boolean)
         .sort((a,b) => {
-
-            const ta =
-                Date.parse(
-                    a.created_at ||
-                    a.visitado_em ||
-                    0
-                ) || 0;
-
-            const tb =
-                Date.parse(
-                    b.created_at ||
-                    b.visitado_em ||
-                    0
-                ) || 0;
-
+            const ta = Date.parse(a.created_at || a.visitado_em || 0) || 0;
+            const tb = Date.parse(b.created_at || b.visitado_em || 0) || 0;
             return tb - ta;
         });
 }
@@ -1246,9 +1246,29 @@ function renderizarClientesPatrocinadores(){
             "filtroPatrocinador"
         )?.value || "";
 
-    const clientesUnicos = obterClientesUnicosPatrocinadores();
+    // VÁLIDO = registro que realmente possui patrocinador visitado.
+    const registrosValidos =
+        (dadosClientesPatrocinadores || [])
+            .filter(possuiVisitaPatrocinador)
+            .sort((a,b) => {
+                const ta =
+                    Date.parse(
+                        dataVisitaPatrocinador(a) ||
+                        a.created_at ||
+                        0
+                    ) || 0;
 
-    const filtrados = clientesUnicos.filter(item => {
+                const tb =
+                    Date.parse(
+                        dataVisitaPatrocinador(b) ||
+                        b.created_at ||
+                        0
+                    ) || 0;
+
+                return tb - ta;
+            });
+
+    const filtrados = registrosValidos.filter(item => {
 
         const nome = String(
             item.nome_cliente ||
@@ -1263,9 +1283,8 @@ function renderizarClientesPatrocinadores(){
             ""
         );
 
-        const patrocinador = possuiVisitaPatrocinador(item)
-            ? obterNomePatrocinadorRegistro(item)
-            : "";
+        const patrocinador =
+            obterNomePatrocinadorRegistro(item);
 
         const texto = (
             nome + " " +
@@ -1282,31 +1301,28 @@ function renderizarClientesPatrocinadores(){
         );
     });
 
+    // Os dois indicadores agora consideram somente registros válidos.
     document.getElementById(
         "totalClientesPatrocinadores"
-    ).textContent = clientesUnicos.length;
-
-    const visitasRegistradas = clientesUnicos.filter(
-        possuiVisitaPatrocinador
-    );
+    ).textContent = registrosValidos.length;
 
     document.getElementById(
         "totalVisitasPatrocinadores"
-    ).textContent = visitasRegistradas.length;
+    ).textContent = registrosValidos.length;
 
-    console.log("[PATROCINADORES] CLIENTES ÚNICOS:", clientesUnicos);
-    console.log("[PATROCINADORES] VISITAS ÚNICAS:", visitasRegistradas);
+    console.log(
+        "[PATROCINADORES] REGISTROS VÁLIDOS:",
+        registrosValidos
+    );
 
     if(!filtrados.length){
-
         tbody.innerHTML = `
             <tr>
                 <td colspan="4">
-                    Nenhum registro encontrado.
+                    Nenhuma visita válida registrada.
                 </td>
             </tr>
         `;
-
         return;
     }
 
@@ -1324,13 +1340,11 @@ function renderizarClientesPatrocinadores(){
                 item.telefone ||
                 "-";
 
-            const possuiVisita = possuiVisitaPatrocinador(item);
+            const patrocinador =
+                obterNomePatrocinadorRegistro(item);
 
-            const patrocinador = possuiVisita
-                ? obterNomePatrocinadorRegistro(item)
-                : "Ainda não visitou";
-
-            const data = dataVisitaPatrocinador(item);
+            const data =
+                dataVisitaPatrocinador(item);
 
             return `
                 <tr>
@@ -1343,132 +1357,20 @@ function renderizarClientesPatrocinadores(){
                     </td>
 
                     <td>
-                        ${possuiVisita
-                        ? `<span class="badge-patrocinador-admin">⭐ ${escaparHtmlAdmin(patrocinador)}</span>`
-                        : `<span class="badge-sem-patrocinador-admin">⏳ Ainda não visitou</span>`
-                    }
+                        <span class="badge-patrocinador-admin">
+                            ⭐ ${escaparHtmlAdmin(patrocinador)}
+                        </span>
                     </td>
 
                     <td>
-                        ${possuiVisita && data
-                            ? escaparHtmlAdmin(formatarDataAdmin(data))
-                            : "-"
-                        }
+                        ${escaparHtmlAdmin(
+                            formatarDataAdmin(data)
+                        )}
                     </td>
                 </tr>
             `;
+
         }).join("");
-}
-
-
-async function gerarPdfClientesPatrocinadores(){
-    const clientes = obterClientesUnicosPatrocinadores();
-
-    if(!clientes.length){
-        alert("Não há clientes para gerar o PDF.");
-        return;
-    }
-
-    const busca = (document.getElementById("filtroClientePatrocinador")?.value || "")
-        .trim().toLowerCase();
-    const patrocinadorFiltro = document.getElementById("filtroPatrocinador")?.value || "";
-
-    const registros = clientes.filter(item => {
-        const nome = String(item.nome_cliente || item.nome || item.cliente_nome || "");
-        const whatsapp = String(item.whatsapp || item.telefone || "");
-        const patrocinador = possuiVisitaPatrocinador(item)
-            ? obterNomePatrocinadorRegistro(item)
-            : "Ainda não visitou";
-        const texto = (nome + " " + whatsapp + " " + patrocinador).toLowerCase();
-        return (!busca || texto.includes(busca)) &&
-               (!patrocinadorFiltro || patrocinador === patrocinadorFiltro);
-    });
-
-    if(!registros.length){
-        alert("Nenhum cliente encontrado com os filtros atuais.");
-        return;
-    }
-
-    if(!window.jspdf || !window.jspdf.jsPDF){
-        alert("A biblioteca de PDF não foi carregada. Verifique a conexão com a internet.");
-        return;
-    }
-
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({
-        orientation: "landscape",
-        unit: "mm",
-        format: "a4"
-    });
-
-    const agora = new Date();
-    const dataGeracao = new Intl.DateTimeFormat("pt-BR", {
-        timeZone: "America/Sao_Paulo",
-        dateStyle: "short",
-        timeStyle: "short"
-    }).format(agora);
-
-    doc.setFontSize(18);
-    doc.setFont(undefined, "bold");
-    doc.text("RELATÓRIO DE CLIENTES E PATROCINADORES", 14, 15);
-
-    doc.setFontSize(10);
-    doc.setFont(undefined, "normal");
-    doc.text("FF Hotspot", 14, 22);
-    doc.text("Gerado em: " + dataGeracao, 14, 28);
-    doc.text("Clientes: " + registros.length, 14, 35);
-    doc.text("Visitas: " + registros.filter(possuiVisitaPatrocinador).length, 14, 42);
-
-    const linhas = registros.map(item => {
-        const visitou = possuiVisitaPatrocinador(item);
-        const patrocinador = visitou
-            ? obterNomePatrocinadorRegistro(item)
-            : "Ainda não visitou";
-        const data = visitou ? dataVisitaPatrocinador(item) : null;
-        return [
-            item.nome_cliente || item.nome || item.cliente_nome || "-",
-            item.whatsapp || item.telefone || "-",
-            patrocinador,
-            visitou && data ? formatarDataAdmin(data) : "-"
-        ];
-    });
-
-    if(typeof doc.autoTable !== "function"){
-        alert("A biblioteca de tabela do PDF não foi carregada. Recarregue a página e tente novamente.");
-        return;
-    }
-
-    doc.autoTable({
-        startY: 48,
-        head: [["Cliente", "WhatsApp", "Patrocinador visitado", "Data/Hora"]],
-        body: linhas,
-        theme: "grid",
-        styles: {
-            fontSize: 9,
-            cellPadding: 3,
-            valign: "middle"
-        },
-        headStyles: {
-            fontStyle: "bold"
-        },
-        columnStyles: {
-            0: { cellWidth: 60 },
-            1: { cellWidth: 50 },
-            2: { cellWidth: 85 },
-            3: { cellWidth: 45 }
-        },
-        margin: { left: 14, right: 14 }
-    });
-
-    const paginas = doc.internal.getNumberOfPages();
-    for(let i=1; i<=paginas; i++){
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setFont(undefined, "normal");
-        doc.text(`Página ${i} de ${paginas}`, 283, 202, { align:"right" });
-    }
-
-    doc.save("clientes-patrocinadores-" + agora.toISOString().slice(0,10) + ".pdf");
 }
 
 document.addEventListener(
