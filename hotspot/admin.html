@@ -1286,6 +1286,33 @@ async function carregarClientesPatrocinadores(){
 
     dadosClientesPatrocinadores = data || [];
 
+    // Alguns registros de visita podem não carregar o nome.
+    // Busca também nos pagamentos para recuperar o nome pelo MAC/WhatsApp.
+    mapaNomesClientesAdmin = {};
+
+    const { data: pagamentosComNomes, error: erroPagamentosNomes } = await db
+        .from("hotspot_pagamentos")
+        .select("*")
+        .eq("app_id", APP_ID)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+
+    if(erroPagamentosNomes){
+        console.warn(
+            "[PATROCINADORES] Não foi possível buscar nomes nos pagamentos:",
+            erroPagamentosNomes
+        );
+    }else{
+        (pagamentosComNomes || []).forEach(p => {
+            const nome = obterNomeClienteRegistro(p);
+            const chave = chaveContatoCliente(p);
+
+            if(nome && chave && !mapaNomesClientesAdmin[chave]){
+                mapaNomesClientesAdmin[chave] = nome;
+            }
+        });
+    }
+
     mapaPatrocinadoresAdmin = {};
     const idsPatrocinadores = [...new Set(
         dadosClientesPatrocinadores
@@ -1400,19 +1427,68 @@ function dataVisitaPatrocinador(item){
     );
 }
 
+function obterNomeClienteRegistro(item){
+    return String(
+        item?.nome_cliente ||
+        item?.cliente_nome ||
+        item?.nome_usuario ||
+        item?.usuario_nome ||
+        item?.nome ||
+        item?.cliente ||
+        item?.usuario ||
+        ""
+    ).trim();
+}
+
+function obterWhatsAppClienteRegistro(item){
+    return String(
+        item?.whatsapp ||
+        item?.telefone ||
+        item?.celular ||
+        ""
+    ).trim();
+}
+
+function chaveContatoCliente(item){
+    const mac = String(
+        item?.cliente_mac ||
+        item?.mac ||
+        item?.client_mac ||
+        ""
+    ).trim().toLowerCase();
+
+    if(mac) return "mac:" + mac;
+
+    const whatsapp = obterWhatsAppClienteRegistro(item).replace(/\D/g, "");
+    if(whatsapp) return "whatsapp:" + whatsapp;
+
+    return "";
+}
+
+let mapaNomesClientesAdmin = {};
+
 function selecionarRegistroCliente(registros){
     if(!registros || !registros.length) return null;
 
-    // O registro mais recente define o nome/WhatsApp exibidos.
-    // A visita mais recente, de qualquer registro do mesmo cliente,
-    // define patrocinador e data da visita.
     const ordenarRecente = (a,b) => {
         const ta = Date.parse(a.created_at || a.visitado_em || 0) || 0;
         const tb = Date.parse(b.created_at || b.visitado_em || 0) || 0;
         return tb - ta;
     };
 
-    const maisRecente = [...registros].sort(ordenarRecente)[0];
+    const ordenados = [...registros].sort(ordenarRecente);
+    const maisRecente = ordenados[0];
+
+    // Procura o nome no histórico inteiro do cliente.
+    // O registro mais novo pode ser somente a visita e não possuir nome.
+    const registroComNome = ordenados.find(
+        item => obterNomeClienteRegistro(item)
+    );
+
+    const registroComWhatsApp = ordenados.find(
+        item => obterWhatsAppClienteRegistro(item)
+    );
+
     const visitas = registros
         .filter(possuiVisitaPatrocinador)
         .sort((a,b) => {
@@ -1421,21 +1497,42 @@ function selecionarRegistroCliente(registros){
             return tb - ta;
         });
 
-    if(!visitas.length){
-        return maisRecente;
-    }
-
     const visitaMaisRecente = visitas[0];
 
-    // Junta o cadastro mais recente com a visita mais recente.
-    return {
-        ...visitaMaisRecente,
-        ...maisRecente,
-        patrocinador_id: visitaMaisRecente.patrocinador_id,
-        patrocinador_nome: visitaMaisRecente.patrocinador_nome,
-        patrocinador_url: visitaMaisRecente.patrocinador_url,
-        visitado_em: visitaMaisRecente.visitado_em
+    const resultado = {
+        ...(visitaMaisRecente || {}),
+        ...maisRecente
     };
+
+    if(visitaMaisRecente){
+        resultado.patrocinador_id = visitaMaisRecente.patrocinador_id;
+        resultado.patrocinador_nome = visitaMaisRecente.patrocinador_nome;
+        resultado.patrocinador_url = visitaMaisRecente.patrocinador_url;
+        resultado.visitado_em = dataVisitaPatrocinador(visitaMaisRecente);
+    }
+
+    // Preserva o nome mesmo que o registro mais recente esteja sem nome.
+    if(registroComNome && !obterNomeClienteRegistro(resultado)){
+        const nome = obterNomeClienteRegistro(registroComNome);
+        resultado.nome_cliente = nome;
+        resultado.cliente_nome = nome;
+    }
+
+    if(registroComWhatsApp && !obterWhatsAppClienteRegistro(resultado)){
+        resultado.whatsapp = obterWhatsAppClienteRegistro(registroComWhatsApp);
+    }
+
+    // Último fallback: nome salvo nos pagamentos.
+    if(!obterNomeClienteRegistro(resultado)){
+        const chave = chaveContatoCliente(resultado);
+        const nomePagamento = chave ? mapaNomesClientesAdmin[chave] : "";
+        if(nomePagamento){
+            resultado.nome_cliente = nomePagamento;
+            resultado.cliente_nome = nomePagamento;
+        }
+    }
+
+    return resultado;
 }
 
 function obterClientesUnicosPatrocinadores(){
@@ -1509,18 +1606,9 @@ function renderizarClientesPatrocinadores(){
 
     const filtrados = registrosValidos.filter(item => {
 
-        const nome = String(
-            item.nome_cliente ||
-            item.nome ||
-            item.cliente_nome ||
-            ""
-        );
+        const nome = obterNomeClienteRegistro(item);
 
-        const whatsapp = String(
-            item.whatsapp ||
-            item.telefone ||
-            ""
-        );
+        const whatsapp = obterWhatsAppClienteRegistro(item);
 
         const patrocinador =
             obterNomePatrocinadorRegistro(item);
@@ -1569,14 +1657,11 @@ function renderizarClientesPatrocinadores(){
         filtrados.map(item => {
 
             const nome =
-                item.nome_cliente ||
-                item.nome ||
-                item.cliente_nome ||
-                "-";
+                obterNomeClienteRegistro(item) ||
+                "Cliente sem nome";
 
             const whatsapp =
-                item.whatsapp ||
-                item.telefone ||
+                obterWhatsAppClienteRegistro(item) ||
                 "-";
 
             const patrocinador =
@@ -1644,18 +1729,9 @@ async function gerarPdfClientesPatrocinadores(){
         document.getElementById("filtroPatrocinador")?.value || "";
 
     const registros = todos.filter(item => {
-        const nome = String(
-            item.nome_cliente ||
-            item.nome ||
-            item.cliente_nome ||
-            ""
-        );
+        const nome = obterNomeClienteRegistro(item);
 
-        const whatsapp = String(
-            item.whatsapp ||
-            item.telefone ||
-            ""
-        );
+        const whatsapp = obterWhatsAppClienteRegistro(item);
 
         const patrocinador = obterNomePatrocinadorRegistro(item);
 
