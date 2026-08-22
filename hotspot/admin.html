@@ -1413,6 +1413,173 @@ function renderizarClientesPatrocinadores(){
 }
 
 
+
+async function gerarPdfClientesPatrocinadores(){
+
+    const todos = (dadosClientesPatrocinadores || [])
+        .filter(possuiVisitaPatrocinador)
+        .sort((a,b) => {
+            const ta = Date.parse(
+                dataVisitaPatrocinador(a) || a.created_at || 0
+            ) || 0;
+            const tb = Date.parse(
+                dataVisitaPatrocinador(b) || b.created_at || 0
+            ) || 0;
+            return tb - ta;
+        });
+
+    if(!todos.length){
+        alert("Não há clientes válidos para gerar o PDF.");
+        return;
+    }
+
+    const busca = (
+        document.getElementById("filtroClientePatrocinador")?.value || ""
+    ).trim().toLowerCase();
+
+    const patrocinadorFiltro =
+        document.getElementById("filtroPatrocinador")?.value || "";
+
+    const registros = todos.filter(item => {
+        const nome = String(
+            item.nome_cliente ||
+            item.nome ||
+            item.cliente_nome ||
+            ""
+        );
+
+        const whatsapp = String(
+            item.whatsapp ||
+            item.telefone ||
+            ""
+        );
+
+        const patrocinador = obterNomePatrocinadorRegistro(item);
+
+        const texto = (
+            nome + " " +
+            whatsapp + " " +
+            patrocinador
+        ).toLowerCase();
+
+        return (
+            (!busca || texto.includes(busca)) &&
+            (!patrocinadorFiltro || patrocinador === patrocinadorFiltro)
+        );
+    });
+
+    if(!registros.length){
+        alert("Nenhum cliente válido encontrado com os filtros atuais.");
+        return;
+    }
+
+    if(!window.jspdf || !window.jspdf.jsPDF){
+        alert("A biblioteca de PDF não foi carregada. Recarregue a página e tente novamente.");
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: "a4"
+    });
+
+    const agora = new Date();
+    const dataGeracao = new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        dateStyle: "short",
+        timeStyle: "short"
+    }).format(agora);
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, "bold");
+    doc.text("RELATÓRIO DE CLIENTES E PATROCINADORES", 14, 15);
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, "normal");
+    doc.text("FF Hotspot", 14, 22);
+    doc.text("Gerado em: " + dataGeracao, 14, 28);
+    doc.text("Clientes válidos: " + registros.length, 14, 35);
+    doc.text(
+        "Visitas registradas: " + registros.length,
+        14,
+        42
+    );
+
+    const linhas = registros.map(item => {
+        const nome =
+            item.nome_cliente ||
+            item.nome ||
+            item.cliente_nome ||
+            "-";
+
+        const whatsapp =
+            item.whatsapp ||
+            item.telefone ||
+            "-";
+
+        const patrocinador =
+            obterNomePatrocinadorRegistro(item);
+
+        const data =
+            dataVisitaPatrocinador(item);
+
+        return [
+            nome,
+            whatsapp,
+            patrocinador,
+            data ? formatarDataAdmin(data) : "-"
+        ];
+    });
+
+    if(typeof doc.autoTable !== "function"){
+        alert("A biblioteca de tabela do PDF não foi carregada. Recarregue a página e tente novamente.");
+        return;
+    }
+
+    doc.autoTable({
+        startY: 48,
+        head: [["Cliente", "WhatsApp", "Patrocinador visitado", "Data/Hora"]],
+        body: linhas,
+        theme: "grid",
+        styles: {
+            fontSize: 9,
+            cellPadding: 3,
+            valign: "middle"
+        },
+        headStyles: {
+            fontStyle: "bold"
+        },
+        columnStyles: {
+            0: { cellWidth: 60 },
+            1: { cellWidth: 50 },
+            2: { cellWidth: 85 },
+            3: { cellWidth: 45 }
+        },
+        margin: { left: 14, right: 14 }
+    });
+
+    const paginas = doc.internal.getNumberOfPages();
+    for(let i = 1; i <= paginas; i++){
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setFont(undefined, "normal");
+        doc.text(
+            `Página ${i} de ${paginas}`,
+            283,
+            202,
+            { align: "right" }
+        );
+    }
+
+    doc.save(
+        "clientes-validos-patrocinadores-" +
+        agora.toISOString().slice(0,10) +
+        ".pdf"
+    );
+}
+
 document.addEventListener(
     "DOMContentLoaded",
     function(){
