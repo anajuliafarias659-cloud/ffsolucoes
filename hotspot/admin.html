@@ -377,6 +377,8 @@ grid-template-columns:repeat(2,1fr);
   .clientes-patrocinadores table{min-width:650px;}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 
 <body>
@@ -579,6 +581,14 @@ Nenhum pagamento.
             style="white-space:nowrap;"
         >
             🔄 Atualizar
+        </button>
+
+        <button
+            type="button"
+            id="btnPdfClientesPatrocinadores"
+            style="white-space:nowrap;background:#dc2626;color:#fff;border:0;padding:11px 15px;border-radius:10px;font-weight:700;cursor:pointer;"
+        >
+            📄 Gerar PDF
         </button>
     </div>
 
@@ -1350,6 +1360,117 @@ function renderizarClientesPatrocinadores(){
         }).join("");
 }
 
+
+async function gerarPdfClientesPatrocinadores(){
+    const clientes = obterClientesUnicosPatrocinadores();
+
+    if(!clientes.length){
+        alert("Não há clientes para gerar o PDF.");
+        return;
+    }
+
+    const busca = (document.getElementById("filtroClientePatrocinador")?.value || "")
+        .trim().toLowerCase();
+    const patrocinadorFiltro = document.getElementById("filtroPatrocinador")?.value || "";
+
+    const registros = clientes.filter(item => {
+        const nome = String(item.nome_cliente || item.nome || item.cliente_nome || "");
+        const whatsapp = String(item.whatsapp || item.telefone || "");
+        const patrocinador = possuiVisitaPatrocinador(item)
+            ? obterNomePatrocinadorRegistro(item)
+            : "Ainda não visitou";
+        const texto = (nome + " " + whatsapp + " " + patrocinador).toLowerCase();
+        return (!busca || texto.includes(busca)) &&
+               (!patrocinadorFiltro || patrocinador === patrocinadorFiltro);
+    });
+
+    if(!registros.length){
+        alert("Nenhum cliente encontrado com os filtros atuais.");
+        return;
+    }
+
+    if(!window.jspdf || !window.jspdf.jsPDF){
+        alert("A biblioteca de PDF não foi carregada. Verifique a conexão com a internet.");
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: "a4"
+    });
+
+    const agora = new Date();
+    const dataGeracao = new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        dateStyle: "short",
+        timeStyle: "short"
+    }).format(agora);
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, "bold");
+    doc.text("RELATÓRIO DE CLIENTES E PATROCINADORES", 14, 15);
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, "normal");
+    doc.text("FF Hotspot", 14, 22);
+    doc.text("Gerado em: " + dataGeracao, 14, 28);
+    doc.text("Clientes: " + registros.length, 14, 35);
+    doc.text("Visitas: " + registros.filter(possuiVisitaPatrocinador).length, 14, 42);
+
+    const linhas = registros.map(item => {
+        const visitou = possuiVisitaPatrocinador(item);
+        const patrocinador = visitou
+            ? obterNomePatrocinadorRegistro(item)
+            : "Ainda não visitou";
+        const data = visitou ? dataVisitaPatrocinador(item) : null;
+        return [
+            item.nome_cliente || item.nome || item.cliente_nome || "-",
+            item.whatsapp || item.telefone || "-",
+            patrocinador,
+            visitou && data ? formatarDataAdmin(data) : "-"
+        ];
+    });
+
+    if(typeof doc.autoTable !== "function"){
+        alert("A biblioteca de tabela do PDF não foi carregada. Recarregue a página e tente novamente.");
+        return;
+    }
+
+    doc.autoTable({
+        startY: 48,
+        head: [["Cliente", "WhatsApp", "Patrocinador visitado", "Data/Hora"]],
+        body: linhas,
+        theme: "grid",
+        styles: {
+            fontSize: 9,
+            cellPadding: 3,
+            valign: "middle"
+        },
+        headStyles: {
+            fontStyle: "bold"
+        },
+        columnStyles: {
+            0: { cellWidth: 60 },
+            1: { cellWidth: 50 },
+            2: { cellWidth: 85 },
+            3: { cellWidth: 45 }
+        },
+        margin: { left: 14, right: 14 }
+    });
+
+    const paginas = doc.internal.getNumberOfPages();
+    for(let i=1; i<=paginas; i++){
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setFont(undefined, "normal");
+        doc.text(`Página ${i} de ${paginas}`, 283, 202, { align:"right" });
+    }
+
+    doc.save("clientes-patrocinadores-" + agora.toISOString().slice(0,10) + ".pdf");
+}
+
 document.addEventListener(
     "DOMContentLoaded",
     function(){
@@ -1379,6 +1500,13 @@ document.addEventListener(
             ?.addEventListener(
                 "click",
                 carregarClientesPatrocinadores
+            );
+
+        document
+            .getElementById("btnPdfClientesPatrocinadores")
+            ?.addEventListener(
+                "click",
+                gerarPdfClientesPatrocinadores
             );
     }
 );
