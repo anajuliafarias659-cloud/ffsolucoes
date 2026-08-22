@@ -977,6 +977,8 @@ function obterNomePatrocinadorRegistro(item){
     );
 }
 
+let mapaPatrocinadoresAdmin = {};
+
 async function carregarClientesPatrocinadores(){
 
     const tbody =
@@ -992,11 +994,14 @@ async function carregarClientesPatrocinadores(){
         </tr>
     `;
 
+    /*
+     * 1) Busca os registros de clientes/visitas.
+     */
     const { data, error } = await db
         .from("hotspot_acessos_patrocinadores")
         .select("*")
         .eq("app_id", APP_ID)
-        .order("created_at", { ascending:false });
+        .order("criado_em", { ascending:false });
 
     if(error){
 
@@ -1019,11 +1024,100 @@ async function carregarClientesPatrocinadores(){
         return;
     }
 
-    dadosClientesPatrocinadores =
-        data || [];
+    dadosClientesPatrocinadores = data || [];
+
+    /*
+     * 2) Busca os patrocinadores pelo ID.
+     *
+     * Isso corrige o caso em que a visita tem
+     * patrocinador_id preenchido, mas
+     * patrocinador_nome está NULL/vazio.
+     */
+    mapaPatrocinadoresAdmin = {};
+
+    const idsPatrocinadores = [
+        ...new Set(
+            dadosClientesPatrocinadores
+                .map(item => item.patrocinador_id)
+                .filter(Boolean)
+                .map(id => String(id))
+        )
+    ];
+
+    if(idsPatrocinadores.length){
+
+        const {
+            data: patrocinadores,
+            error: erroPatrocinadores
+        } = await db
+            .from("hotspot_patrocinadores")
+            .select("id,nome,url,banner")
+            .eq("app_id", APP_ID)
+            .in("id", idsPatrocinadores);
+
+        if(erroPatrocinadores){
+
+            console.error(
+                "Erro ao carregar nomes dos patrocinadores:",
+                erroPatrocinadores
+            );
+
+        }else{
+
+            (patrocinadores || []).forEach(p => {
+
+                mapaPatrocinadoresAdmin[
+                    String(p.id)
+                ] = p;
+
+            });
+        }
+    }
 
     preencherFiltroPatrocinadores();
     renderizarClientesPatrocinadores();
+}
+
+
+function obterNomePatrocinadorRegistro(item){
+
+    /*
+     * Primeiro tenta resolver pelo patrocinador_id
+     * diretamente na tabela de patrocinadores.
+     */
+    if(item.patrocinador_id){
+
+        const patrocinador =
+            mapaPatrocinadoresAdmin[
+                String(item.patrocinador_id)
+            ];
+
+        if(patrocinador && patrocinador.nome){
+
+            return patrocinador.nome;
+        }
+    }
+
+    /*
+     * Depois usa o nome salvo no registro.
+     */
+    return (
+        item.patrocinador_nome ||
+        item.nome_patrocinador ||
+        item.patrocinador ||
+        "Não informado"
+    );
+}
+
+
+function registroTemPatrocinador(item){
+
+    return !!(
+        item.patrocinador_id ||
+        item.patrocinador_nome ||
+        item.nome_patrocinador ||
+        item.patrocinador
+    );
 }
 
 
@@ -1039,19 +1133,10 @@ function preencherFiltroPatrocinadores(){
     const atual =
         select.value;
 
-    /*
-     * Só coloca no filtro patrocinadores
-     * que realmente foram registrados como visitados.
-     */
     const nomes =
         [...new Set(
             dadosClientesPatrocinadores
-                .filter(item =>
-                    item.patrocinador_id ||
-                    item.patrocinador_nome ||
-                    item.nome_patrocinador ||
-                    item.patrocinador
-                )
+                .filter(registroTemPatrocinador)
                 .map(obterNomePatrocinadorRegistro)
                 .filter(nome =>
                     nome &&
@@ -1133,16 +1218,10 @@ function renderizarClientesPatrocinadores(){
                 (
                     nome +
                     " " +
-                    whatsapp
+                    whatsapp +
+                    " " +
+                    patrocinador
                 ).toLowerCase();
-
-            const possuiVisita =
-                !!(
-                    item.patrocinador_id ||
-                    item.patrocinador_nome ||
-                    item.nome_patrocinador ||
-                    item.patrocinador
-                );
 
             return (
                 (!busca || texto.includes(busca)) &&
@@ -1153,9 +1232,6 @@ function renderizarClientesPatrocinadores(){
             );
         });
 
-    /*
-     * Total de clientes registrados.
-     */
     const clientesUnicos =
         new Set(
             dadosClientesPatrocinadores.map(item =>
@@ -1174,16 +1250,9 @@ function renderizarClientesPatrocinadores(){
     ).textContent =
         clientesUnicos.size;
 
-    /*
-     * Visitas = somente registros que possuem
-     * patrocinador visitado.
-     */
     const totalVisitas =
-        dadosClientesPatrocinadores.filter(item =>
-            item.patrocinador_id ||
-            item.patrocinador_nome ||
-            item.nome_patrocinador ||
-            item.patrocinador
+        dadosClientesPatrocinadores.filter(
+            registroTemPatrocinador
         ).length;
 
     document.getElementById(
@@ -1219,12 +1288,7 @@ function renderizarClientesPatrocinadores(){
                 "-";
 
             const possuiVisita =
-                !!(
-                    item.patrocinador_id ||
-                    item.patrocinador_nome ||
-                    item.nome_patrocinador ||
-                    item.patrocinador
-                );
+                registroTemPatrocinador(item);
 
             const patrocinador =
                 possuiVisita
@@ -1232,9 +1296,8 @@ function renderizarClientesPatrocinadores(){
                     : "Ainda não visitou";
 
             /*
-             * IMPORTANTE:
-             * Para a visita usamos visitado_em.
-             * created_at é a hora do cadastro do cliente.
+             * A data da visita deve vir de visitado_em.
+             * criado_em é apenas a hora do cadastro.
              */
             const dataVisita =
                 item.visitado_em ||
@@ -1243,7 +1306,7 @@ function renderizarClientesPatrocinadores(){
                 null;
 
             const dataExibida =
-                possuiVisita
+                possuiVisita && dataVisita
                     ? formatarDataAdmin(dataVisita)
                     : "-";
 
