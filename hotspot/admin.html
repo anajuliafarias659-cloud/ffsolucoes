@@ -345,36 +345,38 @@ grid-template-columns:repeat(2,1fr);
     }
 }
 
-
-/* ===== CLIENTES E PATROCINADORES — DESKTOP ===== */
-@media (min-width:769px){
-    .conteudo{
-        min-width:0;
-    }
-
-    #listaClientesPatrocinadores{
-        min-width:760px;
-    }
-
-    #listaClientesPatrocinadores td,
-    #listaClientesPatrocinadores th{
-        white-space:nowrap;
-    }
-
-    .painel{
-        width:100%;
-    }
-}
-
-/* Mantém a seção acessível em telas menores */
-.tabela{
-    overflow-x:auto;
-}
-
 </style>
 <link rel="manifest" href="/hotspot/manifest.json">
 <meta name="theme-color" content="#0d8db8">
 <link rel="apple-touch-icon" href="/hotspot/icons/icon-192.png">
+
+<style>
+/* AJUSTE FINAL CLIENTES E PATROCINADORES */
+@media (min-width: 769px){
+  details.painel.clientes-patrocinadores{
+    display:block !important;
+  }
+}
+.clientes-patrocinadores .tabela{
+  width:100%;
+  overflow-x:auto;
+}
+.clientes-patrocinadores table{
+  min-width:720px;
+}
+.badge-sem-patrocinador-admin{
+  display:inline-block;
+  padding:5px 8px;
+  border-radius:999px;
+  background:#fff7ed;
+  color:#c2410c;
+  font-weight:700;
+  font-size:12px;
+}
+@media(max-width:768px){
+  .clientes-patrocinadores table{min-width:650px;}
+}
+</style>
 </head>
 
 <body>
@@ -529,7 +531,7 @@ Nenhum pagamento.
 <!-- =========================================================
      CLIENTES X PATROCINADORES
      ========================================================= -->
-<details class="painel" open>
+<details class="painel clientes-patrocinadores" open>
 <summary>
     👥 Clientes e Patrocinadores
 </summary>
@@ -975,27 +977,15 @@ function formatarDataAdmin(valor){
 let mapaPatrocinadoresAdmin = {};
 
 function obterNomePatrocinadorRegistro(item){
-    if(item && item.patrocinador_id){
+    if(item?.patrocinador_id){
         const p = mapaPatrocinadoresAdmin[String(item.patrocinador_id)];
-        if(p && p.nome){
-            return p.nome;
-        }
+        if(p?.nome) return p.nome;
     }
-
     return (
         item?.patrocinador_nome ||
         item?.nome_patrocinador ||
         item?.patrocinador ||
-        "Ainda não visitou"
-    );
-}
-
-function registroTemPatrocinador(item){
-    return !!(
-        item?.patrocinador_id ||
-        item?.patrocinador_nome ||
-        item?.nome_patrocinador ||
-        item?.patrocinador
+        "Não informado"
     );
 }
 
@@ -1014,15 +1004,15 @@ async function carregarClientesPatrocinadores(){
         </tr>
     `;
 
+    /*
+     * Tabela criada para registrar:
+     * cliente + WhatsApp + patrocinador + data/hora.
+     */
     const { data, error } = await db
         .from("hotspot_acessos_patrocinadores")
         .select("*")
         .eq("app_id", APP_ID)
         .order("created_at", { ascending:false });
-
-    console.log("[PATROCINADORES] APP_ID:", APP_ID);
-    console.log("[PATROCINADORES] REGISTROS:", data);
-    console.log("[PATROCINADORES] ERRO:", error);
 
     if(error){
 
@@ -1035,9 +1025,9 @@ async function carregarClientesPatrocinadores(){
             <tr>
                 <td colspan="4">
                     ⚠️ Não foi possível carregar os registros.
-                    Verifique a tabela
+                    Verifique se a tabela
                     <b>hotspot_acessos_patrocinadores</b>
-                    e as políticas RLS do Supabase.
+                    foi criada no Supabase.
                 </td>
             </tr>
         `;
@@ -1047,43 +1037,24 @@ async function carregarClientesPatrocinadores(){
 
     dadosClientesPatrocinadores = data || [];
 
-    /*
-     * Resolve o patrocinador pelo patrocinador_id.
-     * Isso é importante quando o registro possui o ID,
-     * mas patrocinador_nome está vazio.
-     */
     mapaPatrocinadoresAdmin = {};
+    const idsPatrocinadores = [...new Set(
+        dadosClientesPatrocinadores
+            .map(item => item.patrocinador_id)
+            .filter(Boolean)
+            .map(id => String(id))
+    )];
 
-    const ids = [
-        ...new Set(
-            dadosClientesPatrocinadores
-                .map(item => item.patrocinador_id)
-                .filter(Boolean)
-                .map(id => String(id))
-        )
-    ];
-
-    if(ids.length){
-
-        const {
-            data: patrocinadores,
-            error: erroPatrocinadores
-        } = await db
+    if(idsPatrocinadores.length){
+        const { data: patrocinadores, error: erroPatrocinadores } = await db
             .from("hotspot_patrocinadores")
-            .select("id,nome,url,banner")
+            .select("id,nome,url")
             .eq("app_id", APP_ID)
-            .in("id", ids);
+            .in("id", idsPatrocinadores);
 
-        console.log(
-            "[PATROCINADORES] CADASTRADOS:",
-            patrocinadores
-        );
-
+        console.log("[PATROCINADORES] CADASTRADOS:", patrocinadores);
         if(erroPatrocinadores){
-            console.error(
-                "Erro ao carregar patrocinadores:",
-                erroPatrocinadores
-            );
+            console.error("[PATROCINADORES] ERRO AO BUSCAR CADASTRADOS:", erroPatrocinadores);
         }else{
             (patrocinadores || []).forEach(p => {
                 mapaPatrocinadoresAdmin[String(p.id)] = p;
@@ -1104,17 +1075,14 @@ function preencherFiltroPatrocinadores(){
 
     if(!select) return;
 
-    const atual = select.value;
+    const atual =
+        select.value;
 
     const nomes =
         [...new Set(
             dadosClientesPatrocinadores
-                .filter(registroTemPatrocinador)
                 .map(obterNomePatrocinadorRegistro)
-                .filter(nome =>
-                    nome &&
-                    nome !== "Ainda não visitou"
-                )
+                .filter(Boolean)
         )]
         .sort((a,b) =>
             a.localeCompare(
@@ -1137,7 +1105,9 @@ function preencherFiltroPatrocinadores(){
         select.appendChild(option);
     });
 
-    if(nomes.includes(atual)){
+    if(
+        nomes.includes(atual)
+    ){
         select.value = atual;
     }
 }
@@ -1190,9 +1160,7 @@ function renderizarClientesPatrocinadores(){
                 (
                     nome +
                     " " +
-                    whatsapp +
-                    " " +
-                    patrocinador
+                    whatsapp
                 ).toLowerCase();
 
             return (
@@ -1204,7 +1172,9 @@ function renderizarClientesPatrocinadores(){
             );
         });
 
-    const clientesUnicos =
+    document.getElementById(
+        "totalClientesPatrocinadores"
+    ).textContent =
         new Set(
             dadosClientesPatrocinadores.map(item =>
                 String(
@@ -1215,25 +1185,16 @@ function renderizarClientesPatrocinadores(){
                     item.id
                 )
             )
-        );
+        ).size;
 
-    document.getElementById(
-        "totalClientesPatrocinadores"
-    ).textContent =
-        clientesUnicos.size;
-
-    /*
-     * Conta apenas registros que realmente possuem visita.
-     */
-    const totalVisitas =
-        dadosClientesPatrocinadores.filter(
-            registroTemPatrocinador
-        ).length;
+    const visitasRegistradas = dadosClientesPatrocinadores.filter(item =>
+        !!(item.patrocinador_id || item.patrocinador_nome || item.nome_patrocinador || item.patrocinador || item.visitado_em)
+    );
 
     document.getElementById(
         "totalVisitasPatrocinadores"
     ).textContent =
-        totalVisitas;
+        visitasRegistradas.length;
 
     if(!filtrados.length){
 
@@ -1262,28 +1223,17 @@ function renderizarClientesPatrocinadores(){
                 item.telefone ||
                 "-";
 
-            const possuiVisita =
-                registroTemPatrocinador(item);
+            const possuiVisita = !!(item.patrocinador_id || item.patrocinador_nome || item.nome_patrocinador || item.patrocinador || item.visitado_em);
 
-            const patrocinador =
-                possuiVisita
-                    ? obterNomePatrocinadorRegistro(item)
-                    : "Ainda não visitou";
+            const patrocinador = possuiVisita
+                ? obterNomePatrocinadorRegistro(item)
+                : "Ainda não visitou";
 
-            /*
-             * A data da visita é visitado_em.
-             * created_at é apenas o cadastro.
-             */
-            const dataVisita =
+            const data =
                 item.visitado_em ||
                 item.data_visita ||
                 item.data_hora ||
                 null;
-
-            const dataExibida =
-                possuiVisita && dataVisita
-                    ? formatarDataAdmin(dataVisita)
-                    : "-";
 
             return `
                 <tr>
@@ -1296,38 +1246,20 @@ function renderizarClientesPatrocinadores(){
                     </td>
 
                     <td>
-                        ${
-                            possuiVisita
-                            ? `
-                                <span class="badge-patrocinador-admin">
-                                    ⭐ ${escaparHtmlAdmin(patrocinador)}
-                                </span>
-                              `
-                            : `
-                                <span style="
-                                    display:inline-block;
-                                    padding:5px 8px;
-                                    border-radius:999px;
-                                    background:#fff7ed;
-                                    color:#c2410c;
-                                    font-weight:700;
-                                    font-size:12px;
-                                ">
-                                    ⏳ Ainda não visitou
-                                </span>
-                              `
-                        }
+                        ${possuiVisita
+                        ? `<span class="badge-patrocinador-admin">⭐ ${escaparHtmlAdmin(patrocinador)}</span>`
+                        : `<span class="badge-sem-patrocinador-admin">⏳ Ainda não visitou</span>`
+                    }
                     </td>
 
                     <td>
-                        ${escaparHtmlAdmin(dataExibida)}
+                        ${possuiVisita && data ? escaparHtmlAdmin(formatarDataAdmin(data)) : "-"}
                     </td>
                 </tr>
             `;
 
         }).join("");
 }
-
 
 document.addEventListener(
     "DOMContentLoaded",
