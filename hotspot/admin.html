@@ -337,6 +337,16 @@ grid-template-columns:repeat(2,1fr);
     font-weight:700;
     font-size:12px;
 }
+
+.badge-sem-patrocinador-admin{
+    display:inline-block;
+    padding:5px 8px;
+    border-radius:999px;
+    background:#fff7ed;
+    color:#c2410c;
+    font-weight:700;
+    font-size:12px;
+}
 @media(max-width:768px){
     #listaClientesPatrocinadores td,
     #listaClientesPatrocinadores th{
@@ -569,12 +579,24 @@ Nenhum pagamento.
         </div>
 
         <div style="background:#f0fdf4;padding:12px;border-radius:10px;">
-            <small>Visitas registradas</small>
+            <small>Patrocinadores visitados</small>
             <strong
                 id="totalVisitasPatrocinadores"
                 style="display:block;font-size:24px;color:#16834a;"
             >0</strong>
         </div>
+    </div>
+
+    <div style="
+        margin-bottom:12px;
+        padding:10px 12px;
+        border-radius:10px;
+        background:#f8fafc;
+        color:#475569;
+        font-size:13px;
+    ">
+        ℹ️ O patrocinador aparece aqui somente depois que o cliente clicar nele.
+        A data mostrada é a data/hora da visita.
     </div>
 
     <div class="tabela" style="margin:0;box-shadow:none;">
@@ -970,10 +992,6 @@ async function carregarClientesPatrocinadores(){
         </tr>
     `;
 
-    /*
-     * Tabela criada para registrar:
-     * cliente + WhatsApp + patrocinador + data/hora.
-     */
     const { data, error } = await db
         .from("hotspot_acessos_patrocinadores")
         .select("*")
@@ -991,9 +1009,9 @@ async function carregarClientesPatrocinadores(){
             <tr>
                 <td colspan="4">
                     ⚠️ Não foi possível carregar os registros.
-                    Verifique se a tabela
+                    Verifique a tabela
                     <b>hotspot_acessos_patrocinadores</b>
-                    foi criada no Supabase.
+                    e as políticas RLS do Supabase.
                 </td>
             </tr>
         `;
@@ -1008,6 +1026,7 @@ async function carregarClientesPatrocinadores(){
     renderizarClientesPatrocinadores();
 }
 
+
 function preencherFiltroPatrocinadores(){
 
     const select =
@@ -1020,11 +1039,24 @@ function preencherFiltroPatrocinadores(){
     const atual =
         select.value;
 
+    /*
+     * Só coloca no filtro patrocinadores
+     * que realmente foram registrados como visitados.
+     */
     const nomes =
         [...new Set(
             dadosClientesPatrocinadores
+                .filter(item =>
+                    item.patrocinador_id ||
+                    item.patrocinador_nome ||
+                    item.nome_patrocinador ||
+                    item.patrocinador
+                )
                 .map(obterNomePatrocinadorRegistro)
-                .filter(Boolean)
+                .filter(nome =>
+                    nome &&
+                    nome !== "Não informado"
+                )
         )]
         .sort((a,b) =>
             a.localeCompare(
@@ -1047,12 +1079,11 @@ function preencherFiltroPatrocinadores(){
         select.appendChild(option);
     });
 
-    if(
-        nomes.includes(atual)
-    ){
+    if(nomes.includes(atual)){
         select.value = atual;
     }
 }
+
 
 function renderizarClientesPatrocinadores(){
 
@@ -1105,6 +1136,14 @@ function renderizarClientesPatrocinadores(){
                     whatsapp
                 ).toLowerCase();
 
+            const possuiVisita =
+                !!(
+                    item.patrocinador_id ||
+                    item.patrocinador_nome ||
+                    item.nome_patrocinador ||
+                    item.patrocinador
+                );
+
             return (
                 (!busca || texto.includes(busca)) &&
                 (
@@ -1114,9 +1153,10 @@ function renderizarClientesPatrocinadores(){
             );
         });
 
-    document.getElementById(
-        "totalClientesPatrocinadores"
-    ).textContent =
+    /*
+     * Total de clientes registrados.
+     */
+    const clientesUnicos =
         new Set(
             dadosClientesPatrocinadores.map(item =>
                 String(
@@ -1127,12 +1167,29 @@ function renderizarClientesPatrocinadores(){
                     item.id
                 )
             )
-        ).size;
+        );
+
+    document.getElementById(
+        "totalClientesPatrocinadores"
+    ).textContent =
+        clientesUnicos.size;
+
+    /*
+     * Visitas = somente registros que possuem
+     * patrocinador visitado.
+     */
+    const totalVisitas =
+        dadosClientesPatrocinadores.filter(item =>
+            item.patrocinador_id ||
+            item.patrocinador_nome ||
+            item.nome_patrocinador ||
+            item.patrocinador
+        ).length;
 
     document.getElementById(
         "totalVisitasPatrocinadores"
     ).textContent =
-        dadosClientesPatrocinadores.length;
+        totalVisitas;
 
     if(!filtrados.length){
 
@@ -1161,18 +1218,42 @@ function renderizarClientesPatrocinadores(){
                 item.telefone ||
                 "-";
 
-            const patrocinador =
-                obterNomePatrocinadorRegistro(item);
+            const possuiVisita =
+                !!(
+                    item.patrocinador_id ||
+                    item.patrocinador_nome ||
+                    item.nome_patrocinador ||
+                    item.patrocinador
+                );
 
-            const data =
-                item.created_at ||
+            const patrocinador =
+                possuiVisita
+                    ? obterNomePatrocinadorRegistro(item)
+                    : "Ainda não visitou";
+
+            /*
+             * IMPORTANTE:
+             * Para a visita usamos visitado_em.
+             * created_at é a hora do cadastro do cliente.
+             */
+            const dataVisita =
+                item.visitado_em ||
+                item.data_visita ||
                 item.data_hora ||
-                item.data_visita;
+                null;
+
+            const dataExibida =
+                possuiVisita
+                    ? formatarDataAdmin(dataVisita)
+                    : "-";
 
             return `
                 <tr>
+
                     <td>
-                        <b>${escaparHtmlAdmin(nome)}</b>
+                        <b>
+                            ${escaparHtmlAdmin(nome)}
+                        </b>
                     </td>
 
                     <td>
@@ -1180,16 +1261,25 @@ function renderizarClientesPatrocinadores(){
                     </td>
 
                     <td>
-                        <span class="badge-patrocinador-admin">
-                            ⭐ ${escaparHtmlAdmin(patrocinador)}
-                        </span>
+                        ${
+                            possuiVisita
+                            ? `
+                                <span class="badge-patrocinador-admin">
+                                    ⭐ ${escaparHtmlAdmin(patrocinador)}
+                                </span>
+                              `
+                            : `
+                                <span class="badge-sem-patrocinador-admin">
+                                    ⏳ Ainda não visitou
+                                </span>
+                              `
+                        }
                     </td>
 
                     <td>
-                        ${escaparHtmlAdmin(
-                            formatarDataAdmin(data)
-                        )}
+                        ${escaparHtmlAdmin(dataExibida)}
                     </td>
+
                 </tr>
             `;
 
