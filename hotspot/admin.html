@@ -1035,13 +1035,6 @@ if (dataLocal === hoje) {
 
     });
 
-    const { count: online } = await db
-    .from("hotspot_pagamentos")
-    .select("*", { count: "exact", head: true })
-    .eq("app_id", APP_ID)
-    .eq("status_acesso", "ativo");
-
-document.getElementById("online").innerHTML = online || 0;
 
     document.getElementById("pagos").innerHTML = pagosHoje;
     document.getElementById("pendentes").innerHTML = pendentes;
@@ -1103,13 +1096,55 @@ async function carregarUltimosPagamentos(){
 
 }
 
+async function buscarClientesOnlineMikrotik(){
+    const url = "https://hotspot.ffsolucoes.com.br/clientes-online?app_id=" + encodeURIComponent(APP_ID);
+
+    const resposta = await fetch(url, {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+    });
+
+    const resultado = await resposta.json().catch(() => ({}));
+
+    if(!resposta.ok || !resultado.sucesso){
+        throw new Error(
+            resultado.erro ||
+            "Gateway não conseguiu consultar o MikroTik."
+        );
+    }
+
+    return resultado;
+}
+
 async function carregarClientesOnline(){
 
     const tbody = document.getElementById("clientesOnline");
+    const card = document.getElementById("online");
     if(!tbody) return;
 
     try {
-        const { data, error } = await db
+        // A fonte da verdade é o MikroTik: /ip/hotspot/active/print.
+        const ativos = await buscarClientesOnlineMikrotik();
+        const listaAtivos = ativos.clientes || [];
+
+        if(card){
+            card.textContent = String(ativos.online || 0);
+        }
+
+        tbody.innerHTML = "";
+
+        if(!listaAtivos.length){
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" style="text-align:center;">
+                        Nenhum cliente conectado agora.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        // Busca os pagamentos apenas para completar plano/tempo do MAC ativo.
+        const { data: pagamentos, error } = await db
             .from("hotspot_pagamentos")
             .select("cliente_mac, plano_nome, expira_em, status_acesso")
             .eq("app_id", APP_ID)
@@ -1117,126 +1152,71 @@ async function carregarClientesOnline(){
             .limit(1000);
 
         if(error){
-            console.error("[CLIENTES ONLINE] Erro:", error);
-            tbody.innerHTML = `<tr><td colspan="4">Erro ao carregar clientes online.</td></tr>`;
-            return;
+            console.warn("[CLIENTES ONLINE] Não foi possível complementar os dados:", error);
         }
 
-        const agora = Date.now();
-        const mapa = new Map();
+        const pagamentosPorMac = new Map();
 
-        (data || []).forEach(c => {
-            const expira = Date.parse(c.expira_em);
-            const aindaValido = !isNaN(expira) && expira > agora;
-            const estaOnline = c.status_acesso === "ativo";
-
-            if(!aindaValido || !estaOnline) return;
-
-            const mac = String(c.cliente_mac || "").trim().toLowerCase();
-            if(!mac) return;
-
-            if(!mapa.has(mac)) mapa.set(mac, c);
+        (pagamentos || []).forEach(p => {
+            const mac = String(p.cliente_mac || "").trim().toLowerCase();
+            if(mac && !pagamentosPorMac.has(mac)){
+                pagamentosPorMac.set(mac, p);
+            }
         });
 
-        const clientes = [...mapa.values()];
-        tbody.innerHTML = "";
+        listaAtivos.forEach(cliente => {
 
-        if(!clientes.length){
-            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">Nenhum cliente online.</td></tr>`;
-            const el = document.getElementById("online");
-            if(el) el.textContent = "0";
-            return;
-        }
+            const macNormalizado = String(cliente.mac || "").trim().toLowerCase();
+            const pagamento = pagamentosPorMac.get(macNormalizado) || {};
 
-        clientes.forEach(c => {
-            const restante = Math.max(0, Date.parse(c.expira_em) - Date.now());
-            const total = Math.floor(restante / 1000);
-            const horas = Math.floor(total / 3600);
-            const minutos = Math.floor((total % 3600) / 60);
-            const segundos = total % 60;
-            const tempo = horas > 0
-                ? `${String(horas).padStart(2,"0")}:${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`
-                : `${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`;
+            let tempo = "-";
+
+            if(pagamento.expira_em){
+                const restante = Math.max(
+                    0,
+                    Date.parse(pagamento.expira_em) - Date.now()
+                );
+
+                if(restante > 0){
+                    const total = Math.floor(restante / 1000);
+                    const horas = Math.floor(total / 3600);
+                    const minutos = Math.floor((total % 3600) / 60);
+                    const segundos = total % 60;
+
+                    tempo = horas > 0
+                        ? `${String(horas).padStart(2,"0")}:${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`
+                        : `${String(minutos).padStart(2,"0")}:${String(segundos).padStart(2,"0")}`;
+                }
+            }
 
             tbody.innerHTML += `
                 <tr>
-                    <td>${escaparHtmlAdmin(c.cliente_mac || "-")}</td>
-                    <td>${escaparHtmlAdmin(c.plano_nome || "-")}</td>
+                    <td>${escaparHtmlAdmin(cliente.mac || "-")}</td>
+                    <td>${escaparHtmlAdmin(pagamento.plano_nome || cliente.usuario || "-")}</td>
                     <td>${tempo}</td>
                     <td>🟢 Online</td>
                 </tr>`;
         });
 
-        const el = document.getElementById("online");
-        if(el) el.textContent = String(clientes.length);
-
     } catch(e){
-        console.error("[CLIENTES ONLINE] Erro inesperado:", e);
+        console.error("[CLIENTES ONLINE] Erro:", e);
+
+        if(card){
+            // Não mostra 0 quando o gateway está indisponível.
+            card.textContent = "-";
+        }
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4" style="text-align:center;color:#c00;">
+                    Não foi possível consultar o MikroTik.
+                </td>
+            </tr>`;
     }
 }
 
 async function atualizarTotalOnline(){
-    const {data,error}=await db
-        .from("hotspot_pagamentos")
-        .select("cliente_mac, expira_em, status_acesso")
-        .eq("app_id",APP_ID)
-        .eq("status_acesso","ativo");
-
-    if(error){
-        console.error("[TOTAL ONLINE] Erro:",error);
-        return;
-    }
-
-    const agora=Date.now();
-    const macs=new Set();
-
-    (data||[]).forEach(c=>{
-        const expira=Date.parse(c.expira_em);
-        if(isNaN(expira)||expira<=agora) return;
-
-        const mac=String(c.cliente_mac||"").trim().toLowerCase();
-        if(mac) macs.add(mac);
-    });
-
-    const el=document.getElementById("online");
-    if(el) el.textContent=macs.size;
-}
-
-function formatarDataAdmin(data){
-    if(!data) return "-";
-    const d = new Date(data);
-    if(isNaN(d.getTime())) return "-";
-    return d.toLocaleString("pt-BR", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-    });
-}
-
-function escaparHtmlAdmin(valor){
-    return String(valor ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-let mapaPatrocinadoresAdmin = {};
-
-function obterNomePatrocinadorRegistro(item){
-    if(item?.patrocinador_id){
-        const p = mapaPatrocinadoresAdmin[String(item.patrocinador_id)];
-        if(p?.nome) return p.nome;
-    }
-    return (
-        item?.patrocinador_nome ||
-        item?.nome_patrocinador ||
-        item?.patrocinador ||
-        "Não informado"
-    );
+    await carregarClientesOnline();
 }
 
 async function carregarClientesPatrocinadores(){
