@@ -694,14 +694,58 @@ async function carregarAppId() {
         return false;
     }
 
+    /*
+     * IMPORTANTE:
+     * Quando o usuário possui mais de um negócio usando
+     * o mesmo e-mail/conta, o APP_ID deve vir da URL.
+     *
+     * Exemplo:
+     * /hotspot/admin.html?app_id=SEU_APP_ID
+     *
+     * Assim cada botão "Gerenciar" abre o negócio correto.
+     */
+    const params = new URLSearchParams(window.location.search);
+    const appIdUrl = params.get("app_id");
+
+    if (appIdUrl) {
+
+        // Confirma que o negócio pertence ao usuário logado.
+        const { data: negocio, error: negocioError } = await db
+            .from("negocios")
+            .select("id, app_id")
+            .eq("app_id", appIdUrl)
+            .eq("dono_id", session.user.id)
+            .eq("ativo", true)
+            .maybeSingle();
+
+        if (negocioError || !negocio) {
+            console.error(
+                "Negócio não encontrado ou sem permissão:",
+                negocioError
+            );
+            alert("⛔ Você não tem acesso a este negócio.");
+            location.href = "/painel-negocios/";
+            return false;
+        }
+
+        APP_ID = negocio.app_id;
+        return true;
+    }
+
+    /*
+     * Compatibilidade:
+     * se o admin for aberto sem ?app_id=,
+     * usa o app_id antigo da conta.
+     */
     const { data: usuario, error } = await db
         .from("usuarios")
         .select("app_id")
         .eq("id", session.user.id)
         .single();
 
-    if (error || !usuario) {
-        console.error("Usuário não encontrado.", error);
+    if (error || !usuario?.app_id) {
+        console.error("APP_ID não encontrado.", error);
+        alert("APP_ID não encontrado. Abra o painel de negócios e clique em Gerenciar.");
         return false;
     }
 
