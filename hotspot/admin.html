@@ -1105,139 +1105,144 @@ async function carregarUltimosPagamentos(){
 
 async function carregarClientesOnline(){
 
-    const { data, error } = await db
-    .from("hotspot_pagamentos")
-    .select(`
-    cliente_mac,
-    plano_nome,
-    expira_em
-`)
-    .eq("app_id", APP_ID)
-    .eq("status_acesso", "ativo")
-    .order("expira_em");
+    const agora = new Date().toISOString();
 
-    if(error){
+    // Busca pelos dois indicadores usados pelo sistema:
+    // 1) status_acesso = ativo
+    // 2) online = true
+    // Assim a lista não depende de apenas um campo.
+    const resultado = await Promise.all([
+        db
+            .from("hotspot_pagamentos")
+            .select("cliente_mac, plano_nome, expira_em, online, status_acesso")
+            .eq("app_id", APP_ID)
+            .eq("status_acesso", "ativo")
+            .gt("expira_em", agora)
+            .order("expira_em"),
 
-        console.log(error);
-        return;
+        db
+            .from("hotspot_pagamentos")
+            .select("cliente_mac, plano_nome, expira_em, online, status_acesso")
+            .eq("app_id", APP_ID)
+            .eq("online", true)
+            .gt("expira_em", agora)
+            .order("expira_em")
+    ]);
 
+    const erro = resultado.find(r => r.error)?.error;
+
+    if(erro){
+        console.error("[CLIENTES ONLINE] Erro ao buscar:", erro);
     }
 
-    const tbody=document.getElementById("clientesOnline");
+    // Junta as duas consultas sem duplicar o mesmo cliente.
+    const mapa = new Map();
 
-    tbody.innerHTML="";
+    resultado.forEach(r => {
+        (r.data || []).forEach(c => {
+            const chave = String(
+                c.cliente_mac ||
+                `${c.plano_nome || ""}-${c.expira_em || ""}`
+            ).toLowerCase();
 
-    if(!data || data.length==0){
+            if(!mapa.has(chave)){
+                mapa.set(chave, c);
+            }
+        });
+    });
 
-        tbody.innerHTML=`
+    const data = [...mapa.values()]
+        .filter(c => {
+            const expira = Date.parse(c.expira_em);
+            return !isNaN(expira) && expira > Date.now();
+        })
+        .sort((a,b) => {
+            return Date.parse(a.expira_em) - Date.parse(b.expira_em);
+        });
+
+    const tbody = document.getElementById("clientesOnline");
+
+    if(!tbody) return;
+
+    tbody.innerHTML = "";
+
+    if(!data.length){
+
+        tbody.innerHTML = `
         <tr>
-            <td colspan="3">Nenhum cliente online.</td>
+            <td colspan="4" style="text-align:center;">
+                Nenhum cliente online.
+            </td>
         </tr>`;
 
         return;
-
     }
 
-        data.forEach(c => {
+    data.forEach(c => {
 
-        const agoraMs = Date.now();
+        const expiraMs = Date.parse(c.expira_em);
+        let restante = expiraMs - Date.now();
 
-const expiraMs = Date.parse(c.expira_em);
+        if(isNaN(restante) || restante < 0){
+            restante = 0;
+        }
 
-let restante = expiraMs - agoraMs;
+        const totalSegundos = Math.floor(restante / 1000);
 
-if (isNaN(restante) || restante < 0) {
-    restante = 0;
-}
+        const horas = Math.floor(totalSegundos / 3600);
+        const minutos = Math.floor((totalSegundos % 3600) / 60);
+        const segundos = totalSegundos % 60;
 
-const totalSegundos = Math.floor(restante / 1000);
+        let tempo;
 
-const horas = Math.floor(totalSegundos / 3600);
-const minutos = Math.floor((totalSegundos % 3600) / 60);
-const segundos = totalSegundos % 60;
+        if(horas > 0){
+            tempo =
+                String(horas).padStart(2, "0") + ":" +
+                String(minutos).padStart(2, "0") + ":" +
+                String(segundos).padStart(2, "0");
+        }else{
+            tempo =
+                String(minutos).padStart(2, "0") + ":" +
+                String(segundos).padStart(2, "0");
+        }
 
-let tempo;
-
-if (horas > 0) {
-    tempo =
-        String(horas).padStart(2, "0") + ":" +
-        String(minutos).padStart(2, "0") + ":" +
-        String(segundos).padStart(2, "0");
-} else {
-    tempo =
-        String(minutos).padStart(2, "0") + ":" +
-        String(segundos).padStart(2, "0");
-}
+        const mac = c.cliente_mac || "-";
+        const plano = c.plano_nome || "-";
 
         tbody.innerHTML += `
         <tr>
-            <td>${c.cliente_mac}</td>
-           <td>${c.plano_nome}</td>
+            <td>${mac}</td>
+            <td>${plano}</td>
             <td>${tempo}</td>
             <td>🟢 Online</td>
         </tr>`;
     });
-
 }
+
 async function atualizarTotalOnline(){
 
-    const { count } = await db
+    const agora = new Date().toISOString();
+
+    const { data, error } = await db
         .from("hotspot_pagamentos")
-        .select("*", { count: "exact", head: true })
+        .select("cliente_mac, expira_em")
         .eq("app_id", APP_ID)
-        .eq("online", true);
+        .eq("online", true)
+        .gt("expira_em", agora);
 
-    document.getElementById("online").innerHTML = count || 0;
-
-}
-
-
-/* =========================================================
-   CLIENTES X PATROCINADORES
-   ========================================================= */
-let dadosClientesPatrocinadores = [];
-
-function escaparHtmlAdmin(valor){
-    return String(valor ?? "")
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;")
-        .replace(/'/g,"&#039;");
-}
-
-function formatarDataAdmin(valor){
-    if(!valor) return "-";
-
-    const d = new Date(valor);
-
-    if(isNaN(d.getTime())) return valor;
-
-    return new Intl.DateTimeFormat(
-        "pt-BR",
-        {
-            timeZone:"America/Sao_Paulo",
-            dateStyle:"short",
-            timeStyle:"short"
-        }
-    ).format(d);
-}
-
-let mapaPatrocinadoresAdmin = {};
-
-function obterNomePatrocinadorRegistro(item){
-    if(item?.patrocinador_id){
-        const p = mapaPatrocinadoresAdmin[String(item.patrocinador_id)];
-        if(p?.nome) return p.nome;
+    if(error){
+        console.error("[TOTAL ONLINE] Erro:", error);
+        return;
     }
-    return (
-        item?.patrocinador_nome ||
-        item?.nome_patrocinador ||
-        item?.patrocinador ||
-        "Não informado"
-    );
-}
 
+    const total = data?.length || 0;
+
+    const elemento = document.getElementById("online");
+
+    if(elemento){
+        elemento.innerHTML = total;
+    }
+}
 async function carregarClientesPatrocinadores(){
 
     const tbody =
@@ -1919,11 +1924,13 @@ document.getElementById("linkAparencia").href  = `${BASE}aparencia.html${QS}`;
     await carregarEmpresa();
     await carregarDashboard();
     await carregarClientesOnline();
+    await atualizarTotalOnline();
     await carregarUltimosPagamentos();
     await carregarClientesPatrocinadores();
 
     setInterval(carregarDashboard,30000);
     setInterval(carregarClientesOnline,1000);
+    setInterval(atualizarTotalOnline,5000);
     setInterval(carregarUltimosPagamentos,5000);
     setInterval(carregarClientesPatrocinadores,10000);
 }
