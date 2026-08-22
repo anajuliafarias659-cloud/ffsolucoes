@@ -1112,6 +1112,96 @@ function preencherFiltroPatrocinadores(){
     }
 }
 
+function chaveClientePatrocinador(item){
+    const whatsapp = String(
+        item.whatsapp ||
+        item.telefone ||
+        ""
+    ).replace(/\D/g, "");
+
+    if(whatsapp) return "whatsapp:" + whatsapp;
+
+    const nome = String(
+        item.nome_cliente ||
+        item.nome ||
+        item.cliente_nome ||
+        ""
+    )
+    .trim()
+    .toLowerCase();
+
+    return "nome:" + nome;
+}
+
+function possuiVisitaPatrocinador(item){
+    return !!(
+        item.patrocinador_id ||
+        item.patrocinador_nome ||
+        item.nome_patrocinador ||
+        item.patrocinador
+    );
+}
+
+function dataVisitaPatrocinador(item){
+    return (
+        item.visitado_em ||
+        item.data_visita ||
+        item.data_hora ||
+        null
+    );
+}
+
+function selecionarRegistroCliente(registros){
+    // Mantém apenas 1 linha por cliente.
+    // Dá preferência ao registro que já tem patrocinador visitado.
+    return registros.reduce((melhor, atual) => {
+        if(!melhor) return atual;
+
+        const melhorVisitou = possuiVisitaPatrocinador(melhor);
+        const atualVisitou = possuiVisitaPatrocinador(atual);
+
+        if(atualVisitou && !melhorVisitou){
+            return atual;
+        }
+
+        if(atualVisitou && melhorVisitou){
+            const dataMelhor = dataVisitaPatrocinador(melhor);
+            const dataAtual = dataVisitaPatrocinador(atual);
+
+            const msMelhor = dataMelhor ? Date.parse(dataMelhor) : 0;
+            const msAtual = dataAtual ? Date.parse(dataAtual) : 0;
+
+            if(msAtual >= msMelhor) return atual;
+        }
+
+        return melhor;
+    }, null);
+}
+
+function obterClientesUnicosPatrocinadores(){
+    const mapa = new Map();
+
+    (dadosClientesPatrocinadores || []).forEach(item => {
+        const chave = chaveClientePatrocinador(item);
+        if(!chave) return;
+
+        if(!mapa.has(chave)){
+            mapa.set(chave, [item]);
+        }else{
+            mapa.get(chave).push(item);
+        }
+    });
+
+    return [...mapa.values()]
+        .map(selecionarRegistroCliente)
+        .filter(Boolean)
+        .sort((a,b) => {
+            const ta = Date.parse(a.created_at || a.visitado_em || 0) || 0;
+            const tb = Date.parse(b.created_at || b.visitado_em || 0) || 0;
+            return tb - ta;
+        });
+}
+
 function renderizarClientesPatrocinadores(){
 
     const tbody =
@@ -1135,68 +1225,56 @@ function renderizarClientesPatrocinadores(){
             "filtroPatrocinador"
         )?.value || "";
 
-    const filtrados =
-        dadosClientesPatrocinadores.filter(item => {
+    const clientesUnicos = obterClientesUnicosPatrocinadores();
 
-            const nome =
-                String(
-                    item.nome_cliente ||
-                    item.nome ||
-                    item.cliente_nome ||
-                    ""
-                );
+    const filtrados = clientesUnicos.filter(item => {
 
-            const whatsapp =
-                String(
-                    item.whatsapp ||
-                    item.telefone ||
-                    ""
-                );
+        const nome = String(
+            item.nome_cliente ||
+            item.nome ||
+            item.cliente_nome ||
+            ""
+        );
 
-            const patrocinador =
-                obterNomePatrocinadorRegistro(item);
+        const whatsapp = String(
+            item.whatsapp ||
+            item.telefone ||
+            ""
+        );
 
-            const texto =
-                (
-                    nome +
-                    " " +
-                    whatsapp
-                ).toLowerCase();
+        const patrocinador = possuiVisitaPatrocinador(item)
+            ? obterNomePatrocinadorRegistro(item)
+            : "";
 
-            return (
-                (!busca || texto.includes(busca)) &&
-                (
-                    !patrocinadorFiltro ||
-                    patrocinador === patrocinadorFiltro
-                )
-            );
-        });
+        const texto = (
+            nome + " " +
+            whatsapp + " " +
+            patrocinador
+        ).toLowerCase();
+
+        return (
+            (!busca || texto.includes(busca)) &&
+            (
+                !patrocinadorFiltro ||
+                patrocinador === patrocinadorFiltro
+            )
+        );
+    });
 
     document.getElementById(
         "totalClientesPatrocinadores"
-    ).textContent =
-        new Set(
-            dadosClientesPatrocinadores.map(item =>
-                String(
-                    item.whatsapp ||
-                    item.telefone ||
-                    item.nome_cliente ||
-                    item.nome ||
-                    item.id
-                )
-            )
-        ).size;
+    ).textContent = clientesUnicos.length;
 
-    // Conta somente quem realmente possui um patrocinador associado.
-    // visitado_em sozinho NÃO significa que houve visita.
-    const visitasRegistradas = dadosClientesPatrocinadores.filter(item =>
-        !!(item.patrocinador_id || item.patrocinador_nome || item.nome_patrocinador || item.patrocinador)
+    const visitasRegistradas = clientesUnicos.filter(
+        possuiVisitaPatrocinador
     );
 
     document.getElementById(
         "totalVisitasPatrocinadores"
-    ).textContent =
-        visitasRegistradas.length;
+    ).textContent = visitasRegistradas.length;
+
+    console.log("[PATROCINADORES] CLIENTES ÚNICOS:", clientesUnicos);
+    console.log("[PATROCINADORES] VISITAS ÚNICAS:", visitasRegistradas);
 
     if(!filtrados.length){
 
@@ -1225,24 +1303,13 @@ function renderizarClientesPatrocinadores(){
                 item.telefone ||
                 "-";
 
-            // Só considera visita quando existe patrocinador associado.
-            // Não usa visitado_em sozinho para evitar contar cadastros sem patrocinador.
-            const possuiVisita = !!(
-                item.patrocinador_id ||
-                item.patrocinador_nome ||
-                item.nome_patrocinador ||
-                item.patrocinador
-            );
+            const possuiVisita = possuiVisitaPatrocinador(item);
 
             const patrocinador = possuiVisita
                 ? obterNomePatrocinadorRegistro(item)
                 : "Ainda não visitou";
 
-            const data =
-                item.visitado_em ||
-                item.data_visita ||
-                item.data_hora ||
-                null;
+            const data = dataVisitaPatrocinador(item);
 
             return `
                 <tr>
@@ -1262,11 +1329,13 @@ function renderizarClientesPatrocinadores(){
                     </td>
 
                     <td>
-                        ${possuiVisita && data ? escaparHtmlAdmin(formatarDataAdmin(data)) : "-"}
+                        ${possuiVisita && data
+                            ? escaparHtmlAdmin(formatarDataAdmin(data))
+                            : "-"
+                        }
                     </td>
                 </tr>
             `;
-
         }).join("");
 }
 
