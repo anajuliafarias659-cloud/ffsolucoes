@@ -206,25 +206,49 @@ await supabase
   });
 
     // 👤 USUÁRIO
-    // verifica se já existe
-const { data: usuarioExistente } = await supabase
+    // MULTI-LOJA:
+    // Um mesmo usuário pode possuir várias lojas.
+    // Portanto, se o usuário já existir, NÃO sobrescrevemos
+    // usuarios.app_id, plano ou data_expiracao.
+    //
+    // Cada loja fica vinculada pelo:
+    // negocios.app_id -> apps.id
+
+const { data: usuarioExistente, error: usuarioBuscaError } = await supabase
   .from("usuarios")
-  .select("id")
+  .select("id, app_id, plano, data_expiracao")
   .eq("id", userId)
   .maybeSingle();
 
-await supabase.from("usuarios").upsert({
-  id: userId,
-  nome,
-  email,
-  tipo: "admin",
-  sistema: tipo,
-  ativo: true,
-  data_expiracao: expiracao.toISOString(),
-  app_id: app.id
-}, {
-  onConflict: "id"
-});
+if(usuarioBuscaError) throw usuarioBuscaError;
+
+if(!usuarioExistente){
+
+  const { error: usuarioInsertError } = await supabase
+    .from("usuarios")
+    .insert({
+      id: userId,
+      nome,
+      email,
+      tipo: "admin",
+      sistema: tipo,
+      ativo: true,
+      data_expiracao: expiracao.toISOString(),
+      app_id: app.id
+    });
+
+  if(usuarioInsertError) throw usuarioInsertError;
+
+}else{
+
+  console.log(
+    "Usuário já existe. Cadastro preservado:",
+    usuarioExistente.app_id,
+    usuarioExistente.plano,
+    usuarioExistente.data_expiracao
+  );
+
+}
 
 
     // ⚙️ CONFIG SITE
