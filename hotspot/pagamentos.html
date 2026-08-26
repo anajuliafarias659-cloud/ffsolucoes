@@ -289,6 +289,42 @@ label{
     margin-bottom:7px;
 }
 
+input[type="text"]{
+
+    width:100%;
+
+    height:50px;
+
+    padding:
+        0
+        14px;
+
+    border:
+        1px solid
+        #d1d5db;
+
+    border-radius:11px;
+
+    background:#fff;
+
+    color:#222;
+
+    font-size:17px;
+
+    outline:none;
+
+    text-align:center;
+}
+
+input[type="text"]:focus{
+
+    border-color:#0d8db8;
+
+    box-shadow:
+        0 0 0 3px
+        rgba(13,141,184,.12);
+}
+
 input[type="tel"]{
 
     width:100%;
@@ -731,6 +767,22 @@ button:disabled{
         </div>
 
 
+        <label for="nomeCliente">
+
+            👤 Digite seu nome
+
+        </label>
+
+        <input
+            type="text"
+            id="nomeCliente"
+            placeholder="Seu nome"
+            maxlength="80"
+            autocomplete="name"
+        >
+
+        <br>
+
         <label for="celular">
 
             📱 Digite seu celular
@@ -847,6 +899,27 @@ button:disabled{
 
     </div>
 
+    <div
+        class="sucesso"
+        id="boasVindas"
+    >
+
+        <h2>
+            Seja bem-vindo!
+        </h2>
+
+        <p id="textoBoasVindas">
+            Seu acesso está ativo.
+        </p>
+
+        <br>
+
+        <button onclick="continuarAcesso()">
+            Entrar na internet
+        </button>
+
+    </div>
+
 
     <!-- =================================================
          RODAPÉ
@@ -952,6 +1025,7 @@ if(
 let planoAtual = null;
 
 let pagamentoId = null;
+let clienteAtual = null;
 
 
 // =====================================================
@@ -962,6 +1036,16 @@ const campoCelular =
     document.getElementById(
         "celular"
     );
+
+const campoNome =
+    document.getElementById("nomeCliente");
+
+const nomeSalvo =
+    localStorage.getItem("hotspot_nome") || "";
+
+if(campoNome && nomeSalvo){
+    campoNome.value = nomeSalvo;
+}
 
 
 campoCelular.addEventListener(
@@ -1331,6 +1415,132 @@ function obterCelular(){
 
 
 // =====================================================
+// CLIENTE / CREDITO EXISTENTE
+// =====================================================
+
+function obterNome(){
+
+    return String(
+        document.getElementById("nomeCliente")?.value || ""
+    ).trim().replace(/\s+/g," ");
+}
+
+function esconderPagamento(){
+
+    document.querySelector(".card").style.display = "none";
+
+    document.getElementById("pix").style.display = "none";
+    document.getElementById("statusPagamento").style.display = "none";
+    document.getElementById("sucesso").style.display = "none";
+    document.getElementById("boasVindas").style.display = "block";
+}
+
+function mostrarBoasVindas(nome, pagamento){
+
+    clienteAtual = pagamento || null;
+
+    const nomeFinal = nome || pagamento?.nome || "cliente";
+
+    document.getElementById("textoBoasVindas").innerHTML =
+        `Olá, <strong>${nomeFinal}</strong>!<br><br>Seu acesso está ativo.`;
+
+    esconderPagamento();
+}
+
+function creditoValido(pagamento){
+
+    if(!pagamento) return false;
+
+    const status = String(
+        pagamento.status || pagamento.payment_status || ""
+    ).toLowerCase();
+
+    if(status !== "approved") return false;
+
+    // Se o banco possuir uma data de fim, respeita a validade do crédito.
+    const camposFim = [
+        "fim_acesso",
+        "data_fim",
+        "data_expiracao",
+        "expires_at",
+        "expira_em",
+        "valid_until"
+    ];
+
+    for(const campo of camposFim){
+        if(pagamento[campo]){
+            const fim = new Date(pagamento[campo]);
+            if(!Number.isNaN(fim.getTime())){
+                return fim.getTime() > Date.now();
+            }
+        }
+    }
+
+    // Se não existir campo de expiração, mantém a compatibilidade com
+    // a estrutura atual e considera o pagamento aprovado como crédito.
+    return true;
+}
+
+async function verificarCreditoExistente(celular){
+
+    try{
+
+        const {data, error} = await db
+            .from("hotspot_pagamentos")
+            .select("*")
+            .eq("app_id", APP_ID)
+            .eq("celular", celular)
+            .limit(20);
+
+        if(error){
+            console.warn("Não foi possível consultar crédito existente:", error);
+            return null;
+        }
+
+        const lista = Array.isArray(data) ? data : [];
+
+        const aprovado = lista
+            .filter(creditoValido)
+            .sort((a,b)=>{
+                const da = new Date(a.created_at || a.updated_at || a.data_pagamento || 0).getTime();
+                const db = new Date(b.created_at || b.updated_at || b.data_pagamento || 0).getTime();
+                return db - da;
+            })[0];
+
+        return aprovado || null;
+
+    }catch(e){
+        console.warn("Erro consultando crédito existente:", e);
+        return null;
+    }
+}
+
+function continuarAcesso(){
+
+    // Se houver uma página de sucesso/liberação já existente, reutiliza o
+    // mesmo fluxo que o pagamento aprovado utiliza.
+    if(clienteAtual?.payment_id || clienteAtual?.id){
+
+        const id = clienteAtual.payment_id || clienteAtual.id;
+
+        const celular = obterCelular();
+
+        window.location.href =
+            `sucesso.html?` +
+            `app_id=${encodeURIComponent(APP_ID)}` +
+            `&mac=${encodeURIComponent(MAC)}` +
+            `&ip=${encodeURIComponent(IP)}` +
+            `&celular=${encodeURIComponent(celular)}` +
+            `&nome=${encodeURIComponent(obterNome() || clienteAtual.nome || "")}` +
+            `&pagamento_id=${encodeURIComponent(id)}` +
+            `&link_login=${encodeURIComponent(LINK_LOGIN)}` +
+            `&link_orig=${encodeURIComponent(LINK_ORIG)}` +
+            `&chap_id=${encodeURIComponent(CHAP_ID)}` +
+            `&chap=${encodeURIComponent(CHAP)}`;
+    }
+}
+
+// =====================================================
 // GERA PIX
 // =====================================================
 
@@ -1359,6 +1569,39 @@ async function gerarPix(){
 
         return;
 
+    }
+
+    const nome = obterNome();
+
+    if(nome.length < 2){
+
+        alert("Digite seu nome.");
+
+        document.getElementById("nomeCliente").focus();
+
+        return;
+    }
+
+    // Antes de gerar outro PIX, procura se este celular já possui
+    // um crédito aprovado e ainda válido.
+    const creditoExistente = await verificarCreditoExistente(celular);
+
+    if(creditoExistente){
+
+        const nomeBanco = String(
+            creditoExistente.nome ||
+            creditoExistente.nome_cliente ||
+            nome
+        ).trim();
+
+        document.getElementById("nomeCliente").value = nomeBanco;
+
+        localStorage.setItem("hotspot_nome", nomeBanco);
+        localStorage.setItem("hotspot_celular", celular);
+
+        mostrarBoasVindas(nomeBanco, creditoExistente);
+
+        return;
     }
 
 
@@ -1414,7 +1657,10 @@ async function gerarPix(){
                 IP,
 
             celular:
-                celular
+                celular,
+
+            nome:
+                nome
 
         });
 
@@ -1463,7 +1709,10 @@ async function gerarPix(){
                                 "",
 
                             celular:
-                                celular
+                                celular,
+
+                            nome:
+                                nome
 
                         })
 
@@ -1839,6 +2088,11 @@ async function verificarPagamento(){
             celular
         );
 
+        localStorage.setItem(
+            "hotspot_nome",
+            nome
+        );
+
 
         localStorage.setItem(
             "hotspot_pagamento_id",
@@ -1873,6 +2127,12 @@ async function verificarPagamento(){
             `&celular=${
                 encodeURIComponent(
                     celular
+                )
+            }` +
+
+            `&nome=${
+                encodeURIComponent(
+                    nome
                 )
             }` +
 
