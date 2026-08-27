@@ -1455,9 +1455,32 @@ function creditoValido(pagamento){
         pagamento.status || pagamento.payment_status || ""
     ).toLowerCase();
 
-    if(status !== "approved") return false;
+    // O pagamento precisa estar aprovado
+    if(status !== "approved"){
+        return false;
+    }
 
-    // Se o banco possuir uma data de fim, respeita a validade do crédito.
+    // =====================================================
+    // ACESSO ATUAL
+    // =====================================================
+
+    const statusAcesso = String(
+        pagamento.status_acesso || ""
+    ).toLowerCase();
+
+    // Se existir status_acesso, somente "ativo"
+    // pode ser considerado crédito vigente.
+    if(
+        statusAcesso &&
+        statusAcesso !== "ativo"
+    ){
+        return false;
+    }
+
+    // =====================================================
+    // DATA DE EXPIRAÇÃO
+    // =====================================================
+
     const camposFim = [
         "fim_acesso",
         "data_fim",
@@ -1468,17 +1491,30 @@ function creditoValido(pagamento){
     ];
 
     for(const campo of camposFim){
+
         if(pagamento[campo]){
-            const fim = new Date(pagamento[campo]);
-            if(!Number.isNaN(fim.getTime())){
+
+            const fim =
+                new Date(
+                    pagamento[campo]
+                );
+
+            if(
+                !Number.isNaN(
+                    fim.getTime()
+                )
+            ){
+
+                // Só existe crédito enquanto
+                // a data de vencimento ainda não chegou.
                 return fim.getTime() > Date.now();
             }
         }
     }
 
-    // Se não existir campo de expiração, mantém a compatibilidade com
-    // a estrutura atual e considera o pagamento aprovado como crédito.
-    return true;
+    // Se não existe data de vencimento,
+    // NÃO considera crédito antigo como válido.
+    return false;
 }
 
 async function verificarCreditoExistente(celular){
@@ -1489,7 +1525,7 @@ async function verificarCreditoExistente(celular){
             .from("hotspot_pagamentos")
             .select("*")
             .eq("app_id", APP_ID)
-            .eq("celular", celular)
+            .eq("telefone", celular)
             .limit(20);
 
         if(error){
