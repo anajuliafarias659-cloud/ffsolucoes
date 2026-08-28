@@ -1258,6 +1258,29 @@ body.modo-patrocinadores #tela-patrocinadores .titulo-patrocinadores{
     pointer-events:none !important;
 }
 
+.btn-seguir-patrocinador{
+    width:100%;
+    margin-top:7px;
+    min-height:36px;
+    border:0;
+    border-radius:9px;
+    padding:8px 10px;
+    background:#087ea4;
+    color:#fff;
+    font-size:10px;
+    font-weight:900;
+    cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.12);
+}
+.btn-seguir-patrocinador:active{transform:scale(.98)}
+@media(max-width:520px){
+    .btn-seguir-patrocinador{
+        min-height:34px;
+        font-size:9px;
+        margin-top:5px;
+    }
+}
+
 </style>
 </head>
 <body>
@@ -1517,8 +1540,7 @@ function mostrarAvisoSeguirPatrocinador(){
     aviso.classList.add("mostrar");
 
     aviso.innerHTML =
-        "📶 Internet liberada!<br>" +
-        "❤️ Para manter o acesso gratuito, siga nosso patrocinador no Instagram/Telegram.";
+        "👉 Siga nosso patrocinador para liberar a sua internet.";
 }
 
 function mostrarPatrocinadoresAposDados(){
@@ -1657,80 +1679,102 @@ function renderCliquePatrocinadores(lista){
         item.appendChild(status);
 
         /*
-         * Ao clicar:
-         * 1. abre o patrocinador;
-         * 2. registra a visita;
-         * 3. libera a internet;
-         * 4. mantém esta página aberta.
+         * FLUXO FINAL DO PATROCINADOR
          *
-         * A liberação do MikroTik é enviada para um iframe oculto,
-         * portanto o LINK_LOGIN não troca a página do captive portal.
+         * O CARD funciona como o botão de gerar PIX:
+         * - primeiro clique: libera a internet;
+         * - a página indexx.html continua aberta;
+         * - NÃO abre Instagram/Telegram neste primeiro clique;
+         * - depois da liberação aparece o botão SEGUIR;
+         * - somente o botão SEGUIR abre o link do patrocinador.
          */
         item.addEventListener(
             "click",
-            async function(){
+            async function(event){
+
+                /* Clique no botão SEGUIR não deve clicar novamente no card. */
+                if(event && event.target && event.target.closest(".btn-seguir-patrocinador")){
+                    return;
+                }
 
                 if(item.classList.contains("processando")) return;
 
                 item.classList.add("processando");
 
-                /* Abre a rede social no gesto direto do usuário. */
-                if(patrocinador.url){
-                    try{
-                        const janela=window.open(
-                            patrocinador.url,
-                            "_blank",
-                            "noopener,noreferrer"
-                        );
-
-                        if(!janela){
-                            console.log("O navegador bloqueou a abertura da rede social.");
-                        }
-                    }catch(e){
-                        console.warn("Não foi possível abrir o patrocinador:",e);
-                    }
-                }
-
                 await registrarVisitaPatrocinador(patrocinador);
 
-                /* Mantém o aviso informando a condição do patrocinador. */
+                /*
+                 * A mensagem permanece exatamente como condição do fluxo:
+                 * seguir o patrocinador para liberar a internet.
+                 * Não mostramos "internet liberada" ao cliente.
+                 */
                 mostrarAvisoSeguirPatrocinador();
 
-                const aviso=document.getElementById("aviso-seguir-patrocinador");
-                if(aviso){
-                    aviso.innerHTML =
-                        "📶 Internet liberada!<br>" +
-                        "❤️ Para manter o acesso gratuito, siga nosso patrocinador no Instagram/Telegram.";
-                }
-
-                /*
-                 * O clique passa a cumprir a etapa técnica de liberação.
-                 * liberarInternet() envia o login para o iframe oculto,
-                 * então a tela do portal permanece aberta.
-                 */
                 patrocinadorClicadoParaLiberar=true;
 
+                /*
+                 * O mesmo mecanismo usado pelo fluxo de liberação:
+                 * LINK_LOGIN é enviado para o iframe oculto, mantendo
+                 * o indexx.html aberto na tela.
+                 */
                 await liberarInternet({
                     preventDefault:function(){}
                 });
 
+                /*
+                 * O botão principal não deve mais ser usado nesta etapa.
+                 * O próximo passo visível será somente SEGUIR.
+                 */
                 const btn=document.getElementById("btn-entrar");
                 if(btn){
                     btn.disabled=true;
                     btn.classList.remove("bloqueado");
-                    btn.classList.add("pronto-liberar");
-                    btn.textContent="✅ INTERNET LIBERADA";
-                    btn.title="Internet liberada. Siga o patrocinador para apoiar o evento.";
+                    btn.textContent="👉 SIGA O PATROCINADOR";
+                    btn.title="Siga o patrocinador para manter o acesso gratuito.";
+                }
+
+                /*
+                 * Depois da liberação, cria o botão que realmente abre
+                 * Instagram/Telegram/site. O link externo só é acionado
+                 * pelo clique explícito neste botão.
+                 */
+                let btnSeguir=item.querySelector(".btn-seguir-patrocinador");
+
+                if(!btnSeguir && patrocinador.url){
+                    btnSeguir=document.createElement("button");
+                    btnSeguir.type="button";
+                    btnSeguir.className="btn-seguir-patrocinador";
+                    btnSeguir.textContent="👉 SEGUIR PATROCINADOR";
+
+                    btnSeguir.addEventListener("click",function(e){
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        try{
+                            const janela=window.open(
+                                patrocinador.url,
+                                "_blank",
+                                "noopener,noreferrer"
+                            );
+
+                            if(!janela){
+                                console.log("O navegador bloqueou a abertura do patrocinador.");
+                            }
+                        }catch(erro){
+                            console.error("Erro ao abrir patrocinador:",erro);
+                        }
+                    });
+
+                    item.appendChild(btnSeguir);
                 }
 
                 item.classList.remove("processando");
                 item.classList.add("visitado");
 
                 const status=item.querySelector(".item-clique-status");
-                if(status) status.textContent="✓ Acessado";
+                if(status) status.textContent="👉 Siga o patrocinador";
             }
         );
-
         listaEl.appendChild(item);
     });
 
