@@ -1384,6 +1384,7 @@ Aceito os termos de uso e autorizo o recebimento de novidades e promoções dos 
         Patrocinadores
     </button>
 </nav>
+<iframe name="mikrotik-login-frame" id="mikrotik-login-frame" style="display:none;width:0;height:0;border:0;position:absolute;left:-9999px"></iframe>
 <script>
 const db = window.supabase.createClient(
     "https://pdajixsoowcyhnjwhgpc.supabase.co",
@@ -1516,9 +1517,8 @@ function mostrarAvisoSeguirPatrocinador(){
     aviso.classList.add("mostrar");
 
     aviso.innerHTML =
-        "✅ Internet liberada! " +
-        "Por favor, siga nosso patrocinador " +
-        "e ajude a fortalecer o evento. ❤️";
+        "📶 Internet liberada!<br>" +
+        "❤️ Para manter o acesso gratuito, siga nosso patrocinador no Instagram/Telegram.";
 }
 
 function mostrarPatrocinadoresAposDados(){
@@ -1658,14 +1658,13 @@ function renderCliquePatrocinadores(lista){
 
         /*
          * Ao clicar:
-         * 1. registra o clique;
-         * 2. abre a rede social/site;
-         * 3. NÃO libera ainda.
+         * 1. abre o patrocinador;
+         * 2. registra a visita;
+         * 3. libera a internet;
+         * 4. mantém esta página aberta.
          *
-         * A liberação só acontece quando o cliente voltar para esta
-         * página e tocar no botão "LIBERAR WI-FI GRÁTIS".
-         * Isso evita que o navegador/Instagram faça o portal sumir
-         * antes que o cliente consiga concluir o fluxo.
+         * A liberação do MikroTik é enviada para um iframe oculto,
+         * portanto o LINK_LOGIN não troca a página do captive portal.
          */
         item.addEventListener(
             "click",
@@ -1677,50 +1676,58 @@ function renderCliquePatrocinadores(lista){
 
                 /* Abre a rede social no gesto direto do usuário. */
                 if(patrocinador.url){
-                    const janela=window.open(
-                        patrocinador.url,
-                        "_blank",
-                        "noopener,noreferrer"
-                    );
+                    try{
+                        const janela=window.open(
+                            patrocinador.url,
+                            "_blank",
+                            "noopener,noreferrer"
+                        );
 
-                    if(!janela){
-                        console.log("O navegador bloqueou a abertura da rede social.");
+                        if(!janela){
+                            console.log("O navegador bloqueou a abertura da rede social.");
+                        }
+                    }catch(e){
+                        console.warn("Não foi possível abrir o patrocinador:",e);
                     }
                 }
 
                 await registrarVisitaPatrocinador(patrocinador);
 
-                /*
-                 * O clique foi concluído, mas a internet ainda NÃO é
-                 * liberada automaticamente. O usuário precisa voltar
-                 * para esta página e apertar o botão de liberação.
-                 */
-                patrocinadorClicadoParaLiberar=true;
-
-                const btn=document.getElementById("btn-entrar");
-
-                if(btn){
-                    btn.disabled=false;
-                    btn.classList.remove("bloqueado");
-                    btn.classList.add("pronto-liberar");
-                    btn.textContent="📶 VOLTE AQUI E LIBERE A INTERNET";
-                    btn.title="Você já visitou o patrocinador. Volte para esta página e toque para liberar.";
-                }
-
+                /* Mantém o aviso informando a condição do patrocinador. */
                 mostrarAvisoSeguirPatrocinador();
 
                 const aviso=document.getElementById("aviso-seguir-patrocinador");
                 if(aviso){
                     aviso.innerHTML =
-                        "✅ Patrocinador acessado!<br>" +
-                        "Volte para esta página e toque no botão abaixo para liberar a internet. 📶";
+                        "📶 Internet liberada!<br>" +
+                        "❤️ Para manter o acesso gratuito, siga nosso patrocinador no Instagram/Telegram.";
+                }
+
+                /*
+                 * O clique passa a cumprir a etapa técnica de liberação.
+                 * liberarInternet() envia o login para o iframe oculto,
+                 * então a tela do portal permanece aberta.
+                 */
+                patrocinadorClicadoParaLiberar=true;
+
+                await liberarInternet({
+                    preventDefault:function(){}
+                });
+
+                const btn=document.getElementById("btn-entrar");
+                if(btn){
+                    btn.disabled=true;
+                    btn.classList.remove("bloqueado");
+                    btn.classList.add("pronto-liberar");
+                    btn.textContent="✅ INTERNET LIBERADA";
+                    btn.title="Internet liberada. Siga o patrocinador para apoiar o evento.";
                 }
 
                 item.classList.remove("processando");
                 item.classList.add("visitado");
 
                 const status=item.querySelector(".item-clique-status");
-                if(status) status.textContent="✓ Acessado — volte e libere";
+                if(status) status.textContent="✓ Acessado";
             }
         );
 
@@ -2547,6 +2554,7 @@ async function liberarInternet(event){
             const form=document.createElement("form");
             form.method="POST";
             form.action=LINK_LOGIN;
+            form.target="mikrotik-login-frame";
 
             const campos={
                 username:"GRATUITO_PATROCINADO",
