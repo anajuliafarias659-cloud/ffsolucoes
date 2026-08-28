@@ -496,6 +496,7 @@ button,input{font:inherit}
 .aviso-clique{display:none;margin-top:8px;padding:7px 8px;border-radius:8px;background:#fff8df;color:#806500;font-size:9px;text-align:center;font-weight:700}
 .aviso-clique.mostrar{display:block}
 #btn-entrar.bloqueado{opacity:.48;cursor:not-allowed;filter:grayscale(.15)}
+#btn-entrar.pronto-liberar{opacity:1;cursor:pointer;filter:none;box-shadow:0 5px 12px rgba(32,201,104,.30)}
 @media(max-width:360px){.lista-clique-patrocinadores{gap:5px}.item-clique-patrocinador{padding:6px 3px}.item-clique-nome{font-size:8px}}
 
 
@@ -1445,14 +1446,14 @@ function atualizarContadorPatrocinadores(){
 
     contador.textContent =
         qtd >= TOTAL_PATROCINADORES_EXIGIDOS
-        ? "✓ Patrocinador acessado — internet liberada"
+        ? "✓ Patrocinador acessado — volte e libere"
         : `${qtd} de ${TOTAL_PATROCINADORES_EXIGIDOS} visitados`;
 
     if(qtd >= TOTAL_PATROCINADORES_EXIGIDOS){
         if(aviso) aviso.classList.remove("mostrar");
         if(btn){
             btn.classList.remove("bloqueado");
-            btn.title = "Liberar Wi-Fi grátis";
+            btn.title = "Patrocinador acessado. Toque para liberar o Wi-Fi.";
         }
     }else{
         if(btn){
@@ -1659,7 +1660,12 @@ function renderCliquePatrocinadores(lista){
          * Ao clicar:
          * 1. registra o clique;
          * 2. abre a rede social/site;
-         * 3. libera o Wi-Fi imediatamente.
+         * 3. NÃO libera ainda.
+         *
+         * A liberação só acontece quando o cliente voltar para esta
+         * página e tocar no botão "LIBERAR WI-FI GRÁTIS".
+         * Isso evita que o navegador/Instagram faça o portal sumir
+         * antes que o cliente consiga concluir o fluxo.
          */
         item.addEventListener(
             "click",
@@ -1669,7 +1675,7 @@ function renderCliquePatrocinadores(lista){
 
                 item.classList.add("processando");
 
-                /* Abre a rede social no gesto do usuário. */
+                /* Abre a rede social no gesto direto do usuário. */
                 if(patrocinador.url){
                     const janela=window.open(
                         patrocinador.url,
@@ -1684,14 +1690,37 @@ function renderCliquePatrocinadores(lista){
 
                 await registrarVisitaPatrocinador(patrocinador);
 
-                mostrarAvisoSeguirPatrocinador();
-
-                /* Um clique basta para liberar. */
+                /*
+                 * O clique foi concluído, mas a internet ainda NÃO é
+                 * liberada automaticamente. O usuário precisa voltar
+                 * para esta página e apertar o botão de liberação.
+                 */
                 patrocinadorClicadoParaLiberar=true;
 
-                await liberarInternet({
-                    preventDefault:function(){}
-                });
+                const btn=document.getElementById("btn-entrar");
+
+                if(btn){
+                    btn.disabled=false;
+                    btn.classList.remove("bloqueado");
+                    btn.classList.add("pronto-liberar");
+                    btn.textContent="📶 VOLTE AQUI E LIBERE A INTERNET";
+                    btn.title="Você já visitou o patrocinador. Volte para esta página e toque para liberar.";
+                }
+
+                mostrarAvisoSeguirPatrocinador();
+
+                const aviso=document.getElementById("aviso-seguir-patrocinador");
+                if(aviso){
+                    aviso.innerHTML =
+                        "✅ Patrocinador acessado!<br>" +
+                        "Volte para esta página e toque no botão abaixo para liberar a internet. 📶";
+                }
+
+                item.classList.remove("processando");
+                item.classList.add("visitado");
+
+                const status=item.querySelector(".item-clique-status");
+                if(status) status.textContent="✓ Acessado — volte e libere";
             }
         );
 
@@ -2506,6 +2535,7 @@ async function liberarInternet(event){
     }
 
     patrocinadorClicadoParaLiberar=false;
+    btn.classList.remove("pronto-liberar");
 
     btn.disabled=true;
     btn.textContent="CONECTANDO...";
