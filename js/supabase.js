@@ -1,8 +1,8 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 export const supabase = createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw",
+  "https://auzdqapjetmhaokoynzo.supabase.co",
+  "sb_publishable_36kXlyuKU8RMfgSx01h5mw_lOLp1lbX",
   {
     auth: {
       persistSession: true,
