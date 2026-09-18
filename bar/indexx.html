@@ -171,8 +171,6 @@
       </div>
       <label>Valor a cobrar</label>
       <input id="pixValor" type="number" step="0.01" min="0.01">
-      <label>Descrição</label>
-      <input id="pixDescricao" maxlength="25" placeholder="Comanda">
       <button class="primary" style="width:100%;margin-top:10px" onclick="gerarPix()">Gerar QR Code</button>
 
       <div id="pixGerado" class="hidden">
@@ -496,27 +494,26 @@ function pixDoItem(id){
   let qtd=prompt(`Quantas unidades de ${i.produto_nome} deseja cobrar?`, String(qtdMax));
   if(qtd===null) return;
   qtd=Math.min(qtdMax,Math.max(1,parseInt(qtd)||1));
-  abrirModalPix(n(i.preco_unitario)*qtd, `${qtd}x ${i.produto_nome}`);
+  abrirModalPix(n(i.preco_unitario)*qtd);
 }
 
 function abrirPixSaldo(){
   const t=totais();
   if(t.saldo<=0) return alert("Essa comanda não tem saldo pendente.");
-  abrirModalPix(t.saldo,"Saldo da comanda");
+  abrirModalPix(t.saldo);
 }
 
 function abrirPixParcial(){
   const t=totais();
   if(t.saldo<=0) return alert("Essa comanda não tem saldo pendente.");
-  abrirModalPix(t.saldo,"Pagamento parcial");
+  abrirModalPix(t.saldo);
   setTimeout(()=>document.getElementById("pixValor").select(),100);
 }
 
-function abrirModalPix(valor,descricao){
+function abrirModalPix(valor){
   if(!config?.chave_pix) return alert("Cadastre primeiro a chave PIX na aba PIX.");
   valorPixAtual=n(valor);
   document.getElementById("pixValor").value=valorPixAtual.toFixed(2);
-  document.getElementById("pixDescricao").value=descricao||"Comanda";
   document.getElementById("pixGerado").classList.add("hidden");
   document.getElementById("modalPix").classList.remove("hidden");
 }
@@ -577,42 +574,94 @@ async function salvarConfig(){
 /* =========================
    PIX BR CODE
 ========================= */
-function pixLimparChave(chave){
-  return String(chave || "").trim();
+function norm(s){
+  return String(s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^A-Za-z0-9 .-]/g,"")
+    .toUpperCase();
 }
 
-function emv(id, value){
-  value = String(value ?? "");
-  return id + value.length.toString().padStart(2,"0") + value;
+function emv(id,value){
+  value=String(value ?? "");
+  return id + String(value.length).padStart(2,"0") + value;
 }
 
 function crc16(payload){
-  let crc = 0xFFFF;
+  let crc=0xFFFF;
   for(let i=0;i<payload.length;i++){
-    crc ^= payload.charCodeAt(i) << 8;
+    crc ^= payload.charCodeAt(i)<<8;
     for(let j=0;j<8;j++){
-      crc = (crc & 0x8000)
-        ? ((crc << 1) ^ 0x1021)
-        : (crc << 1);
+      crc=(crc & 0x8000)
+        ? ((crc<<1)^0x1021)
+        : (crc<<1);
       crc &= 0xFFFF;
     }
   }
   return crc.toString(16).toUpperCase().padStart(4,"0");
 }
 
-function montarPix(chave, nome, cidade, valor){
-  chave = pixLimparChave(chave);
-  if(!chave) throw new Error("Chave PIX não cadastrada.");
+function cpfValido(cpf){
+  cpf=String(cpf).replace(/\D/g,"");
+  if(cpf.length!==11 || /^(\d)\1{10}$/.test(cpf)) return false;
 
-  const numero = Number(valor);
-  if(!Number.isFinite(numero) || numero <= 0)
+  let soma=0;
+  for(let i=0;i<9;i++) soma += Number(cpf[i])*(10-i);
+  let d=(soma*10)%11;
+  if(d===10) d=0;
+  if(d!==Number(cpf[9])) return false;
+
+  soma=0;
+  for(let i=0;i<10;i++) soma += Number(cpf[i])*(11-i);
+  d=(soma*10)%11;
+  if(d===10) d=0;
+
+  return d===Number(cpf[10]);
+}
+
+function prepararChavePix(chave){
+  chave=String(chave || "").trim();
+
+  // CPF
+  const digits=chave.replace(/\D/g,"");
+  if(/^\d{11}$/.test(digits) && cpfValido(digits)){
+    return digits;
+  }
+
+  // CNPJ
+  if(/^\d{14}$/.test(digits)){
+    return digits;
+  }
+
+  // Telefone digitado sem +55.
+  if(/^\d{10,11}$/.test(digits)){
+    return "+55"+digits;
+  }
+
+  // Telefone já com 55.
+  if(/^55\d{10,11}$/.test(digits)){
+    return "+"+digits;
+  }
+
+  // E-mail ou chave aleatória: mantém exatamente como cadastrada.
+  return chave;
+}
+
+function montarPix(chave,nome,cidade,valor){
+  chave=prepararChavePix(chave);
+
+  if(!chave) throw new Error("Cadastre a chave PIX.");
+
+  const numero=Number(valor);
+  if(!Number.isFinite(numero) || numero<=0){
     throw new Error("Valor PIX inválido.");
+  }
 
   const merchantAccount =
     emv("00","br.gov.bcb.pix") +
     emv("01",chave);
 
-  let payload =
+  const payloadSemCRC =
     emv("00","01") +
     emv("26",merchantAccount) +
     emv("52","0000") +
@@ -624,43 +673,43 @@ function montarPix(chave, nome, cidade, valor){
     emv("62",emv("05","***")) +
     "6304";
 
-  return payload + crc16(payload);
+  return payloadSemCRC + crc16(payloadSemCRC);
 }
 
 function gerarPix(){
-  const valor = n(document.getElementById("pixValor").value);
-  const t = totais();
+  const valor=n(document.getElementById("pixValor").value);
+  const t=totais();
 
-  if(valor <= 0) return alert("Informe um valor válido.");
-  if(!config || !config.chave_pix)
+  if(valor<=0) return alert("Informe um valor válido.");
+  if(!config?.chave_pix)
     return alert("Cadastre primeiro a chave PIX na aba PIX.");
 
-  if(comandaAtual && valor > t.saldo + 0.009){
+  if(comandaAtual && valor>t.saldo+0.009){
     if(!confirm(`O valor é maior que o saldo atual (${money(t.saldo)}). Continuar?`))
       return;
   }
 
   try{
-    const payload = montarPix(
+    const payload=montarPix(
       config.chave_pix,
       config.nome_recebedor,
       config.cidade_pix,
       valor
     );
 
-    valorPixAtual = valor;
+    valorPixAtual=valor;
 
-    const qr = document.getElementById("qrcode");
-    qr.innerHTML = "";
+    const qr=document.getElementById("qrcode");
+    qr.innerHTML="";
 
     new QRCode(qr,{
-      text: payload,
-      width: 240,
-      height: 240,
-      correctLevel: QRCode.CorrectLevel.M
+      text:payload,
+      width:240,
+      height:240,
+      correctLevel:QRCode.CorrectLevel.M
     });
 
-    document.getElementById("pixCopiaCola").value = payload;
+    document.getElementById("pixCopiaCola").value=payload;
     document.getElementById("pixGerado").classList.remove("hidden");
   }catch(e){
     console.error(e);
@@ -677,7 +726,6 @@ async function copiarPix(){
 async function confirmarPagamento(){
   if(!comandaAtual)return;
   const valor=n(document.getElementById("pixValor").value);
-  const descricao=document.getElementById("pixDescricao").value.trim()||"PIX";
   if(!valor)return;
   if(!confirm(`Confirmar que recebeu ${money(valor)}?`)) return;
 
@@ -685,7 +733,7 @@ async function confirmarPagamento(){
     comanda_id:comandaAtual.id,
     valor,
     tipo:"pix",
-    descricao
+    descricao:"PIX"
   });
   if(error)return alert(error.message);
   fecharModalPix();
