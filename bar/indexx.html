@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>FF Bar - Comandas</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--line:#263244;--txt:#f8fafc;--muted:#94a3b8;--ok:#22c55e;--warn:#f59e0b;--danger:#ef4444;--blue:#3b82f6}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Arial;background:#020617;color:var(--txt)}
+    button,input,select{font:inherit}
+    .top{position:sticky;top:0;z-index:20;background:rgba(2,6,23,.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:12px}
+    .top h1{font-size:19px;margin:0 0 10px}
+    .tabs{display:flex;gap:8px;overflow:auto}
+    .tab{border:0;border-radius:10px;padding:10px 14px;background:#172033;color:#cbd5e1;white-space:nowrap}
+    .tab.active{background:var(--blue);color:white}
+    main{max-width:1100px;margin:auto;padding:14px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+    .card h2,.card h3{margin-top:0}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .between{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    input,select{width:100%;background:#0b1220;border:1px solid #334155;color:white;border-radius:10px;padding:11px}
+    label{display:block;color:#cbd5e1;font-size:13px;margin:10px 0 5px}
+    button{cursor:pointer;border:0;border-radius:10px;padding:10px 12px;background:#334155;color:white;font-weight:700}
+    button.primary{background:var(--blue)}
+    button.ok{background:var(--ok);color:#052e16}
+    button.warn{background:var(--warn);color:#3b2200}
+    button.danger{background:var(--danger)}
+    button.ghost{background:#1e293b}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .pill{display:inline-block;border-radius:999px;padding:5px 9px;background:#1e293b;color:#cbd5e1;font-size:12px}
+    .money{font-size:22px;font-weight:900}
+    .muted{color:var(--muted)}
+    .hidden{display:none!important}
+    .comanda{cursor:pointer}
+    .comanda:hover{border-color:#475569}
+    .produtos{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:9px}
+    .produto{padding:12px;border-radius:14px;background:#162033;border:1px solid #2b3a50;text-align:left}
+    .produto b{display:block;margin-bottom:5px}
+    .produto small{color:#a5b4fc}
+    .item{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px dashed #334155}
+    .item:last-child{border-bottom:0}
+    .qty{display:flex;gap:6px;align-items:center}
+    .qty button{padding:6px 9px}
+    .totalbox{background:#07111f;border:1px solid #29405e;border-radius:14px;padding:12px;margin-top:12px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:15px;z-index:100}
+    .modal .box{width:min(520px,100%);max-height:92vh;overflow:auto;background:#0f172a;border:1px solid #334155;border-radius:18px;padding:16px}
+    #qrcode{display:flex;justify-content:center;background:white;padding:12px;border-radius:12px;width:max-content;margin:12px auto}
+    textarea{width:100%;min-height:86px;background:#0b1220;color:white;border:1px solid #334155;border-radius:10px;padding:10px}
+    .sectionTitle{margin:6px 0 12px;font-size:18px}
+    .empty{padding:24px;text-align:center;color:var(--muted)}
+    @media(max-width:650px){
+      main{padding:10px}.card{padding:12px}.money{font-size:20px}
+      .item{grid-template-columns:1fr}.qty{justify-content:flex-start}
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <h1>🍻 FF Bar — Comandas</h1>
+    <div class="tabs">
+      <button class="tab active" data-page="caixa">🍺 Caixa</button>
+      <button class="tab" data-page="produtos">📦 Produtos</button>
+      <button class="tab" data-page="config">⚙️ PIX</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="page-caixa">
+      <div class="grid">
+        <div class="card">
+          <h3>➕ Nova comanda</h3>
+          <label>Local / Mesa</label>
+          <div style="position:relative">
+            <input id="novoLocal" autocomplete="off" placeholder="Digite a primeira letra..." oninput="filtrarLocais()" onfocus="filtrarLocais()" />
+            <div id="listaLocais" class="card hidden" style="position:absolute;z-index:50;left:0;right:0;top:52px;padding:6px;max-height:220px;overflow:auto"></div>
+          </div>
+          <label>Nome do responsável <span class="muted">(opcional)</span></label>
+          <input id="novoNome" placeholder="Ex.: João" />
+          <button class="primary" style="width:100%;margin-top:12px" onclick="criarComanda()">Abrir comanda</button>
+        </div>
+        <div class="card">
+          <div class="between">
+            <div>
+              <div class="muted">Comandas abertas</div>
+              <div class="money" id="qtdAbertas">0</div>
+            </div>
+            <button class="ghost" onclick="carregarComandas()">↻ Atualizar</button>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sectionTitle">Comandas abertas</h2>
+      <div id="listaComandas" class="grid"></div>
+
+      <div id="areaComanda" class="hidden" style="margin-top:18px">
+        <div class="card">
+          <div class="between">
+            <div>
+              <h2 id="tituloComanda" style="margin:0"></h2>
+              <div id="subComanda" class="muted"></div>
+            </div>
+            <button onclick="fecharAreaComanda()">✕</button>
+          </div>
+
+          <h3 style="margin-top:18px">🍻 Adicionar ao consumo</h3>
+          <div id="categoriasVenda" class="row" style="margin-bottom:10px"></div>
+          <input id="buscaProduto" placeholder="Pesquisar bebida..." oninput="renderProdutosVenda()" />
+          <div id="produtosVenda" class="produtos" style="margin-top:10px"></div>
+
+          <h3 style="margin-top:18px">Consumo</h3>
+          <div id="itensComanda"></div>
+
+          <div class="totalbox">
+            <div class="between"><span>Total consumido</span><b id="totalConsumido">R$ 0,00</b></div>
+            <div class="between"><span>Já pago</span><b id="totalPago">R$ 0,00</b></div>
+            <div class="between" style="margin-top:8px"><span>Saldo</span><span class="money" id="saldoComanda">R$ 0,00</span></div>
+          </div>
+
+          <div class="row" style="margin-top:12px">
+            <button class="ok" onclick="abrirPixSaldo()">💠 PIX do saldo</button>
+            <button class="warn" onclick="abrirPixParcial()">💵 PIX parcial</button>
+            <button class="danger" onclick="fecharComanda()">✅ Fechar comanda</button>
+          </div>
+
+          <h3 style="margin-top:18px">Pagamentos</h3>
+          <div id="listaPagamentos"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-produtos" class="hidden">
+      <div class="card">
+        <h2>Cadastrar produto</h2>
+        <div class="grid">
+          <div><label>Nome</label><input id="pNome" placeholder="Ex.: Skol 600ml"></div>
+          <div><label>Categoria</label><input id="pCategoria" placeholder="Ex.: Cerveja"></div>
+          <div><label>Preço</label><input id="pPreco" type="number" step="0.01" min="0" placeholder="8,00"></div>
+        </div>
+        <button class="primary" style="margin-top:12px" onclick="salvarProduto()">Salvar produto</button>
+      </div>
+      <h2 class="sectionTitle">Produtos cadastrados</h2>
+      <div id="listaProdutos" class="grid"></div>
+    </section>
+
+    <section id="page-config" class="hidden">
+      <div class="card">
+        <h2>Configuração do PIX</h2>
+        <p class="muted">A chave e o valor ficam dentro do QR Code. A confirmação do pagamento é manual.</p>
+        <label>Chave PIX</label>
+        <input id="cfgChave" placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória">
+        <label>Nome do recebedor</label>
+        <input id="cfgNome" maxlength="25" placeholder="NOME DO BAR">
+        <label>Cidade</label>
+        <input id="cfgCidade" maxlength="15" placeholder="SAO RAIMUNDO NONATO">
+        <label>Nome do estabelecimento</label>
+        <input id="cfgBar" placeholder="Meu Bar">
+        <button class="primary" style="margin-top:12px" onclick="salvarConfig()">Salvar configuração</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="modalPix" class="modal hidden">
+    <div class="box">
+      <div class="between">
+        <h2 style="margin:0">💠 Cobrança PIX</h2>
+        <button onclick="fecharModalPix()">✕</button>
+      </div>
+      <label>Valor a cobrar</label>
+      <input id="pixValor" type="number" step="0.01" min="0.01">
+      <label>Descrição</label>
+      <input id="pixDescricao" maxlength="25" placeholder="Comanda">
+      <button class="primary" style="width:100%;margin-top:10px" onclick="gerarPix()">Gerar QR Code</button>
+
+      <div id="pixGerado" class="hidden">
+        <div id="qrcode"></div>
+        <textarea id="pixCopiaCola" readonly></textarea>
+        <div class="row">
+          <button onclick="copiarPix()">📋 Copiar PIX</button>
+          <button class="ok" onclick="confirmarPagamento()">✅ Marcar como pago</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* =========================
+   1) COLOQUE SEUS DADOS AQUI
+========================= */
+const SUPABASE_URL = "https://auzdqapjetmhaokoynzo.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_36kXlyuKU8RMfgSx01h5mw_lOLp1lbX";
+
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* =========================
+   ESTADO
+========================= */
+let produtos = [];\nlet locais = [];\nlet categoriaAtual = "Todos";
+let comandas = [];
+let comandaAtual = null;
+let itensAtuais = [];
+let pagamentosAtuais = [];
+let config = null;
+let valorPixAtual = 0;
+
+const money = v => Number(v || 0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const n = v => Number(v || 0);
+
+document.querySelectorAll(".tab").forEach(btn=>{
+  btn.onclick = () => abrirPagina(btn.dataset.page, btn);
+});
+
+function abrirPagina(nome, btn){
+  document.querySelectorAll("main > section").forEach(s=>s.classList.add("hidden"));
+  document.getElementById("page-"+nome).classList.remove("hidden");
+  document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  if(nome==="produtos") carregarProdutos();
+  if(nome==="config") carregarConfig();
+  if(nome==="caixa"){ carregarProdutos(); carregarComandas(); }
+}
+
+async function init(){
+  if(SUPABASE_URL.includes("SEU-PROJETO")){
+    alert("Antes de usar, coloque SUPABASE_URL e SUPABASE_ANON_KEY no HTML.");
+    return;
+  }
+  await Promise.all([carregarProdutos(), carregarConfig(), carregarLocais()]);
+  await carregarComandas();
+}
+
+/* =========================
+   PRODUTOS
+========================= */
+async function carregarProdutos(){
+  const {data,error} = await db.from("bar_produtos").select("*").order("nome");
+  if(error){ console.error(error); return alert("Erro ao carregar produtos: "+error.message); }
+  produtos = data || [];
+  renderListaProdutos();
+  renderCategoriasVenda();
+  renderProdutosVenda();
+}
+
+function renderListaProdutos(){
+  const el = document.getElementById("listaProdutos");
+  if(!el) return;
+  if(!produtos.length){ el.innerHTML='<div class="empty">Nenhum produto cadastrado.</div>'; return; }
+  el.innerHTML = produtos.map(p=>`
+    <div class="card">
+      <div class="between">
+        <div>
+          <b>${esc(p.nome)}</b>
+          <div class="muted">${esc(p.categoria||"Sem categoria")}</div>
+        </div>
+        <span class="money">${money(p.preco)}</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="warn" onclick="editarProduto('${p.id}')">Editar</button>
+        <button class="danger" onclick="alternarProduto('${p.id}',${p.ativo!==false})">${p.ativo!==false?"Desativar":"Ativar"}</button>
+      </div>
+    </div>`).join("");
+}
+
+async function salvarProduto(){
+  const nome = document.getElementById("pNome").value.trim();
+  const categoria = document.getElementById("pCategoria").value.trim();
+  const preco = n(document.getElementById("pPreco").value);
+  if(!nome || preco<=0) return alert("Informe nome e preço.");
+  const {error} = await db.from("bar_produtos").insert({nome,categoria,preco,ativo:true});
+  if(error) return alert(error.message);
+  document.getElementById("pNome").value="";
+  document.getElementById("pCategoria").value="";
+  document.getElementById("pPreco").value="";
+  carregarProdutos();
+}
+
+async function editarProduto(id){
+  const p = produtos.find(x=>x.id===id); if(!p) return;
+  const nome = prompt("Nome:",p.nome); if(nome===null) return;
+  const categoria = prompt("Categoria:",p.categoria||""); if(categoria===null) return;
+  const preco = prompt("Preço:",p.preco); if(preco===null) return;
+  const {error} = await db.from("bar_produtos").update({nome:nome.trim(),categoria:categoria.trim(),preco:n(preco)}).eq("id",id);
+  if(error) return alert(error.message);
+  carregarProdutos();
+}
+
+async function alternarProduto(id, ativo){
+  const {error} = await db.from("bar_produtos").update({ativo:!ativo}).eq("id",id);
+  if(error) return alert(error.message);
+  carregarProdutos();
+}
+
+/* =========================
+   LOCAIS / MESAS
+========================= */
+async function carregarLocais(){
+  const {data,error}=await db.from("bar_locais").select("*").eq("ativo",true).order("nome");
+  if(error){ console.warn("Crie bar_locais com o SQL enviado:",error.message); locais=[]; return; }
+  locais=data||[];
+}
+function filtrarLocais(){
+  const input=document.getElementById("novoLocal"), box=document.getElementById("listaLocais");
+  if(!input||!box)return;
+  const q=input.value.trim().toLowerCase();
+  const lista=locais.filter(x=>!q || x.nome.toLowerCase().startsWith(q) || x.nome.toLowerCase().includes(q));
+  box.innerHTML=lista.length ? lista.map(x=>`
+    <button style="display:block;width:100%;text-align:left;margin:3px 0;background:#172033"
+      onclick="selecionarLocal(${JSON.stringify(x.nome)})">${esc(x.nome)}</button>
+  `).join("") : '<div class="empty" style="padding:12px">Nenhum local encontrado.</div>';
+  box.classList.remove("hidden");
+}
+function selecionarLocal(nome){
+  document.getElementById("novoLocal").value=nome;
+  document.getElementById("listaLocais").classList.add("hidden");
+}
+document.addEventListener("click",e=>{
+  if(!e.target.closest("#novoLocal") && !e.target.closest("#listaLocais"))
+    document.getElementById("listaLocais")?.classList.add("hidden");
+});
+
+/* =========================
+   COMANDAS
+========================= */
+async function criarComanda(){
+  const local=document.getElementById("novoLocal").value.trim();
+  const nome=document.getElementById("novoNome").value.trim();
+  if(!local)return alert("Selecione ou informe o local/mesa.");
+  const {data,error}=await db.from("bar_comandas")
+    .insert({nome_cliente:nome||null,mesa:local,status:"aberta"})
+    .select().single();
+  if(error)return alert(error.message);
+  document.getElementById("novoNome").value="";
+  document.getElementById("novoLocal").value="";
+  document.getElementById("listaLocais").classList.add("hidden");
+  await carregarComandas();
+  abrirComanda(data.id);
+}
+async function carregarComandas(){
+  const {data,error} = await db.from("bar_comandas")
+    .select("*").eq("status","aberta").order("criada_em",{ascending:false});
+  if(error){ console.error(error); return alert(error.message); }
+  comandas = data || [];
+  document.getElementById("qtdAbertas").textContent=comandas.length;
+  const el = document.getElementById("listaComandas");
+  if(!comandas.length){ el.innerHTML='<div class="empty">Nenhuma comanda aberta.</div>'; return; }
+  el.innerHTML = comandas.map(c=>`
+    <div class="card comanda" onclick="abrirComanda('${c.id}')">
+      <div class="between">
+        <div>
+          <b>${esc(c.nome_cliente || c.mesa || "Comanda")}</b>
+          <div class="muted">${c.mesa ? "Mesa: "+esc(c.mesa) : "Sem mesa"}</div>
+        </div>
+        <span class="pill">ABERTA</span>
+      </div>
+      <small class="muted">${new Date(c.criada_em).toLocaleString("pt-BR")}</small>
+    </div>`).join("");
+}
+
+async function abrirComanda(id){
+  const {data:c,error} = await db.from("bar_comandas").select("*").eq("id",id).single();
+  if(error) return alert(error.message);
+  comandaAtual = c;
+  document.getElementById("areaComanda").classList.remove("hidden");
+  document.getElementById("tituloComanda").textContent = c.nome_cliente || c.mesa || "Comanda";
+  document.getElementById("subComanda").textContent = [c.mesa && "Mesa "+c.mesa, "Aberta em "+new Date(c.criada_em).toLocaleString("pt-BR")].filter(Boolean).join(" • ");
+  await carregarItens();
+  document.getElementById("areaComanda").scrollIntoView({behavior:"smooth"});
+}
+
+function fecharAreaComanda(){
+  document.getElementById("areaComanda").classList.add("hidden");
+  comandaAtual=null;
+}
+
+function categoriasProdutos(){
+  const cats=[...new Set(produtos.filter(p=>p.ativo!==false).map(p=>(p.categoria||"Outros").trim()).filter(Boolean))];
+  return ["Todos",...cats];
+}
+function renderCategoriasVenda(){
+  const el=document.getElementById("categoriasVenda");
+  if(!el)return;
+  el.innerHTML=categoriasProdutos().map(c=>`
+    <button class="${categoriaAtual===c?'primary':'ghost'}" onclick="selecionarCategoria(${JSON.stringify(c)})">${esc(c==="Todos"?"🍻 Todos":c)}</button>
+  `).join("");
+}
+function selecionarCategoria(c){
+  categoriaAtual=c;
+  renderCategoriasVenda();
+  renderProdutosVenda();
+}
+function renderProdutosVenda(){
+  const el=document.getElementById("produtosVenda");
+  if(!el)return;
+  const q=(document.getElementById("buscaProduto")?.value||"").toLowerCase().trim();
+  const lista=produtos.filter(p=>{
+    const cat=(p.categoria||"Outros").trim()||"Outros";
+    return p.ativo!==false &&
+      (categoriaAtual==="Todos" || cat===categoriaAtual) &&
+      (!q || p.nome.toLowerCase().includes(q) || cat.toLowerCase().includes(q));
+  });
+  el.innerHTML=lista.map(p=>`
+    <button class="produto" onclick="adicionarProduto('${p.id}')">
+      <b>${esc(p.nome)}</b>
+      <span>${money(p.preco)}</span><br><small>${esc(p.categoria||"Outros")}</small>
+    </button>`).join("") || '<div class="empty">Nenhum produto nessa categoria.</div>';
+}
+async function adicionarProduto(produtoId){
+  if(!comandaAtual) return;
+  const p=produtos.find(x=>x.id===produtoId); if(!p) return;
+
+  const existente = itensAtuais.find(i=>i.produto_id===produtoId);
+  if(existente){
+    const {error}=await db.from("bar_comanda_itens").update({quantidade:existente.quantidade+1}).eq("id",existente.id);
+    if(error) return alert(error.message);
+  } else {
+    const {error}=await db.from("bar_comanda_itens").insert({
+      comanda_id:comandaAtual.id, produto_id:p.id, produto_nome:p.nome,
+      preco_unitario:p.preco, quantidade:1
+    });
+    if(error) return alert(error.message);
+  }
+  carregarItens();
+}
+
+async function carregarItens(){
+  if(!comandaAtual) return;
+  const [ri,rp]=await Promise.all([
+    db.from("bar_comanda_itens").select("*").eq("comanda_id",comandaAtual.id).order("criado_em"),
+    db.from("bar_pagamentos").select("*").eq("comanda_id",comandaAtual.id).order("criado_em",{ascending:false})
+  ]);
+  if(ri.error) return alert(ri.error.message);
+  if(rp.error) return alert(rp.error.message);
+  itensAtuais=ri.data||[];
+  pagamentosAtuais=rp.data||[];
+  renderItens();
+}
+
+function totais(){
+  const consumido=itensAtuais.reduce((s,i)=>s+n(i.preco_unitario)*n(i.quantidade),0);
+  const pago=pagamentosAtuais.reduce((s,p)=>s+n(p.valor),0);
+  return {consumido,pago,saldo:Math.max(0,consumido-pago)};
+}
+
+function renderItens(){
+  const el=document.getElementById("itensComanda");
+  if(!itensAtuais.length) el.innerHTML='<div class="empty">Nenhum consumo lançado.</div>';
+  else el.innerHTML=itensAtuais.map(i=>`
+    <div class="item">
+      <div>
+        <b>${esc(i.produto_nome)}</b>
+        <div class="muted">${money(i.preco_unitario)} cada • subtotal ${money(n(i.preco_unitario)*n(i.quantidade))}</div>
+      </div>
+      <div class="qty">
+        <button onclick="alterarQtd('${i.id}',-1)">−</button>
+        <b>${i.quantidade}</b>
+        <button onclick="alterarQtd('${i.id}',1)">+</button>
+        <button class="warn" onclick="pixDoItem('${i.id}')">PIX</button>
+      </div>
+    </div>`).join("");
+
+  const t=totais();
+  document.getElementById("totalConsumido").textContent=money(t.consumido);
+  document.getElementById("totalPago").textContent=money(t.pago);
+  document.getElementById("saldoComanda").textContent=money(t.saldo);
+
+  const p=document.getElementById("listaPagamentos");
+  p.innerHTML = pagamentosAtuais.length ? pagamentosAtuais.map(x=>`
+    <div class="item">
+      <div><b>${money(x.valor)}</b><div class="muted">${esc(x.descricao||"PIX")} • ${new Date(x.criado_em).toLocaleString("pt-BR")}</div></div>
+      <button class="danger" onclick="estornarPagamento('${x.id}')">Estornar</button>
+    </div>`).join("") : '<div class="empty">Nenhum pagamento registrado.</div>';
+}
+
+async function alterarQtd(id,delta){
+  const i=itensAtuais.find(x=>x.id===id); if(!i)return;
+  const qtd=n(i.quantidade)+delta;
+  let r;
+  if(qtd<=0) r=await db.from("bar_comanda_itens").delete().eq("id",id);
+  else r=await db.from("bar_comanda_itens").update({quantidade:qtd}).eq("id",id);
+  if(r.error) return alert(r.error.message);
+  carregarItens();
+}
+
+function pixDoItem(id){
+  const i=itensAtuais.find(x=>x.id===id); if(!i)return;
+  const qtdMax=n(i.quantidade);
+  let qtd=prompt(`Quantas unidades de ${i.produto_nome} deseja cobrar?`, String(qtdMax));
+  if(qtd===null) return;
+  qtd=Math.min(qtdMax,Math.max(1,parseInt(qtd)||1));
+  abrirModalPix(n(i.preco_unitario)*qtd, `${qtd}x ${i.produto_nome}`);
+}
+
+function abrirPixSaldo(){
+  const t=totais();
+  if(t.saldo<=0) return alert("Essa comanda não tem saldo pendente.");
+  abrirModalPix(t.saldo,"Saldo da comanda");
+}
+
+function abrirPixParcial(){
+  const t=totais();
+  if(t.saldo<=0) return alert("Essa comanda não tem saldo pendente.");
+  abrirModalPix(t.saldo,"Pagamento parcial");
+  setTimeout(()=>document.getElementById("pixValor").select(),100);
+}
+
+function abrirModalPix(valor,descricao){
+  if(!config?.chave_pix) return alert("Cadastre primeiro a chave PIX na aba PIX.");
+  valorPixAtual=n(valor);
+  document.getElementById("pixValor").value=valorPixAtual.toFixed(2);
+  document.getElementById("pixDescricao").value=descricao||"Comanda";
+  document.getElementById("pixGerado").classList.add("hidden");
+  document.getElementById("modalPix").classList.remove("hidden");
+}
+
+function fecharModalPix(){
+  document.getElementById("modalPix").classList.add("hidden");
+  document.getElementById("qrcode").innerHTML="";
+}
+
+async function fecharComanda(){
+  if(!comandaAtual) return;
+  const t=totais();
+  if(t.saldo>0.009 && !confirm(`Ainda existe saldo de ${money(t.saldo)}. Deseja fechar mesmo assim?`)) return;
+  const {error}=await db.from("bar_comandas").update({status:"fechada",fechada_em:new Date().toISOString()}).eq("id",comandaAtual.id);
+  if(error) return alert(error.message);
+  fecharAreaComanda();
+  carregarComandas();
+}
+
+async function estornarPagamento(id){
+  if(!confirm("Remover este pagamento?")) return;
+  const {error}=await db.from("bar_pagamentos").delete().eq("id",id);
+  if(error)return alert(error.message);
+  carregarItens();
+}
+
+/* =========================
+   CONFIGURAÇÃO
+========================= */
+async function carregarConfig(){
+  const {data,error}=await db.from("bar_config").select("*").limit(1).maybeSingle();
+  if(error){ console.error(error); return; }
+  config=data||null;
+  if(config){
+    document.getElementById("cfgChave").value=config.chave_pix||"";
+    document.getElementById("cfgNome").value=config.nome_recebedor||"";
+    document.getElementById("cfgCidade").value=config.cidade_pix||"";
+    document.getElementById("cfgBar").value=config.nome_bar||"";
+  }
+}
+
+async function salvarConfig(){
+  const obj={
+    chave_pix:document.getElementById("cfgChave").value.trim(),
+    nome_recebedor:document.getElementById("cfgNome").value.trim().toUpperCase(),
+    cidade_pix:document.getElementById("cfgCidade").value.trim().toUpperCase(),
+    nome_bar:document.getElementById("cfgBar").value.trim()
+  };
+  if(!obj.chave_pix||!obj.nome_recebedor||!obj.cidade_pix) return alert("Preencha chave PIX, nome e cidade.");
+  let r;
+  if(config?.id) r=await db.from("bar_config").update(obj).eq("id",config.id).select().single();
+  else r=await db.from("bar_config").insert(obj).select().single();
+  if(r.error)return alert(r.error.message);
+  config=r.data;
+  alert("Configuração salva.");
+}
+
+/* =========================
+   PIX BR CODE (EMV)
+========================= */
+const norm = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Za-z0-9 .-]/g,"").toUpperCase();
+
+function emv(id,value){
+  const v=String(value);
+  return id + String(v.length).padStart(2,"0") + v;
+}
+function crc16(payload){
+  let crc=0xFFFF;
+  for(let i=0;i<payload.length;i++){
+    crc ^= payload.charCodeAt(i)<<8;
+    for(let j=0;j<8;j++) crc=(crc & 0x8000) ? ((crc<<1)^0x1021) : (crc<<1);
+    crc &= 0xFFFF;
+  }
+  return crc.toString(16).toUpperCase().padStart(4,"0");
+}
+function montarPix(chave, nome, cidade, valor, descricao){
+  const gui=emv("00","br.gov.bcb.pix");
+  const key=emv("01",chave);
+  const desc=descricao ? emv("02",norm(descricao).slice(0,25)) : "";
+  const merchant=emv("26",gui+key+desc);
+  const txid=emv("05","***");
+  const adicional=emv("62",txid);
+
+  let payload =
+    emv("00","01") +
+    merchant +
+    emv("52","0000") +
+    emv("53","986") +
+    emv("54",Number(valor).toFixed(2)) +
+    emv("58","BR") +
+    emv("59",norm(nome).slice(0,25)) +
+    emv("60",norm(cidade).slice(0,15)) +
+    adicional +
+    "6304";
+
+  return payload + crc16(payload);
+}
+
+function gerarPix(){
+  const valor=n(document.getElementById("pixValor").value);
+  const descricao=document.getElementById("pixDescricao").value.trim();
+  const t=totais();
+  if(valor<=0)return alert("Informe um valor válido.");
+  if(comandaAtual && valor > t.saldo+0.009 && !confirm(`O valor é maior que o saldo atual (${money(t.saldo)}). Continuar?`)) return;
+
+  valorPixAtual=valor;
+  const payload=montarPix(config.chave_pix,config.nome_recebedor,config.cidade_pix,valor,descricao);
+
+  const qr=document.getElementById("qrcode");
+  qr.innerHTML="";
+  new QRCode(qr,{text:payload,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});
+  document.getElementById("pixCopiaCola").value=payload;
+  document.getElementById("pixGerado").classList.remove("hidden");
+}
+
+async function copiarPix(){
+  const txt=document.getElementById("pixCopiaCola").value;
+  await navigator.clipboard.writeText(txt);
+  alert("PIX copia e cola copiado.");
+}
+
+async function confirmarPagamento(){
+  if(!comandaAtual)return;
+  const valor=n(document.getElementById("pixValor").value);
+  const descricao=document.getElementById("pixDescricao").value.trim()||"PIX";
+  if(!valor)return;
+  if(!confirm(`Confirmar que recebeu ${money(valor)}?`)) return;
+
+  const {error}=await db.from("bar_pagamentos").insert({
+    comanda_id:comandaAtual.id,
+    valor,
+    tipo:"pix",
+    descricao
+  });
+  if(error)return alert(error.message);
+  fecharModalPix();
+  await carregarItens();
+}
+
+/* =========================
+   UTIL
+========================= */
+function esc(v){
+  return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+init();
+</script>
+</body>
+</html>
