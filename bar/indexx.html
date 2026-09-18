@@ -575,61 +575,97 @@ async function salvarConfig(){
 }
 
 /* =========================
-   PIX BR CODE (EMV)
+   PIX BR CODE
 ========================= */
-const norm = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Za-z0-9 .-]/g,"").toUpperCase();
-
-function emv(id,value){
-  const v=String(value);
-  return id + String(v.length).padStart(2,"0") + v;
+function pixLimparChave(chave){
+  return String(chave || "").trim();
 }
+
+function emv(id, value){
+  value = String(value ?? "");
+  return id + value.length.toString().padStart(2,"0") + value;
+}
+
 function crc16(payload){
-  let crc=0xFFFF;
+  let crc = 0xFFFF;
   for(let i=0;i<payload.length;i++){
-    crc ^= payload.charCodeAt(i)<<8;
-    for(let j=0;j<8;j++) crc=(crc & 0x8000) ? ((crc<<1)^0x1021) : (crc<<1);
-    crc &= 0xFFFF;
+    crc ^= payload.charCodeAt(i) << 8;
+    for(let j=0;j<8;j++){
+      crc = (crc & 0x8000)
+        ? ((crc << 1) ^ 0x1021)
+        : (crc << 1);
+      crc &= 0xFFFF;
+    }
   }
   return crc.toString(16).toUpperCase().padStart(4,"0");
 }
-function montarPix(chave, nome, cidade, valor, descricao){
-  const gui=emv("00","br.gov.bcb.pix");
-  const key=emv("01",chave);
-  const desc=descricao ? emv("02",norm(descricao).slice(0,25)) : "";
-  const merchant=emv("26",gui+key+desc);
-  const txid=emv("05","***");
-  const adicional=emv("62",txid);
+
+function montarPix(chave, nome, cidade, valor){
+  chave = pixLimparChave(chave);
+  if(!chave) throw new Error("Chave PIX não cadastrada.");
+
+  const numero = Number(valor);
+  if(!Number.isFinite(numero) || numero <= 0)
+    throw new Error("Valor PIX inválido.");
+
+  const merchantAccount =
+    emv("00","br.gov.bcb.pix") +
+    emv("01",chave);
 
   let payload =
     emv("00","01") +
-    merchant +
+    emv("26",merchantAccount) +
     emv("52","0000") +
     emv("53","986") +
-    emv("54",Number(valor).toFixed(2)) +
+    emv("54",numero.toFixed(2)) +
     emv("58","BR") +
     emv("59",norm(nome).slice(0,25)) +
     emv("60",norm(cidade).slice(0,15)) +
-    adicional +
+    emv("62",emv("05","***")) +
     "6304";
 
   return payload + crc16(payload);
 }
 
 function gerarPix(){
-  const valor=n(document.getElementById("pixValor").value);
-  const descricao=document.getElementById("pixDescricao").value.trim();
-  const t=totais();
-  if(valor<=0)return alert("Informe um valor válido.");
-  if(comandaAtual && valor > t.saldo+0.009 && !confirm(`O valor é maior que o saldo atual (${money(t.saldo)}). Continuar?`)) return;
+  const valor = n(document.getElementById("pixValor").value);
+  const t = totais();
 
-  valorPixAtual=valor;
-  const payload=montarPix(config.chave_pix,config.nome_recebedor,config.cidade_pix,valor,descricao);
+  if(valor <= 0) return alert("Informe um valor válido.");
+  if(!config || !config.chave_pix)
+    return alert("Cadastre primeiro a chave PIX na aba PIX.");
 
-  const qr=document.getElementById("qrcode");
-  qr.innerHTML="";
-  new QRCode(qr,{text:payload,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});
-  document.getElementById("pixCopiaCola").value=payload;
-  document.getElementById("pixGerado").classList.remove("hidden");
+  if(comandaAtual && valor > t.saldo + 0.009){
+    if(!confirm(`O valor é maior que o saldo atual (${money(t.saldo)}). Continuar?`))
+      return;
+  }
+
+  try{
+    const payload = montarPix(
+      config.chave_pix,
+      config.nome_recebedor,
+      config.cidade_pix,
+      valor
+    );
+
+    valorPixAtual = valor;
+
+    const qr = document.getElementById("qrcode");
+    qr.innerHTML = "";
+
+    new QRCode(qr,{
+      text: payload,
+      width: 240,
+      height: 240,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+
+    document.getElementById("pixCopiaCola").value = payload;
+    document.getElementById("pixGerado").classList.remove("hidden");
+  }catch(e){
+    console.error(e);
+    alert(e.message || "Erro ao gerar PIX.");
+  }
 }
 
 async function copiarPix(){
