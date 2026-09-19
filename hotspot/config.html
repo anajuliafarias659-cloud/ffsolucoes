@@ -216,6 +216,46 @@ transform:translateX(26px);
 .master-acoes button{font-size:13px;padding:10px}
 .master-vazio{padding:18px;border:1px dashed #cbdde2;border-radius:10px;background:#f8fbfc;color:#728087;text-align:center;font-size:12px;margin-bottom:12px}
 @media(max-width:650px){.master-config-topo{flex-direction:column}.badge-rotacao{white-space:normal}.master-acoes{flex-direction:column}}
+
+/* ===== MOLDURA DA SELFIE ===== */
+.selfie-moldura-card{
+    border:1px solid #dce7ea;
+    border-radius:12px;
+    padding:16px;
+    margin-top:15px;
+    background:#fff;
+}
+.selfie-moldura-card h3{
+    color:#0d8db8;
+    margin-bottom:6px;
+}
+.selfie-moldura-info{
+    color:#68747a;
+    font-size:12px;
+    line-height:1.5;
+    margin-bottom:12px;
+}
+.selfie-moldura-preview{
+    width:100%;
+    max-width:360px;
+    max-height:420px;
+    object-fit:contain;
+    display:none;
+    margin:12px auto;
+    border-radius:12px;
+    border:1px solid #e5e7eb;
+    background:#f7f7f7;
+}
+.selfie-moldura-acoes{
+    display:flex;
+    gap:10px;
+}
+.selfie-moldura-acoes button{
+    flex:1;
+}
+@media(max-width:650px){
+    .selfie-moldura-acoes{flex-direction:column}
+}
 </style>
 
 </head>
@@ -306,6 +346,37 @@ Excluir Banner
 
     <label>Descrição da Tela de Entrada</label>
     <textarea id="evento_descricao" placeholder="Conecte-se gratuitamente oferecido por nossos patrocinadores."></textarea>
+
+    <div class="selfie-moldura-card">
+        <h3>📸 Moldura da Selfie</h3>
+        <div class="selfie-moldura-info">
+            Envie a arte pronta do evento em <b>PNG com transparência</b>.
+            A selfie ficará atrás da moldura. Não é necessário cadastrar
+            logo, frase, cores ou posição no site_config.
+        </div>
+
+        <input type="file" id="molduraSelfieFile" accept="image/png,image/webp,image/jpeg">
+
+        <img id="previewMolduraSelfie"
+             class="selfie-moldura-preview"
+             alt="Prévia da moldura da selfie">
+
+        <div class="selfie-moldura-acoes">
+            <button type="button" onclick="molduraSelfieFile.click()">
+                📤 Escolher Moldura
+            </button>
+
+            <button type="button"
+                    style="background:#d32f2f"
+                    onclick="excluirMolduraSelfie()">
+                🗑️ Excluir Moldura
+            </button>
+        </div>
+
+        <div id="statusMolduraSelfie"
+             style="margin-top:10px;font-size:12px;text-align:center;color:#68747a">
+        </div>
+    </div>
 
     <div class="patrocinador-card master-config-card">
         <div class="master-config-topo">
@@ -524,6 +595,10 @@ const descricao = document.getElementById("descricao");
 const logoFile = document.getElementById("logoFile");
 const bannerFile = document.getElementById("bannerFile");
 
+const molduraSelfieFile = document.getElementById("molduraSelfieFile");
+const previewMolduraSelfie = document.getElementById("previewMolduraSelfie");
+const statusMolduraSelfie = document.getElementById("statusMolduraSelfie");
+
 const previewLogo = document.getElementById("previewLogo");
 const previewBanner = document.getElementById("previewBanner");
 const whatsapp = document.getElementById("whatsapp");
@@ -538,6 +613,17 @@ if(logoFile){
 if(bannerFile){
     bannerFile.addEventListener("change", function(){
         previewImagemPatrocinador(bannerFile, previewBanner);
+    });
+}
+
+if(molduraSelfieFile){
+    molduraSelfieFile.addEventListener("change", function(){
+        previewImagemPatrocinador(molduraSelfieFile, previewMolduraSelfie);
+        if(statusMolduraSelfie){
+            statusMolduraSelfie.textContent = molduraSelfieFile.files && molduraSelfieFile.files[0]
+                ? "Nova moldura selecionada. Clique em Salvar Configurações para enviar."
+                : "";
+        }
     });
 }
 
@@ -1048,6 +1134,9 @@ if (data.banner) {
     previewBanner.src = data.banner;
     previewBanner.style.display = "block";
 }
+
+    // Moldura da selfie fica no Storage e não precisa entrar no site_config.
+    carregarMolduraSelfie();
     whatsapp.value = data.whatsapp || "";
 
     cor.value = data.cor_primaria || "#0d8db8";
@@ -1203,6 +1292,69 @@ const nomeArquivo = `${APP_ID}/banner.${extensao}`;
 }
 
     /* =======================
+       MOLDURA DA SELFIE
+       ======================= */
+    if(molduraSelfieFile && molduraSelfieFile.files.length > 0){
+        const arquivoMoldura = molduraSelfieFile.files[0];
+
+        if(arquivoMoldura.type && !["image/png","image/webp","image/jpeg"].includes(arquivoMoldura.type)){
+            alert("A moldura deve ser PNG, WEBP ou JPG.");
+            if(btnSalvar){
+                btnSalvar.disabled = false;
+                btnSalvar.textContent = "💾 Salvar Configurações";
+            }
+            return;
+        }
+
+        const extensaoMoldura =
+            arquivoMoldura.name.split(".").pop().toLowerCase() || "png";
+
+        // Mantém somente uma moldura por APP_ID.
+        await db.storage
+            .from("hotspot-molduras")
+            .remove([
+                `${APP_ID}.png`,
+                `${APP_ID}.webp`,
+                `${APP_ID}.jpg`,
+                `${APP_ID}.jpeg`
+            ]);
+
+        const caminhoMoldura = `${APP_ID}.${extensaoMoldura}`;
+
+        const { error: erroMoldura } = await db.storage
+            .from("hotspot-molduras")
+            .upload(caminhoMoldura, arquivoMoldura, {
+                upsert:true,
+                contentType:arquivoMoldura.type || "image/png"
+            });
+
+        if(erroMoldura){
+            console.error("ERRO MOLDURA:", erroMoldura);
+            alert("Erro ao salvar a moldura: " + erroMoldura.message);
+
+            if(btnSalvar){
+                btnSalvar.disabled = false;
+                btnSalvar.textContent = "💾 Salvar Configurações";
+            }
+            return;
+        }
+
+        if(statusMolduraSelfie){
+            statusMolduraSelfie.textContent = "✓ Moldura enviada com sucesso!";
+            statusMolduraSelfie.style.color = "#16834a";
+        }
+
+        previewMolduraSelfie.src =
+            db.storage
+                .from("hotspot-molduras")
+                .getPublicUrl(caminhoMoldura)
+                .data.publicUrl + "?v=" + Date.now();
+
+        previewMolduraSelfie.style.display = "block";
+        molduraSelfieFile.value = "";
+    }
+
+    /* =======================
        PATROCINADORES MASTER ROTATIVOS
        ======================= */
     const masterNomes = [];
@@ -1342,6 +1494,83 @@ const nomeArquivo = `${APP_ID}/banner.${extensao}`;
     }
 
     carregar();
+}
+
+async function carregarMolduraSelfie(){
+    if(!APP_ID || !previewMolduraSelfie) return;
+
+    const extensoes = ["png","webp","jpg","jpeg"];
+
+    for(const ext of extensoes){
+        const caminho = `${APP_ID}.${ext}`;
+        const url = db.storage
+            .from("hotspot-molduras")
+            .getPublicUrl(caminho)
+            .data.publicUrl;
+
+        try{
+            const resp = await fetch(url + "?v=" + Date.now(), {
+                method:"HEAD",
+                cache:"no-store"
+            });
+
+            if(resp.ok){
+                previewMolduraSelfie.src = url + "?v=" + Date.now();
+                previewMolduraSelfie.style.display = "block";
+
+                if(statusMolduraSelfie){
+                    statusMolduraSelfie.textContent = "✓ Moldura atual carregada.";
+                    statusMolduraSelfie.style.color = "#16834a";
+                }
+                return;
+            }
+        }catch(e){
+            console.warn("Não foi possível verificar a moldura:", e);
+        }
+    }
+
+    previewMolduraSelfie.removeAttribute("src");
+    previewMolduraSelfie.style.display = "none";
+
+    if(statusMolduraSelfie){
+        statusMolduraSelfie.textContent = "Nenhuma moldura cadastrada.";
+        statusMolduraSelfie.style.color = "#68747a";
+    }
+}
+
+async function excluirMolduraSelfie(){
+    if(!APP_ID) return;
+
+    if(!confirm("Excluir a moldura da selfie?")) return;
+
+    const { error } = await db.storage
+        .from("hotspot-molduras")
+        .remove([
+            `${APP_ID}.png`,
+            `${APP_ID}.webp`,
+            `${APP_ID}.jpg`,
+            `${APP_ID}.jpeg`
+        ]);
+
+    if(error){
+        console.error("ERRO AO EXCLUIR MOLDURA:", error);
+        alert("Erro ao excluir a moldura: " + error.message);
+        return;
+    }
+
+    if(previewMolduraSelfie){
+        previewMolduraSelfie.removeAttribute("src");
+        previewMolduraSelfie.style.display = "none";
+    }
+
+    if(molduraSelfieFile){
+        molduraSelfieFile.value = "";
+    }
+
+    if(statusMolduraSelfie){
+        statusMolduraSelfie.textContent = "Moldura excluída.";
+        statusMolduraSelfie.style.color = "#16834a";
+    }
 }
 
 async function gerarVPN(id){
