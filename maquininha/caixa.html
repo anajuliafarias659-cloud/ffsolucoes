@@ -657,7 +657,7 @@ function atualizarBotaoGerar(){
 }
 
 function valorDiretoAlterado(){
-  // No modo parcial este campo não participa da cobrança.
+
   if($("pagamentoParcial").checked){
     return;
   }
@@ -667,13 +667,11 @@ function valorDiretoAlterado(){
     current = "";
   }
 
-  atualizarBotaoGerar();
+  atualizarContaTela();
 }
 
 function valorParcialAlterado(){
-  // Valor parcial nunca pega resultado da calculadora.
-  // O operador sempre digita o valor pago agora manualmente.
-  atualizarBotaoGerar();
+  atualizarContaTela();
 }
 
 function alternarParcial(){
@@ -701,16 +699,13 @@ function alternarParcial(){
 }
 
 function toggleCalculadora(){
-  // Nunca abrir/usuar a calculadora durante pagamento parcial.
-  if($("pagamentoParcial").checked){
-    return;
-  }
 
-  calculadoraAberta =
-    !calculadoraAberta;
+  calculadoraAberta = !calculadoraAberta;
 
-  $("calcBody")
-    .classList.toggle("show", calculadoraAberta);
+  $("calcBody").classList.toggle(
+    "show",
+    calculadoraAberta
+  );
 
   $("calcToggle").textContent =
     calculadoraAberta
@@ -729,111 +724,45 @@ function render(){
   try{
     v = Number(calcular());
   }catch(e){
-    v = Number(current.replace(",", ".")) || 0;
+    v = Number(String(current || "").replace(",", ".")) || 0;
   }
 
   if(!Number.isFinite(v)) v = 0;
 
+  $("expr").textContent = expr || current || "";
+  $("total").textContent = money(v);
+
+  // Fora do parcial, calculadora/digitação define o total da conta.
   if(!modoParcial && v > 0){
     contaTotal = v;
   }
 
-  if(contaTotal < 0) contaTotal = 0;
-  if(totalPago < 0) totalPago = 0;
-  if(totalPago > contaTotal) totalPago = contaTotal;
-
   const restante = Math.max(0, contaTotal - totalPago);
 
-  $("total").textContent = money(v);
+  $("contaTotal").textContent = money(contaTotal);
+  $("contaPago").textContent = money(totalPago);
+  $("contaRestante").textContent = money(restante);
+
   $("gerarBtn").textContent =
-    "GERAR PIX DA CONTA — " + money(contaTotal);
+    "GERAR PIX DA CONTA — " + money(restante > 0 ? contaTotal : 0);
 
-  const totalEl = $("contaTotal");
-  const pagoEl = $("contaPago");
-  const restanteEl = $("contaRestante");
+  const parcial = numeroValor($("valorParcial")?.value);
 
-  if(totalEl) totalEl.textContent = money(contaTotal);
-  if(pagoEl) pagoEl.textContent = money(totalPago);
-  if(restanteEl) restanteEl.textContent = money(restante);
-
-  const parcialBtn = $("gerarParcialBtn");
-  if(parcialBtn){
-    const parcial = parseValor($("valorParcial")?.value);
-    parcialBtn.textContent =
+  if($("gerarParcialBtn")){
+    $("gerarParcialBtn").textContent =
       "GERAR PIX — " + money(parcial);
-    parcialBtn.disabled =
-      restante <= 0 || !Number.isFinite(parcial) || parcial <= 0 || parcial > restante;
+
+    $("gerarParcialBtn").disabled =
+      !modoParcial ||
+      parcial <= 0 ||
+      parcial > restante ||
+      restante <= 0;
   }
 
-  const fechada = $("contaFechada");
-  if(fechada){
-    fechada.style.display =
+  if($("contaFechada")){
+    $("contaFechada").style.display =
       contaTotal > 0 && restante <= 0 ? "block" : "none";
   }
-}
-
-
-function parseValor(v){
-  if(v === null || v === undefined) return 0;
-  let s = String(v).trim().replace(/[R$\s]/g,"");
-  if(!s) return 0;
-
-  if(s.includes(",")){
-    s = s.replace(/\./g,"").replace(",",".");
-  }else{
-    s = s.replace(/,/g,"");
-  }
-
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function formatarInputMoeda(input){
-  if(!input) return;
-  let n = parseValor(input.value);
-  if(!n){
-    input.value = "";
-    renderConta();
-    return;
-  }
-  input.value = n.toLocaleString("pt-BR",{
-    minimumFractionDigits:2,
-    maximumFractionDigits:2
-  });
-  renderConta();
-}
-
-function alternarCalculadora(){
-  const area = $("calculadoraArea");
-  if(!area) return;
-  area.classList.toggle("show");
-  if(area.classList.contains("show")){
-    $("abrirCalcBtn").textContent = "🧮 FECHAR CALCULADORA";
-  }else{
-    $("abrirCalcBtn").textContent = "🧮 ABRIR CALCULADORA";
-  }
-}
-
-function alternarParcial(){
-  modoParcial = $("modoParcial")?.checked === true;
-  const box = $("parcialBox");
-  if(box) box.classList.toggle("show", modoParcial);
-
-  if(modoParcial){
-    // The calculated/typed amount remains the account total.
-    // Only the "Valor que vai pagar agora" field controls the partial PIX.
-    $("valorParcial").value = "";
-    $("status").textContent = "";
-    $("status").className = "status";
-  }else{
-    $("valorParcial").value = "";
-  }
-
-  renderConta();
-}
-
-function renderConta(){
-  render();
 }
 
 
@@ -1070,44 +999,53 @@ async function carregarMaquininha(){
 
 async function gerarPix(){
 
-  // Normal PIX = the complete account total.
   if(modoParcial){
     return gerarPagamentoParcial();
   }
 
-  let valor = 0;
+  // O PIX normal usa o TOTAL DA CONTA.
+  let valor = numeroValor($("valorDireto").value);
 
-  try{
-    valor = Number(calcular());
-  }catch(e){
-    valor = Number(current.replace(",", ".")) || 0;
+  if(valor <= 0){
+    try{
+      valor = Number(calcular()) || 0;
+    }catch(e){
+      valor = 0;
+    }
   }
 
   if(!Number.isFinite(valor) || valor <= 0){
-    alert("Digite ou calcule um valor válido.");
+    alert("Digite ou calcule o valor da conta.");
     return;
   }
 
   contaTotal = valor;
 
-  if(totalPago >= contaTotal){
+  const restante = Math.max(0, contaTotal - totalPago);
+
+  if(restante <= 0){
     alert("Essa conta já está paga.");
     return;
   }
 
-  pagamentoAtual = contaTotal - totalPago;
+  pagamentoAtual = restante;
 
-  await criarPix(pagamentoAtual, "total");
+  await criarPix(
+    restante,
+    totalPago > 0 ? "parcial" : "total"
+  );
 }
 
 
 async function gerarPagamentoParcial(){
 
-  const restante = Math.max(0, contaTotal - totalPago);
-  const valor = parseValor($("valorParcial")?.value);
+  // O total da conta vem do que foi digitado ou calculado ANTES.
+  const total = contaTotal;
+  const restante = Math.max(0, total - totalPago);
+  const valor = numeroValor($("valorParcial").value);
 
-  if(contaTotal <= 0){
-    alert("Primeiro informe ou calcule o valor total da conta.");
+  if(total <= 0){
+    alert("Primeiro digite ou calcule o valor total da conta.");
     return;
   }
 
@@ -1122,12 +1060,19 @@ async function gerarPagamentoParcial(){
   }
 
   if(valor > restante){
-    alert("O pagamento não pode ser maior que o valor restante.");
+    alert(
+      "O pagamento não pode ser maior que o restante de " +
+      money(restante) + "."
+    );
     return;
   }
 
   pagamentoAtual = valor;
-  await criarPix(valor, "parcial");
+
+  await criarPix(
+    valor,
+    "parcial"
+  );
 }
 
 async function criarPix(valor, tipo){
@@ -1320,23 +1265,19 @@ async function verificarAgora(){
     $("pixBox").style.display = "none";
     $("gerarBtn").disabled = false;
 
-    if($("valorParcial")){
-      $("valorParcial").value = "";
-    }
+    $("valorParcial").value = "";
 
-    // If the account still has a balance, keep the partial mode ready
-    // for the next PIX. The total remains unchanged.
     if(restante > 0){
-      $("modoParcial").checked = true;
+      $("pagamentoParcial").checked = true;
       modoParcial = true;
-      $("parcialBox").classList.add("show");
+      $("partialFields").classList.add("show");
     }else{
-      $("modoParcial").checked = false;
+      $("pagamentoParcial").checked = false;
       modoParcial = false;
-      $("parcialBox").classList.remove("show");
+      $("partialFields").classList.remove("show");
     }
 
-    renderConta();
+    atualizarContaTela();
   }
 }
 
@@ -1382,33 +1323,31 @@ function novaCobranca(){
   clearInterval(poll);
 
   paymentId = null;
+  pagamentoAtual = 0;
+  contaTotal = 0;
+  totalPago = 0;
+  modoParcial = false;
+  calculadoraAberta = false;
 
   expr = "";
-
   current = "";
 
-  $("descricao").value = "";
   $("valorDireto").value = "";
   $("valorTotal").value = "";
   $("valorParcial").value = "";
+  $("descricao").value = "";
+
   $("pagamentoParcial").checked = false;
   $("partialFields").classList.remove("show");
+  $("calcBody").classList.remove("show");
+  $("calcToggle").textContent = "🧮 ABRIR CALCULADORA";
 
-  expr = "";
-  current = "";
-
-  $("pixBox").style.display =
-    "none";
-
-  $("status").textContent =
-    "";
-
-  $("status").className =
-    "status";
-
+  $("pixBox").style.display = "none";
+  $("status").textContent = "";
+  $("status").className = "status";
   $("gerarBtn").disabled = false;
 
-  renderConta();
+  render();
 }
 
 
