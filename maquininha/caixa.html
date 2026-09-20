@@ -319,6 +319,39 @@ button:disabled{
   display:block;
 }
 
+
+.conta-acoes{margin-top:12px}
+.sair-conta{width:100%;padding:12px;border:1px solid #ddd;border-radius:12px;background:#fff;font-weight:bold}
+.historico-card{margin-top:12px;padding:14px;border:1px solid #ddd;border-radius:16px;background:#fafafa}
+.historico-title{font-weight:bold;font-size:14px;margin-bottom:9px}
+.historico-item{background:#fff;border:1px solid #eee;border-radius:12px;padding:11px;margin-bottom:8px}
+.historico-item:last-child{margin-bottom:0}
+.historico-item .hdesc{font-weight:bold}
+.historico-item .hinf{margin-top:4px;color:#777;font-size:12px}
+.historico-item .hfalta{margin-top:4px;color:#b00020;font-weight:bold}
+.historico-vazio{color:#777;font-size:13px}
+
+
+.historico-toggle{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:2px 0;
+  border:0;
+  background:transparent;
+  font-weight:bold;
+  font-size:14px;
+  cursor:pointer;
+}
+.historico-conteudo{
+  display:none;
+  margin-top:10px;
+}
+.historico-conteudo.show{
+  display:block;
+}
+
 </style>
 </head>
 
@@ -344,6 +377,7 @@ button:disabled{
     class="desc"
     placeholder="Descrição da cobrança (opcional)"
     maxlength="120"
+    oninput="if(contaAtiva) salvarConta()"
   >
 
   <div class="conta-card">
@@ -455,6 +489,30 @@ button:disabled{
 
   <div id="status" class="status"></div>
 
+
+  <div class="conta-acoes">
+    <button type="button" class="sair-conta" onclick="sairDaConta()">
+      SAIR DESTA CONTA
+    </button>
+  </div>
+
+  <div class="historico-card">
+    <button
+      type="button"
+      class="historico-toggle"
+      onclick="abrirHistorico()"
+    >
+      📋 CONTAS PENDENTES
+      <span id="historicoSeta">▼</span>
+    </button>
+
+    <div id="historicoConteudo" class="historico-conteudo">
+      <div id="historicoContas" class="historico-list">
+        <div class="historico-vazio">Nenhuma conta pendente.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="pix" id="pixBox">
 
     <h2>PIX — aguardando pagamento</h2>
@@ -543,6 +601,15 @@ let totalPago = 0;
 let pagamentoAtual = 0;
 let modoParcial = false;
 
+let contaAtiva = false;
+let contaId = null;
+
+const STORAGE_CONTA =
+  "ff_maquininha_conta_ativa_" + MAQUININHA_ID;
+
+const STORAGE_HISTORICO =
+  "ff_maquininha_historico_" + MAQUININHA_ID;
+
 
 // =====================================================
 // HELPERS
@@ -574,6 +641,179 @@ function numeroValor(v){
 
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
+}
+
+
+// =====================================================
+// ABRIR / FECHAR CONTAS PENDENTES
+// =====================================================
+
+function abrirHistorico(){
+
+  const area =
+    $("historicoConteudo");
+
+  const seta =
+    $("historicoSeta");
+
+  const aberto =
+    area.classList.toggle("show");
+
+  seta.textContent =
+    aberto ? "▲" : "▼";
+}
+
+
+// =====================================================
+// CONTA PERSISTENTE
+// =====================================================
+
+function salvarConta(){
+  if(!contaAtiva || contaTotal <= 0) return;
+
+  const restante=Math.max(0,contaTotal-totalPago);
+
+  localStorage.setItem(STORAGE_CONTA,JSON.stringify({
+    id:contaId,
+    total:Number(contaTotal.toFixed(2)),
+    pago:Number(totalPago.toFixed(2)),
+    restante:Number(restante.toFixed(2)),
+    descricao:$("descricao").value.trim() || "Conta sem descrição",
+    atualizada_em:new Date().toISOString()
+  }));
+}
+
+function iniciarConta(){
+  if(contaAtiva) return;
+  contaAtiva=true;
+  contaId=Date.now()+"_"+Math.random().toString(36).slice(2);
+  salvarConta();
+}
+
+function carregarConta(){
+  try{
+    const raw=localStorage.getItem(STORAGE_CONTA);
+    if(!raw) return;
+
+    const c=JSON.parse(raw);
+    const restante=Number(c.restante);
+
+    if(!Number.isFinite(restante) || restante<=0){
+      localStorage.removeItem(STORAGE_CONTA);
+      return;
+    }
+
+    contaAtiva=true;
+    contaId=c.id||null;
+    contaTotal=Number(c.total)||0;
+    totalPago=Number(c.pago)||0;
+
+    $("descricao").value=c.descricao||"";
+    $("pagamentoParcial").checked=true;
+    modoParcial=true;
+    $("parcialArea").classList.add("show");
+  }catch(e){
+    console.error("Erro ao restaurar conta:",e);
+  }
+}
+
+function salvarHistoricoPendente(){
+  const restante=Math.max(0,contaTotal-totalPago);
+  if(!contaAtiva || restante<=0) return;
+
+  let lista=[];
+  try{
+    lista=JSON.parse(localStorage.getItem(STORAGE_HISTORICO)||"[]");
+  }catch(e){ lista=[]; }
+
+  lista.unshift({
+    id:contaId,
+    descricao:$("descricao").value.trim() || "Conta sem descrição",
+    total:Number(contaTotal.toFixed(2)),
+    pago:Number(totalPago.toFixed(2)),
+    restante:Number(restante.toFixed(2)),
+    status:"PENDENTE",
+    data:new Date().toISOString()
+  });
+
+  localStorage.setItem(STORAGE_HISTORICO,JSON.stringify(lista.slice(0,30)));
+  renderHistorico();
+}
+
+function renderHistorico(){
+  const area=$("historicoContas");
+  if(!area) return;
+
+  let lista=[];
+  try{
+    lista=JSON.parse(localStorage.getItem(STORAGE_HISTORICO)||"[]");
+  }catch(e){ lista=[]; }
+
+  if(!lista.length){
+    area.innerHTML='<div class="historico-vazio">Nenhuma conta pendente.</div>';
+    return;
+  }
+
+  area.innerHTML=lista.map(c=>`
+    <div class="historico-item">
+      <div class="hdesc">${escapeHtml(c.descricao)}</div>
+      <div class="hinf">Total: ${money(c.total)} · Pago: ${money(c.pago)}</div>
+      <div class="hfalta">Ainda falta: ${money(c.restante)}</div>
+    </div>
+  `).join("");
+}
+
+function escapeHtml(v){
+  return String(v??"")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+function sairDaConta(){
+  if(!contaAtiva) return;
+
+  const restante=Math.max(0,contaTotal-totalPago);
+
+  if(restante>0){
+    if(!confirm(
+      "Essa conta ainda tem "+money(restante)+
+      " em aberto.\n\nEla ficará no histórico como PENDENTE."
+    )) return;
+
+    salvarHistoricoPendente();
+  }
+
+  localStorage.removeItem(STORAGE_CONTA);
+  clearInterval(poll);
+
+  contaAtiva=false;
+  contaId=null;
+  contaTotal=0;
+  totalPago=0;
+  pagamentoAtual=0;
+  paymentId=null;
+  modoParcial=false;
+  expr="";
+  current="";
+
+  $("descricao").value="";
+  $("valorDigitado").value="";
+  $("valorParcial").value="";
+  $("pagamentoParcial").checked=false;
+  $("parcialArea").classList.remove("show");
+  $("pixBox").style.display="none";
+  $("status").textContent="";
+  $("status").className="status";
+
+  render();
+}
+
+function salvarEstadoConta(){
+  if(contaTotal>0){
+    iniciarConta();
+    salvarConta();
+  }
 }
 
 
@@ -674,6 +914,7 @@ function usarValorDigitado(){
 
     if(!modoParcial){
       contaTotal = valor;
+      salvarEstadoConta();
     }
 
   }else if(!modoParcial){
@@ -774,6 +1015,7 @@ function igual(){
     expr = "";
 
     contaTotal = Number(v) || 0;
+    salvarEstadoConta();
     atualizarTela();
 
   }catch(e){
@@ -918,6 +1160,8 @@ async function gerarPixParcial(){
 
   pagamentoAtual = valor;
 
+  salvarEstadoConta();
+
   await criarPix(
     valor,
     "parcial"
@@ -956,6 +1200,7 @@ async function gerarPix(){
   }
 
   contaTotal = valor;
+  salvarEstadoConta();
 
   const restante =
     Math.max(
@@ -1497,6 +1742,15 @@ async function verificarAgora(){
     paymentId = null;
     pagamentoAtual = 0;
 
+    if(restante <= 0){
+      localStorage.removeItem(STORAGE_CONTA);
+      contaAtiva = false;
+      contaId = null;
+    }else{
+      contaAtiva = true;
+      salvarConta();
+    }
+
     $("pixBox").style.display =
       "none";
 
@@ -1583,39 +1837,47 @@ async function copiarPix(){
 
 function novaCobranca(){
 
+  // Se existe conta aberta, não abandona a conta.
+  if(
+    contaAtiva &&
+    contaTotal > 0 &&
+    (contaTotal-totalPago) > 0
+  ){
+    $("pixBox").style.display="none";
+    $("valorParcial").value="";
+    pagamentoAtual=0;
+    paymentId=null;
+
+    $("status").textContent =
+      "Conta em aberto — restante " +
+      money(contaTotal-totalPago);
+
+    $("status").className="status wait";
+    atualizarTela();
+    return;
+  }
+
   clearInterval(poll);
+  localStorage.removeItem(STORAGE_CONTA);
 
-  paymentId = null;
-  pagamentoAtual = 0;
+  paymentId=null;
+  pagamentoAtual=0;
+  contaAtiva=false;
+  contaId=null;
+  contaTotal=0;
+  totalPago=0;
+  modoParcial=false;
+  expr="";
+  current="";
 
-  contaTotal = 0;
-  totalPago = 0;
-  modoParcial = false;
-
-  expr = "";
-  current = "";
-
-  $("descricao").value = "";
-  $("valorDigitado").value = "";
-  $("valorParcial").value = "";
-
-  $("pagamentoParcial").checked =
-    false;
-
-  $("parcialArea")
-    .classList.remove("show");
-
-  $("pixBox").style.display =
-    "none";
-
-  $("status").textContent =
-    "";
-
-  $("status").className =
-    "status";
-
-  $("gerarBtn").disabled =
-    false;
+  $("descricao").value="";
+  $("valorDigitado").value="";
+  $("valorParcial").value="";
+  $("pagamentoParcial").checked=false;
+  $("parcialArea").classList.remove("show");
+  $("pixBox").style.display="none";
+  $("status").textContent="";
+  $("status").className="status";
 
   render();
 }
@@ -1627,7 +1889,9 @@ function novaCobranca(){
 
 carregarMaquininha();
 
+carregarConta();
 render();
+renderHistorico();
 
 </script>
 
