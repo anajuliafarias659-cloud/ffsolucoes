@@ -6,6 +6,7 @@
 <title>FF Maquininha</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <style>
 *{
@@ -351,6 +352,19 @@ button:disabled{
 .historico-conteudo.show{
   display:block;
 }
+
+.historico-pdf-btn{
+  width:100%;
+  margin-top:10px;
+  padding:13px;
+  border:0;
+  border-radius:12px;
+  background:#111;
+  color:#fff;
+  font-weight:bold;
+  font-size:14px;
+}
+.historico-pdf-btn:active{transform:scale(.98)}
 
 
 .consumo-card{
@@ -2445,6 +2459,242 @@ async function novaCobranca(){
 
 
 // =====================================================
+// HISTÓRICO COMPLETO EM PDF
+// =====================================================
+
+function pdfTextoSeguro(valor){
+  return String(valor ?? "")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+function pdfData(valor){
+  if(!valor) return "";
+  const d = new Date(valor);
+  if(Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("pt-BR");
+}
+
+function pdfQuebrar(doc, texto, x, y, largura, altura=6){
+  const linhas = doc.splitTextToSize(pdfTextoSeguro(texto), largura);
+  doc.text(linhas, x, y);
+  return y + (linhas.length * altura);
+}
+
+function pdfNovaPaginaSePreciso(doc, y, margem=18){
+  if(y > 275){
+    doc.addPage();
+    return margem;
+  }
+  return y;
+}
+
+async function gerarHistoricoPDF(){
+  try{
+    if(!MAQUININHA_ID){
+      alert("Maquininha não identificada.");
+      return;
+    }
+
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      alert("Biblioteca de PDF ainda está carregando. Tente novamente.");
+      return;
+    }
+
+    const btn = document.querySelector(".historico-pdf-btn");
+    if(btn){
+      btn.disabled = true;
+      btn.textContent = "⏳ GERANDO PDF...";
+    }
+
+    const [maquinaRes, contasRes, pagamentosRes] = await Promise.all([
+      sb.from("maquininhas")
+        .select("id,nome,descricao")
+        .eq("id",MAQUININHA_ID)
+        .maybeSingle(),
+      sb.from("maquininha_contas")
+        .select("*")
+        .eq("maquininha_id",MAQUININHA_ID)
+        .order("atualizado_em",{ascending:false}),
+      sb.from("maquininha_pagamentos")
+        .select("*")
+        .eq("maquininha_id",MAQUININHA_ID)
+    ]);
+
+    if(maquinaRes.error) throw maquinaRes.error;
+    if(contasRes.error) throw contasRes.error;
+    if(pagamentosRes.error) throw pagamentosRes.error;
+
+    const maquina = maquinaRes.data || {};
+    const contas = contasRes.data || [];
+    const pagamentos = pagamentosRes.data || [];
+
+    const contasPagas = contas.filter(c => String(c.status||"").toLowerCase()==="paga");
+    const contasAbertas = contas.filter(c => String(c.status||"").toLowerCase()!=="paga");
+    const totalContas = contas.reduce((s,c)=>s+Number(c.total||0),0);
+    const totalRecebido = contas.reduce((s,c)=>s+Number(c.total_pago||0),0);
+    const totalRestante = contas.reduce((s,c)=>s+Number(c.restante||0),0);
+    const totalPix = pagamentos
+      .filter(p => String(p.status||p.payment_status||"").toLowerCase()==="approved")
+      .reduce((s,p)=>s+Number(p.valor||0),0);
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+    const margem = 14;
+    const largura = 182;
+    let y = 18;
+
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(18);
+    doc.text("FF MAQUININHA", margem, y);
+    y += 7;
+
+    doc.setFontSize(13);
+    doc.text("HISTÓRICO COMPLETO", margem, y);
+    y += 6;
+
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(9);
+    doc.text(`Maquininha: ${pdfTextoSeguro(maquina.nome || "Maquininha")}`, margem, y);
+    y += 5;
+    if(maquina.descricao){
+      y = pdfQuebrar(doc, `Descrição: ${maquina.descricao}`, margem, y, largura, 4.5);
+      y += 1;
+    }
+    doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, margem, y);
+    y += 8;
+
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(11);
+    doc.text("RESUMO", margem, y);
+    y += 6;
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(9);
+    const resumo = [
+      `Contas registradas: ${contas.length}`,
+      `Contas pagas: ${contasPagas.length}`,
+      `Contas abertas/pendentes: ${contasAbertas.length}`,
+      `Total das contas: ${money(totalContas)}`,
+      `Total recebido nas contas: ${money(totalRecebido)}`,
+      `Total ainda em aberto: ${money(totalRestante)}`,
+      `PIX aprovados registrados: ${pagamentos.filter(p=>String(p.status||p.payment_status||"").toLowerCase()==="approved").length}`,
+      `Valor dos PIX aprovados: ${money(totalPix)}`
+    ];
+    resumo.forEach(l=>{ y=pdfNovaPaginaSePreciso(doc,y); doc.text(l,margem,y); y+=4.8; });
+    y += 4;
+
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(11);
+    y=pdfNovaPaginaSePreciso(doc,y);
+    doc.text("CONTAS", margem, y);
+    y += 6;
+
+    if(!contas.length){
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(9);
+      doc.text("Nenhuma conta registrada.",margem,y);
+      y+=7;
+    }else{
+      contas.forEach((c,index)=>{
+        y=pdfNovaPaginaSePreciso(doc,y);
+        doc.setFont("helvetica","bold");
+        doc.setFontSize(10);
+        const status = String(c.status||"").toLowerCase()==="paga" ? "PAGA" : String(c.status||"").toUpperCase();
+        doc.text(`${index+1}. ${pdfTextoSeguro(c.identificador||"Conta")} — ${status}`,margem,y);
+        y+=5;
+
+        doc.setFont("helvetica","normal");
+        doc.setFontSize(8.5);
+        y=pdfQuebrar(doc,`Descrição: ${c.descricao||"Sem descrição"}`,margem+3,y,largura-3,4.2);
+        doc.text(`Total: ${money(c.total)}   |   Pago: ${money(c.total_pago)}   |   Restante: ${money(c.restante)}`,margem+3,y);
+        y+=4.5;
+        if(c.atualizado_em){
+          doc.text(`Última atualização: ${pdfData(c.atualizado_em)}`,margem+3,y);
+          y+=4.5;
+        }
+
+        const itens = Array.isArray(c.consumos) ? c.consumos : [];
+        if(itens.length){
+          doc.setFont("helvetica","bold");
+          doc.text("Consumos:",margem+3,y);
+          y+=4.2;
+          doc.setFont("helvetica","normal");
+          itens.forEach(item=>{
+            y=pdfNovaPaginaSePreciso(doc,y);
+            const qtd = Number(item.quantidade||1);
+            const unit = Number(item.valor_unitario||0);
+            const sub = Number(item.valor||unit*qtd);
+            const linha = `• ${pdfTextoSeguro(item.descricao||"Consumo")} — ${qtd}x ${money(unit)} = ${money(sub)}`;
+            y=pdfQuebrar(doc,linha,margem+6,y,largura-6,4);
+            y+=1;
+          });
+        }else{
+          doc.text("Consumos: nenhum registrado",margem+3,y);
+          y+=4.2;
+        }
+        y+=3;
+        doc.setDrawColor(210,210,210);
+        doc.line(margem,y,margem+largura,y);
+        y+=5;
+      });
+    }
+
+    y=pdfNovaPaginaSePreciso(doc,y);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(11);
+    doc.text("LANÇAMENTOS PIX",margem,y);
+    y+=6;
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(8.5);
+
+    if(!pagamentos.length){
+      doc.text("Nenhum pagamento PIX registrado.",margem,y);
+      y+=7;
+    }else{
+      pagamentos.forEach((p,index)=>{
+        y=pdfNovaPaginaSePreciso(doc,y);
+        const st=String(p.status||p.payment_status||"-").toUpperCase();
+        doc.setFont("helvetica","bold");
+        doc.text(`${index+1}. ${money(p.valor)} — ${st}`,margem,y);
+        y+=4.2;
+        doc.setFont("helvetica","normal");
+        if(p.descricao) { y=pdfQuebrar(doc,`Descrição: ${p.descricao}`,margem+3,y,largura-3,4); y+=1; }
+        if(p.payment_id) { y=pdfQuebrar(doc,`Payment ID: ${p.payment_id}`,margem+3,y,largura-3,4); y+=1; }
+        if(p.maquininha_id) doc.text(`Maquininha ID: ${p.maquininha_id}`,margem+3,y);
+        y+=4.5;
+        doc.setDrawColor(220,220,220);
+        doc.line(margem,y,margem+largura,y);
+        y+=4;
+      });
+    }
+
+    const paginas = doc.internal.getNumberOfPages();
+    for(let i=1;i<=paginas;i++){
+      doc.setPage(i);
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(8);
+      doc.text(`FF Maquininha • Página ${i}/${paginas}`,margem,289);
+    }
+
+    const nome = String(maquina.nome||"maquininha")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+      .replace(/[^a-zA-Z0-9_-]+/g,"-")
+      .replace(/^-+|-+$/g,"") || "maquininha";
+
+    doc.save(`historico-${nome}-${new Date().toISOString().slice(0,10)}.pdf`);
+  }catch(error){
+    console.error("Erro ao gerar histórico PDF:",error);
+    alert("Não foi possível gerar o PDF: " + (error.message || "erro desconhecido"));
+  }finally{
+    const btn = document.querySelector(".historico-pdf-btn");
+    if(btn){
+      btn.disabled = false;
+      btn.textContent = "📄 GERAR HISTÓRICO COMPLETO EM PDF";
+    }
+  }
+}
+
+// =====================================================
 // MODO APP NO CELULAR
 // =====================================================
 
@@ -2538,6 +2788,13 @@ function montarModoAppMobile(){
   // Tela contas
   contasView.appendChild(tituloContas);
   if(historicoCard) contasView.appendChild(historicoCard);
+
+  const pdfBtn = document.createElement("button");
+  pdfBtn.type = "button";
+  pdfBtn.className = "historico-pdf-btn";
+  pdfBtn.textContent = "📄 GERAR HISTÓRICO COMPLETO EM PDF";
+  pdfBtn.onclick = gerarHistoricoPDF;
+  contasView.appendChild(pdfBtn);
 
   // Tela PIX
   pixView.appendChild(tituloPix);
