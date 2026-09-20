@@ -820,6 +820,23 @@ button:disabled{
   transform:scale(.98);
 }
 
+
+.historico-item .excluir-historico-btn{
+  width:100%;
+  margin-top:8px;
+  padding:11px 10px;
+  border:1px solid #d32f2f;
+  border-radius:10px;
+  background:#fff;
+  color:#c62828;
+  font-size:13px;
+  font-weight:800;
+}
+.historico-item .excluir-historico-btn:active{
+  transform:scale(.98);
+  background:#fff0f0;
+}
+
 </style>
 </head>
 
@@ -1112,6 +1129,10 @@ const params =
 
 const MAQUININHA_ID =
   params.get("maquininha_id");
+
+// Senha exigida para apagar historicos antigos/testes.
+// Troque aqui pela senha que voce quiser.
+const SENHA_EXCLUSAO_HISTORICO = "1234";
 
 
 // =====================================================
@@ -1578,6 +1599,7 @@ async function salvarHistoricoPendente(){
 function renderHistorico(){
   const area=$("historicoContas");
   if(!area) return;
+
   if(!contasBanco.length){
     area.innerHTML='<div class="historico-vazio">Nenhuma conta registrada.</div>';
     return;
@@ -1597,9 +1619,72 @@ function renderHistorico(){
       <div class="hfalta">Ainda falta: ${money(c.restante)}</div>
       <div class="hinf" style="font-weight:800;margin-top:6px">${statusTexto}</div>
       ${botao}
+      <button
+        type="button"
+        class="excluir-historico-btn"
+        onclick="excluirHistoricoComSenha('${c.id}')"
+      >
+        🗑️ EXCLUIR HISTÓRICO
+      </button>
     </div>`;
   }).join("");
 }
+
+async function excluirHistoricoComSenha(id){
+
+  const conta = contasBanco.find(c => String(c.id) === String(id));
+
+  if(!conta){
+    await carregarContasBanco();
+    alert("Histórico não encontrado.");
+    return;
+  }
+
+  if(contaAtiva && contaId && String(contaId) === String(id)){
+    alert("Essa é a conta que está aberta agora. Saia dela antes de excluir.");
+    return;
+  }
+
+  const senha = prompt("Digite a senha para excluir este histórico:");
+
+  if(senha === null) return;
+
+  if(senha !== SENHA_EXCLUSAO_HISTORICO){
+    alert("Senha incorreta. Histórico não excluído.");
+    return;
+  }
+
+  const confirmar = confirm(
+    "Excluir definitivamente este histórico?\n\n" +
+    "Conta: " + (conta.identificador || "Conta") + "\n" +
+    "Total: " + money(conta.total) + "\n\n" +
+    "Essa ação não pode ser desfeita."
+  );
+
+  if(!confirmar) return;
+
+  const { error } = await sb.from("maquininha_contas")
+    .delete()
+    .eq("id", id)
+    .eq("maquininha_id", MAQUININHA_ID);
+
+  if(error){
+    console.error("Erro ao excluir histórico:", error);
+    alert("Não foi possível excluir.\n\n" + (error.message || "Erro no banco."));
+    return;
+  }
+
+  contasBanco = contasBanco.filter(c => String(c.id) !== String(id));
+
+  if(String(localStorage.getItem(STORAGE_CONTA) || "") === String(id)){
+    localStorage.removeItem(STORAGE_CONTA);
+  }
+
+  renderHistorico();
+
+  alert("Histórico excluído com sucesso.");
+}
+
 
 function escapeHtml(v){
   return String(v??"")
