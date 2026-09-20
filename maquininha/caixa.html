@@ -809,6 +809,7 @@ let modoParcial = false;
 
 let consumos = [];
 
+let contasBanco = [];
 let contaAtiva = false;
 let contaId = null;
 
@@ -891,32 +892,26 @@ function abrirConsumos(){
     aberto ? "▲" : "▼";
 }
 
-function salvarConsumos(){
+async function salvarConsumos(){
 
-  localStorage.setItem(
-    STORAGE_CONSUMOS,
-    JSON.stringify(consumos)
-  );
+  if(!contaAtiva || !contaId) return;
+
+  const { error } =
+    await sb.from("maquininha_contas")
+      .update({
+        consumos,
+        atualizado_em:new Date().toISOString()
+      })
+      .eq("id",contaId)
+      .eq("maquininha_id",MAQUININHA_ID);
+
+  if(error)
+    console.error("Erro ao salvar consumos:",error);
+
+  renderConsumos();
 }
 
 function carregarConsumos(){
-
-  try{
-    const raw =
-      localStorage.getItem(
-        STORAGE_CONSUMOS
-      );
-
-    consumos =
-      raw ? JSON.parse(raw) : [];
-
-    if(!Array.isArray(consumos)){
-      consumos = [];
-    }
-  }catch(e){
-    consumos = [];
-  }
-
   renderConsumos();
 }
 
@@ -1150,115 +1145,181 @@ function fecharContaPorConsumo(){
 // CONTA PERSISTENTE
 // =====================================================
 
-function salvarConta(){
-  if(!contaAtiva || contaTotal <= 0) return;
+async function salvarConta(){
 
-  const restante=Math.max(0,contaTotal-totalPago);
+  if(!contaAtiva || !contaId) return;
 
-  localStorage.setItem(STORAGE_CONTA,JSON.stringify({
-    id:contaId,
-    total:Number(contaTotal.toFixed(2)),
-    pago:Number(totalPago.toFixed(2)),
-    restante:Number(restante.toFixed(2)),
+  const restante =
+    Math.max(0, contaTotal-totalPago);
+
+  const dados = {
+    id: contaId,
+    maquininha_id: MAQUININHA_ID,
     identificador:
-      $("identificadorConta").value.trim() ||
-      "Conta",
-    descricao:$("descricao").value.trim() || "Conta sem descrição",
-    atualizada_em:new Date().toISOString()
-  }));
-}
+      $("identificadorConta").value.trim() || "Conta",
+    descricao:
+      $("descricao").value.trim() || "Conta sem descrição",
+    total: Number(contaTotal.toFixed(2)),
+    total_pago: Number(totalPago.toFixed(2)),
+    restante: Number(restante.toFixed(2)),
+    consumos: Array.isArray(consumos) ? consumos : [],
+    status: restante <= 0 ? "paga" : "aberta",
+    atualizado_em: new Date().toISOString()
+  };
 
-function iniciarConta(){
-  if(contaAtiva) return;
-  contaAtiva=true;
-  contaId=Date.now()+"_"+Math.random().toString(36).slice(2);
-  salvarConta();
-}
+  const { error } =
+    await sb.from("maquininha_contas")
+      .upsert(dados, { onConflict:"id" });
 
-function carregarConta(){
-  try{
-    const raw=localStorage.getItem(STORAGE_CONTA);
-    if(!raw) return;
-
-    const c=JSON.parse(raw);
-    const restante=Number(c.restante);
-
-    if(!Number.isFinite(restante) || restante<=0){
-      localStorage.removeItem(STORAGE_CONTA);
-      return;
-    }
-
-    contaAtiva=true;
-    contaId=c.id||null;
-    contaTotal=Number(c.total)||0;
-    totalPago=Number(c.pago)||0;
-
-    $("identificadorConta").value =
-      c.identificador || "Conta";
-    $("descricao").value=c.descricao||"";
-    $("pagamentoParcial").checked=true;
-    modoParcial=true;
-    $("parcialArea").classList.add("show");
-  }catch(e){
-    console.error("Erro ao restaurar conta:",e);
+  if(error){
+    console.error("Erro ao salvar conta:",error);
+    return false;
   }
+
+  localStorage.setItem(
+    STORAGE_CONTA,
+    String(contaId)
+  );
+
+  return true;
 }
 
-function salvarHistoricoPendente(){
-  const restante=Math.max(0,contaTotal-totalPago);
-  if(!contaAtiva || restante<=0) return;
+async function carregarContasBanco(){
 
-  let lista=[];
-  try{
-    lista=JSON.parse(localStorage.getItem(STORAGE_HISTORICO)||"[]");
-  }catch(e){ lista=[]; }
+  const { data, error } =
+    await sb.from("maquininha_contas")
+      .select("*")
+      .eq("maquininha_id",MAQUININHA_ID)
+      .in("status",["aberta","pendente"])
+      .order("atualizado_em",{ascending:false});
 
-  lista.unshift({
-    id:contaId,
-    identificador:
-      $("identificadorConta").value.trim() ||
-      "Conta",
-    descricao:$("descricao").value.trim() || "Conta sem descrição",
-    total:Number(contaTotal.toFixed(2)),
-    pago:Number(totalPago.toFixed(2)),
-    restante:Number(restante.toFixed(2)),
-    status:"PENDENTE",
-    data:new Date().toISOString()
-  });
-
-  localStorage.setItem(STORAGE_HISTORICO,JSON.stringify(lista.slice(0,30)));
-  renderHistorico();
-}
-
-function renderHistorico(){
-  const area=$("historicoContas");
-  if(!area) return;
-
-  let lista=[];
-  try{
-    lista=JSON.parse(localStorage.getItem(STORAGE_HISTORICO)||"[]");
-  }catch(e){ lista=[]; }
-
-  if(!lista.length){
-    area.innerHTML='<div class="historico-vazio">Nenhuma conta pendente.</div>';
+  if(error){
+    console.error("Erro ao carregar contas:",error);
     return;
   }
 
-  area.innerHTML=lista.map(c=>`
-    <div class="historico-item">
-      <div class="hdesc">${escapeHtml(c.identificador || "Conta")}</div>
-      <div class="hinf">${escapeHtml(c.descricao || "")}</div>
-      <div class="hinf">Total: ${money(c.total)} · Pago: ${money(c.pago)}</div>
-      <div class="hfalta">Ainda falta: ${money(c.restante)}</div>
-      <button
-        type="button"
-        class="retomar-conta"
-        onclick="retomarConta('${c.id}')"
-      >
-        ▶ RETOMAR CONTA E PAGAR
-      </button>
-    </div>
-  `).join("");
+  contasBanco=data||[];
+  renderHistorico();
+}
+
+async function iniciarConta(){
+
+  if(contaAtiva) return true;
+
+  contaAtiva=true;
+  contaId =
+    crypto.randomUUID
+      ? crypto.randomUUID()
+      : Date.now()+"_"+Math.random().toString(36).slice(2);
+
+  contaTotal=0;
+  totalPago=0;
+  consumos=[];
+
+  return await salvarConta();
+}
+
+async function carregarConta(){
+
+  await carregarContasBanco();
+
+  const id =
+    localStorage.getItem(STORAGE_CONTA);
+
+  if(!id) return;
+
+  const c =
+    contasBanco.find(
+      item=>String(item.id)===String(id)
+    );
+
+  if(!c) return;
+
+  contaAtiva=true;
+  contaId=c.id;
+  contaTotal=Number(c.total)||0;
+  totalPago=Number(c.total_pago)||0;
+  consumos=Array.isArray(c.consumos)?c.consumos:[];
+
+  $("identificadorConta").value =
+    c.identificador||"Conta";
+
+  $("descricao").value =
+    c.descricao||"";
+
+  $("pagamentoParcial").checked=true;
+  modoParcial=true;
+  $("parcialArea").classList.add("show");
+
+  renderConsumos();
+}
+
+async function salvarHistoricoPendente(){
+
+  if(!contaAtiva || !contaId) return;
+
+  const restante =
+    Math.max(0,contaTotal-totalPago);
+
+  if(restante<=0) return;
+
+  const { error } =
+    await sb.from("maquininha_contas")
+      .update({
+        status:"pendente",
+        total_pago:Number(totalPago.toFixed(2)),
+        restante:Number(restante.toFixed(2)),
+        identificador:
+          $("identificadorConta").value.trim()||"Conta",
+        descricao:
+          $("descricao").value.trim()||"Conta sem descrição",
+        consumos,
+        atualizado_em:new Date().toISOString()
+      })
+      .eq("id",contaId)
+      .eq("maquininha_id",MAQUININHA_ID);
+
+  if(error)
+    console.error("Erro ao salvar pendência:",error);
+
+  await carregarContasBanco();
+}
+
+function renderHistorico(){
+
+  const area=$("historicoContas");
+  if(!area) return;
+
+  if(!contasBanco.length){
+    area.innerHTML =
+      '<div class="historico-vazio">Nenhuma conta aberta ou pendente.</div>';
+    return;
+  }
+
+  area.innerHTML =
+    contasBanco.map(c=>`
+      <div class="historico-item">
+        <div class="hdesc">
+          ${escapeHtml(c.identificador||"Conta")}
+        </div>
+        <div class="hinf">
+          ${escapeHtml(c.descricao||"")}
+        </div>
+        <div class="hinf">
+          Total: ${money(c.total)} · Pago: ${money(c.total_pago)}
+        </div>
+        <div class="hfalta">
+          Ainda falta: ${money(c.restante)}
+        </div>
+        <button
+          type="button"
+          class="retomar-conta"
+          onclick="retomarConta('${c.id}')"
+        >
+          ▶ RETOMAR CONTA E PAGAR
+        </button>
+      </div>
+    `).join("");
 }
 
 function escapeHtml(v){
@@ -1268,111 +1329,62 @@ function escapeHtml(v){
     .replace(/'/g,"&#039;");
 }
 
-function retomarConta(id){
-
-  // Várias contas podem ficar abertas.
-  // A conta atual é preservada antes de retomar outra.
-  if(
-    contaAtiva &&
-    contaTotal > 0 &&
-    (contaTotal - totalPago) > 0 &&
-    String(contaId) !== String(id)
-  ){
-    salvarHistoricoPendente();
-    localStorage.removeItem(STORAGE_CONTA);
-  }
-
-  let lista = [];
-
-  try{
-    lista =
-      JSON.parse(
-        localStorage.getItem(
-          STORAGE_HISTORICO
-        ) || "[]"
-      );
-  }catch(e){
-    lista = [];
-  }
+async function retomarConta(id){
 
   const conta =
-    lista.find(
-      item => String(item.id) === String(id)
+    contasBanco.find(
+      c=>String(c.id)===String(id)
     );
 
   if(!conta){
-    alert(
-      "Essa conta pendente não foi encontrada."
-    );
-    renderHistorico();
+    await carregarContasBanco();
+    alert("Conta não encontrada.");
     return;
   }
 
-  contaAtiva = true;
-  contaId = conta.id;
+  if(
+    contaAtiva &&
+    contaId &&
+    String(contaId)!==String(id) &&
+    contaTotal>totalPago
+  ){
+    await salvarHistoricoPendente();
+  }
 
-  contaTotal =
-    Number(conta.total) || 0;
+  contaAtiva=true;
+  contaId=conta.id;
+  contaTotal=Number(conta.total)||0;
+  totalPago=Number(conta.total_pago)||0;
+  consumos=Array.isArray(conta.consumos)?conta.consumos:[];
 
-  totalPago =
-    Number(conta.pago) || 0;
+  $("identificadorConta").value=conta.identificador||"Conta";
+  $("descricao").value=conta.descricao||"";
+  $("pagamentoParcial").checked=true;
+  modoParcial=true;
+  $("parcialArea").classList.add("show");
+  $("valorParcial").value="";
+  $("pixBox").style.display="none";
 
-  pagamentoAtual = 0;
-  paymentId = null;
+  await sb.from("maquininha_contas")
+    .update({
+      status:"aberta",
+      atualizado_em:new Date().toISOString()
+    })
+    .eq("id",contaId)
+    .eq("maquininha_id",MAQUININHA_ID);
 
-  modoParcial = true;
-
-  $("identificadorConta").value =
-    conta.identificador || "Conta";
-
-  $("descricao").value =
-    conta.descricao || "";
-
-  $("pagamentoParcial").checked =
-    true;
-
-  $("parcialArea")
-    .classList.add("show");
-
-  $("pixBox").style.display =
-    "none";
-
-  $("valorParcial").value =
-    "";
+  localStorage.setItem(STORAGE_CONTA,String(contaId));
 
   $("status").textContent =
-    "Conta retomada — ainda falta " +
-    money(contaTotal - totalPago);
+    "Conta retomada — ainda falta "+
+    money(contaTotal-totalPago);
+  $("status").className="status wait";
 
-  $("status").className =
-    "status wait";
-
-  // Remove do histórico porque voltou a ser a conta ativa.
-  lista =
-    lista.filter(
-      item => String(item.id) !== String(id)
-    );
-
-  localStorage.setItem(
-    STORAGE_HISTORICO,
-    JSON.stringify(lista)
-  );
-
-  salvarConta();
   atualizarTela();
-  renderHistorico();
+  await carregarContasBanco();
 
-  // Fecha automaticamente o painel de pendentes.
-  $("historicoConteudo")
-    .classList.remove("show");
-
-  $("historicoSeta").textContent =
-    "▼";
-
-  window.scrollTo({
-    top:0,
-    behavior:"smooth"
-  });
+  $("historicoConteudo").classList.remove("show");
+  $("historicoSeta").textContent="▼";
 }
 
 function sairDaConta(){
@@ -1415,13 +1427,12 @@ function sairDaConta(){
   render();
 }
 
-function salvarEstadoConta(){
-  if(contaTotal>0){
-    iniciarConta();
-    salvarConta();
+async function salvarEstadoConta(){
+  if(contaTotal>=0){
+    await iniciarConta();
+    await salvarConta();
   }
 }
-
 
 // =====================================================
 // RENDER DA CALCULADORA / CONTA
@@ -2349,16 +2360,28 @@ async function verificarAgora(){
     pagamentoAtual = 0;
 
     if(restante <= 0){
-      localStorage.removeItem(STORAGE_CONTA);
-      localStorage.removeItem(STORAGE_CONSUMOS);
 
-      contaAtiva = false;
-      contaId = null;
-      consumos = [];
+      await sb.from("maquininha_contas")
+        .update({
+          total_pago:Number(totalPago.toFixed(2)),
+          restante:0,
+          status:"paga",
+          consumos,
+          atualizado_em:new Date().toISOString()
+        })
+        .eq("id",contaId)
+        .eq("maquininha_id",MAQUININHA_ID);
+
+      localStorage.removeItem(STORAGE_CONTA);
+      contaAtiva=false;
+      contaId=null;
+      consumos=[];
       renderConsumos();
+      await carregarContasBanco();
+
     }else{
-      contaAtiva = true;
-      salvarConta();
+      contaAtiva=true;
+      await salvarConta();
     }
 
     $("pixBox").style.display =
@@ -2445,63 +2468,48 @@ async function copiarPix(){
 // NOVA COBRANÇA
 // =====================================================
 
-function novaCobranca(){
+async function novaCobranca(){
 
-  // Guarda a conta atual no histórico e abre outra.
-  if(
-    contaAtiva &&
-    contaTotal > 0 &&
-    (contaTotal - totalPago) > 0
-  ){
-    salvarHistoricoPendente();
+  if(contaAtiva && contaId && contaTotal>totalPago){
+    await salvarHistoricoPendente();
     localStorage.removeItem(STORAGE_CONTA);
   }
 
   clearInterval(poll);
 
-  paymentId = null;
-  pagamentoAtual = 0;
-
-  contaAtiva = true;
+  contaAtiva=true;
   contaId =
-    Date.now() + "_" +
-    Math.random().toString(36).slice(2);
+    crypto.randomUUID
+      ? crypto.randomUUID()
+      : Date.now()+"_"+Math.random().toString(36).slice(2);
 
-  contaTotal = 0;
-  totalPago = 0;
-  modoParcial = false;
+  contaTotal=0;
+  totalPago=0;
+  pagamentoAtual=0;
+  paymentId=null;
+  modoParcial=false;
+  expr="";
+  current="";
+  consumos=[];
 
-  expr = "";
-  current = "";
-
-  consumos = [];
-  localStorage.removeItem(STORAGE_CONSUMOS);
-
-  $("identificadorConta").value = "";
-  $("descricao").value = "";
-  $("valorDigitado").value = "";
-  $("valorParcial").value = "";
-
-  $("pagamentoParcial").checked = false;
+  $("identificadorConta").value="";
+  $("descricao").value="";
+  $("valorDigitado").value="";
+  $("valorParcial").value="";
+  $("pagamentoParcial").checked=false;
   $("parcialArea").classList.remove("show");
+  $("pixBox").style.display="none";
 
-  $("pixBox").style.display = "none";
+  $("status").textContent="Nova conta aberta.";
+  $("status").className="status ok";
 
-  $("status").textContent = "Nova conta aberta.";
-  $("status").className = "status ok";
-
-  $("gerarBtn").disabled = true;
+  await salvarConta();
+  await carregarContasBanco();
 
   renderConsumos();
-  renderHistorico();
   render();
 
-  salvarConta();
-
-  window.scrollTo({
-    top: 0,
-    behavior: "smooth"
-  });
+  window.scrollTo({top:0,behavior:"smooth"});
 }
 
 
@@ -2511,10 +2519,13 @@ function novaCobranca(){
 
 carregarMaquininha();
 
-carregarConta();
-carregarConsumos();
-render();
-renderHistorico();
+(async()=>{
+  await carregarContasBanco();
+  await carregarConta();
+  carregarConsumos();
+  render();
+  renderHistorico();
+})();
 
 </script>
 
