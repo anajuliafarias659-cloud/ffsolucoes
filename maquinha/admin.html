@@ -2,95 +2,73 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FF Maquininha - Admin</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin - FF Maquininhas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-*{box-sizing:border-box;font-family:Arial,sans-serif}
-body{margin:0;background:#f3f4f6;color:#101828}
-.wrap{max-width:520px;margin:auto;padding:20px}
-.card{background:#fff;border-radius:22px;padding:22px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
-.logo{text-align:center;font-size:42px}
-h1{text-align:center;margin:8px 0 5px;font-size:23px}
-.sub{text-align:center;color:#667085;font-size:14px;margin-bottom:22px}
-label{display:block;font-size:14px;font-weight:700;margin:0 0 7px}
-input{width:100%;height:50px;border:1px solid #d0d5dd;border-radius:12px;padding:0 13px;font-size:16px;outline:none}
-input:focus{border-color:#08749a;box-shadow:0 0 0 3px rgba(8,116,154,.12)}
-button{width:100%;min-height:52px;border:0;border-radius:13px;font-size:16px;font-weight:750;cursor:pointer;margin-top:12px}
-.primary{background:#08749a;color:#fff}
-.secondary{background:#eaf2ff;color:#175cd3}
-.info{margin-top:18px;background:#f9fafb;border-radius:15px;padding:15px;font-size:14px;line-height:1.5;color:#475467}
-.status{margin-top:14px;padding:12px;border-radius:12px;background:#ecfdf3;color:#027a48;font-size:14px;text-align:center}
-.error{background:#fef3f2;color:#b42318}
+*{box-sizing:border-box}body{margin:0;background:#f4f5f7;font-family:Arial,sans-serif}.box{max-width:500px;margin:30px auto;background:#fff;padding:22px;border-radius:18px}
+h1{margin-top:0}input{width:100%;padding:14px;margin:7px 0;border:1px solid #ddd;border-radius:10px;font-size:16px}
+button{width:100%;padding:15px;margin-top:10px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:bold}
+.machine{background:#f5f5f5;padding:12px;border-radius:10px;margin-top:10px}.link{word-break:break-all;font-size:12px;color:#444}
+.status{margin-top:12px;font-weight:bold}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <div class="logo">⚙️</div>
-    <h1>FF MAQUININHA</h1>
-    <div class="sub">Administração da maquininha</div>
+<div class="box">
+<h1>FF MAQUININHAS</h1>
+<p>Cadastre cada maquininha com o Access Token do Mercado Pago dela. Isso é separado do Hotspot.</p>
 
-    <label for="app_id">ID da aplicação</label>
-    <input id="app_id" placeholder="Cole o app_id aqui">
+<input id="nome" placeholder="Nome da maquininha / operador">
+<input id="descricao" placeholder="Descrição (opcional)">
+<input id="token" type="password" placeholder="Mercado Pago Access Token">
 
-    <button class="primary" id="abrirConfig">ABRIR CONFIGURAÇÃO</button>
-    <button class="secondary" id="abrirCaixa">ABRIR MAQUININHA</button>
-
-    <div class="info">
-      <b>Mercado Pago</b><br>
-      O token continua sendo cadastrado na tela de configuração existente.
-      <br><br>
-      Clique em <b>ABRIR CONFIGURAÇÃO</b> para acessar:
-      <br>
-      <b>ffsolucoes.com.br/hotspot/config.html</b>
-      <br><br>
-      A maquininha usa o mesmo <b>app_id</b> para encontrar o
-      <b>mercado_pago_token</b> salvo no seu <b>hotspot_config</b>.
-    </div>
-
-    <div id="status" class="status" style="display:none"></div>
-  </div>
+<button onclick="cadastrar()">CADASTRAR MAQUININHA</button>
+<div id="status" class="status"></div>
+<div id="resultado"></div>
 </div>
 
 <script>
-const CONFIG_URL = "https://www.ffsolucoes.com.br/hotspot/config.html";
-const CAIXA_PATH = "/caixa.html";
+const SUPABASE_URL="https://auzdqapjetmhaokoynzo.supabase.co";
+const SUPABASE_ANON_KEY="sb_publishable_36kXlyuKU8RMfgSx01h5mw_lOLp1lbX";
 
-const appInput = document.getElementById("app_id");
-const status = document.getElementById("status");
+async function cadastrar(){
+  const nome=document.getElementById("nome").value.trim();
+  const descricao=document.getElementById("descricao").value.trim();
+  const token=document.getElementById("token").value.trim();
+  const status=document.getElementById("status");
+  const resultado=document.getElementById("resultado");
 
-const params = new URLSearchParams(location.search);
-const appUrl = params.get("app_id") || "";
+  if(!nome||!token){status.textContent="Informe o nome e o Access Token.";return}
 
-if(appUrl) appInput.value = appUrl;
+  status.textContent="Cadastrando...";
+  resultado.innerHTML="";
 
-function getAppId(){
-  const id = appInput.value.trim();
-  if(!id){
-    status.className = "status error";
-    status.style.display = "block";
-    status.textContent = "Informe o app_id primeiro.";
-    appInput.focus();
-    return null;
+  const r=await fetch(`${SUPABASE_URL}/functions/v1/cadastrar-maquininha`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json","apikey":SUPABASE_ANON_KEY},
+    body:JSON.stringify({nome,descricao,mercado_pago_token:token})
+  });
+  const d=await r.json();
+
+  if(!r.ok||!d.success){
+    status.textContent=d.error||"Erro ao cadastrar.";
+    return;
   }
-  return id;
+
+  const id=d.maquininha.id;
+  const caixa=`${location.origin}/caixa.html?maquininha_id=${encodeURIComponent(id)}`;
+
+  status.textContent="Maquininha cadastrada com sucesso.";
+  resultado.innerHTML=`
+    <div class="machine">
+      <b>${escapeHtml(d.maquininha.nome)}</b><br>
+      ID: <span class="link">${escapeHtml(id)}</span><br><br>
+      <a href="${caixa}" target="_blank">ABRIR MAQUININHA</a>
+      <p class="link">${escapeHtml(caixa)}</p>
+    </div>`;
+  document.getElementById("token").value="";
 }
-
-document.getElementById("abrirConfig").addEventListener("click",()=>{
-  const id = getAppId();
-  if(!id) return;
-
-  const url = CONFIG_URL + "?app_id=" + encodeURIComponent(id);
-  window.location.href = url;
-});
-
-document.getElementById("abrirCaixa").addEventListener("click",()=>{
-  const id = getAppId();
-  if(!id) return;
-
-  const url = CAIXA_PATH + "?app_id=" + encodeURIComponent(id);
-  window.location.href = url;
-});
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 </script>
 </body>
 </html>
