@@ -2480,46 +2480,134 @@ async function copiarPix(){
 
 async function novaCobranca(){
 
-  if(contaAtiva && contaId && contaTotal>totalPago){
-    await salvarHistoricoPendente();
+  // Se não existe conta ativa, apenas limpa a tela
+  if(!contaAtiva){
+
     localStorage.removeItem(STORAGE_CONTA);
+
+    contaId = null;
+    contaTotal = 0;
+    totalPago = 0;
+    pagamentoAtual = 0;
+    consumos = [];
+    modoParcial = false;
+    paymentId = null;
+    expr = "";
+    current = "";
+
+    $("identificadorConta").value = "";
+    $("descricao").value = "";
+    $("valorDigitado").value = "";
+    $("valorParcial").value = "";
+    $("pagamentoParcial").checked = false;
+    $("parcialArea").classList.remove("show");
+    $("pixBox").style.display = "none";
+    $("status").textContent = "";
+    $("status").className = "status";
+
+    atualizarTela();
+    renderConsumos();
+
+    return;
   }
 
+  const restante =
+    Math.max(
+      0,
+      contaTotal - totalPago
+    );
+
+  // Se ainda existe valor em aberto,
+  // salva essa conta como pendente antes de criar outra.
+  if(restante > 0){
+
+    const identificador =
+      $("identificadorConta").value.trim() || "Conta";
+
+    const descricao =
+      $("descricao").value.trim() || "Conta sem descrição";
+
+    const { error } =
+      await sb.from("maquininha_contas")
+        .update({
+          identificador,
+          descricao,
+          total: Number(contaTotal.toFixed(2)),
+          total_pago: Number(totalPago.toFixed(2)),
+          restante: Number(restante.toFixed(2)),
+          consumos: Array.isArray(consumos) ? consumos : [],
+          status: "pendente",
+          atualizado_em: new Date().toISOString()
+        })
+        .eq("id", contaId)
+        .eq("maquininha_id", MAQUININHA_ID);
+
+    if(error){
+
+      console.error(
+        "Erro ao salvar conta anterior:",
+        error
+      );
+
+      alert(
+        "Não foi possível salvar a conta anterior."
+      );
+
+      return;
+    }
+  }
+
+  // Para a cobrança/polling atual
   clearInterval(poll);
 
-  contaAtiva=true;
-  contaId =
-    crypto.randomUUID
-      ? crypto.randomUUID()
-      : Date.now()+"_"+Math.random().toString(36).slice(2);
+  paymentId = null;
+  pagamentoAtual = 0;
 
-  contaTotal=0;
-  totalPago=0;
-  pagamentoAtual=0;
-  paymentId=null;
-  modoParcial=false;
-  expr="";
-  current="";
-  consumos=[];
+  // Sai da conta atual
+  contaAtiva = false;
+  contaId = null;
+  contaTotal = 0;
+  totalPago = 0;
+  consumos = [];
+  modoParcial = false;
+  expr = "";
+  current = "";
 
-  $("identificadorConta").value="";
-  $("descricao").value="";
-  $("valorDigitado").value="";
-  $("valorParcial").value="";
-  $("pagamentoParcial").checked=false;
+  localStorage.removeItem(STORAGE_CONTA);
+
+  // Limpa somente a tela
+  $("identificadorConta").value = "";
+  $("descricao").value = "";
+  $("valorDigitado").value = "";
+  $("valorParcial").value = "";
+  $("pagamentoParcial").checked = false;
   $("parcialArea").classList.remove("show");
-  $("pixBox").style.display="none";
+  $("pixBox").style.display = "none";
+  $("status").textContent = "";
+  $("status").className = "status";
 
-  $("status").textContent="Nova conta aberta.";
-  $("status").className="status ok";
+  $("qr").src = "";
+  $("copia").textContent = "";
 
-  await salvarConta();
+  atualizarTela();
+  renderConsumos();
+
+  // Atualiza o histórico para mostrar a conta anterior
   await carregarContasBanco();
 
-  renderConsumos();
-  render();
+  // Abre uma NOVA conta vazia
+  const criada = await iniciarConta();
 
-  window.scrollTo({top:0,behavior:"smooth"});
+  if(!criada){
+
+    alert(
+      "A nova conta não pôde ser criada."
+    );
+
+    return;
+  }
+
+  atualizarTela();
 }
 
 
