@@ -1111,25 +1111,37 @@ async function fecharContaPorConsumo(){
     );
 
   if(total <= 0){
+
     alert(
       "Adicione pelo menos um consumo antes de fechar a conta."
     );
+
     return;
   }
 
   // Não altera a lógica existente:
   // apenas coloca o total dos consumos como total da conta
   // e usa o mesmo gerador PIX normal.
+
   contaTotal = total;
   totalPago = 0;
   pagamentoAtual = total;
 
-  await iniciarConta();
-await salvarConta();
+  const contaCriada = await iniciarConta();
+
+  if(!contaCriada){
+    alert("Não foi possível salvar a conta no banco.");
+    return;
+  }
+
+  await salvarConta();
 
   $("valorDigitado").value = "";
+
   $("pagamentoParcial").checked = false;
+
   modoParcial = false;
+
   $("parcialArea").classList.remove("show");
 
   atualizarTela();
@@ -1138,8 +1150,8 @@ await salvarConta();
     total,
     "total"
   );
-}
 
+}
 
 // =====================================================
 // CONTA PERSISTENTE
@@ -1172,9 +1184,17 @@ async function salvarConta(){
       .upsert(dados, { onConflict:"id" });
 
   if(error){
-    console.error("Erro ao salvar conta:",error);
-    return false;
-  }
+
+  console.error("ERRO COMPLETO AO SALVAR CONTA:", error);
+
+  $("status").textContent =
+    "Erro ao salvar conta: " +
+    (error.message || "erro desconhecido");
+
+  $("status").className = "status err";
+
+  return false;
+}
 
   localStorage.setItem(
     STORAGE_CONTA,
@@ -1204,21 +1224,54 @@ async function carregarContasBanco(){
 
 async function iniciarConta(){
 
-  if(contaAtiva) return true;
+  if(contaAtiva && contaId){
+    return true;
+  }
 
-  contaAtiva=true;
-  contaId =
+  const novoId =
     crypto.randomUUID
       ? crypto.randomUUID()
-      : Date.now()+"_"+Math.random().toString(36).slice(2);
+      : null;
 
-  contaTotal=0;
-  totalPago=0;
-  consumos=[];
+  if(!novoId){
+    console.error("Não foi possível gerar UUID da conta.");
+    return false;
+  }
 
-  return await salvarConta();
+  const estadoAnterior = {
+    contaAtiva,
+    contaId,
+    contaTotal,
+    totalPago,
+    consumos
+  };
+
+  contaAtiva = true;
+  contaId = novoId;
+  contaTotal = 0;
+  totalPago = 0;
+  consumos = [];
+
+  const salva = await salvarConta();
+
+  if(!salva){
+
+    console.error(
+      "Não foi possível criar a conta no banco."
+    );
+
+    // desfaz o estado local para permitir nova tentativa
+    contaAtiva = estadoAnterior.contaAtiva;
+    contaId = estadoAnterior.contaId;
+    contaTotal = estadoAnterior.contaTotal;
+    totalPago = estadoAnterior.totalPago;
+    consumos = estadoAnterior.consumos;
+
+    return false;
+  }
+
+  return true;
 }
-
 async function carregarConta(){
 
   await carregarContasBanco();
