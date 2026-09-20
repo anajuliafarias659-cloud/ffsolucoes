@@ -17,7 +17,6 @@ body{
   margin:0;
   background:#f4f5f7;
   font-family:Arial,sans-serif;
-  color:#111;
 }
 
 .box{
@@ -115,8 +114,7 @@ hr{
 
 <p>
 Cadastre cada maquininha.
-O Access Token do Mercado Pago será configurado
-separadamente depois.
+O Access Token do Mercado Pago será configurado separadamente depois.
 </p>
 
 <input
@@ -130,8 +128,8 @@ separadamente depois.
 >
 
 <button
+  id="btnCadastrar"
   class="btn-cadastrar"
-  onclick="cadastrar()"
 >
 CADASTRAR MAQUININHA
 </button>
@@ -151,7 +149,6 @@ Carregando...
 
 </div>
 
-
 <script>
 
 const SUPABASE_URL =
@@ -160,74 +157,106 @@ const SUPABASE_URL =
 const SUPABASE_ANON_KEY =
 "sb_publishable_36kXlyuKU8RMfgSx01h5mw_lOLp1lbX";
 
-const supabase =
+/*
+ * NOME DIFERENTE PARA NÃO COLIDIR
+ * COM NENHUM outro "supabase".
+ */
+const dbMaquininha =
 window.supabase.createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY
 );
 
 
-function escapeHtml(s){
+const nomeInput =
+document.getElementById("nome");
 
-  return String(s || "")
+const descricaoInput =
+document.getElementById("descricao");
+
+const statusEl =
+document.getElementById("status");
+
+const listaEl =
+document.getElementById("lista");
+
+const btnCadastrar =
+document.getElementById("btnCadastrar");
+
+
+function escapeHtml(valor){
+
+  return String(valor || "")
     .replace(
       /[&<>"']/g,
-      m => ({
-        "&":"&amp;",
-        "<":"&lt;",
-        ">":"&gt;",
-        '"':"&quot;",
-        "'":"&#039;"
-      }[m])
+      function(m){
+
+        return {
+          "&":"&amp;",
+          "<":"&lt;",
+          ">":"&gt;",
+          '"':"&quot;",
+          "'":"&#039;"
+        }[m];
+
+      }
     );
 
 }
 
 
+function mostrarStatus(
+  mensagem,
+  erro=false
+){
+
+  statusEl.className =
+    erro
+      ? "status error"
+      : "status ok";
+
+  statusEl.textContent =
+    mensagem;
+
+}
+
+
 /* =====================================================
-   CADASTRAR
+   CADASTRAR MAQUININHA
 ===================================================== */
 
 async function cadastrar(){
 
   const nome =
-    document
-      .getElementById("nome")
-      .value
-      .trim();
+    nomeInput.value.trim();
 
   const descricao =
-    document
-      .getElementById("descricao")
-      .value
-      .trim();
-
-  const status =
-    document.getElementById("status");
+    descricaoInput.value.trim();
 
 
   if(!nome){
 
-    status.className =
-      "status error";
+    mostrarStatus(
+      "Informe o nome da maquininha.",
+      true
+    );
 
-    status.textContent =
-      "Informe o nome da maquininha.";
+    nomeInput.focus();
 
     return;
   }
 
 
-  status.className =
-    "status";
+  btnCadastrar.disabled=true;
 
-  status.textContent =
-    "Cadastrando...";
+  mostrarStatus(
+    "Cadastrando..."
+  );
 
 
   try{
 
-    const r =
+    const resposta =
       await fetch(
         `${SUPABASE_URL}/functions/v1/cadastrar-maquininha`,
         {
@@ -246,58 +275,77 @@ async function cadastrar(){
 
           body:JSON.stringify({
 
-            nome,
+            nome: nome,
 
-            descricao
+            descricao: descricao
 
           })
         }
       );
 
 
-    const d =
-      await r.json();
+    const texto =
+      await resposta.text();
 
 
-    if(!r.ok || !d.success){
+    let dados;
+
+    try{
+
+      dados =
+        JSON.parse(texto);
+
+    }catch{
 
       throw new Error(
-        d.error ||
+        "A Edge Function retornou uma resposta inválida: "
+        + texto
+      );
+
+    }
+
+
+    if(
+      !resposta.ok ||
+      !dados.success
+    ){
+
+      throw new Error(
+        dados.error ||
         "Erro ao cadastrar maquininha."
       );
 
     }
 
 
-    status.className =
-      "status ok";
-
-    status.textContent =
-      "✅ Maquininha cadastrada com sucesso.";
+    mostrarStatus(
+      "✅ Maquininha cadastrada com sucesso."
+    );
 
 
-    document
-      .getElementById("nome")
-      .value="";
-
-    document
-      .getElementById("descricao")
-      .value="";
+    nomeInput.value="";
+    descricaoInput.value="";
 
 
     await carregarMaquininhas();
 
 
-  }catch(e){
+  }catch(erro){
 
-    console.error(e);
+    console.error(
+      "ERRO CADASTRO:",
+      erro
+    );
 
-    status.className =
-      "status error";
+    mostrarStatus(
+      erro.message ||
+      "Erro ao cadastrar.",
+      true
+    );
 
-    status.textContent =
-      e.message ||
-      "Erro ao cadastrar.";
+  }finally{
+
+    btnCadastrar.disabled=false;
 
   }
 
@@ -305,29 +353,21 @@ async function cadastrar(){
 
 
 /* =====================================================
-   LISTAR
+   LISTAR MAQUININHAS
 ===================================================== */
 
 async function carregarMaquininhas(){
 
-  const lista =
-    document.getElementById("lista");
+  listaEl.innerHTML =
+    "Carregando...";
 
 
-  const {
-    data,
-    error
-  } =
-    await supabase
+  const resultado =
+    await dbMaquininha
       .from("maquininhas")
-      .select(`
-        id,
-        app_id,
-        nome,
-        descricao,
-        ativo,
-        criado_em
-      `)
+      .select(
+        "id,app_id,nome,descricao,ativo,criado_em"
+      )
       .order(
         "criado_em",
         {
@@ -336,24 +376,34 @@ async function carregarMaquininhas(){
       );
 
 
-  if(error){
+  if(resultado.error){
 
-    console.error(error);
+    console.error(
+      "ERRO LISTA:",
+      resultado.error
+    );
 
-    lista.innerHTML =
-      `<div class="error">
-        Erro ao carregar:
-        ${escapeHtml(error.message)}
-      </div>`;
+    listaEl.innerHTML = `
+      <div class="error">
+        Erro ao carregar maquininhas:<br>
+        ${escapeHtml(
+          resultado.error.message
+        )}
+      </div>
+    `;
 
     return;
 
   }
 
 
-  if(!data || !data.length){
+  const maquinas =
+    resultado.data || [];
 
-    lista.innerHTML =
+
+  if(!maquinas.length){
+
+    listaEl.innerHTML =
       "Nenhuma maquininha cadastrada.";
 
     return;
@@ -361,70 +411,100 @@ async function carregarMaquininhas(){
   }
 
 
-  lista.innerHTML =
-    data.map(maquina => {
+  listaEl.innerHTML =
+    maquinas.map(
+      function(maquina){
 
-      const config =
-        `/config-maquininha.html?app_id=${
-          encodeURIComponent(maquina.app_id)
-        }`;
+        const configUrl =
+          `/config-maquininha.html?app_id=${
+            encodeURIComponent(
+              maquina.app_id
+            )
+          }`;
 
-      const caixa =
-        `/caixa.html?maquininha_id=${
-          encodeURIComponent(maquina.id)
-        }`;
+        const caixaUrl =
+          `/caixa.html?maquininha_id=${
+            encodeURIComponent(
+              maquina.id
+            )
+          }`;
 
 
-      return `
+        return `
 
-        <div class="machine">
+          <div class="machine">
 
-          <div class="machine-title">
-            ${escapeHtml(maquina.nome)}
+            <div class="machine-title">
+              ${escapeHtml(
+                maquina.nome
+              )}
+            </div>
+
+            <div>
+              ${escapeHtml(
+                maquina.descricao || ""
+              )}
+            </div>
+
+            <br>
+
+            <div class="link">
+              ID:<br>
+              ${escapeHtml(
+                maquina.id
+              )}
+            </div>
+
+            <br>
+
+            <div class="link">
+              APP ID:<br>
+              ${escapeHtml(
+                maquina.app_id
+              )}
+            </div>
+
+            <button
+              class="btn-config"
+              onclick="
+                window.location.href='${configUrl}'
+              "
+            >
+              ⚙️ CONFIGURAR MERCADO PAGO
+            </button>
+
+            <button
+              class="btn-caixa"
+              onclick="
+                window.location.href='${caixaUrl}'
+              "
+            >
+              💰 ABRIR MAQUININHA
+            </button>
+
           </div>
 
-          <div>
-            ${escapeHtml(
-              maquina.descricao || ""
-            )}
-          </div>
+        `;
 
-          <br>
-
-          <div class="link">
-            ID:
-            ${escapeHtml(maquina.id)}
-          </div>
-
-          <div class="link">
-            APP ID:
-            ${escapeHtml(maquina.app_id)}
-          </div>
-
-
-          <button
-            class="btn-config"
-            onclick="location.href='${config}'"
-          >
-            ⚙️ CONFIGURAR MERCADO PAGO
-          </button>
-
-
-          <button
-            class="btn-caixa"
-            onclick="location.href='${caixa}'"
-          >
-            💰 ABRIR MAQUININHA
-          </button>
-
-        </div>
-
-      `;
-
-    }).join("");
+      }
+    ).join("");
 
 }
 
+
+/* =====================================================
+   BOTÃO
+===================================================== */
+
+btnCadastrar.addEventListener(
+  "click",
+  cadastrar
+);
+
+
+/* =====================================================
+   INICIALIZA
+===================================================== */
 
 carregarMaquininhas();
 
