@@ -51,6 +51,11 @@ button{
   cursor:pointer;
 }
 
+button:disabled{
+  opacity:.6;
+  cursor:not-allowed;
+}
+
 .btn-cadastrar{
   background:#111;
   color:#fff;
@@ -66,6 +71,16 @@ button{
   color:#fff;
 }
 
+.btn-editar{
+  background:#f59e0b;
+  color:#fff;
+}
+
+.btn-apagar{
+  background:#dc2626;
+  color:#fff;
+}
+
 .machine{
   background:#f5f5f5;
   padding:15px;
@@ -77,6 +92,11 @@ button{
   font-size:18px;
   font-weight:bold;
   margin-bottom:5px;
+}
+
+.machine-desc{
+  color:#555;
+  margin-bottom:10px;
 }
 
 .link{
@@ -102,6 +122,33 @@ hr{
   border:0;
   border-top:1px solid #eee;
   margin:25px 0;
+}
+
+.edit-area{
+  display:none;
+  margin-top:12px;
+  padding:12px;
+  background:#fff;
+  border:1px solid #ddd;
+  border-radius:10px;
+}
+
+.edit-area input{
+  margin:4px 0;
+}
+
+.btn-salvar{
+  background:#2563eb;
+  color:#fff;
+}
+
+.btn-cancelar{
+  background:#6b7280;
+  color:#fff;
+}
+
+.loading{
+  color:#666;
 }
 </style>
 </head>
@@ -157,16 +204,11 @@ const SUPABASE_URL =
 const SUPABASE_ANON_KEY =
 "sb_publishable_36kXlyuKU8RMfgSx01h5mw_lOLp1lbX";
 
-/*
- * NOME DIFERENTE PARA NÃO COLIDIR
- * COM NENHUM outro "supabase".
- */
 const dbMaquininha =
 window.supabase.createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY
 );
-
 
 const nomeInput =
 document.getElementById("nome");
@@ -222,7 +264,7 @@ function mostrarStatus(
 
 
 /* =====================================================
-   CADASTRAR MAQUININHA
+   CADASTRAR
 ===================================================== */
 
 async function cadastrar(){
@@ -274,11 +316,8 @@ async function cadastrar(){
           },
 
           body:JSON.stringify({
-
-            nome: nome,
-
-            descricao: descricao
-
+            nome,
+            descricao
           })
         }
       );
@@ -287,21 +326,16 @@ async function cadastrar(){
     const texto =
       await resposta.text();
 
-
     let dados;
 
     try{
-
       dados =
         JSON.parse(texto);
-
     }catch{
-
       throw new Error(
-        "A Edge Function retornou uma resposta inválida: "
-        + texto
+        "Resposta inválida da Edge Function: " +
+        texto
       );
-
     }
 
 
@@ -312,7 +346,7 @@ async function cadastrar(){
 
       throw new Error(
         dados.error ||
-        "Erro ao cadastrar maquininha."
+        "Erro ao cadastrar."
       );
 
     }
@@ -353,13 +387,15 @@ async function cadastrar(){
 
 
 /* =====================================================
-   LISTAR MAQUININHAS
+   LISTAR
 ===================================================== */
 
 async function carregarMaquininhas(){
 
   listaEl.innerHTML =
-    "Carregando...";
+    `<div class="loading">
+      Carregando...
+    </div>`;
 
 
   const resultado =
@@ -385,7 +421,7 @@ async function carregarMaquininhas(){
 
     listaEl.innerHTML = `
       <div class="error">
-        Erro ao carregar maquininhas:<br>
+        Erro ao carregar:<br>
         ${escapeHtml(
           resultado.error.message
         )}
@@ -393,7 +429,6 @@ async function carregarMaquininhas(){
     `;
 
     return;
-
   }
 
 
@@ -432,7 +467,10 @@ async function carregarMaquininhas(){
 
         return `
 
-          <div class="machine">
+          <div
+            class="machine"
+            id="machine-${maquina.id}"
+          >
 
             <div class="machine-title">
               ${escapeHtml(
@@ -440,13 +478,11 @@ async function carregarMaquininhas(){
               )}
             </div>
 
-            <div>
+            <div class="machine-desc">
               ${escapeHtml(
                 maquina.descricao || ""
               )}
             </div>
-
-            <br>
 
             <div class="link">
               ID:<br>
@@ -464,6 +500,8 @@ async function carregarMaquininhas(){
               )}
             </div>
 
+
+            <!-- CONFIG -->
             <button
               class="btn-config"
               onclick="
@@ -473,6 +511,8 @@ async function carregarMaquininhas(){
               ⚙️ CONFIGURAR MERCADO PAGO
             </button>
 
+
+            <!-- CAIXA -->
             <button
               class="btn-caixa"
               onclick="
@@ -481,6 +521,78 @@ async function carregarMaquininhas(){
             >
               💰 ABRIR MAQUININHA
             </button>
+
+
+            <!-- EDITAR -->
+            <button
+              class="btn-editar"
+              onclick="
+                abrirEdicao(
+                  '${maquina.id}',
+                  '${escapeJs(maquina.nome)}',
+                  '${escapeJs(maquina.descricao || "")}'
+                )
+              "
+            >
+              ✏️ EDITAR
+            </button>
+
+
+            <!-- APAGAR -->
+            <button
+              class="btn-apagar"
+              onclick="
+                apagarMaquininha(
+                  '${maquina.id}',
+                  '${escapeJs(maquina.nome)}'
+                )
+              "
+            >
+              🗑️ APAGAR
+            </button>
+
+
+            <!-- ÁREA DE EDIÇÃO -->
+            <div
+              class="edit-area"
+              id="edit-${maquina.id}"
+            >
+
+              <input
+                id="editNome-${maquina.id}"
+                value="${escapeHtml(maquina.nome)}"
+                placeholder="Nome"
+              >
+
+              <input
+                id="editDescricao-${maquina.id}"
+                value="${escapeHtml(maquina.descricao || "")}"
+                placeholder="Descrição"
+              >
+
+              <button
+                class="btn-salvar"
+                onclick="
+                  salvarEdicao(
+                    '${maquina.id}'
+                  )
+                "
+              >
+                💾 SALVAR ALTERAÇÕES
+              </button>
+
+              <button
+                class="btn-cancelar"
+                onclick="
+                  fecharEdicao(
+                    '${maquina.id}'
+                  )
+                "
+              >
+                CANCELAR
+              </button>
+
+            </div>
 
           </div>
 
@@ -493,7 +605,299 @@ async function carregarMaquininhas(){
 
 
 /* =====================================================
-   BOTÃO
+   ESCAPE PARA JAVASCRIPT
+===================================================== */
+
+function escapeJs(valor){
+
+  return String(valor || "")
+    .replace(/\\/g,"\\\\")
+    .replace(/'/g,"\\'")
+    .replace(/\r/g,"\\r")
+    .replace(/\n/g,"\\n");
+
+}
+
+
+/* =====================================================
+   ABRIR EDIÇÃO
+===================================================== */
+
+function abrirEdicao(
+  id,
+  nome,
+  descricao
+){
+
+  const area =
+    document.getElementById(
+      `edit-${id}`
+    );
+
+  if(!area) return;
+
+  area.style.display =
+    "block";
+
+}
+
+
+/* =====================================================
+   FECHAR EDIÇÃO
+===================================================== */
+
+function fecharEdicao(id){
+
+  const area =
+    document.getElementById(
+      `edit-${id}`
+    );
+
+  if(!area) return;
+
+  area.style.display =
+    "none";
+
+}
+
+
+/* =====================================================
+   SALVAR EDIÇÃO
+===================================================== */
+
+async function salvarEdicao(id){
+
+  const nomeEl =
+    document.getElementById(
+      `editNome-${id}`
+    );
+
+  const descricaoEl =
+    document.getElementById(
+      `editDescricao-${id}`
+    );
+
+
+  const nome =
+    nomeEl.value.trim();
+
+  const descricao =
+    descricaoEl.value.trim();
+
+
+  if(!nome){
+
+    alert(
+      "Informe o nome da maquininha."
+    );
+
+    return;
+  }
+
+
+  try{
+
+    mostrarStatus(
+      "Salvando alterações..."
+    );
+
+
+    const resposta =
+      await fetch(
+        `${SUPABASE_URL}/functions/v1/editar-maquininha`,
+        {
+          method:"POST",
+
+          headers:{
+            "Content-Type":
+              "application/json",
+
+            "apikey":
+              SUPABASE_ANON_KEY,
+
+            "Authorization":
+              `Bearer ${SUPABASE_ANON_KEY}`
+          },
+
+          body:JSON.stringify({
+
+            maquininha_id:id,
+
+            nome,
+
+            descricao
+
+          })
+        }
+      );
+
+
+    const texto =
+      await resposta.text();
+
+    let dados;
+
+    try{
+      dados =
+        JSON.parse(texto);
+    }catch{
+      throw new Error(
+        "Resposta inválida da Edge Function."
+      );
+    }
+
+
+    if(
+      !resposta.ok ||
+      !dados.success
+    ){
+
+      throw new Error(
+        dados.error ||
+        "Erro ao editar maquininha."
+      );
+
+    }
+
+
+    mostrarStatus(
+      "✅ Maquininha atualizada."
+    );
+
+
+    await carregarMaquininhas();
+
+
+  }catch(erro){
+
+    console.error(
+      "ERRO EDITAR:",
+      erro
+    );
+
+    mostrarStatus(
+      erro.message ||
+      "Erro ao editar.",
+      true
+    );
+
+  }
+
+}
+
+
+/* =====================================================
+   APAGAR
+===================================================== */
+
+async function apagarMaquininha(
+  id,
+  nome
+){
+
+  const confirmar =
+    confirm(
+      `Tem certeza que deseja apagar a maquininha "${nome}"?\n\n` +
+      `Isso também removerá o negócio FF Maquininha relacionado.`
+    );
+
+
+  if(!confirmar){
+
+    return;
+
+  }
+
+
+  try{
+
+    mostrarStatus(
+      "Apagando maquininha..."
+    );
+
+
+    const resposta =
+      await fetch(
+        `${SUPABASE_URL}/functions/v1/excluir-maquininha`,
+        {
+          method:"POST",
+
+          headers:{
+            "Content-Type":
+              "application/json",
+
+            "apikey":
+              SUPABASE_ANON_KEY,
+
+            "Authorization":
+              `Bearer ${SUPABASE_ANON_KEY}`
+          },
+
+          body:JSON.stringify({
+
+            maquininha_id:id
+
+          })
+        }
+      );
+
+
+    const texto =
+      await resposta.text();
+
+    let dados;
+
+    try{
+      dados =
+        JSON.parse(texto);
+    }catch{
+      throw new Error(
+        "Resposta inválida da Edge Function."
+      );
+    }
+
+
+    if(
+      !resposta.ok ||
+      !dados.success
+    ){
+
+      throw new Error(
+        dados.error ||
+        "Erro ao apagar maquininha."
+      );
+
+    }
+
+
+    mostrarStatus(
+      "🗑️ Maquininha apagada com sucesso."
+    );
+
+
+    await carregarMaquininhas();
+
+
+  }catch(erro){
+
+    console.error(
+      "ERRO APAGAR:",
+      erro
+    );
+
+    mostrarStatus(
+      erro.message ||
+      "Erro ao apagar.",
+      true
+    );
+
+  }
+
+}
+
+
+/* =====================================================
+   BOTÃO CADASTRAR
 ===================================================== */
 
 btnCadastrar.addEventListener(
