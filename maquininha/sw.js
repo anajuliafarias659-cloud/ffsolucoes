@@ -1,13 +1,21 @@
 self.addEventListener("install", () => {
-  self.skipWaiting();
+    self.skipWaiting();
 });
 
 self.addEventListener("activate", event => {
-  event.waitUntil(self.clients.claim());
+    event.waitUntil(
+        self.clients.claim()
+    );
 });
 
 self.addEventListener("fetch", event => {
-  event.respondWith(
-    fetch(event.request)
-  );
+
+    if (event.request.method !== "GET") {
+        return;
+    }
+
+    event.respondWith(
+        fetch(event.request)
+    );
+
 });
