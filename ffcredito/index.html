@@ -329,6 +329,101 @@ button {
         padding: 18px;
     }
 }
+
+/* ==========================================================
+   CRÉDITO / SOLICITAÇÃO
+   ========================================================== */
+
+.credit-box {
+    margin-top: 18px;
+    padding: 18px;
+    border-radius: 16px;
+    background: #0b1628;
+    border: 1px solid rgba(56,189,248,.18);
+}
+
+.credit-box h3 {
+    font-size: 18px;
+    margin-bottom: 7px;
+}
+
+.credit-muted {
+    color: #94a3b8;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.credit-available {
+    font-size: 28px;
+    font-weight: 800;
+    margin: 8px 0 14px;
+}
+
+.credit-option {
+    border: 1px solid #334155;
+    border-radius: 13px;
+    padding: 13px;
+    margin-top: 10px;
+    background: #0f1b2e;
+    cursor: pointer;
+}
+
+.credit-option:hover {
+    border-color: #38bdf8;
+}
+
+.credit-option input {
+    width: auto;
+    margin: 0 8px 0 0;
+    padding: 0;
+}
+
+.credit-option strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.credit-option small {
+    color: #94a3b8;
+}
+
+.credit-summary {
+    padding: 14px;
+    margin-top: 14px;
+    border-radius: 13px;
+    background: rgba(37,99,235,.12);
+    border: 1px solid rgba(37,99,235,.25);
+}
+
+.credit-summary-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 0;
+}
+
+.credit-summary-line span:first-child {
+    color: #94a3b8;
+}
+
+.credit-status {
+    margin-top: 14px;
+    padding: 14px;
+    border-radius: 13px;
+    background: rgba(234,179,8,.10);
+    border: 1px solid rgba(234,179,8,.25);
+}
+
+.credit-status.success {
+    background: rgba(34,197,94,.10);
+    border-color: rgba(34,197,94,.25);
+}
+
+.credit-status.danger {
+    background: rgba(239,68,68,.10);
+    border-color: rgba(239,68,68,.25);
+}
+
 </style>
 </head>
 
@@ -1507,6 +1602,8 @@ async function carregarCliente() {
         .classList.remove("hidden");
 
 
+    clienteAtual = cliente;
+
     document
         .getElementById("clienteNome")
         .innerText =
@@ -1527,6 +1624,10 @@ async function carregarCliente() {
 
 
     renderizarStatus(cliente);
+
+    if (cliente.status === "aprovado") {
+        await carregarSolicitacaoCredito(cliente);
+    }
 
 }
 
@@ -1668,13 +1769,45 @@ function renderizarStatus(cliente) {
 
                 </div>
 
-                <button
-                    class="btn-primary"
-                    style="margin-top:15px"
-                    onclick="solicitarCredito()"
-                >
-                    Solicitar crédito
-                </button>
+                <div class="credit-box">
+
+                    <h3>💰 Solicitar crédito</h3>
+
+                    <div class="credit-muted">
+                        Seu limite pode ser utilizado mediante uma nova solicitação de crédito.
+                        A liberação depende da análise da operação.
+                    </div>
+
+                    <div class="credit-available">
+                        R$ ${Number(
+                            Math.max(
+                                0,
+                                Number(cliente.limite_aprovado || 0) -
+                                Number(cliente.limite_utilizado || 0)
+                            )
+                        ).toLocaleString(
+                            "pt-BR",
+                            {
+                                minimumFractionDigits: 2
+                            }
+                        )}
+                    </div>
+
+                    <div class="credit-muted">
+                        Limite disponível para nova solicitação
+                    </div>
+
+                    <button
+                        class="btn-primary"
+                        style="margin-top:15px"
+                        onclick="abrirSolicitacaoCredito()"
+                    >
+                        💰 Solicitar crédito
+                    </button>
+
+                    <div id="solicitacaoAtual"></div>
+
+                </div>
 
             `;
 
@@ -1788,16 +1921,648 @@ function renderizarStatus(cliente) {
 
 
 /* ==========================================================
-   SOLICITAR CRÉDITO
+   SOLICITAÇÃO DE CRÉDITO
    ========================================================== */
 
-function solicitarCredito() {
+let clienteAtual = null;
+let solicitacaoAtual = null;
+
+/*
+   IMPORTANTE:
+   Os valores abaixo são apenas exemplos de configuração da V1.
+   Antes de usar em produção, defina as condições do produto,
+   encargos, CET e regras jurídicas/comerciais adequadas.
+*/
+const CONDICOES_CREDITO = {
+    1: 1.10,
+    2: 1.16,
+    3: 1.35
+};
+
+function moeda(valor) {
+    return Number(valor || 0).toLocaleString(
+        "pt-BR",
+        {
+            style: "currency",
+            currency: "BRL"
+        }
+    );
+}
+
+function abrirSolicitacaoCredito() {
+
+    const cliente = clienteAtual;
+
+    if (!cliente) {
+        mostrarAlerta("Não foi possível identificar sua conta.");
+        return;
+    }
+
+    const limite =
+        Number(cliente.limite_aprovado || 0);
+
+    const utilizado =
+        Number(cliente.limite_utilizado || 0);
+
+    const disponivel =
+        Math.max(0, limite - utilizado);
+
+    if (disponivel <= 0) {
+        mostrarAlerta(
+            "Você não possui limite disponível para uma nova solicitação."
+        );
+        return;
+    }
+
+    const card =
+        document.getElementById("statusCard");
+
+    const box =
+        document.createElement("div");
+
+    box.className = "credit-box";
+
+    box.innerHTML = `
+        <h3>💰 Nova solicitação</h3>
+
+        <div class="credit-muted">
+            Informe quanto deseja solicitar.
+        </div>
+
+        <label style="margin-top:15px">
+            Valor solicitado
+        </label>
+
+        <input
+            id="valorCredito"
+            type="number"
+            min="1"
+            max="${disponivel.toFixed(2)}"
+            step="0.01"
+            placeholder="Ex.: 300.00"
+            oninput="atualizarSimulacaoCredito()"
+        >
+
+        <div id="opcoesParcelamento">
+
+            <div class="credit-option">
+                <label style="margin:0;cursor:pointer">
+                    <input
+                        type="radio"
+                        name="parcelas"
+                        value="1"
+                        checked
+                        onchange="atualizarSimulacaoCredito()"
+                    >
+                    <strong style="display:inline">
+                        1x
+                    </strong>
+                    <small>
+                        pagamento único
+                    </small>
+                </label>
+            </div>
+
+            <div class="credit-option">
+                <label style="margin:0;cursor:pointer">
+                    <input
+                        type="radio"
+                        name="parcelas"
+                        value="2"
+                        onchange="atualizarSimulacaoCredito()"
+                    >
+                    <strong style="display:inline">
+                        2x
+                    </strong>
+                    <small>
+                        parcelas
+                    </small>
+                </label>
+            </div>
+
+            <div class="credit-option">
+                <label style="margin:0;cursor:pointer">
+                    <input
+                        type="radio"
+                        name="parcelas"
+                        value="3"
+                        onchange="atualizarSimulacaoCredito()"
+                    >
+                    <strong style="display:inline">
+                        3x
+                    </strong>
+                    <small>
+                        parcelas
+                    </small>
+                </label>
+            </div>
+
+        </div>
+
+        <div
+            id="simulacaoCredito"
+            class="credit-summary"
+        >
+            Informe um valor para simular.
+        </div>
+
+        <button
+            class="btn-primary"
+            style="margin-top:14px"
+            onclick="enviarSolicitacaoCredito()"
+        >
+            Confirmar solicitação
+        </button>
+
+        <button
+            class="btn-secondary"
+            onclick="carregarCliente()"
+        >
+            Cancelar
+        </button>
+    `;
+
+    card.innerHTML = "";
+
+    card.appendChild(box);
+
+    atualizarSimulacaoCredito();
+}
+
+function obterParcelasSelecionadas() {
+
+    const selecionada =
+        document.querySelector(
+            'input[name="parcelas"]:checked'
+        );
+
+    return Number(
+        selecionada?.value || 1
+    );
+}
+
+function calcularSimulacao(valor, parcelas) {
+
+    const fator =
+        CONDICOES_CREDITO[parcelas];
+
+    const total =
+        valor * fator;
+
+    const parcela =
+        total / parcelas;
+
+    return {
+        total,
+        parcela
+    };
+}
+
+function atualizarSimulacaoCredito() {
+
+    const input =
+        document.getElementById("valorCredito");
+
+    const box =
+        document.getElementById("simulacaoCredito");
+
+    if (!input || !box)
+        return;
+
+    const valor =
+        Number(input.value || 0);
+
+    const parcelas =
+        obterParcelasSelecionadas();
+
+    if (!valor || valor <= 0) {
+
+        box.innerHTML =
+            "Informe um valor para simular.";
+
+        return;
+    }
+
+    const limite =
+        Math.max(
+            0,
+            Number(clienteAtual?.limite_aprovado || 0) -
+            Number(clienteAtual?.limite_utilizado || 0)
+        );
+
+    if (valor > limite) {
+
+        box.innerHTML = `
+            <strong>⚠️ Valor acima do limite disponível.</strong>
+            <br>
+            <small>
+                Limite disponível: ${moeda(limite)}
+            </small>
+        `;
+
+        return;
+    }
+
+    const simulacao =
+        calcularSimulacao(
+            valor,
+            parcelas
+        );
+
+    box.innerHTML = `
+        <div class="credit-summary-line">
+            <span>Valor solicitado</span>
+            <strong>${moeda(valor)}</strong>
+        </div>
+
+        <div class="credit-summary-line">
+            <span>Parcelas</span>
+            <strong>${parcelas}x</strong>
+        </div>
+
+        <div class="credit-summary-line">
+            <span>Valor por parcela</span>
+            <strong>${moeda(simulacao.parcela)}</strong>
+        </div>
+
+        <div class="credit-summary-line">
+            <span>Total da operação</span>
+            <strong>${moeda(simulacao.total)}</strong>
+        </div>
+    `;
+}
+
+async function enviarSolicitacaoCredito() {
+
+    esconderAlerta();
+
+    const input =
+        document.getElementById("valorCredito");
+
+    if (!input) {
+        return;
+    }
+
+    const valor =
+        Number(input.value || 0);
+
+    const parcelas =
+        obterParcelasSelecionadas();
+
+    const limite =
+        Math.max(
+            0,
+            Number(clienteAtual?.limite_aprovado || 0) -
+            Number(clienteAtual?.limite_utilizado || 0)
+        );
+
+    if (!valor || valor <= 0) {
+
+        mostrarAlerta(
+            "Informe o valor que deseja solicitar."
+        );
+
+        return;
+    }
+
+    if (valor > limite) {
+
+        mostrarAlerta(
+            "O valor solicitado é maior que seu limite disponível."
+        );
+
+        return;
+    }
+
+    const simulacao =
+        calcularSimulacao(
+            valor,
+            parcelas
+        );
+
+    try {
+
+        const {
+            data: sessionData
+        } =
+            await supabaseClient.auth.getSession();
+
+        const user =
+            sessionData.session?.user;
+
+        if (!user) {
+
+            mostrarLogin();
+
+            return;
+        }
+
+        const {
+            error
+        } =
+            await supabaseClient
+                .from("solicitacoes_credito")
+                .insert({
+
+                    cliente_id: user.id,
+
+                    valor_solicitado:
+                        valor,
+
+                    parcelas:
+                        parcelas,
+
+                    valor_parcela:
+                        simulacao.parcela,
+
+                    valor_total:
+                        simulacao.total,
+
+                    status:
+                        "solicitado"
+                });
+
+        if (error)
+            throw error;
+
+        mostrarAlerta(
+            "Solicitação enviada com sucesso. Aguarde a análise da operação.",
+            "success"
+        );
+
+        await carregarCliente();
+
+    } catch (error) {
+
+        console.error(
+            "Erro ao solicitar crédito:",
+            error
+        );
+
+        mostrarAlerta(
+            "Não foi possível enviar a solicitação: " +
+            (error.message || "erro desconhecido")
+        );
+    }
+}
+
+async function carregarSolicitacaoCredito(cliente) {
+
+    const box =
+        document.getElementById(
+            "solicitacaoAtual"
+        );
+
+    if (!box)
+        return;
+
+    try {
+
+        const {
+            data,
+            error
+        } =
+            await supabaseClient
+                .from("solicitacoes_credito")
+                .select("*")
+                .eq("cliente_id", cliente.id)
+                .order("created_at", {
+                    ascending: false
+                })
+                .limit(1)
+                .maybeSingle();
+
+        if (error)
+            throw error;
+
+        solicitacaoAtual = data;
+
+        if (!data) {
+
+            box.innerHTML = "";
+
+            return;
+        }
+
+        const status =
+            data.status;
+
+        if (status === "solicitado") {
+
+            box.innerHTML = `
+                <div class="credit-status">
+                    <strong>🕐 Solicitação em análise</strong>
+                    <div class="credit-muted" style="margin-top:6px">
+                        Valor solicitado:
+                        ${moeda(data.valor_solicitado)}
+                        <br>
+                        ${data.parcelas}x de
+                        ${moeda(data.valor_parcela)}
+                    </div>
+                </div>
+            `;
+
+            return;
+        }
+
+        if (status === "aprovado") {
+
+            box.innerHTML = `
+                <div class="credit-status success">
+                    <strong>✅ Crédito aprovado</strong>
+
+                    <div class="credit-muted" style="margin-top:6px">
+                        Valor:
+                        ${moeda(data.valor_solicitado)}
+                        <br>
+                        ${data.parcelas}x de
+                        ${moeda(data.valor_parcela)}
+                    </div>
+
+                    <button
+                        class="btn-primary"
+                        style="margin-top:12px"
+                        onclick="solicitarLiberacaoCredito('${data.id}')"
+                    >
+                        💸 Solicitar liberação
+                    </button>
+                </div>
+            `;
+
+            return;
+        }
+
+        if (status === "liberado") {
+
+            box.innerHTML = `
+                <div class="credit-status success">
+                    <strong>💰 Crédito liberado</strong>
+
+                    <div class="credit-muted" style="margin-top:6px">
+                        Valor disponível:
+                        ${moeda(data.valor_solicitado)}
+                    </div>
+
+                    <button
+                        class="btn-primary"
+                        style="margin-top:12px"
+                        onclick="solicitarSaque('${data.id}')"
+                    >
+                        💸 Sacar crédito
+                    </button>
+                </div>
+            `;
+
+            return;
+        }
+
+        if (status === "saque_solicitado") {
+
+            box.innerHTML = `
+                <div class="credit-status success">
+                    <strong>💸 Saque solicitado</strong>
+
+                    <div class="credit-muted" style="margin-top:6px">
+                        Sua solicitação de pagamento foi enviada.
+                        Aguarde a confirmação da liberação.
+                    </div>
+                </div>
+            `;
+
+            return;
+        }
+
+        if (status === "pago") {
+
+            box.innerHTML = `
+                <div class="credit-status success">
+                    <strong>✅ Crédito pago</strong>
+
+                    <div class="credit-muted" style="margin-top:6px">
+                        Valor pago:
+                        ${moeda(data.valor_solicitado)}
+                    </div>
+                </div>
+            `;
+
+            return;
+        }
+
+        if (status === "recusado") {
+
+            box.innerHTML = `
+                <div class="credit-status danger">
+                    <strong>❌ Solicitação não aprovada</strong>
+
+                    <div class="credit-muted" style="margin-top:6px">
+                        ${escapeHtml(
+                            data.observacao || 
+                            "A solicitação não foi aprovada."
+                        )}
+                    </div>
+                </div>
+            `;
+
+            return;
+        }
+
+        box.innerHTML = `
+            <div class="credit-status">
+                <strong>Status: ${escapeHtml(status)}</strong>
+            </div>
+        `;
+
+    } catch (error) {
+
+        /*
+           Se a tabela ainda não existir, mostramos uma mensagem
+           amigável em vez de quebrar o restante da conta.
+        */
+
+        console.error(
+            "Erro ao carregar solicitação:",
+            error
+        );
+
+        box.innerHTML = `
+            <div class="credit-status">
+                <strong>⚙️ Solicitação de crédito</strong>
+
+                <div class="credit-muted" style="margin-top:6px">
+                    O módulo de solicitações ainda precisa ser
+                    configurado no banco de dados.
+                </div>
+            </div>
+        `;
+    }
+}
+
+async function solicitarLiberacaoCredito(id) {
 
     mostrarAlerta(
-        "A área de solicitação de crédito será liberada na próxima etapa da FF Crédito.",
+        "A solicitação de liberação será enviada.",
         "success"
     );
 
+    /*
+       O cliente não altera o status diretamente.
+       Essa alteração deve ser feita pelo administrador.
+       Aqui apenas informamos o próximo passo.
+    */
+}
+
+async function solicitarSaque(id) {
+
+    if (!confirm(
+        "Deseja solicitar o pagamento deste crédito?"
+    )) {
+        return;
+    }
+
+    try {
+
+        const {
+            data: sessionData
+        } =
+            await supabaseClient.auth.getSession();
+
+        const user =
+            sessionData.session?.user;
+
+        if (!user)
+            throw new Error("Sessão expirada.");
+
+        const {
+            error
+        } =
+            await supabaseClient
+                .from("solicitacoes_credito")
+                .update({
+                    status: "saque_solicitado"
+                })
+                .eq("id", id)
+                .eq("cliente_id", user.id)
+                .eq("status", "liberado");
+
+        if (error)
+            throw error;
+
+        mostrarAlerta(
+            "Solicitação de saque enviada com sucesso.",
+            "success"
+        );
+
+        await carregarCliente();
+
+    } catch (error) {
+
+        console.error(error);
+
+        mostrarAlerta(
+            "Não foi possível solicitar o saque: " +
+            (error.message || "erro desconhecido")
+        );
+    }
 }
 
 
