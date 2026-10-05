@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -989,20 +988,12 @@ const supabaseClient =
 
 
 /*
-   COLOQUE AQUI OS E-MAILS QUE PODEM
-   ENTRAR NO PAINEL.
+   AUTORIZAÇÃO DOS ADMINISTRADORES
 
-   IMPORTANTE:
-   Isso é apenas uma primeira camada.
-   Depois vamos colocar uma tabela
-   usuarios_admin + RLS.
+   O administrador NÃO é definido neste HTML.
+   O acesso é validado pelo Supabase Auth +
+   tabela public.usuarios_admin.
 */
-
-const ADMINS_AUTORIZADOS = [
-
-    "seuemail@gmail.com"
-
-];
 
 
 let clienteSelecionado = null;
@@ -1072,23 +1063,14 @@ async function loginAdmin() {
         );
 
         return;
-
-    }
-
-
-    if (!ADMINS_AUTORIZADOS.includes(email)) {
-
-        alerta(
-            "loginAlert",
-            "Este usuário não possui acesso ao painel."
-        );
-
-        return;
-
     }
 
 
     try {
+
+        /* ===============================
+           LOGIN NO SUPABASE AUTH
+        =============================== */
 
         const {
             data,
@@ -1097,7 +1079,7 @@ async function loginAdmin() {
             await supabaseClient.auth
                 .signInWithPassword({
 
-                    email,
+                    email: email,
                     password: senha
 
                 });
@@ -1107,16 +1089,66 @@ async function loginAdmin() {
             throw error;
 
 
-        if (!data.user)
+        const user = data.user;
+
+
+        if (!user) {
+
             throw new Error(
                 "Usuário não encontrado."
             );
+
+        }
+
+
+        /* ===============================
+           VERIFICA O ADMIN NO BANCO
+        =============================== */
+
+        const {
+            data: admin,
+            error: adminError
+        } =
+            await supabaseClient
+                .from("usuarios_admin")
+                .select("user_id, nome, ativo")
+                .eq("user_id", user.id)
+                .maybeSingle();
+
+
+        console.log("Usuário autenticado:", user.id);
+        console.log("Administrador encontrado:", admin);
+        console.log("Erro ao consultar administrador:", adminError);
+
+
+        if (adminError) {
+
+            await supabaseClient.auth.signOut();
+
+            throw new Error(
+                "Não foi possível verificar suas permissões."
+            );
+
+        }
+
+
+        if (!admin || admin.ativo !== true) {
+
+            await supabaseClient.auth.signOut();
+
+            alerta(
+                "loginAlert",
+                "Este usuário não possui acesso ao painel."
+            );
+
+            return;
+        }
 
 
         document
             .getElementById("adminNome")
             .innerText =
-                data.user.email;
+                admin.nome || user.email;
 
 
         document
@@ -1134,10 +1166,11 @@ async function loginAdmin() {
 
     } catch (error) {
 
-        console.error(error);
+        console.error("Erro no login administrativo:", error);
 
         alerta(
             "loginAlert",
+            error.message ||
             "Não foi possível entrar. Verifique o acesso."
         );
 
@@ -2267,16 +2300,31 @@ async function verificarSessaoAdmin() {
         return;
 
 
+    const {
+        data: admin,
+        error
+    } =
+        await supabaseClient
+            .from("usuarios_admin")
+            .select("user_id, nome, ativo")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+
+    console.log("Sessão atual:", user.id, user.email);
+    console.log("Administrador da sessão:", admin);
+    console.log("Erro na verificação:", error);
+
+
     if (
-        !ADMINS_AUTORIZADOS.includes(
-            user.email.toLowerCase()
-        )
+        error ||
+        !admin ||
+        admin.ativo !== true
     ) {
 
         await supabaseClient.auth.signOut();
 
         return;
-
     }
 
 
@@ -2293,7 +2341,7 @@ async function verificarSessaoAdmin() {
     document
         .getElementById("adminNome")
         .innerText =
-            user.email;
+            admin.nome || user.email;
 
 
     await carregarClientes();
@@ -2311,4 +2359,3 @@ verificarSessaoAdmin();
 
 </body>
 </html>
-```
