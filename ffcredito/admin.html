@@ -436,6 +436,19 @@ textarea {
 
 }
 
+
+.saque-card{border:1px solid #1e293b;background:#0b1628;border-radius:14px;padding:16px;margin-bottom:12px}
+.saque-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.saque-item{background:#0f172a;border-radius:10px;padding:11px}
+.saque-item small{display:block;color:#64748b;margin-bottom:4px;font-size:11px}
+.saque-item strong{word-break:break-word}
+.saque-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.status-saque_solicitado{background:rgba(234,179,8,.15);color:#fde047}
+.status-pago{background:rgba(34,197,94,.15);color:#86efac}
+.status-recusado{background:rgba(239,68,68,.15);color:#fca5a5}
+@media(max-width:900px){.saque-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.saque-grid{grid-template-columns:1fr}}
+
 </style>
 
 </head>
@@ -598,6 +611,29 @@ textarea {
 
 
     <!-- LISTA -->
+
+
+    <!-- SOLICITAÇÕES DE SAQUE -->
+    <div class="card">
+        <h2>💸 Solicitações de saque</h2>
+
+        <div class="toolbar">
+            <select id="filtroSaque" onchange="carregarSolicitacoesSaque()">
+                <option value="saque_solicitado">Pendentes de pagamento</option>
+                <option value="todos">Todas</option>
+                <option value="pago">Pagos</option>
+                <option value="recusado">Recusados</option>
+            </select>
+
+            <button class="btn-primary" onclick="carregarSolicitacoesSaque()">
+                Atualizar saques
+            </button>
+        </div>
+
+        <div id="listaSaques">
+            <div class="loading">Carregando solicitações de saque...</div>
+        </div>
+    </div>
 
     <div class="card">
 
@@ -1426,6 +1462,231 @@ function atualizarEstatisticas(clientes) {
 
 }
 
+
+
+/* =========================================================
+   SOLICITAÇÕES DE SAQUE
+   ========================================================= */
+
+async function carregarSolicitacoesSaque() {
+
+    const area = document.getElementById("listaSaques");
+    if (!area) return;
+
+    area.innerHTML = `<div class="loading">Carregando solicitações de saque...</div>`;
+
+    try {
+        const filtro = document.getElementById("filtroSaque").value;
+
+        let query = supabaseClient
+            .from("solicitacoes_credito")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+        if (filtro !== "todos") {
+            query = query.eq("status", filtro);
+        }
+
+        const { data: solicitacoes, error } = await query;
+        if (error) throw error;
+
+        if (!solicitacoes || !solicitacoes.length) {
+            area.innerHTML = `<div class="empty">Nenhuma solicitação de saque encontrada.</div>`;
+            return;
+        }
+
+        const ids = [...new Set(
+            solicitacoes.map(x => x.cliente_id).filter(Boolean)
+        )];
+
+        let clientes = [];
+
+        if (ids.length) {
+            const { data, error: clientesError } =
+                await supabaseClient
+                    .from("clientes")
+                    .select("id,nome,cpf,telefone,email,chave_pix")
+                    .in("id", ids);
+
+            if (clientesError) throw clientesError;
+            clientes = data || [];
+        }
+
+        const mapa = new Map(clientes.map(c => [c.id, c]));
+
+        area.innerHTML = solicitacoes.map(s => {
+
+            const c = mapa.get(s.cliente_id) || {};
+            const status = s.status || "desconhecido";
+
+            const nomes = {
+                saque_solicitado: "Saque solicitado",
+                pago: "Pago",
+                recusado: "Recusado",
+                solicitado: "Solicitado"
+            };
+
+            return `
+                <div class="saque-card">
+
+                    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+                        <div>
+                            <strong style="font-size:17px">
+                                💸 ${escapeHtml(c.nome || "Cliente")}
+                            </strong>
+                            <div style="color:#94a3b8;font-size:12px;margin-top:4px">
+                                CPF: ${formatarCPF(c.cpf || "")}
+                            </div>
+                        </div>
+
+                        <span class="status status-${status}">
+                            ${nomes[status] || escapeHtml(status)}
+                        </span>
+                    </div>
+
+                    <div class="saque-grid">
+
+                        <div class="saque-item">
+                            <small>Valor do saque</small>
+                            <strong>${moedaAdmin(s.valor_solicitado)}</strong>
+                        </div>
+
+                        <div class="saque-item">
+                            <small>Parcelas escolhidas</small>
+                            <strong>${Number(s.parcelas || 0)}x</strong>
+                        </div>
+
+                        <div class="saque-item">
+                            <small>Valor de cada parcela</small>
+                            <strong>${moedaAdmin(s.valor_parcela)}</strong>
+                        </div>
+
+                        <div class="saque-item">
+                            <small>Total a pagar</small>
+                            <strong>${moedaAdmin(s.valor_total)}</strong>
+                        </div>
+
+                        <div class="saque-item">
+                            <small>Data da solicitação</small>
+                            <strong>${formatarDataHora(s.created_at)}</strong>
+                        </div>
+
+                        <div class="saque-item">
+                            <small>Telefone</small>
+                            <strong>${escapeHtml(c.telefone || "-")}</strong>
+                        </div>
+
+                        <div class="saque-item">
+                            <small>E-mail</small>
+                            <strong>${escapeHtml(c.email || "-")}</strong>
+                        </div>
+
+                        <div class="saque-item">
+                            <small>PIX cadastrado</small>
+                            <strong>${escapeHtml(c.chave_pix || "-")}</strong>
+                        </div>
+
+                    </div>
+
+                    ${s.observacao ? `
+                        <div style="margin-top:12px;padding:12px;border-radius:10px;background:#0f172a">
+                            <small style="color:#64748b">Observação</small>
+                            <div style="margin-top:5px">${escapeHtml(s.observacao)}</div>
+                        </div>
+                    ` : ""}
+
+                    ${status === "saque_solicitado" ? `
+                        <div class="saque-actions">
+                            <button class="btn-success"
+                                onclick="marcarSaquePago('${s.id}')">
+                                ✓ Marcar como pago
+                            </button>
+
+                            <button class="btn-danger"
+                                onclick="recusarSaque('${s.id}')">
+                                ✕ Recusar saque
+                            </button>
+                        </div>
+                    ` : ""}
+
+                </div>
+            `;
+        }).join("");
+
+    } catch (error) {
+        console.error(error);
+        area.innerHTML = `
+            <div class="alert alert-error">
+                Erro ao carregar solicitações de saque:
+                ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+
+function moedaAdmin(valor) {
+    return Number(valor || 0).toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL"
+    });
+}
+
+function formatarDataHora(data) {
+    if (!data) return "-";
+    return new Date(data).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short"
+    });
+}
+
+async function marcarSaquePago(id) {
+
+    if (!confirm("Confirma que o valor foi enviado para a chave PIX cadastrada?")) {
+        return;
+    }
+
+    try {
+        const { error } = await supabaseClient
+            .from("solicitacoes_credito")
+            .update({ status: "pago" })
+            .eq("id", id)
+            .eq("status", "saque_solicitado");
+
+        if (error) throw error;
+
+        alerta("alertPainel", "Saque marcado como pago.", "success");
+        await carregarSolicitacoesSaque();
+
+    } catch (error) {
+        alerta("alertPainel", "Erro ao marcar saque como pago: " + error.message);
+    }
+}
+
+async function recusarSaque(id) {
+
+    const motivo = prompt("Informe o motivo da recusa do saque:");
+
+    if (!motivo || !motivo.trim()) return;
+
+    try {
+        const { error } = await supabaseClient
+            .from("solicitacoes_credito")
+            .update({
+                status: "recusado",
+                observacao: motivo.trim()
+            })
+            .eq("id", id)
+            .eq("status", "saque_solicitado");
+
+        if (error) throw error;
+
+        alerta("alertPainel", "Saque recusado.", "success");
+        await carregarSolicitacoesSaque();
+
+    } catch (error) {
+        alerta("alertPainel", "Erro ao recusar saque: " + error.message);
+    }
+}
 
 /* =========================================================
    ABRIR CLIENTE
@@ -2345,6 +2606,7 @@ async function verificarSessaoAdmin() {
 
 
     await carregarClientes();
+    await carregarSolicitacoesSaque();
 
 }
 
