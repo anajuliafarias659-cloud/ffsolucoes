@@ -460,7 +460,7 @@ body{
 </div> <!-- fecha container -->
 
 <script type="module">
-import { supabase } from "/js/supabase.js";
+import { supabase } from "/js/supabase-login.js";
 
 let app_id = null;
 let slug_loja = "";
@@ -495,64 +495,73 @@ async function carregarUsuario(){
   const userId = await verificarSessao();
   if(!userId) return;
 
-  const params = new URLSearchParams(window.location.search);
-  const appIdUrl = params.get("app_id");
+  const { data: usuario, error } = await supabase
+    .from("usuarios")
+    .select("nome, app_id")
+    .eq("id", userId)
+    .single();
 
-  if(!appIdUrl){
-    window.location.href = "/painel-negocios/";
+  if(error || !usuario){
+    alert("Não foi possível carregar os dados do usuário.");
     return;
   }
 
-  app_id = appIdUrl;
+ const params = new URLSearchParams(window.location.search);
+const appIdUrl = params.get("app_id");
 
-  // Valida o acesso diretamente pelo negócio.
-  // Não depende mais da tabela "usuarios".
-  const { data: negocio, error: negocioError } = await supabase
-    .from("negocios")
-    .select("id, nome, app_id")
-    .eq("app_id", app_id)
-    .eq("dono_id", userId)
-    .eq("ativo", true)
-    .maybeSingle();
+if(!appIdUrl){
+  window.location.href = "/painel-negocios/";
+  return;
+}
 
-  if(negocioError){
-    console.error("Erro ao carregar negócio:", negocioError);
-    alert("Não foi possível carregar os dados da loja.");
-    return;
-  }
+app_id = appIdUrl;
 
-  if(!negocio){
-    alert("⛔ Você não tem acesso a este painel.");
-    window.location.href = "/painel-negocios/";
-    return;
-  }
+// valida dono
+const { data: acesso, error: acessoError } = await supabase
+  .from("negocios")
+  .select("id")
+  .eq("app_id", app_id)
+  .eq("dono_id", userId)
+  .eq("ativo", true)
+  .maybeSingle();
 
-  document.getElementById("nome").innerText =
-    negocio.nome || "Minha Loja";
+if(acessoError || !acesso){
+  alert("⛔ Você não tem acesso a este painel.");
+  window.location.href = "/painel-negocios/";
+  return;
+}
 
-  await carregarSlugLoja();
-  document.getElementById("negocioId").innerText =
-    negocio.nome || negocio.id || app_id;
+// 🔥 pega negocio primeiro
+const { data: negocio, error: negocioError } = await supabase
+  .from("negocios")
+  .select("id, nome, app_id")
+  .eq("app_id", app_id)
+  .eq("dono_id", userId)
+  .eq("ativo", true)
+  .maybeSingle();
 
-  await carregarStatusLoja();
-  await verificarPedidos();
+if(negocioError || !negocio){
+  alert("⛔ Negócio não encontrado.");
+  window.location.href = "/painel-negocios/";
+  return;
+}
 
-  setInterval(verificarPedidos, 5000);
-  setInterval(carregarStatusLoja, 15000);
+// 🔥 AGORA SIM
+document.getElementById("nome").innerText =
+  negocio?.nome || "Minha Loja";
+
+document.getElementById("negocioId").innerText =
+  negocio?.nome || negocio?.id || app_id;
+
+// 🔥 COLOCA AQUI DENTRO
+await carregarStatusLoja();
+await verificarPedidos();
+
+setInterval(verificarPedidos, 5000)
+setInterval(carregarStatusLoja, 15000);
 
 } // FECHA carregarUsuario
   
-async function carregarSlugLoja(){
-  if(!app_id) return;
-
-  const { data } = await supabase
-    .from("apps")
-    .select("slug")
-    .eq("id", app_id)
-    .maybeSingle();
-
-  slug_loja = data?.slug || "";
-}
 async function carregarStatusLoja(){
   if(!app_id) return;
 
