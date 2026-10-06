@@ -5,9 +5,6 @@
 <title>Categorias - </title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script type="module" src="../js/auth.js"></script>
-
 <style>
 body{
   margin:0;
@@ -92,7 +89,7 @@ button{
 <body>
 
 <div class="topo">
-  <h2> Categorias - do seu comércio</h2>
+  <h2>Categorias - do seu comércio</h2>
   <button onclick="history.back()">⬅ Voltar</button>
 </div>
 
@@ -100,8 +97,10 @@ button{
 
   <div class="card-box">
     <h3>Nova Categoria</h3>
-    <input id="emoji" placeholder="Emoji ()">
-    <input id="nome" placeholder="">
+
+    <input id="emoji" placeholder="Emoji (opcional)">
+    <input id="nome" placeholder="Nome da categoria">
+
     <button class="salvar" onclick="criar()">Salvar</button>
   </div>
 
@@ -109,76 +108,152 @@ button{
 
 </div>
 
-<script>
-const sb = supabase.createClient(
-  "https://pdajixsoowcyhnjwhgpc.supabase.co",
-  "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
-);
+<script type="module">
+
+/* =========================================================
+   MESMO CLIENTE USADO PELO LOGIN PRINCIPAL
+   ========================================================= */
+import { supabase as sb } from "/js/supabase-login.js";
 
 let app_id = null;
 
-/* 🔐 Iniciar */
+
+/* =========================================================
+   INICIAR
+   ========================================================= */
 async function iniciar(){
 
   const params = new URLSearchParams(location.search);
   const appIdUrl = params.get("app_id");
 
+  /* Se veio app_id pela URL, usa ele */
   if(appIdUrl){
+
     app_id = appIdUrl;
+
+    console.log("APP_ID pela URL:", app_id);
+
     listar();
     return;
   }
 
-  const { data: { session }, error: sessionError } =
-    await sb.auth.getSession();
+
+  /* =======================================================
+     VERIFICAR SESSÃO
+     ======================================================= */
+  const {
+    data: { session },
+    error: sessionError
+  } = await sb.auth.getSession();
+
 
   if(sessionError){
-    console.error("Erro ao verificar sessão:", sessionError);
+
+    console.error(
+      "Erro ao verificar sessão:",
+      sessionError
+    );
+
     alert("Erro ao verificar a sessão.");
     return;
   }
 
+
   if(!session){
+
     alert("Sessão inválida");
-    location.href="/auth/login.html";
+
+    location.href = "/auth/login.html";
+
     return;
   }
 
-  const { data: usuario, error } = await sb
+
+  /* =======================================================
+     BUSCAR APP_ID DO USUÁRIO LOGADO
+     ======================================================= */
+  const {
+    data: usuario,
+    error
+  } = await sb
     .from("usuarios")
     .select("app_id")
     .eq("id", session.user.id)
     .single();
 
+
   if(error){
-    console.error("Erro ao buscar usuário:", error);
-    alert("Não foi possível carregar os dados do usuário.");
+
+    console.error(
+      "Erro ao buscar usuário:",
+      error
+    );
+
+    alert(
+      "Não foi possível carregar os dados do usuário."
+    );
+
     return;
   }
 
+
   if(!usuario?.app_id){
+
     alert("Usuário sem app_id.");
+
     return;
   }
+
 
   app_id = usuario.app_id;
 
-  console.log("Usuário:", session.user.email);
-  console.log("APP_ID:", app_id);
+
+  console.log(
+    "Usuário:",
+    session.user.email
+  );
+
+  console.log(
+    "APP_ID:",
+    app_id
+  );
+
 
   listar();
 }
 
-/* ➕ Criar Categoria */
+
+/* =========================================================
+   CRIAR CATEGORIA
+   ========================================================= */
 async function criar(){
 
-  const nome = document.getElementById("nome").value.trim();
-  const emoji = document.getElementById("emoji").value.trim();
+  const nome =
+    document.getElementById("nome").value.trim();
+
+  const emoji =
+    document.getElementById("emoji").value.trim();
+
 
   if(!nome){
-    alert("Informe o nome da categoria");
+
+    alert(
+      "Informe o nome da categoria"
+    );
+
     return;
   }
+
+
+  if(!app_id){
+
+    alert(
+      "APP_ID não identificado."
+    );
+
+    return;
+  }
+
 
   const { error } = await sb
     .from("categorias")
@@ -189,66 +264,143 @@ async function criar(){
       ativo:true
     });
 
+
   if(error){
+
+    console.error(error);
+
     alert(error.message);
+
     return;
   }
 
-  document.getElementById("nome").value="";
-  document.getElementById("emoji").value="";
+
+  document.getElementById("nome").value = "";
+  document.getElementById("emoji").value = "";
+
   listar();
 }
 
-/* 📋 Listar */
+
+/* =========================================================
+   LISTAR CATEGORIAS
+   ========================================================= */
 async function listar(){
 
-  const { data, error } = await sb
+  if(!app_id){
+
+    console.error(
+      "APP_ID não definido."
+    );
+
+    return;
+  }
+
+
+  const {
+    data,
+    error
+  } = await sb
     .from("categorias")
     .select("*")
     .eq("app_id", app_id)
     .eq("ativo", true)
     .order("created_at");
 
+
   if(error){
+
     console.error(error);
+
     return;
   }
 
-  const lista = document.getElementById("lista");
-  lista.innerHTML="";
 
-  if(!data || data.length===0){
-    lista.innerHTML="<div class='vazio'>Nenhuma categoria cadastrada</div>";
+  const lista =
+    document.getElementById("lista");
+
+
+  lista.innerHTML = "";
+
+
+  if(!data || data.length === 0){
+
+    lista.innerHTML =
+      "<div class='vazio'>Nenhuma categoria cadastrada</div>";
+
     return;
   }
 
-  data.forEach(cat=>{
-    const div = document.createElement("div");
-    div.className="item";
-    div.innerHTML=`
+
+  data.forEach(cat => {
+
+    const div =
+      document.createElement("div");
+
+    div.className = "item";
+
+
+    div.innerHTML = `
       <div>
         <b>${cat.emoji || "📦"} ${cat.nome}</b>
       </div>
-      <button class="desativar" onclick="desativar('${cat.id}')">Desativar</button>
+
+      <button
+        class="desativar"
+        onclick="desativar('${cat.id}')">
+        Desativar
+      </button>
     `;
+
+
     lista.appendChild(div);
   });
 }
 
-/* ❌ Desativar */
+
+/* =========================================================
+   DESATIVAR
+   ========================================================= */
 async function desativar(id){
 
-  if(!confirm("Desativar categoria?")) return;
+  if(!confirm("Desativar categoria?"))
+    return;
 
-  await sb
+
+  const { error } = await sb
     .from("categorias")
-    .update({ativo:false})
+    .update({
+      ativo:false
+    })
     .eq("id", id);
+
+
+  if(error){
+
+    console.error(error);
+
+    alert(error.message);
+
+    return;
+  }
+
 
   listar();
 }
 
+
+/* =========================================================
+   DISPONIBILIZAR PARA OS BOTÕES HTML
+   ========================================================= */
+window.criar = criar;
+window.desativar = desativar;
+
+
+/* =========================================================
+   INICIAR
+   ========================================================= */
 iniciar();
+
 </script>
 
 </body>
