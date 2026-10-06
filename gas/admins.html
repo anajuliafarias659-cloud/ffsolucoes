@@ -5,23 +5,104 @@
 <title>Usuários do Gás</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script type="module" src="../js/auth.js"></script>
-
 <style>
-body{margin:0;font-family:Arial;background:#020617;color:#fff}
-.topo{background:#0f172a;padding:16px;display:flex;justify-content:space-between;align-items:center}
-.topo button{width:auto;padding:9px 14px}
-.container{max-width:900px;margin:auto;padding:24px}
-.box{background:#0f172a;padding:20px;border-radius:14px;margin-bottom:20px}
-input,select,button{width:100%;padding:10px;margin-top:10px;border-radius:8px;border:none;box-sizing:border-box}
-button{background:#22c55e;font-weight:bold;cursor:pointer;color:#fff}
-.usuario{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid #1e293b;padding:12px 0}
-.badge{display:inline-block;padding:4px 8px;border-radius:8px;font-size:12px;margin-top:5px}
-.caixa_gas{background:#facc15;color:#000}
-.produtos_gas{background:#2563eb;color:#fff}
-.admin_gas{background:#22c55e;color:#000}
-.btn-excluir{background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12px}
-.info{font-size:13px;color:#94a3b8;margin-top:8px;line-height:1.4}
+body{
+  margin:0;
+  font-family:Arial;
+  background:#020617;
+  color:#fff
+}
+
+.topo{
+  background:#0f172a;
+  padding:16px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center
+}
+
+.topo button{
+  width:auto;
+  padding:9px 14px
+}
+
+.container{
+  max-width:900px;
+  margin:auto;
+  padding:24px
+}
+
+.box{
+  background:#0f172a;
+  padding:20px;
+  border-radius:14px;
+  margin-bottom:20px
+}
+
+input,select,button{
+  width:100%;
+  padding:10px;
+  margin-top:10px;
+  border-radius:8px;
+  border:none;
+  box-sizing:border-box
+}
+
+button{
+  background:#22c55e;
+  font-weight:bold;
+  cursor:pointer;
+  color:#fff
+}
+
+.usuario{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+  border-bottom:1px solid #1e293b;
+  padding:12px 0
+}
+
+.badge{
+  display:inline-block;
+  padding:4px 8px;
+  border-radius:8px;
+  font-size:12px;
+  margin-top:5px
+}
+
+.caixa_gas{
+  background:#facc15;
+  color:#000
+}
+
+.produtos_gas{
+  background:#2563eb;
+  color:#fff
+}
+
+.admin_gas{
+  background:#22c55e;
+  color:#000
+}
+
+.btn-excluir{
+  background:#1e293b;
+  color:#94a3b8;
+  border:1px solid #334155;
+  padding:6px 10px;
+  border-radius:8px;
+  cursor:pointer;
+  font-size:12px
+}
+
+.info{
+  font-size:13px;
+  color:#94a3b8;
+  margin-top:8px;
+  line-height:1.4
+}
 </style>
 </head>
 
@@ -63,7 +144,12 @@ button{background:#22c55e;font-weight:bold;cursor:pointer;color:#fff}
 </div>
 
 <script type="module">
-import { supabase } from "../js/supabase.js";
+
+/* =========================================================
+   MESMO CLIENTE DO LOGIN PRINCIPAL
+   ========================================================= */
+import { supabase } from "/js/supabase-login.js";
+
 
 const CODIGO_ENCERRAMENTO = "9999";
 
@@ -73,143 +159,436 @@ const NOMES = {
   admin_gas: "ADMIN GÁS"
 };
 
-function esperarAuth() {
-  if (window.APP_ID) {
-    carregarFuncionarios();
-  } else {
-    setTimeout(esperarAuth, 100);
+
+/* =========================================================
+   APP_ID
+   ========================================================= */
+let APP_ID = null;
+
+
+/* =========================================================
+   INICIAR
+   ========================================================= */
+async function iniciar(){
+
+  const params = new URLSearchParams(location.search);
+  const appIdUrl = params.get("app_id");
+
+
+  /* =======================================================
+     VERIFICAR SESSÃO
+     ======================================================= */
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+
+
+  if(sessionError){
+
+    console.error(
+      "Erro ao verificar sessão:",
+      sessionError
+    );
+
+    alert("Erro ao verificar a sessão.");
+
+    return;
   }
+
+
+  if(!session){
+
+    alert("Sessão inválida");
+
+    location.href = "/auth/login.html";
+
+    return;
+  }
+
+
+  /* =======================================================
+     BUSCAR APP_ID DO USUÁRIO LOGADO
+     ======================================================= */
+  const {
+    data: usuario,
+    error
+  } = await supabase
+    .from("usuarios")
+    .select("app_id")
+    .eq("id", session.user.id)
+    .single();
+
+
+  if(error){
+
+    console.error(
+      "Erro ao buscar usuário:",
+      error
+    );
+
+    alert(
+      "Não foi possível carregar os dados do usuário."
+    );
+
+    return;
+  }
+
+
+  if(!usuario?.app_id){
+
+    alert("Usuário sem app_id.");
+
+    return;
+  }
+
+
+  /*
+   * Se a página veio com ?app_id=,
+   * mantém o comportamento anterior.
+   *
+   * Caso contrário usa o app_id do usuário logado.
+   */
+  APP_ID = appIdUrl || usuario.app_id;
+
+
+  /* Mantém compatibilidade com qualquer parte
+     do sistema que ainda use window.APP_ID */
+  window.APP_ID = APP_ID;
+
+
+  console.log(
+    "Usuário:",
+    session.user.email
+  );
+
+  console.log(
+    "APP_ID:",
+    APP_ID
+  );
+
+
+  carregarFuncionarios();
 }
 
+
+/* =========================================================
+   CRIAR FUNCIONÁRIO
+   ========================================================= */
 async function criarFuncionario(){
 
-  if (!window.APP_ID) {
+  if(!APP_ID){
+
     alert("Sessão ainda carregando...");
+
     return;
   }
 
-  const nome = document.getElementById("nome").value.trim();
-  const email = document.getElementById("email").value.trim().toLowerCase();
-  const senha = document.getElementById("senha").value.trim();
-  const tipo = document.getElementById("tipo").value;
+
+  const nome =
+    document.getElementById("nome")
+      .value
+      .trim();
+
+
+  const email =
+    document.getElementById("email")
+      .value
+      .trim()
+      .toLowerCase();
+
+
+  const senha =
+    document.getElementById("senha")
+      .value
+      .trim();
+
+
+  const tipo =
+    document.getElementById("tipo")
+      .value;
+
 
   if(!nome || !email || !senha){
-    alert("Informe nome, e-mail e senha.");
+
+    alert(
+      "Informe nome, e-mail e senha."
+    );
+
     return;
   }
+
 
   if(senha.length < 6){
-    alert("A senha precisa ter pelo menos 6 caracteres.");
+
+    alert(
+      "A senha precisa ter pelo menos 6 caracteres."
+    );
+
     return;
   }
 
-  const { data: sessionData } = await supabase.auth.getSession();
-const token = sessionData?.session?.access_token;
 
-const resp = await fetch("https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-funcionario-auth", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer " + token
-  },
-  body: JSON.stringify({
-    nome,
-    email,
-    senha,
-    tipo,
-    sistema: "gas",
-    app_id: window.APP_ID
-  })
-});
+  /* =======================================================
+     PEGAR TOKEN DO USUÁRIO LOGADO
+     ======================================================= */
+  const {
+    data: sessionData
+  } = await supabase.auth.getSession();
 
-const texto = await resp.text();
 
-let data = null;
-try{
-  data = JSON.parse(texto);
-}catch(e){
-  data = { mensagem: texto };
-}
+  const token =
+    sessionData?.session?.access_token;
 
-console.log("STATUS FUNCTION:", resp.status);
-console.log("RESPOSTA FUNCTION:", data);
 
-if(!resp.ok || data?.erro){
-  alert(data?.mensagem || "Erro ao criar funcionário.");
-  return;
-}
+  if(!token){
 
-  alert("Funcionário criado. Ele já pode entrar pelo login principal.");
+    alert(
+      "Sessão inválida. Faça login novamente."
+    );
+
+    location.href = "/auth/login.html";
+
+    return;
+  }
+
+
+  /* =======================================================
+     CRIAR FUNCIONÁRIO PELA EDGE FUNCTION
+     ======================================================= */
+  const resp = await fetch(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co/functions/v1/criar-funcionario-auth",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token
+      },
+
+      body: JSON.stringify({
+        nome,
+        email,
+        senha,
+        tipo,
+        sistema: "gas",
+        app_id: APP_ID
+      })
+    }
+  );
+
+
+  const texto =
+    await resp.text();
+
+
+  let data = null;
+
+
+  try{
+
+    data = JSON.parse(texto);
+
+  }catch(e){
+
+    data = {
+      mensagem: texto
+    };
+
+  }
+
+
+  console.log(
+    "STATUS FUNCTION:",
+    resp.status
+  );
+
+  console.log(
+    "RESPOSTA FUNCTION:",
+    data
+  );
+
+
+  if(!resp.ok || data?.erro){
+
+    alert(
+      data?.mensagem ||
+      "Erro ao criar funcionário."
+    );
+
+    return;
+  }
+
+
+  alert(
+    "Funcionário criado. Ele já pode entrar pelo login principal."
+  );
+
 
   document.getElementById("nome").value = "";
   document.getElementById("email").value = "";
   document.getElementById("senha").value = "";
 
+
   carregarFuncionarios();
 }
 
+
+/* =========================================================
+   CARREGAR FUNCIONÁRIOS
+   ========================================================= */
 async function carregarFuncionarios(){
 
-  const { data, error } = await supabase
-    .from("usuarios")
-    .select("id,nome,email,tipo,sistema,ativo")
-    .eq("app_id", window.APP_ID)
-    .eq("sistema", "gas")
-    .in("tipo", ["caixa_gas", "produtos_gas", "admin_gas"])
-    .order("nome");
+  if(!APP_ID){
 
-  if(error){
-    console.error(error);
-    alert("Erro ao carregar funcionários.");
+    console.error(
+      "APP_ID não definido."
+    );
+
     return;
   }
 
-  const div = document.getElementById("lista");
+
+  const {
+    data,
+    error
+  } = await supabase
+    .from("usuarios")
+    .select(
+      "id,nome,email,tipo,sistema,ativo"
+    )
+    .eq("app_id", APP_ID)
+    .eq("sistema", "gas")
+    .in(
+      "tipo",
+      [
+        "caixa_gas",
+        "produtos_gas",
+        "admin_gas"
+      ]
+    )
+    .order("nome");
+
+
+  if(error){
+
+    console.error(error);
+
+    alert(
+      "Erro ao carregar funcionários."
+    );
+
+    return;
+  }
+
+
+  const div =
+    document.getElementById("lista");
+
+
   div.innerHTML = "";
 
-  (data || []).forEach(u=>{
 
-    const box = document.createElement("div");
+  (data || []).forEach(u => {
+
+    const box =
+      document.createElement("div");
+
+
     box.className = "usuario";
+
 
     box.innerHTML = `
       <div>
         <strong>${u.nome || "Sem nome"}</strong><br>
+
         <small>${u.email || ""}</small><br>
-        <span class="badge ${u.tipo}">${NOMES[u.tipo] || u.tipo}</span>
+
+        <span class="badge ${u.tipo}">
+          ${NOMES[u.tipo] || u.tipo}
+        </span>
       </div>
 
       <div>
-        <button class="btn-excluir">${u.ativo === false ? "Ativar" : "Bloquear"}</button>
+        <button class="btn-excluir">
+          ${u.ativo === false ? "Ativar" : "Bloquear"}
+        </button>
       </div>
     `;
 
+
     div.appendChild(box);
 
-    box.querySelector(".btn-excluir").onclick = async () => {
 
-      const codigo = prompt("🔐 Código de encerramento:");
+    box.querySelector(
+      ".btn-excluir"
+    ).onclick = async () => {
+
+
+      const codigo =
+        prompt(
+          "🔐 Código de encerramento:"
+        );
+
 
       if(codigo !== CODIGO_ENCERRAMENTO){
-        alert("Código inválido");
+
+        alert(
+          "Código inválido"
+        );
+
         return;
       }
 
-      const novoStatus = u.ativo === false ? true : false;
 
-      await supabase
+      const novoStatus =
+        u.ativo === false
+          ? true
+          : false;
+
+
+      const {
+        error
+      } = await supabase
         .from("usuarios")
-        .update({ ativo: novoStatus })
+        .update({
+          ativo: novoStatus
+        })
         .eq("id", u.id);
 
+
+      if(error){
+
+        console.error(error);
+
+        alert(
+          "Erro ao alterar status do funcionário."
+        );
+
+        return;
+      }
+
+
       carregarFuncionarios();
+
     };
+
   });
 }
 
-esperarAuth();
 
-window.criarFuncionario = criarFuncionario;
+/* =========================================================
+   DISPONIBILIZAR FUNÇÃO PARA O HTML
+   ========================================================= */
+window.criarFuncionario =
+  criarFuncionario;
+
+
+/* =========================================================
+   INICIAR
+   ========================================================= */
+iniciar();
+
 </script>
 
 </body>
