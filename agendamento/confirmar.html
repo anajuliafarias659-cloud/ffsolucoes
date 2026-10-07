@@ -112,9 +112,11 @@ if(!dataSelecionada){
 
 const horaSelecionada =
 localStorage.getItem("horaSelecionada");
+
 const app_id =
 localStorage.getItem("barbeariaAppId") ||
 localStorage.getItem("app_id");
+
 let partes = ["","",""];
 
 if(dataSelecionada){
@@ -134,161 +136,176 @@ async function confirmar(){
     const nome =
     document.getElementById("nome").value;
 
-   const telefone =
-document.getElementById("telefone").value;
+    const telefone =
+    document.getElementById("telefone").value;
 
-const telefoneLimpo =
-telefone.replace(/\D/g,'');
+    const telefoneLimpo =
+    telefone.replace(/\D/g,'');
 
-if(telefoneLimpo.length < 10){
+    if(telefoneLimpo.length < 10){
 
-    alert("Telefone inválido");
-
-    return;
-}
-
-const agora = new Date();
-
-const hoje =
-agora.getFullYear() + "-" +
-String(agora.getMonth()+1).padStart(2,"0") + "-" +
-String(agora.getDate()).padStart(2,"0");
-
-if(dataSelecionada === hoje){
-
-    const horaAtual =
-    String(agora.getHours()).padStart(2,"0") +
-    ":" +
-    String(agora.getMinutes()).padStart(2,"0");
-
-    if(horaSelecionada <= horaAtual){
-
-        alert("Este horário já passou.");
+        alert("Telefone inválido");
 
         return;
     }
-}
+
+    const agora = new Date();
+
+    const hoje =
+    agora.getFullYear() + "-" +
+    String(agora.getMonth()+1).padStart(2,"0") + "-" +
+    String(agora.getDate()).padStart(2,"0");
+
+    if(dataSelecionada === hoje){
+
+        const horaAtual =
+        String(agora.getHours()).padStart(2,"0") +
+        ":" +
+        String(agora.getMinutes()).padStart(2,"0");
+
+        if(horaSelecionada <= horaAtual){
+
+            alert("Este horário já passou.");
+
+            return;
+        }
+    }
+
     /* Verifica se alguém reservou antes */
 
     let profissionalFinal = profissionalId;
 
-if(profissionalId === "sem_preferencia"){
+    if(profissionalId === "sem_preferencia"){
 
-    const { data: profissionais } = await db
-    .from("barbearia_profissionais")
-    .select("id")
-    .eq("ativo", true)
-    .eq("app_id", app_id);
+        const { data: profissionais } = await db
+        .from("barbearia_profissionais")
+        .select("id")
+        .eq("ativo", true)
+        .eq("app_id", app_id);
 
-    if(profissionais && profissionais.length > 0){
+        if(profissionais && profissionais.length > 0){
 
-        profissionalFinal = profissionais[0].id;
+            profissionalFinal = profissionais[0].id;
 
-    }else{
+        }else{
 
-        alert("Nenhum profissional disponível.");
-        return;
+            alert("Nenhum profissional disponível.");
+            return;
+        }
+
     }
 
-}
+    /*
+     * Verifica se o cliente já possui agendamento no dia.
+     *
+     * IMPORTANTE:
+     * Agendamentos cancelados NÃO contam mais.
+     */
+    const { data: clienteJaTem } = await db
+    .from("barbearia_agendamentos")
+    .select("id,hora_agendamento")
+    .eq("app_id", app_id)
+    .eq("telefone", telefoneLimpo)
+    .eq("data_agendamento", dataSelecionada)
+    .neq("status", "cancelado");
 
-const { data: clienteJaTem } = await db
-.from("barbearia_agendamentos")
-.select("id,hora_agendamento")
-.eq("app_id", app_id)
-.eq("telefone", telefoneLimpo)
-.eq("data_agendamento", dataSelecionada);
+    if(clienteJaTem && clienteJaTem.length > 0){
 
-if(clienteJaTem && clienteJaTem.length > 0){
+        const agendamentoAtual =
+        clienteJaTem[0];
 
-    const agendamentoAtual =
-    clienteJaTem[0];
+        const agora = new Date();
 
-    const agora = new Date();
+        const horarioAntigo = new Date(
+            `${dataSelecionada}T${agendamentoAtual.hora_agendamento}`
+        );
 
-    const horarioAntigo = new Date(
-        `${dataSelecionada}T${agendamentoAtual.hora_agendamento}`
-    );
+        const diferenca =
+        (horarioAntigo - agora) / 60000;
 
-    const diferenca =
-    (horarioAntigo - agora) / 60000;
+        if(diferenca < 30){
 
-    if(diferenca < 30){
+            alert(
+                "Você já possui um agendamento hoje e faltam menos de 30 minutos para ele."
+            );
+
+            return;
+        }
+
+        const reagendar = confirm(
+            "Você já possui um agendamento neste dia. Deseja reagendar?"
+        );
+
+        if(!reagendar){
+            return;
+        }
+
+        await db
+        .from("barbearia_agendamentos")
+        .delete()
+        .eq("id", agendamentoAtual.id);
+
+        foiReagendamento = true;
+    }
+
+    /*
+     * Verifica se o horário escolhido já está ocupado.
+     *
+     * IMPORTANTE:
+     * Agendamentos cancelados NÃO bloqueiam o horário.
+     */
+    const { data: existe, error: erroExiste } = await db
+    .from("barbearia_agendamentos")
+    .select("id")
+    .eq("app_id", app_id)
+    .eq("profissional_id", profissionalFinal)
+    .eq("data_agendamento", dataSelecionada)
+    .eq("hora_agendamento", horaSelecionada)
+    .neq("status", "cancelado");
+
+    if(erroExiste){
+
+        console.log(erroExiste);
 
         alert(
-            "Você já possui um agendamento hoje e faltam menos de 30 minutos para ele."
+            erroExiste.message +
+            "\n\n" +
+            JSON.stringify(erroExiste)
         );
 
         return;
     }
 
-    const reagendar = confirm(
-        "Você já possui um agendamento neste dia. Deseja reagendar?"
-    );
+    if(existe && existe.length > 0){
 
-    if(!reagendar){
+        alert("Esse horário já está reservado.");
         return;
     }
 
-    await db
-    .from("barbearia_agendamentos")
-    .delete()
-    .eq("id", agendamentoAtual.id);
-foiReagendamento = true;
-}
-
-const { data: existe, error: erroExiste } = await db
-.from("barbearia_agendamentos")
-.select("id")
-.eq("app_id", app_id)
-.eq("profissional_id", profissionalFinal)
-.eq("data_agendamento", dataSelecionada)
-.eq("hora_agendamento", horaSelecionada);
-
-if(erroExiste){
-
-    console.log(erroExiste);
-
-    alert(
-        erroExiste.message +
-        "\n\n" +
-        JSON.stringify(erroExiste)
-    );
-
-    return;
-}
-
-if(existe && existe.length > 0){
-
-    alert("Esse horário já está reservado.");
-    return;
-}
-
-const { data: empresa } = await db
-.from("barbearia_config")
-.select("*")
-.eq("app_id", app_id)
-.single();
-
+    const { data: empresa } = await db
+    .from("barbearia_config")
+    .select("*")
+    .eq("app_id", app_id)
+    .single();
 
     const { error } = await db
     .from("barbearia_agendamentos")
     .insert({
 
-    app_id: app_id,
+        app_id: app_id,
 
-    cliente_nome: nome,
-    telefone: telefoneLimpo,
+        cliente_nome: nome,
+        telefone: telefoneLimpo,
 
-    servico_id: servicoId,
+        servico_id: servicoId,
 
-    profissional_id: profissionalFinal,
+        profissional_id: profissionalFinal,
 
-    data_agendamento: dataSelecionada,
+        data_agendamento: dataSelecionada,
 
-    hora_agendamento: horaSelecionada
+        hora_agendamento: horaSelecionada
 
-});
+    });
 
     if(error){
 
@@ -296,32 +313,32 @@ const { data: empresa } = await db
         return;
 
     }
- 
-if(foiReagendamento){
 
-    alert(
-        "✅ Atendimento reagendado com sucesso!"
-    );
+    if(foiReagendamento){
 
-}else{
+        alert(
+            "✅ Atendimento reagendado com sucesso!"
+        );
 
-    alert(
-        "✅ Agendamento realizado com sucesso!"
-    );
+    }else{
 
-}
+        alert(
+            "✅ Agendamento realizado com sucesso!"
+        );
 
-localStorage.removeItem("servicoSelecionado");
-localStorage.removeItem("profissionalSelecionado");
-localStorage.removeItem("dataSelecionada");
-localStorage.removeItem("horaSelecionada");
+    }
 
-setTimeout(() => {
+    localStorage.removeItem("servicoSelecionado");
+    localStorage.removeItem("profissionalSelecionado");
+    localStorage.removeItem("dataSelecionada");
+    localStorage.removeItem("horaSelecionada");
 
-    location.href =
-    `https://www.ffsolucoes.com.br/agendamento/index.html?app_id=${app_id}`;
+    setTimeout(() => {
 
-}, 3000);
+        location.href =
+        `https://www.ffsolucoes.com.br/agendamento/index.html?app_id=${app_id}`;
+
+    }, 3000);
 
 }
 
