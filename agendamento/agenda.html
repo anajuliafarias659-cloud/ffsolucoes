@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -178,6 +177,7 @@ function gerarCalendario(){
     document.getElementById("dias")
     .innerHTML = html;
 }
+
 document
 .getElementById("data")
 .addEventListener("change",carregarHorarios);
@@ -188,87 +188,106 @@ async function carregarHorarios(){
     document.getElementById("data").value;
 
     if(!data) return;
-const { data: config, error } = await db
-.from("barbearia_config")
-.select("hora_abertura,hora_fechamento")
-.eq("app_id", app_id)
-.single();
 
-console.log(config);
-console.log(error);
+    const { data: config, error } = await db
+    .from("barbearia_config")
+    .select("hora_abertura,hora_fechamento")
+    .eq("app_id", app_id)
+    .single();
 
-let horaInicio =
-config?.hora_abertura?.substring(0,5)
-|| "08:00";
+    console.log(config);
+    console.log(error);
 
-let horaFim =
-config?.hora_fechamento?.substring(0,5)
-|| "18:00";
+    let horaInicio =
+    config?.hora_abertura?.substring(0,5)
+    || "08:00";
 
-if(profissionalId !== "sem_preferencia"){
+    let horaFim =
+    config?.hora_fechamento?.substring(0,5)
+    || "18:00";
 
-    const { data: profissional, error: erroProf } = await db
-.from("barbearia_profissionais")
-.select("*")
-.eq("id", profissionalId)
-.single();
+    if(profissionalId !== "sem_preferencia"){
 
-console.log("ID SELECIONADO:", profissionalId);
-console.log("PROFISSIONAL:", profissional);
-console.log("ERRO:", erroProf);
+        const { data: profissional, error: erroProf } = await db
+        .from("barbearia_profissionais")
+        .select("*")
+        .eq("id", profissionalId)
+        .single();
 
-console.log(
-    "PROFISSIONAL:",
-    profissional
-);
+        console.log("ID SELECIONADO:", profissionalId);
+        console.log("PROFISSIONAL:", profissional);
+        console.log("ERRO:", erroProf);
 
-    if(profissional){
+        if(profissional){
 
-    horaInicio =
-    profissional.hora_inicio?.substring(0,5)
-    || horaInicio;
+            horaInicio =
+            profissional.hora_inicio?.substring(0,5)
+            || horaInicio;
 
-    horaFim =
-    profissional.hora_fim?.substring(0,5)
-    || horaFim;
-}
+            horaFim =
+            profissional.hora_fim?.substring(0,5)
+            || horaFim;
+        }
+    }
 
-}
+    /*
+     * BUSCA OS AGENDAMENTOS DO DIA.
+     *
+     * IMPORTANTE:
+     * Agendamentos cancelados não bloqueiam mais o horário.
+     */
     let consulta = db
-.from("barbearia_agendamentos")
-.select("hora_agendamento,duracao")
-.eq("app_id", app_id)
-.eq("data_agendamento", data);
+    .from("barbearia_agendamentos")
+    .select("hora_agendamento,duracao,status")
+    .eq("app_id", app_id)
+    .eq("data_agendamento", data)
+    .neq("status", "cancelado");
 
-if(profissionalId !== "sem_preferencia"){
-    consulta = consulta.eq(
-        "profissional_id",
-        profissionalId
+    if(profissionalId !== "sem_preferencia"){
+
+        consulta = consulta.eq(
+            "profissional_id",
+            profissionalId
+        );
+    }
+
+    const { data: agendados, error: erroAgendamentos } =
+    await consulta;
+
+    if(erroAgendamentos){
+
+        console.error(
+            "Erro ao carregar agendamentos:",
+            erroAgendamentos
+        );
+
+    }
+
+    const duracaoServico =
+    parseInt(
+        localStorage.getItem("duracaoServico")
+    ) || 40;
+
+    console.log(
+        "HORARIO USADO:",
+        horaInicio,
+        horaFim
     );
-}
 
-const { data: agendados } =
-await consulta;
+    console.log(
+        "AGENDAMENTOS CONSIDERADOS:",
+        agendados
+    );
 
-const duracaoServico =
-parseInt(
-    localStorage.getItem("duracaoServico")
-) || 40;
+    const horariosPadrao =
+    gerarHorarios(
+        horaInicio,
+        horaFim
+    );
 
-console.log(
-    "HORARIO USADO:",
-    horaInicio,
-    horaFim
-);
-const horariosPadrao =
-gerarHorarios(
-    horaInicio,
-    horaFim
-);
+    let html = "";
 
-let html = "";
-
-const agora = new Date();
+    const agora = new Date();
 
     const hoje =
     agora.getFullYear() + "-" +
@@ -279,20 +298,20 @@ const agora = new Date();
 
         const ocupado = agendados?.some(a => {
 
-    const inicioExistente =
-    a.hora_agendamento.substring(0,5);
+            const inicioExistente =
+            a.hora_agendamento.substring(0,5);
 
-    const duracaoExistente =
-    a.duracao || 40;
+            const duracaoExistente =
+            parseInt(a.duracao) || 40;
 
-    return horariosConflitam(
-        hora,
-        duracaoServico,
-        inicioExistente,
-        duracaoExistente
-    );
+            return horariosConflitam(
+                hora,
+                duracaoServico,
+                inicioExistente,
+                duracaoExistente
+            );
 
-});
+        }) || false;
 
         let horarioPassado = false;
 
@@ -303,22 +322,23 @@ const agora = new Date();
             ":" +
             String(agora.getMinutes()).padStart(2,"0");
 
-            horarioPassado = hora <= horaAtual;
+            horarioPassado =
+            hora <= horaAtual;
         }
 
         const fimServico =
-adicionarMinutos(
-    hora,
-    duracaoServico
-);
+        adicionarMinutos(
+            hora,
+            duracaoServico
+        );
 
-const ultrapassaHorario =
-fimServico > horaFim;
+        const ultrapassaHorario =
+        fimServico > horaFim;
 
-const bloqueado =
-ocupado ||
-horarioPassado ||
-ultrapassaHorario;
+        const bloqueado =
+        ocupado ||
+        horarioPassado ||
+        ultrapassaHorario;
 
         html += `
         <div
@@ -376,7 +396,6 @@ function gerarHorarios(
     return horarios;
 }
 
-
 function selecionarData(data, elemento){
 
     document
@@ -409,6 +428,7 @@ function horariosConflitam(
         fim1 > inicio2
     );
 }
+
 function selecionarHorario(hora){
 
     localStorage.setItem(
@@ -425,6 +445,7 @@ function selecionarHorario(hora){
 }
 
 gerarCalendario();
+
 </script>
 
 </body>
