@@ -1,1 +1,431 @@
 
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Escolha o Horário</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+body{
+    font-family:Arial;
+    background:#f5f5f5;
+    padding:20px;
+}
+
+.card{
+    background:white;
+    padding:20px;
+    border-radius:12px;
+    margin-bottom:20px;
+}
+
+.horarios{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(100px,1fr));
+    gap:10px;
+}
+
+.hora{
+    background:#0d8db8;
+    color:white;
+    padding:12px;
+    text-align:center;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+.hora:hover{
+    opacity:.9;
+}
+
+.ocupado{
+    background:#999;
+    cursor:not-allowed;
+}
+
+.calendario{
+    background:white;
+    padding:20px;
+    border-radius:12px;
+    margin-bottom:20px;
+    box-shadow:0 2px 5px rgba(0,0,0,.1);
+}
+
+.mes{
+    text-align:center;
+    font-size:22px;
+    font-weight:700;
+    margin-bottom:15px;
+}
+
+.dias{
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:8px;
+}
+
+.dia{
+    background:#f1f5f9;
+    padding:12px;
+    text-align:center;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:600;
+}
+
+.dia:hover{
+    background:#0d8db8;
+    color:white;
+}
+
+.dia.selecionado{
+    background:#0d8db8;
+    color:white;
+}
+
+.dia.hoje{
+    border:2px solid #0d8db8;
+}
+</style>
+
+</head>
+<body>
+
+<div class="calendario">
+
+    <div id="mesAtual" class="mes"></div>
+
+    <div id="dias" class="dias"></div>
+
+    <input
+    type="hidden"
+    id="data">
+
+</div>
+
+<div class="card">
+
+<h2>⏰ Horários Disponíveis</h2>
+
+<div id="horarios" class="horarios">
+
+</div>
+
+</div>
+
+<script>
+
+const db = window.supabase.createClient(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co",
+    "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const profissionalId =
+localStorage.getItem("profissionalSelecionado");
+
+const app_id =
+localStorage.getItem("barbeariaAppId") ||
+localStorage.getItem("app_id");
+
+function gerarCalendario(){
+
+    const hoje = new Date();
+
+    const ano = hoje.getFullYear();
+    const mes = hoje.getMonth();
+
+    const meses = [
+        "Janeiro","Fevereiro","Março","Abril",
+        "Maio","Junho","Julho","Agosto",
+        "Setembro","Outubro","Novembro","Dezembro"
+    ];
+
+    document.getElementById("mesAtual")
+    .innerText =
+    `${meses[mes]} ${ano}`;
+
+    const ultimoDia =
+    new Date(ano, mes + 1, 0).getDate();
+
+    let html = "";
+
+    for(let dia=1; dia<=ultimoDia; dia++){
+
+        const dataFormatada =
+        `${ano}-${String(mes+1).padStart(2,"0")}-${String(dia).padStart(2,"0")}`;
+
+        const classe =
+        dia === hoje.getDate()
+        ? "dia hoje"
+        : "dia";
+
+        html += `
+        <div
+        class="${classe}"
+        onclick="selecionarData('${dataFormatada}',this)">
+
+        ${dia}
+
+        </div>
+        `;
+    }
+
+    document.getElementById("dias")
+    .innerHTML = html;
+}
+document
+.getElementById("data")
+.addEventListener("change",carregarHorarios);
+
+async function carregarHorarios(){
+
+    const data =
+    document.getElementById("data").value;
+
+    if(!data) return;
+const { data: config, error } = await db
+.from("barbearia_config")
+.select("hora_abertura,hora_fechamento")
+.eq("app_id", app_id)
+.single();
+
+console.log(config);
+console.log(error);
+
+let horaInicio =
+config?.hora_abertura?.substring(0,5)
+|| "08:00";
+
+let horaFim =
+config?.hora_fechamento?.substring(0,5)
+|| "18:00";
+
+if(profissionalId !== "sem_preferencia"){
+
+    const { data: profissional, error: erroProf } = await db
+.from("barbearia_profissionais")
+.select("*")
+.eq("id", profissionalId)
+.single();
+
+console.log("ID SELECIONADO:", profissionalId);
+console.log("PROFISSIONAL:", profissional);
+console.log("ERRO:", erroProf);
+
+console.log(
+    "PROFISSIONAL:",
+    profissional
+);
+
+    if(profissional){
+
+    horaInicio =
+    profissional.hora_inicio?.substring(0,5)
+    || horaInicio;
+
+    horaFim =
+    profissional.hora_fim?.substring(0,5)
+    || horaFim;
+}
+
+}
+    let consulta = db
+.from("barbearia_agendamentos")
+.select("hora_agendamento,duracao")
+.eq("app_id", app_id)
+.eq("data_agendamento", data);
+
+if(profissionalId !== "sem_preferencia"){
+    consulta = consulta.eq(
+        "profissional_id",
+        profissionalId
+    );
+}
+
+const { data: agendados } =
+await consulta;
+
+const duracaoServico =
+parseInt(
+    localStorage.getItem("duracaoServico")
+) || 40;
+
+console.log(
+    "HORARIO USADO:",
+    horaInicio,
+    horaFim
+);
+const horariosPadrao =
+gerarHorarios(
+    horaInicio,
+    horaFim
+);
+
+let html = "";
+
+const agora = new Date();
+
+    const hoje =
+    agora.getFullYear() + "-" +
+    String(agora.getMonth()+1).padStart(2,"0") + "-" +
+    String(agora.getDate()).padStart(2,"0");
+
+    horariosPadrao.forEach(hora => {
+
+        const ocupado = agendados?.some(a => {
+
+    const inicioExistente =
+    a.hora_agendamento.substring(0,5);
+
+    const duracaoExistente =
+    a.duracao || 40;
+
+    return horariosConflitam(
+        hora,
+        duracaoServico,
+        inicioExistente,
+        duracaoExistente
+    );
+
+});
+
+        let horarioPassado = false;
+
+        if(data === hoje){
+
+            const horaAtual =
+            String(agora.getHours()).padStart(2,"0") +
+            ":" +
+            String(agora.getMinutes()).padStart(2,"0");
+
+            horarioPassado = hora <= horaAtual;
+        }
+
+        const fimServico =
+adicionarMinutos(
+    hora,
+    duracaoServico
+);
+
+const ultrapassaHorario =
+fimServico > horaFim;
+
+const bloqueado =
+ocupado ||
+horarioPassado ||
+ultrapassaHorario;
+
+        html += `
+        <div
+        class="hora ${bloqueado ? 'ocupado' : ''}"
+        onclick="${
+            bloqueado
+            ? ''
+            : `selecionarHorario('${hora}')`
+        }">
+
+        ${hora}
+
+        </div>
+        `;
+    });
+
+    document.getElementById("horarios").innerHTML = html;
+}
+
+function adicionarMinutos(hora, minutos){
+
+    const [h,m] = hora.split(":").map(Number);
+
+    const data = new Date();
+
+    data.setHours(h);
+    data.setMinutes(m + minutos);
+
+    return (
+        String(data.getHours()).padStart(2,"0") +
+        ":" +
+        String(data.getMinutes()).padStart(2,"0")
+    );
+}
+
+function gerarHorarios(
+    inicio,
+    fim
+){
+
+    const horarios = [];
+
+    let atual = inicio;
+
+    while(atual < fim){
+
+        horarios.push(atual);
+
+        atual = adicionarMinutos(
+            atual,
+            10
+        );
+    }
+
+    return horarios;
+}
+
+
+function selecionarData(data, elemento){
+
+    document
+    .querySelectorAll(".dia")
+    .forEach(d => d.classList.remove("selecionado"));
+
+    elemento.classList.add("selecionado");
+
+    document.getElementById("data").value =
+    data;
+
+    carregarHorarios();
+}
+
+function horariosConflitam(
+    inicio1,
+    duracao1,
+    inicio2,
+    duracao2
+){
+
+    const fim1 =
+    adicionarMinutos(inicio1, duracao1);
+
+    const fim2 =
+    adicionarMinutos(inicio2, duracao2);
+
+    return (
+        inicio1 < fim2 &&
+        fim1 > inicio2
+    );
+}
+function selecionarHorario(hora){
+
+    localStorage.setItem(
+        "dataSelecionada",
+        document.getElementById("data").value
+    );
+
+    localStorage.setItem(
+        "horaSelecionada",
+        hora
+    );
+
+    location.href="confirmar.html";
+}
+
+gerarCalendario();
+</script>
+
+</body>
+</html>
