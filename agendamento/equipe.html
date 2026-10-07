@@ -113,6 +113,7 @@ button{
 
 </style>
 </head>
+
 <body>
 
 <div class="container">
@@ -162,16 +163,20 @@ if(!codigo){
     document.body.innerHTML =
     "<h2>Código inválido.</h2>";
 
-    throw new Error();
+    throw new Error("Código inválido");
 }
 
 async function carregar(){
 
-    const { data: config } = await db
+    const { data: config, error: configError } = await db
     .from("barbearia_config")
     .select("*")
     .eq("codigo_agenda", codigo)
     .single();
+
+    if(configError){
+        console.error("ERRO CONFIG:", configError);
+    }
 
     if(!config){
 
@@ -188,22 +193,34 @@ async function carregar(){
 
     const app_id = config.app_id;
 
-    const { data: profissionais } = await db
+    const { data: profissionais, error: profissionaisError } = await db
     .from("barbearia_profissionais")
     .select("*")
     .eq("app_id", app_id);
 
-    const { data: servicos } = await db
+    if(profissionaisError){
+        console.error("ERRO PROFISSIONAIS:", profissionaisError);
+    }
+
+    const { data: servicos, error: servicosError } = await db
     .from("barbearia_servicos")
     .select("*")
     .eq("app_id", app_id);
 
-    const { data: agendamentos } = await db
+    if(servicosError){
+        console.error("ERRO SERVICOS:", servicosError);
+    }
+
+    const { data: agendamentos, error: agendamentosError } = await db
     .from("barbearia_agendamentos")
     .select("*")
     .eq("app_id", app_id)
     .order("data_agendamento")
     .order("hora_agendamento");
+
+    if(agendamentosError){
+        console.error("ERRO AGENDAMENTOS:", agendamentosError);
+    }
 
     PROFISSIONAIS = profissionais || [];
     SERVICOS = servicos || [];
@@ -243,14 +260,24 @@ function renderizarAgenda(){
 
     let html = "";
 
-    AGENDAMENTOS
-    .filter(item => {
+    const lista = AGENDAMENTOS.filter(item => {
 
         if(!filtro) return true;
 
         return item.profissional_id == filtro;
-    })
-    .forEach(item => {
+    });
+
+    if(lista.length === 0){
+
+        document.getElementById("agenda").innerHTML =
+        `<div class="card">
+            Nenhum agendamento encontrado.
+        </div>`;
+
+        return;
+    }
+
+    lista.forEach(item => {
 
         const profissional =
         PROFISSIONAIS.find(
@@ -285,40 +312,41 @@ function renderizarAgenda(){
             </div>
 
             <div class="info">
-                📅 ${item.data_agendamento}
+                📅 ${item.data_agendamento || ''}
             </div>
 
             <div class="info">
-                ⏰ ${item.hora_agendamento}
+                ⏰ ${item.hora_agendamento || ''}
             </div>
 
             <div class="status ${status}">
                 ${status.toUpperCase()}
             </div>
 
-            <button
-            class="btn-atendimento"
-            onclick="alterarStatus(${item.id},'atendimento')">
+            ${
+                status !== "cancelado" &&
+                status !== "finalizado"
+                ? `
+                <button
+                class="btn-atendimento"
+                onclick="alterarStatus(${item.id},'atendimento')">
+                Em Atendimento
+                </button>
 
-            Em Atendimento
+                <button
+                class="btn-finalizado"
+                onclick="alterarStatus(${item.id},'finalizado')">
+                Finalizado
+                </button>
 
-            </button>
-
-            <button
-            class="btn-finalizado"
-            onclick="alterarStatus(${item.id},'finalizado')">
-
-            Finalizado
-
-            </button>
-
-            <button
-            class="btn-cancelado"
-            onclick="alterarStatus(${item.id},'cancelado')">
-
-            Cancelado
-
-            </button>
+                <button
+                class="btn-cancelado"
+                onclick="alterarStatus(${item.id},'cancelado')">
+                Cancelado
+                </button>
+                `
+                : ""
+            }
 
         </div>
         `;
@@ -330,6 +358,18 @@ function renderizarAgenda(){
 }
 
 async function alterarStatus(id,status){
+
+    if(status === "cancelado"){
+
+        const confirmar = confirm(
+            "Confirmar cancelamento deste agendamento?\n\n" +
+            "O horário ficará livre novamente para o profissional."
+        );
+
+        if(!confirmar){
+            return;
+        }
+    }
 
     const { data, error } = await db
     .from("barbearia_agendamentos")
@@ -347,7 +387,15 @@ async function alterarStatus(id,status){
         return;
     }
 
-    carregar();
+    if(status === "cancelado"){
+
+        alert(
+            "Agendamento cancelado!\n\n" +
+            "O horário do profissional está livre novamente."
+        );
+    }
+
+    await carregar();
 }
 
 carregar();
