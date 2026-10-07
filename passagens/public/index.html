@@ -1,3 +1,8 @@
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1106,75 +1111,63 @@ async function carregarViagens(){
   viagensCache = data || [];
 }
 
-
-function encontrarProximaDataComViagem(dataInicial){
-  let data = new Date(`${dataInicial}T00:00:00`);
-  for(let i = 0; i < 31; i++){
-    const iso = data.toISOString().slice(0,10);
-    const disponiveis = viagensCache.filter(v =>
-      viagemRodaNaData(v, iso) &&
-      !viagemExpiradaParaData(v, iso)
-    );
-    if(disponiveis.length) return iso;
-    data.setDate(data.getDate() + 1);
-  }
-  return dataInicial;
-}
-
 async function renderizarListaViagens(){
   const lista = document.getElementById("listaViagens");
-  const inputData = document.getElementById("dataIda");
+  const dataIda = document.getElementById("dataIda").value;
+  const estado = getEstadoSalvo();
 
-  let dataEscolhida = inputData?.value || hojeLocalISO();
+  lista.innerHTML = "";
 
-  // Hoje: remove horários que já passaram.
-  // Se não houver nenhuma viagem restante hoje, vai automaticamente para
-  // a próxima data com viagem disponível.
-  let disponiveisHoje = viagensCache.filter(v =>
-    viagemRodaNaData(v, dataEscolhida) &&
-    !viagemExpiradaParaData(v, dataEscolhida)
-  );
-
-  if(!disponiveisHoje.length){
-    const proximaData = encontrarProximaDataComViagem(dataEscolhida);
-
-    if(proximaData && proximaData !== dataEscolhida){
-      dataEscolhida = proximaData;
-      if(inputData) inputData.value = dataEscolhida;
-
-      const dataVolta = document.getElementById("dataVolta");
-      if(dataVolta && document.getElementById("tipoViagem")?.value === "ida_volta"){
-        if(!dataVolta.value || dataVolta.value <= dataEscolhida){
-          const d = new Date(`${dataEscolhida}T00:00:00`);
-          d.setDate(d.getDate() + 1);
-          dataVolta.value = d.toISOString().slice(0,10);
-        }
-      }
-
-      disponiveisHoje = viagensCache.filter(v =>
-        viagemRodaNaData(v, dataEscolhida) &&
-        !viagemExpiradaParaData(v, dataEscolhida)
-      );
-    }
+  if(!restaurandoEstado){
+    limparSelecaoViagem();
   }
 
-  if(!lista) return;
-
-  if(!disponiveisHoje.length){
-    lista.innerHTML = `
-      <div class="msg erro">
-        Nenhuma viagem disponível para esta data.
-      </div>`;
+  if(!viagensCache.length){
+    lista.innerHTML = `<div class="vazio">Nenhuma viagem cadastrada.</div>`;
     return;
   }
 
-  lista.innerHTML = disponiveisHoje.map(v => `
-    <div class="item-viagem ${Number(viagemSelecionada) === Number(v.id) ? "ativa" : ""}"
-         onclick="selecionarViagem(${Number(v.id)})">
-      <strong>${v.rota || "Viagem"}</strong>
-      <small>🕐 ${v.hora || "--:--"} · ${dataEscolhida.split("-").reverse().join("/")}</small>
-    </div>
-  `).join("");
+  const viagensFiltradas = dataIda
+    ? viagensCache.filter(v =>
+        viagemRodaNaData(v, dataIda) &&
+        !viagemExpiradaParaData(v, dataIda)
+      )
+    : viagensCache;
+
+  if(!viagensFiltradas.length){
+    lista.innerHTML = `<div class="vazio">Nenhuma viagem disponível para a data escolhida.</div>`;
+    return;
+  }
+
+  for(const v of viagensFiltradas){
+    let nomeVeiculo = "";
+
+    if(v.veiculo_id){
+      const { data: veiculo } = await client
+        .from("veiculos_passagens")
+        .select("nome")
+        .eq("id", v.veiculo_id)
+        .maybeSingle();
+
+      nomeVeiculo = veiculo?.nome || "";
+    }
+
+    const div = document.createElement("div");
+    div.className = "item-viagem";
+    div.dataset.id = v.id;
+    div.innerHTML = `
+      ${v.rota || ""} - ${v.hora || ""}
+      ${nomeVeiculo ? `<small>${nomeVeiculo}</small>` : ""}
+      ${v.dias ? `<small>Dias: ${v.dias}</small>` : ""}
+      ${v.valor !== null && v.valor !== undefined ? `<small>Valor: R$ ${Number(v.valor).toFixed(2)}</small>` : ""}
+    `;
+    div.onclick = () => selecionarViagem(v.id);
+    if(String(estado.viagemSelecionada || "") === String(v.id)){
+      div.classList.add("ativa");
+    }
+    lista.appendChild(div);
+  }
+}
 
 async function selecionarViagem(id, manterTela = false){
   viagemSelecionada = id;
@@ -1834,25 +1827,15 @@ async function montarTextoRecibo(){
   const dataVolta = formatarDataPadrao(document.getElementById("dataVolta").value);
   const valorTotal = await calcularValorTotal();
   const formaPagamento = document.getElementById("formaPagamento").value;
-let statusComprovante = "Aguardando pagamento";
+  let statusComprovante = "Aguardando pagamento";
 
-if(formaPagamento === "embarque"){
-  statusComprovante = "Pagamento no dia do embarque";
-}else if(formaPagamento === "PIX"){
-  statusComprovante = "Aguardando pagamento PIX";
-}else if(formaPagamento === "cartao"){
-  statusComprovante = "Aguardando pagamento no Mercado Pago";
-}
-  const formaPagamento = document.getElementById("formaPagamento").value;
-let statusComprovante = "Aguardando pagamento";
-
-if(formaPagamento === "embarque"){
-  statusComprovante = "Pagamento no dia do embarque";
-}else if(formaPagamento === "PIX"){
-  statusComprovante = "Aguardando pagamento PIX";
-}else if(formaPagamento === "cartao"){
-  statusComprovante = "Aguardando pagamento no Mercado Pago";
-}
+  if(formaPagamento === "embarque"){
+    statusComprovante = "Pagamento no dia do embarque";
+  }else if(formaPagamento === "PIX"){
+    statusComprovante = "Aguardando pagamento PIX";
+  }else if(formaPagamento === "cartao"){
+    statusComprovante = "Aguardando pagamento no Mercado Pago";
+  }
 
   return `FF TRANSPORTE
 COMPROVANTE DE RESERVA
@@ -1867,7 +1850,7 @@ Data ida: ${dataIda}
 ${tipoViagem === "ida_volta" && dataVolta ? `Data volta: ${dataVolta}\n` : ""}Poltrona: ${poltronaSelecionada || ""}
 Tipo: ${tipoViagem === "ida_volta" ? "Ida e Volta" : "Somente Ida"}
 Tipo da poltrona: ${tipoPoltronaSelecionada}
-Status: ${statusRecibo}
+Status: ${statusComprovante}
 Valor: R$ ${Number(valorTotal || 0).toFixed(2)}
 
 Apresente este comprovante no embarque.`;
@@ -2291,27 +2274,16 @@ async function baixarPDFRecibo(){
     const tipoViagem = document.getElementById("tipoViagem").value;
     const dataVolta = formatarDataPadrao(document.getElementById("dataVolta").value);
     const valorTotal = await calcularValorTotal();
-    <b>Status:</b> ${statusComprovante}<br>
     const formaPagamento = document.getElementById("formaPagamento").value;
-let statusRecibo = "Aguardando pagamento";
 
-if(formaPagamento === "embarque"){
-  statusRecibo = "Pagamento no dia do embarque";
-}else if(formaPagamento === "PIX"){
-  statusRecibo = "Aguardando pagamento PIX";
-}else if(formaPagamento === "cartao"){
-  statusRecibo = "Aguardando pagamento no Mercado Pago";
-}
-
-const formaPagamento = document.getElementById("formaPagamento").value;
-let statusComprovante = "Aguardando pagamento";
-
-  statusComprovante = "Pagamento no dia do embarque";
-}else if(formaPagamento === "PIX"){
-  statusComprovante = "Aguardando pagamento PIX";
-}else if(formaPagamento === "cartao"){
-  statusComprovante = "Aguardando pagamento no Mercado Pago";
-}
+    let statusRecibo = "Aguardando pagamento";
+    if(formaPagamento === "embarque"){
+      statusRecibo = "Pagamento no dia do embarque";
+    }else if(formaPagamento === "PIX"){
+      statusRecibo = "Aguardando pagamento PIX";
+    }else if(formaPagamento === "cartao"){
+      statusRecibo = "Aguardando pagamento no Mercado Pago";
+    }
 
     const empresaNome = configLoja?.nome_site || "FF TRANSPORTE";
     const empresaTelefone = configLoja?.whatsapp_numero || configLoja?.telefone || "";
@@ -2340,7 +2312,8 @@ let statusComprovante = "Aguardando pagamento";
       data_viagem: dataIda,
       origem: origemTexto,
       destino: destinoTexto,
-      valor_total: valorTotal
+      valor_total: valorTotal,
+      status: statusRecibo
     });
 
     const qrDataUrl = await QRCode.toDataURL(qrTexto, {
@@ -2378,7 +2351,6 @@ let statusComprovante = "Aguardando pagamento";
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
     doc.text("COMPROVANTE DE EMBARQUE", 40, 27, { align: "center" });
-
     doc.line(8, 30, 72, 30);
 
     let y = 36;
@@ -2392,7 +2364,6 @@ let statusComprovante = "Aguardando pagamento";
       const texto = String(valor || "-");
       const linhas = doc.splitTextToSize(texto, 42);
       doc.text(linhas, 24, y);
-
       y += Math.max(7, linhas.length * 4.2);
     }
 
@@ -2411,6 +2382,7 @@ let statusComprovante = "Aguardando pagamento";
     linha("Poltrona:", poltronaSelecionada);
     linha("Tipo:", tipoViagem === "ida_volta" ? "Ida e Volta" : "Somente Ida");
     linha("Assento:", String(tipoPoltronaSelecionada || "padrao").replace("_","-"));
+    linha("Status:", statusRecibo);
     linha("Valor:", `R$ ${Number(valorTotal || 0).toFixed(2)}`);
 
     doc.line(8, y + 2, 72, y + 2);
