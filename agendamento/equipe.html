@@ -111,6 +111,42 @@ button{
     background:#dc2626;
 }
 
+/* ÁREA DOS CANCELADOS */
+
+.cancelados-box{
+    margin-top:25px;
+}
+
+.btn-toggle-cancelados{
+    background:#555;
+    width:100%;
+    font-weight:bold;
+    font-size:15px;
+    padding:13px;
+}
+
+.lista-cancelados{
+    display:none;
+    margin-top:15px;
+}
+
+.lista-cancelados.aberto{
+    display:grid;
+}
+
+.card-cancelado{
+    opacity:.85;
+    border-left:5px solid #dc2626;
+}
+
+.aviso-vazio{
+    background:#fff;
+    padding:15px;
+    border-radius:12px;
+    color:#666;
+    text-align:center;
+}
+
 </style>
 </head>
 
@@ -137,7 +173,29 @@ Todos os profissionais
 
 </div>
 
+<!-- NOVOS / ATIVOS -->
+
 <div id="agenda" class="grid"></div>
+
+<!-- CANCELADOS RECOLHIDOS -->
+
+<div class="cancelados-box">
+
+<button
+id="btnCancelados"
+class="btn-toggle-cancelados"
+onclick="toggleCancelados()">
+
+🚫 Cancelados (0) — Mostrar
+
+</button>
+
+<div
+id="cancelados"
+class="grid lista-cancelados">
+</div>
+
+</div>
 
 </div>
 
@@ -151,6 +209,8 @@ const db = window.supabase.createClient(
 let AGENDAMENTOS = [];
 let PROFISSIONAIS = [];
 let SERVICOS = [];
+
+let canceladosAbertos = false;
 
 const params =
 new URLSearchParams(location.search);
@@ -238,6 +298,8 @@ function preencherFiltro(){
         "filtroProfissional"
     );
 
+    const valorAtual = select.value;
+
     select.innerHTML =
     '<option value="">Todos os profissionais</option>';
 
@@ -249,6 +311,86 @@ function preencherFiltro(){
         </option>
         `;
     });
+
+    if(valorAtual){
+        select.value = valorAtual;
+    }
+}
+
+function criarCard(item, cancelado = false){
+
+    const profissional =
+    PROFISSIONAIS.find(
+        p => p.id == item.profissional_id
+    );
+
+    const servico =
+    SERVICOS.find(
+        s => s.id == item.servico_id
+    );
+
+    const status =
+    item.status || "aguardando";
+
+    return `
+    <div class="card ${cancelado ? 'card-cancelado' : ''}">
+
+        <div class="cliente">
+            ${item.cliente_nome || ''}
+        </div>
+
+        <div class="info">
+            📞 ${item.telefone || ''}
+        </div>
+
+        <div class="info">
+            👨‍💼 ${profissional?.nome || ''}
+        </div>
+
+        <div class="info">
+            ✂️ ${servico?.nome || ''}
+        </div>
+
+        <div class="info">
+            📅 ${item.data_agendamento || ''}
+        </div>
+
+        <div class="info">
+            ⏰ ${item.hora_agendamento || ''}
+        </div>
+
+        <div class="status ${status}">
+            ${status.toUpperCase()}
+        </div>
+
+        ${
+            !cancelado &&
+            status !== "cancelado" &&
+            status !== "finalizado"
+            ? `
+            <button
+            class="btn-atendimento"
+            onclick="alterarStatus(${item.id},'atendimento')">
+            Em Atendimento
+            </button>
+
+            <button
+            class="btn-finalizado"
+            onclick="alterarStatus(${item.id},'finalizado')">
+            Finalizado
+            </button>
+
+            <button
+            class="btn-cancelado"
+            onclick="alterarStatus(${item.id},'cancelado')">
+            Cancelado
+            </button>
+            `
+            : ""
+        }
+
+    </div>
+    `;
 }
 
 function renderizarAgenda(){
@@ -258,8 +400,6 @@ function renderizarAgenda(){
         "filtroProfissional"
     ).value;
 
-    let html = "";
-
     const lista = AGENDAMENTOS.filter(item => {
 
         if(!filtro) return true;
@@ -267,94 +407,132 @@ function renderizarAgenda(){
         return item.profissional_id == filtro;
     });
 
-    if(lista.length === 0){
+    /*
+     * CANCELADOS ficam separados e recolhidos.
+     */
+    const cancelados = lista.filter(
+        item => (item.status || "aguardando") === "cancelado"
+    );
 
-        document.getElementById("agenda").innerHTML =
-        `<div class="card">
-            Nenhum agendamento encontrado.
-        </div>`;
+    /*
+     * A tela principal mostra somente os agendamentos
+     * que ainda estão ativos/finalizados.
+     */
+    const ativos = lista.filter(
+        item => (item.status || "aguardando") !== "cancelado"
+    );
 
-        return;
-    }
+    let htmlAtivos = "";
 
-    lista.forEach(item => {
+    if(ativos.length === 0){
 
-        const profissional =
-        PROFISSIONAIS.find(
-            p => p.id == item.profissional_id
-        );
-
-        const servico =
-        SERVICOS.find(
-            s => s.id == item.servico_id
-        );
-
-        const status =
-        item.status || "aguardando";
-
-        html += `
+        htmlAtivos = `
         <div class="card">
-
-            <div class="cliente">
-                ${item.cliente_nome || ''}
-            </div>
-
-            <div class="info">
-                📞 ${item.telefone || ''}
-            </div>
-
-            <div class="info">
-                👨‍💼 ${profissional?.nome || ''}
-            </div>
-
-            <div class="info">
-                ✂️ ${servico?.nome || ''}
-            </div>
-
-            <div class="info">
-                📅 ${item.data_agendamento || ''}
-            </div>
-
-            <div class="info">
-                ⏰ ${item.hora_agendamento || ''}
-            </div>
-
-            <div class="status ${status}">
-                ${status.toUpperCase()}
-            </div>
-
-            ${
-                status !== "cancelado" &&
-                status !== "finalizado"
-                ? `
-                <button
-                class="btn-atendimento"
-                onclick="alterarStatus(${item.id},'atendimento')">
-                Em Atendimento
-                </button>
-
-                <button
-                class="btn-finalizado"
-                onclick="alterarStatus(${item.id},'finalizado')">
-                Finalizado
-                </button>
-
-                <button
-                class="btn-cancelado"
-                onclick="alterarStatus(${item.id},'cancelado')">
-                Cancelado
-                </button>
-                `
-                : ""
-            }
-
+            Nenhum novo agendamento encontrado.
         </div>
         `;
-    });
+
+    }else{
+
+        ativos.forEach(item => {
+            htmlAtivos += criarCard(item, false);
+        });
+
+    }
+
+    document.getElementById("agenda").innerHTML =
+    htmlAtivos;
+
+    let htmlCancelados = "";
+
+    if(cancelados.length === 0){
+
+        htmlCancelados = `
+        <div class="aviso-vazio">
+            Nenhum agendamento cancelado.
+        </div>
+        `;
+
+    }else{
+
+        cancelados.forEach(item => {
+            htmlCancelados += criarCard(item, true);
+        });
+
+    }
+
+    const divCancelados =
+    document.getElementById("cancelados");
+
+    divCancelados.innerHTML =
+    htmlCancelados;
+
+    /*
+     * Mantém aberto somente se o usuário já abriu.
+     */
+    if(canceladosAbertos){
+
+        divCancelados.classList.add("aberto");
+
+    }else{
+
+        divCancelados.classList.remove("aberto");
+
+    }
+
+    const botao =
+    document.getElementById("btnCancelados");
+
+    botao.innerText =
+    `🚫 Cancelados (${cancelados.length}) — ${
+        canceladosAbertos
+        ? "Ocultar"
+        : "Mostrar"
+    }`;
+}
+
+function toggleCancelados(){
+
+    canceladosAbertos =
+    !canceladosAbertos;
+
+    const div =
+    document.getElementById("cancelados");
+
+    if(canceladosAbertos){
+
+        div.classList.add("aberto");
+
+    }else{
+
+        div.classList.remove("aberto");
+
+    }
+
+    const quantidade =
+    AGENDAMENTOS.filter(
+        item => (item.status || "aguardando") === "cancelado"
+    ).filter(item => {
+
+        const filtro =
+        document.getElementById(
+            "filtroProfissional"
+        ).value;
+
+        if(!filtro) return true;
+
+        return item.profissional_id == filtro;
+
+    }).length;
 
     document.getElementById(
-        "agenda"
-    ).innerHTML = html;
+        "btnCancelados"
+    ).innerText =
+    `🚫 Cancelados (${quantidade}) — ${
+        canceladosAbertos
+        ? "Ocultar"
+        : "Mostrar"
+    }`;
 }
 
 async function alterarStatus(id,status){
