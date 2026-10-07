@@ -194,6 +194,20 @@ id="logo_url"
 placeholder="URL da Logo"
 oninput="atualizarPreview()">
 
+<div style="margin-top:12px;">
+  <label style="display:block;font-weight:bold;margin-bottom:8px;">
+    📤 Ou envie a logo
+  </label>
+
+  <input
+    id="logo_upload"
+    type="file"
+    accept="image/png,image/jpeg,image/webp"
+    onchange="enviarLogo()">
+
+  <small id="status_logo" style="display:block;margin-top:8px;"></small>
+</div>
+
 <img
 id="preview_logo"
 class="logo-preview"
@@ -491,6 +505,80 @@ function atualizarPreview(){
 
     document.getElementById("preview_logo").src =
 url || "https://dummyimage.com/100x100/cccccc/000000.png";
+}
+
+/* UPLOAD DA LOGO PARA O SUPABASE STORAGE */
+async function enviarLogo(){
+
+    const arquivo =
+        document.getElementById("logo_upload").files[0];
+
+    const status =
+        document.getElementById("status_logo");
+
+    if(!arquivo) return;
+
+    if(!arquivo.type.startsWith("image/")){
+        alert("Selecione uma imagem válida.");
+        return;
+    }
+
+    if(arquivo.size > 5 * 1024 * 1024){
+        alert("A logo deve ter no máximo 5 MB.");
+        return;
+    }
+
+    if(!window.usuarioSistema?.app_id){
+        alert("Não foi possível identificar o negócio.");
+        return;
+    }
+
+    status.textContent = "Enviando logo...";
+
+    try{
+
+        const extensao =
+            arquivo.name.split(".").pop().toLowerCase();
+
+        const nomeArquivo =
+            `barbearias/${window.usuarioSistema.app_id}/logo_${Date.now()}.${extensao}`;
+
+        const { error: uploadError } =
+            await db.storage
+            .from("logos")
+            .upload(nomeArquivo, arquivo, {
+                cacheControl: "3600",
+                upsert: true,
+                contentType: arquivo.type
+            });
+
+        if(uploadError){
+            console.error(uploadError);
+            status.textContent = "";
+            alert(
+                "Erro ao enviar a logo. Verifique se o bucket 'logos' existe no Supabase Storage e está público."
+            );
+            return;
+        }
+
+        const { data } =
+            db.storage
+            .from("logos")
+            .getPublicUrl(nomeArquivo);
+
+        const url = data.publicUrl;
+
+        document.getElementById("logo_url").value = url;
+        document.getElementById("preview_logo").src = url;
+
+        status.textContent = "✅ Logo enviada com sucesso.";
+
+    }catch(error){
+
+        console.error(error);
+        status.textContent = "";
+        alert("Erro ao enviar a logo.");
+    }
 }
 
 /* CONFIGURAÇÕES */
