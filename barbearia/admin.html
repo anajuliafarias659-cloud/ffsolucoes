@@ -18,6 +18,7 @@ const {
 
 if(!session){
   location.href = "../auth/login.html";
+  throw new Error("Sessão não encontrada");
 }
 
 const { data: usuario } = await supabase
@@ -29,23 +30,64 @@ const { data: usuario } = await supabase
 if(!usuario){
   alert("Usuário não encontrado");
   location.href = "../auth/login.html";
+  throw new Error("Usuário não encontrado");
 }
 
-/* ACEITA "barbearia" SEM DIFERENÇA DE MAIÚSCULAS OU ESPAÇOS */
 /*
- * O usuário já está autenticado pelo Supabase.
- * Não bloqueamos o painel pelo campo "sistema", pois esse campo
- * pode ter valores diferentes conforme o cadastro do negócio.
+ * IMPORTANTE:
+ * O usuário pode possuir mais de uma loja.
+ * Portanto, quando o painel vier com ?app_id=..., usamos
+ * o app_id da loja da URL e não o app_id antigo salvo em usuarios.
  *
- * O painel continua trabalhando com o app_id do usuário para
- * carregar/salvar somente os dados da barbearia dele.
+ * Antes o painel usava sempre usuario.app_id. Isso fazia uma
+ * nova barbearia abrir o cadastro da barbearia anterior.
  */
-if(!usuario.app_id){
-  alert("Usuário sem negócio vinculado.");
+
+const paramsAdmin = new URLSearchParams(window.location.search);
+const appIdUrl = paramsAdmin.get("app_id");
+
+let appIdPainel = appIdUrl || usuario.app_id;
+
+if(!appIdPainel){
+  alert("Negócio não identificado.");
   location.href = "../auth/login.html";
+  throw new Error("app_id não informado");
 }
 
-window.usuarioSistema = usuario;
+/* Confirma que o negócio pertence ao usuário logado. */
+const { data: negocioAcesso, error: negocioAcessoError } = await supabase
+  .from("negocios")
+  .select("id, app_id, dono_id, nome, tipo")
+  .eq("app_id", appIdPainel)
+  .eq("dono_id", session.user.id)
+  .maybeSingle();
+
+if(negocioAcessoError){
+  console.error("ERRO AO VALIDAR NEGÓCIO:", negocioAcessoError);
+  alert(negocioAcessoError.message);
+  throw negocioAcessoError;
+}
+
+if(!negocioAcesso){
+  alert("Você não tem acesso a este negócio.");
+  location.href = "../auth/login.html";
+  throw new Error("Negócio não pertence ao usuário");
+}
+
+if(negocioAcesso.tipo !== "barbearia"){
+  alert("Este negócio não é uma barbearia.");
+  location.href = "../auth/login.html";
+  throw new Error("Tipo de negócio inválido");
+}
+
+/* Mantemos a estrutura usada pelo restante do painel,
+   mas apontando para o negócio correto. */
+window.usuarioSistema = {
+  ...usuario,
+  app_id: appIdPainel,
+  sistema: "barbearia"
+};
+
 window.db = supabase;
 
 </script>
@@ -151,20 +193,6 @@ placeholder="Endereço">
 id="logo_url"
 placeholder="URL da Logo"
 oninput="atualizarPreview()">
-
-<div style="margin-top:12px;">
-  <label style="display:block;font-weight:bold;margin-bottom:8px;">
-    📤 Ou envie a logo
-  </label>
-
-  <input
-    id="logo_upload"
-    type="file"
-    accept="image/png,image/jpeg,image/webp"
-    onchange="enviarLogo()">
-
-  <small id="status_logo" style="display:block;margin-top:8px;"></small>
-</div>
 
 <img
 id="preview_logo"
@@ -459,85 +487,10 @@ async function carregarAgendamentos(){
 function atualizarPreview(){
 
     const url =
-    document.getElementById("logo_url").value.trim();
+    document.getElementById("logo_url").value;
 
     document.getElementById("preview_logo").src =
 url || "https://dummyimage.com/100x100/cccccc/000000.png";
-}
-
-
-/* UPLOAD DA LOGO PARA O SUPABASE STORAGE */
-async function enviarLogo(){
-
-    const arquivo =
-        document.getElementById("logo_upload").files[0];
-
-    const status =
-        document.getElementById("status_logo");
-
-    if(!arquivo) return;
-
-    if(!arquivo.type.startsWith("image/")){
-        alert("Selecione uma imagem válida.");
-        return;
-    }
-
-    if(arquivo.size > 5 * 1024 * 1024){
-        alert("A logo deve ter no máximo 5 MB.");
-        return;
-    }
-
-    if(!window.usuarioSistema?.app_id){
-        alert("Não foi possível identificar o negócio.");
-        return;
-    }
-
-    status.textContent = "Enviando logo...";
-
-    try{
-
-        const extensao =
-            arquivo.name.split(".").pop().toLowerCase();
-
-        const nomeArquivo =
-            `barbearias/${window.usuarioSistema.app_id}/logo_${Date.now()}.${extensao}`;
-
-        const { error: uploadError } =
-            await db.storage
-            .from("logos")
-            .upload(nomeArquivo, arquivo, {
-                cacheControl: "3600",
-                upsert: true,
-                contentType: arquivo.type
-            });
-
-        if(uploadError){
-            console.error(uploadError);
-            status.textContent = "";
-            alert(
-                "Erro ao enviar a logo. Verifique se o bucket 'logos' existe no Supabase Storage e está público."
-            );
-            return;
-        }
-
-        const { data } =
-            db.storage
-            .from("logos")
-            .getPublicUrl(nomeArquivo);
-
-        const url = data.publicUrl;
-
-        document.getElementById("logo_url").value = url;
-        document.getElementById("preview_logo").src = url;
-
-        status.textContent = "✅ Logo enviada com sucesso.";
-
-    }catch(error){
-
-        console.error(error);
-        status.textContent = "";
-        alert("Erro ao enviar a logo.");
-    }
 }
 
 /* CONFIGURAÇÕES */
