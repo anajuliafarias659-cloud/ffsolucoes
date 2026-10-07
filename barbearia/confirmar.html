@@ -1,1 +1,332 @@
 
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Confirmar Agendamento</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+body{
+    font-family:Arial,sans-serif;
+    background:#f5f5f5;
+    padding:20px;
+}
+
+.card{
+    max-width:500px;
+    margin:auto;
+    background:white;
+    padding:20px;
+    border-radius:12px;
+    box-shadow:0 2px 5px rgba(0,0,0,.1);
+}
+
+input{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    margin-bottom:10px;
+    border:1px solid #ddd;
+    border-radius:8px;
+    box-sizing:border-box;
+}
+
+button{
+    width:100%;
+    background:#0d8db8;
+    color:white;
+    border:none;
+    padding:14px;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+.resumo{
+    background:#f8f8f8;
+    padding:15px;
+    border-radius:8px;
+    margin-bottom:15px;
+}
+
+</style>
+
+</head>
+<body>
+
+<div class="card">
+
+<h2>✅ Confirmar Agendamento</h2>
+
+<div class="resumo">
+
+<p><b>Data:</b> <span id="data"></span></p>
+
+<p><b>Horário:</b> <span id="hora"></span></p>
+
+</div>
+
+<input
+type="text"
+id="nome"
+placeholder="Seu nome">
+
+<input
+type="tel"
+id="telefone"
+placeholder="Telefone">
+
+<button onclick="confirmar()">
+Confirmar Agendamento
+</button>
+
+</div>
+
+<script>
+
+const db = window.supabase.createClient(
+    "https://pdajixsoowcyhnjwhgpc.supabase.co",
+    "sb_publishable_LatlFlcxk6IchHe3RNmfwA_9Oq4EsZw"
+);
+
+const servicoId =
+localStorage.getItem("servicoSelecionado");
+
+const profissionalId =
+localStorage.getItem("profissionalSelecionado");
+
+const dataSelecionada =
+localStorage.getItem("dataSelecionada");
+
+if(!dataSelecionada){
+
+    alert("Data não encontrada.");
+
+    location.href = "agenda.html";
+
+    throw new Error("dataSelecionada não encontrada");
+}
+
+const horaSelecionada =
+localStorage.getItem("horaSelecionada");
+const app_id =
+localStorage.getItem("barbeariaAppId") ||
+localStorage.getItem("app_id");
+let partes = ["","",""];
+
+if(dataSelecionada){
+    partes = dataSelecionada.split("-");
+}
+
+document.getElementById("data").innerText =
+`${partes[2]}/${partes[1]}/${partes[0]}`;
+
+document.getElementById("hora")
+.innerText = horaSelecionada;
+
+async function confirmar(){
+
+    let foiReagendamento = false;
+
+    const nome =
+    document.getElementById("nome").value;
+
+   const telefone =
+document.getElementById("telefone").value;
+
+const telefoneLimpo =
+telefone.replace(/\D/g,'');
+
+if(telefoneLimpo.length < 10){
+
+    alert("Telefone inválido");
+
+    return;
+}
+
+const agora = new Date();
+
+const hoje =
+agora.getFullYear() + "-" +
+String(agora.getMonth()+1).padStart(2,"0") + "-" +
+String(agora.getDate()).padStart(2,"0");
+
+if(dataSelecionada === hoje){
+
+    const horaAtual =
+    String(agora.getHours()).padStart(2,"0") +
+    ":" +
+    String(agora.getMinutes()).padStart(2,"0");
+
+    if(horaSelecionada <= horaAtual){
+
+        alert("Este horário já passou.");
+
+        return;
+    }
+}
+    /* Verifica se alguém reservou antes */
+
+    let profissionalFinal = profissionalId;
+
+if(profissionalId === "sem_preferencia"){
+
+    const { data: profissionais } = await db
+    .from("barbearia_profissionais")
+    .select("id")
+    .eq("ativo", true)
+    .eq("app_id", app_id);
+
+    if(profissionais && profissionais.length > 0){
+
+        profissionalFinal = profissionais[0].id;
+
+    }else{
+
+        alert("Nenhum profissional disponível.");
+        return;
+    }
+
+}
+
+const { data: clienteJaTem } = await db
+.from("barbearia_agendamentos")
+.select("id,hora_agendamento")
+.eq("app_id", app_id)
+.eq("telefone", telefoneLimpo)
+.eq("data_agendamento", dataSelecionada);
+
+if(clienteJaTem && clienteJaTem.length > 0){
+
+    const agendamentoAtual =
+    clienteJaTem[0];
+
+    const agora = new Date();
+
+    const horarioAntigo = new Date(
+        `${dataSelecionada}T${agendamentoAtual.hora_agendamento}`
+    );
+
+    const diferenca =
+    (horarioAntigo - agora) / 60000;
+
+    if(diferenca < 30){
+
+        alert(
+            "Você já possui um agendamento hoje e faltam menos de 30 minutos para ele."
+        );
+
+        return;
+    }
+
+    const reagendar = confirm(
+        "Você já possui um agendamento neste dia. Deseja reagendar?"
+    );
+
+    if(!reagendar){
+        return;
+    }
+
+    await db
+    .from("barbearia_agendamentos")
+    .delete()
+    .eq("id", agendamentoAtual.id);
+foiReagendamento = true;
+}
+
+const { data: existe, error: erroExiste } = await db
+.from("barbearia_agendamentos")
+.select("id")
+.eq("app_id", app_id)
+.eq("profissional_id", profissionalFinal)
+.eq("data_agendamento", dataSelecionada)
+.eq("hora_agendamento", horaSelecionada);
+
+if(erroExiste){
+
+    console.log(erroExiste);
+
+    alert(
+        erroExiste.message +
+        "\n\n" +
+        JSON.stringify(erroExiste)
+    );
+
+    return;
+}
+
+if(existe && existe.length > 0){
+
+    alert("Esse horário já está reservado.");
+    return;
+}
+
+const { data: empresa } = await db
+.from("barbearia_config")
+.select("*")
+.eq("app_id", app_id)
+.single();
+
+
+    const { error } = await db
+    .from("barbearia_agendamentos")
+    .insert({
+
+    app_id: app_id,
+
+    cliente_nome: nome,
+    telefone: telefoneLimpo,
+
+    servico_id: servicoId,
+
+    profissional_id: profissionalFinal,
+
+    data_agendamento: dataSelecionada,
+
+    hora_agendamento: horaSelecionada
+
+});
+
+    if(error){
+
+        alert(error.message);
+        return;
+
+    }
+ 
+if(foiReagendamento){
+
+    alert(
+        "✅ Atendimento reagendado com sucesso!"
+    );
+
+}else{
+
+    alert(
+        "✅ Agendamento realizado com sucesso!"
+    );
+
+}
+
+localStorage.removeItem("servicoSelecionado");
+localStorage.removeItem("profissionalSelecionado");
+localStorage.removeItem("dataSelecionada");
+localStorage.removeItem("horaSelecionada");
+
+setTimeout(() => {
+
+    location.href =
+    `https://www.ffsolucoes.com.br/agendamento/index.html?app_id=${app_id}`;
+
+}, 3000);
+
+}
+
+</script>
+
+</body>
+</html>
