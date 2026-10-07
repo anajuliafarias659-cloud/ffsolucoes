@@ -1781,30 +1781,152 @@ window.abrirCardMobile = function(cardId){
 };
 
 async function verificarSessao(){
-  const { data:{ session } } = await supabase.auth.getSession();
-  if(!session){
-    window.location.href = "/auth/login.html";
+
+  const {
+    data: { session },
+    error
+  } = await supabase.auth.getSession();
+
+  if(error){
+
+    console.error(
+      "Erro ao verificar sessão:",
+      error
+    );
+
     return null;
   }
-  return session.user.id;
+
+  if(!session){
+
+    console.warn(
+      "Sessão não encontrada."
+    );
+
+    window.location.href =
+      "/auth/login.html";
+
+    return null;
+  }
+
+  return session.user;
 }
 
+
 async function carregarUsuario(){
-  const userId = await verificarSessao();
-  if(!userId) return;
 
-  const { data: usuario, error } = await supabase
-    .from("usuarios")
-    .select("nome, app_id")
-    .eq("id", userId)
-    .single();
+  const user =
+    await verificarSessao();
 
-  if(error || !usuario){
-    alert("Não foi possível carregar os dados do usuário.");
+  if(!user) return;
+
+
+  /*
+   * O app_id vem do Painel de Negócios
+   */
+  const params =
+    new URLSearchParams(
+      window.location.search
+    );
+
+  const appIdUrl =
+    params.get("app_id");
+
+
+  if(!appIdUrl){
+
+    alert(
+      "ID do negócio não informado."
+    );
+
     return;
   }
 
-  app_id = usuario.app_id;
+
+  /*
+   * Verifica se esse negócio
+   * realmente pertence ao usuário
+   */
+  const {
+    data: negocio,
+    error: erroNegocio
+  } = await supabase
+
+    .from("negocios")
+
+    .select(`
+      id,
+      nome,
+      tipo,
+      app_id
+    `)
+
+    .eq("app_id", appIdUrl)
+
+    .eq("dono_id", user.id)
+
+    .eq("ativo", true)
+
+    .maybeSingle();
+
+
+  if(erroNegocio){
+
+    console.error(
+      "Erro ao localizar negócio:",
+      erroNegocio
+    );
+
+    alert(
+      "Erro ao verificar o negócio."
+    );
+
+    return;
+  }
+
+
+  if(!negocio){
+
+    alert(
+      "Esse negócio não pertence ao usuário logado."
+    );
+
+    return;
+  }
+
+
+  /*
+   * Agora o app_id correto é
+   * o negócio selecionado.
+   */
+  app_id =
+    negocio.app_id;
+
+
+  document.getElementById(
+    "nome"
+  ).innerText =
+    negocio.nome || "";
+
+
+  document.getElementById(
+    "negocioId"
+  ).innerText =
+    app_id;
+
+
+  document.getElementById(
+    "dataReserva"
+  ).value =
+    hojeISO();
+
+
+  await montarLinkPublico();
+
+  await carregarVeiculos();
+
+  await carregarViagens();
+}
 
   await supabase
     .from("pedidos")
