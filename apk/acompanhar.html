@@ -23,13 +23,16 @@ button:disabled{opacity:.65;cursor:wait}
 .card h2{font-size:16px;margin:0 0 12px;color:#9fffe1}
 .campo{margin:9px 0}
 .campo strong{color:#e7fff7}
-.status-toggle{width:auto;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;color:#fff;background:#102b35;border:1px solid rgba(29,233,182,.35);margin:0;padding:13px}
-.status-label{display:inline-block;padding:5px 10px;border-radius:20px;background:rgba(29,233,182,.15);color:#7dffdc;font-weight:bold;font-size:13px}
-.status-conteudo{display:none;padding:14px;margin-top:10px;background:rgba(0,0,0,.18);border-radius:12px}
+.status-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;color:#fff;background:linear-gradient(135deg,#087f68,#075985);border:2px solid #1de9b6;margin:0;padding:15px;border-radius:12px;cursor:pointer;font-weight:bold;box-shadow:0 4px 12px rgba(0,0,0,.2);transition:transform .2s,filter .2s}
+.status-toggle:hover{filter:brightness(1.15);transform:translateY(-1px)}
+.status-toggle:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.status-label{display:inline-block;padding:6px 11px;border-radius:20px;background:#e0fff5;color:#075943;font-weight:bold;font-size:13px;white-space:nowrap}
+.status-seta{font-size:23px;line-height:1;color:#9fffe1}
+.status-conteudo{display:none;padding:16px;margin-top:10px;background:rgba(0,0,0,.22);border:1px solid rgba(29,233,182,.25);border-radius:12px}
 .status-conteudo.aberto{display:block}
-.relato{white-space:pre-wrap;overflow-wrap:anywhere;color:#e4edf2}
+.relato{white-space:pre-wrap;overflow-wrap:anywhere;color:#e4edf2;line-height:1.6}
 .ajuda{text-align:center;color:#b9c8d3;font-size:12px;line-height:1.5;margin:16px auto 0;max-width:500px}
-.vazio{color:#c4d2dc}
+@media(max-width:480px){body{padding:14px}.container{padding:18px}.status-toggle{gap:8px;padding:12px}.status-label{font-size:12px;padding:5px 8px}}
 </style>
 </head>
 <body>
@@ -67,20 +70,41 @@ function criarCampo(rotulo, valor) {
   const strong = document.createElement("strong");
   strong.textContent = rotulo + ": ";
   p.appendChild(strong);
-  p.appendChild(document.createTextNode(valor == null || String(valor).trim() === "" ? "Não informado" : String(valor)));
+  p.appendChild(document.createTextNode(
+    valor == null || String(valor).trim() === "" ? "Não informado" : String(valor)
+  ));
   return p;
 }
 
+/*
+ * O painel /apk/admin salva o relato escrito pelo administrador no campo "problema".
+ * Os demais campos ficam como compatibilidade com versões anteriores.
+ */
 function obterRelatoAdmin(dados) {
-  // Aceita nomes de campos comuns para o relato do administrador.
-  return dados.relatoAdmin || dados.relato_admin || dados.observacaoAdmin ||
-    dados.observacao_admin || dados.respostaAdmin || dados.resposta_admin ||
-    dados.atualizacao || dados.observacao || "";
+  const campos = [
+    "problema",
+    "relatoAdmin", "relato_admin",
+    "relatoEquipe", "relato_equipe",
+    "descricaoAdmin", "descricao_admin",
+    "descricaoProblema", "descricao_problema",
+    "observacaoAdmin", "observacao_admin",
+    "respostaAdmin", "resposta_admin",
+    "atualizacao", "observacao"
+  ];
+
+  for (const campo of campos) {
+    const valor = dados[campo];
+    if (valor !== undefined && valor !== null && String(valor).trim() !== "") {
+      return String(valor);
+    }
+  }
+  return "";
 }
 
 function montarResultado(dados, codigo) {
   resultado.replaceChildren();
 
+  // Dados originais da solicitação do cliente.
   const pedido = document.createElement("section");
   pedido.className = "card";
   const tituloPedido = document.createElement("h2");
@@ -88,9 +112,11 @@ function montarResultado(dados, codigo) {
   pedido.appendChild(tituloPedido);
   pedido.appendChild(criarCampo("Código de atendimento", codigo));
   pedido.appendChild(criarCampo("Nome", dados.nome));
-  pedido.appendChild(criarCampo("Serviço solicitado", dados.servico || dados.problema));
+  pedido.appendChild(criarCampo("Serviço solicitado", dados.servico));
   if (dados.sistema) pedido.appendChild(criarCampo("Sistema escolhido", dados.sistema));
-  pedido.appendChild(criarCampo("Descrição do pedido", dados.descricao || dados.problema));
+
+  // A descrição original do cliente é mostrada separadamente, sem usar o campo "problema".
+  pedido.appendChild(criarCampo("Descrição do pedido", dados.descricao));
   resultado.appendChild(pedido);
 
   const statusCard = document.createElement("section");
@@ -99,36 +125,46 @@ function montarResultado(dados, codigo) {
   tituloStatus.textContent = "📍 Andamento do atendimento";
   statusCard.appendChild(tituloStatus);
 
-  const statusAtual = String(dados.status || "Pendente");
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "status-toggle";
   toggle.setAttribute("aria-expanded", "false");
 
-  const label = document.createElement("span");
-  label.textContent = "Status atual";
+  const textoBotao = document.createElement("span");
+  textoBotao.textContent = "👆 Clique para ver o relato da equipe";
+
   const badge = document.createElement("span");
   badge.className = "status-label";
-  badge.textContent = statusAtual;
+  badge.textContent = String(dados.status || "Pendente");
+
   const seta = document.createElement("span");
+  seta.className = "status-seta";
   seta.textContent = "＋";
-  toggle.append(label, badge, seta);
+  seta.setAttribute("aria-hidden", "true");
+  toggle.append(textoBotao, badge, seta);
 
   const conteudo = document.createElement("div");
   conteudo.className = "status-conteudo";
-  const relatoTitulo = document.createElement("p");
-  relatoTitulo.innerHTML = "<strong>Relato da equipe:</strong>";
-  conteudo.appendChild(relatoTitulo);
+
+  const tituloRelato = document.createElement("p");
+  const strongRelato = document.createElement("strong");
+  strongRelato.textContent = "👷 Relato da equipe:";
+  tituloRelato.appendChild(strongRelato);
+  conteudo.appendChild(tituloRelato);
 
   const relato = document.createElement("div");
   relato.className = "relato";
   const textoRelato = obterRelatoAdmin(dados);
-  relato.textContent = textoRelato ? String(textoRelato) : "Ainda não há relato ou atualização da equipe para esta solicitação.";
+  relato.textContent = textoRelato ||
+    "Ainda não há relato da equipe para esta solicitação.";
   conteudo.appendChild(relato);
 
   toggle.addEventListener("click", () => {
     const aberto = conteudo.classList.toggle("aberto");
     toggle.setAttribute("aria-expanded", String(aberto));
+    textoBotao.textContent = aberto
+      ? "👆 Clique para ocultar o relato da equipe"
+      : "👆 Clique para ver o relato da equipe";
     seta.textContent = aberto ? "−" : "＋";
   });
 
