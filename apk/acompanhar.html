@@ -3,72 +3,74 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Acompanhar Serviço</title>
+<meta name="theme-color" content="#0b1b29">
+<title>Acompanhar Serviço | FF Soluções</title>
 
 <style>
+*{box-sizing:border-box}
 body{
   margin:0;
-  font-family:Arial;
-  background:#0b1b29;
+  min-height:100vh;
+  font-family:Arial,sans-serif;
+  background:radial-gradient(circle at top left,#15394a 0,transparent 38%),#0b1b29;
   color:#fff;
   padding:20px;
 }
-
-h1{
-  text-align:center;
-  color:#1de9b6;
-}
-
+h1{text-align:center;color:#1de9b6;margin:18px 0 8px}
+.subtitulo{text-align:center;color:#c0d0dc;line-height:1.5;margin:0 auto 24px;max-width:520px}
 .container{
   max-width:500px;
-  margin:30px auto;
-  background:linear-gradient(135deg,#2f8f4e,#4b1fa0);
+  margin:0 auto;
+  background:linear-gradient(135deg,#205c43,#432477);
   padding:25px;
+  border:1px solid rgba(255,255,255,.12);
   border-radius:20px;
+  box-shadow:0 18px 45px rgba(0,0,0,.25);
 }
-
+label{display:block;margin:4px 0 8px;font-weight:bold;font-size:14px}
 input,button{
   width:100%;
-  padding:12px;
+  padding:14px;
   border-radius:12px;
-  border:none;
-  margin-top:12px;
+  margin-top:10px;
   font-size:16px;
 }
-
-button{
-  background:#fff;
-  font-weight:bold;
-  cursor:pointer;
-}
-
+input{border:1px solid #78909c;background:#0b1b29;color:#fff;outline:none}
+input:focus{border-color:#1de9b6;box-shadow:0 0 0 3px rgba(29,233,182,.13)}
+button{border:none;background:#fff;color:#153329;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.65;cursor:wait}
 .resultado{
   margin-top:20px;
-  font-size:18px;
+  padding:15px;
+  border-radius:12px;
+  background:rgba(0,0,0,.18);
+  font-size:16px;
+  line-height:1.55;
+  overflow-wrap:anywhere;
 }
-
-.resultado p{
-  margin:10px 0;
-}
+.resultado:empty{display:none}
+.resultado p{margin:10px 0}
+.status{display:inline-block;padding:5px 10px;border-radius:20px;background:rgba(29,233,182,.15);color:#7dffdc;font-weight:bold}
+.ajuda{text-align:center;color:#b9c8d3;font-size:12px;line-height:1.5;margin:16px auto 0;max-width:500px}
 </style>
 </head>
 
 <body>
-
 <h1>📋 Acompanhar Serviço</h1>
+<p class="subtitulo">Consulte o andamento da sua solicitação na FF Soluções.</p>
 
 <div class="container">
-  <input type="text" id="codigoInput" placeholder="Digite seu código (ex: ORC-3399)">
-  <button onclick="verificar()">Verificar</button>
-
-  <div class="resultado" id="resultado"></div>
+  <label for="codigoInput">Código de atendimento</label>
+  <input type="text" id="codigoInput" placeholder="Ex.: ORC-3399" autocomplete="off" maxlength="40">
+  <button type="button" id="btnVerificar" onclick="verificar()">Consultar meu pedido</button>
+  <div class="resultado" id="resultado" aria-live="polite"></div>
 </div>
+<p class="ajuda">Se você recebeu um link pelo WhatsApp, o código será preenchido automaticamente. Basta clicar em “Consultar meu pedido”.</p>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
-/* FIREBASE CONFIG */
 const firebaseConfig = {
   apiKey: "AIzaSyBgar59yF1k6XmfG0iNOXvWCWKIa9dHcdI",
   authDomain: "servicospc-b3382.firebaseapp.com",
@@ -77,45 +79,85 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-
 const resultado = document.getElementById("resultado");
-
+const codigoInput = document.getElementById("codigoInput");
+const btnVerificar = document.getElementById("btnVerificar");
 let unsubscribe = null;
 
+function mostrarMensagem(texto) {
+  resultado.textContent = texto;
+}
+
 window.verificar = () => {
+  const codigo = codigoInput.value.trim().toUpperCase();
 
-  const codigo = document.getElementById("codigoInput").value.trim().toUpperCase();
-
-  if(!codigo){
-    alert("Digite o código");
+  if (!codigo) {
+    mostrarMensagem("Digite seu código de atendimento ou abra o link recebido pelo WhatsApp.");
+    codigoInput.focus();
     return;
   }
 
-  resultado.innerHTML = "Carregando...";
-
-  if(unsubscribe){
-    unsubscribe(); // cancela listener anterior
+  if (unsubscribe) {
+    unsubscribe();
+    unsubscribe = null;
   }
+
+  btnVerificar.disabled = true;
+  btnVerificar.textContent = "Consultando...";
+  mostrarMensagem("Buscando sua solicitação...");
 
   const servicoRef = doc(db, "servicos", codigo);
 
   unsubscribe = onSnapshot(servicoRef, (docSnap) => {
+    btnVerificar.disabled = false;
+    btnVerificar.textContent = "Consultar meu pedido";
 
-    if(!docSnap.exists()){
-      resultado.innerHTML = "<p>❌ Código não encontrado.</p>";
+    if (!docSnap.exists()) {
+      mostrarMensagem("Código não encontrado. Confira o código recebido no WhatsApp e tente novamente.");
       return;
     }
 
     const dados = docSnap.data();
 
-    resultado.innerHTML = `
-      <p><strong>Nome:</strong> ${dados.nome}</p>
-      <p><strong>Status:</strong> ${dados.status}</p>
-      <p><strong>Problema:</strong> ${dados.problema || "Não informado"}</p>
-    `;
+    // Exibe conteúdo como texto para evitar interpretar dados do banco como HTML.
+    resultado.replaceChildren();
+
+    const titulo = document.createElement("p");
+    titulo.innerHTML = "<strong>Solicitação encontrada!</strong>";
+    resultado.appendChild(titulo);
+
+    const adicionarCampo = (rotulo, valor) => {
+      const p = document.createElement("p");
+      const strong = document.createElement("strong");
+      strong.textContent = rotulo + ": ";
+      p.appendChild(strong);
+      p.appendChild(document.createTextNode(valor || "Não informado"));
+      resultado.appendChild(p);
+    };
+
+    adicionarCampo("Nome", dados.nome);
+    adicionarCampo("Serviço solicitado", dados.servico);
+    if (dados.sistema) adicionarCampo("Sistema", dados.sistema);
+    adicionarCampo("Status", dados.status || "Em análise");
+    if (dados.descricao) adicionarCampo("Descrição", dados.descricao);
+  }, (erro) => {
+    console.error("Erro ao consultar solicitação:", erro);
+    btnVerificar.disabled = false;
+    btnVerificar.textContent = "Consultar meu pedido";
+    mostrarMensagem("Não foi possível consultar agora. Verifique sua conexão e tente novamente.");
   });
 };
-</script>
 
+// Lê o código enviado no link, por exemplo:
+// acompanhar.html?codigo=ORC-1234
+const parametros = new URLSearchParams(window.location.search);
+const codigoDaUrl = (parametros.get("codigo") || "").trim().toUpperCase();
+
+if (codigoDaUrl) {
+  codigoInput.value = codigoDaUrl;
+  // Aguarda a inicialização do módulo e consulta automaticamente.
+  window.verificar();
+}
+</script>
 </body>
 </html>
