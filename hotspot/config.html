@@ -1496,47 +1496,68 @@ const nomeArquivo = `${APP_ID}/banner.${extensao}`;
     carregar();
 }
 
-async function carregarMolduraSelfie(){
-    if(!APP_ID || !previewMolduraSelfie) return;
 
-    const extensoes = ["png","webp","jpg","jpeg"];
+async function carregarMolduraSelfie() {
+    if (!APP_ID || !previewMolduraSelfie) return;
 
-    for(const ext of extensoes){
-        const caminho = `${APP_ID}.${ext}`;
-        const url = db.storage
+    try {
+        const { data: arquivos, error } = await db.storage
             .from("hotspot-molduras")
-            .getPublicUrl(caminho)
-            .data.publicUrl;
-
-        try{
-            const resp = await fetch(url + "?v=" + Date.now(), {
-                method:"HEAD",
-                cache:"no-store"
+            .list("", {
+                limit: 1000,
+                search: APP_ID
             });
 
-            if(resp.ok){
-                previewMolduraSelfie.src = url + "?v=" + Date.now();
-                previewMolduraSelfie.style.display = "block";
+        if (error) {
+            throw error;
+        }
 
-                if(statusMolduraSelfie){
-                    statusMolduraSelfie.textContent = "✓ Moldura atual carregada.";
-                    statusMolduraSelfie.style.color = "#16834a";
-                }
-                return;
+        const extensoes = ["png", "webp", "jpg", "jpeg"];
+
+        const moldura = extensoes
+            .map(ext => `${APP_ID}.${ext}`)
+            .find(nome =>
+                (arquivos || []).some(arquivo => arquivo.name === nome)
+            );
+
+        if (!moldura) {
+            previewMolduraSelfie.removeAttribute("src");
+            previewMolduraSelfie.style.display = "none";
+
+            if (statusMolduraSelfie) {
+                statusMolduraSelfie.textContent =
+                    "Nenhuma moldura cadastrada.";
+                statusMolduraSelfie.style.color = "#68747a";
             }
-        }catch(e){
-            console.warn("Não foi possível verificar a moldura:", e);
+            return;
+        }
+
+        const { data } = db.storage
+            .from("hotspot-molduras")
+            .getPublicUrl(moldura);
+
+        previewMolduraSelfie.src =
+            data.publicUrl + "?v=" + Date.now();
+
+        previewMolduraSelfie.style.display = "block";
+
+        if (statusMolduraSelfie) {
+            statusMolduraSelfie.textContent =
+                "✓ Moldura atual carregada.";
+            statusMolduraSelfie.style.color = "#16834a";
+        }
+
+    } catch (e) {
+        console.error("Erro ao carregar moldura:", e);
+
+        if (statusMolduraSelfie) {
+            statusMolduraSelfie.textContent =
+                "Erro ao consultar as molduras.";
+            statusMolduraSelfie.style.color = "#c0392b";
         }
     }
-
-    previewMolduraSelfie.removeAttribute("src");
-    previewMolduraSelfie.style.display = "none";
-
-    if(statusMolduraSelfie){
-        statusMolduraSelfie.textContent = "Nenhuma moldura cadastrada.";
-        statusMolduraSelfie.style.color = "#68747a";
-    }
 }
+
 
 async function excluirMolduraSelfie(){
     if(!APP_ID) return;
