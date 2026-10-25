@@ -1392,7 +1392,41 @@ iframe{
   gap:10px;
 }
 
-  </style>
+  
+
+/* ===== NAVEGAÇÃO POR CONTROLE REMOTO / TV BOX ===== */
+:focus-visible {
+  outline: 3px solid #ffffff !important;
+  outline-offset: 4px !important;
+}
+.movie:focus, .canal-item:focus, .top-channel-card:focus,
+.categoria-btn:focus, button:focus, input:focus, .icon-btn:focus {
+  outline: 3px solid #ff3030 !important;
+  outline-offset: 4px !important;
+  border-color: #fff !important;
+  position: relative;
+  z-index: 20;
+}
+.movie:focus {
+  transform: scale(1.04);
+  box-shadow: 0 0 0 3px #ff3030;
+}
+.tv-remote-help {
+  display: none;
+  margin: 8px 0 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.08);
+  color: #fff;
+  font-size: 14px;
+  text-align: center;
+}
+@media (min-width: 769px) and (hover: none) {
+  .tv-remote-help { display:block; }
+  .movie:hover { transform:none; }
+}
+
+</style>
  
 </head>
 <body>
@@ -5229,6 +5263,150 @@ if("serviceWorker" in navigator){
   });
 
 }
+
+
+
+/* ===== CONTROLE REMOTO TV BOX: SETAS + OK + VOLTAR ===== */
+(function ativarNavegacaoControleTV() {
+  const seletor = [
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '.movie',
+    '.canal-item',
+    '.top-channel-card',
+    '.categoria-btn',
+    '.icon-btn',
+    '[role="button"]',
+    'a[href]'
+  ].join(',');
+
+  function visivel(el) {
+    if (!el || !el.isConnected) return false;
+    const r = el.getBoundingClientRect();
+    const st = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 &&
+      st.display !== 'none' && st.visibility !== 'hidden' &&
+      st.opacity !== '0' && !el.closest('[style*="display: none"]');
+  }
+
+  function prepararElementos() {
+    document.querySelectorAll(seletor).forEach(el => {
+      if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+      if ((el.classList.contains('movie') ||
+           el.classList.contains('canal-item') ||
+           el.classList.contains('top-channel-card')) &&
+          !el.hasAttribute('role')) {
+        el.setAttribute('role', 'button');
+      }
+    });
+  }
+
+  function itensVisiveis() {
+    prepararElementos();
+    return [...document.querySelectorAll(seletor)].filter(visivel);
+  }
+
+  function moverFoco(direcao) {
+    const itens = itensVisiveis();
+    const atual = document.activeElement;
+    if (!itens.length) return;
+    if (!itens.includes(atual)) {
+      const primeiro = itens.find(el =>
+        el.matches('.top-channel-card, .categoria-btn, .movie, .canal-item, button, input')
+      ) || itens[0];
+      primeiro.focus({preventScroll: true});
+      primeiro.scrollIntoView({block:'nearest', inline:'nearest'});
+      return;
+    }
+
+    const a = atual.getBoundingClientRect();
+    const ax = a.left + a.width / 2;
+    const ay = a.top + a.height / 2;
+    let melhor = null, melhorPontuacao = Infinity;
+
+    for (const el of itens) {
+      if (el === atual) continue;
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const dx = x - ax, dy = y - ay;
+      let principal, lateral;
+
+      if (direcao === 'ArrowRight') { if (dx <= 8) continue; principal = dx; lateral = Math.abs(dy); }
+      if (direcao === 'ArrowLeft')  { if (dx >= -8) continue; principal = -dx; lateral = Math.abs(dy); }
+      if (direcao === 'ArrowDown')  { if (dy <= 8) continue; principal = dy; lateral = Math.abs(dx); }
+      if (direcao === 'ArrowUp')    { if (dy >= -8) continue; principal = -dy; lateral = Math.abs(dx); }
+
+      const pontuacao = principal + lateral * 2.2;
+      if (pontuacao < melhorPontuacao) {
+        melhorPontuacao = pontuacao;
+        melhor = el;
+      }
+    }
+
+    if (melhor) {
+      melhor.focus({preventScroll: true});
+      melhor.scrollIntoView({block:'nearest', inline:'nearest', behavior:'auto'});
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    const alvo = e.target;
+    const digitando = alvo && (
+      alvo.matches('input, textarea, select') ||
+      alvo.isContentEditable
+    );
+
+    if (digitando) {
+      if (e.key === 'Escape') {
+        alvo.blur();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+      // Deixa as setas do player do YouTube controlarem o vídeo quando ele está aberto.
+      const overlay = document.getElementById('playerOverlay');
+      if (overlay && overlay.classList.contains('show')) return;
+      e.preventDefault();
+      moverFoco(e.key);
+      return;
+    }
+
+    if (e.key === 'Enter' || e.key === ' ') {
+      const el = document.activeElement;
+      if (el && el !== document.body &&
+          (el.matches('.movie, .canal-item, .top-channel-card, .categoria-btn, [role="button"]') ||
+           el.tagName === 'BUTTON')) {
+        e.preventDefault();
+        el.click();
+      }
+      return;
+    }
+
+    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'BrowserBack') {
+      const overlay = document.getElementById('playerOverlay');
+      if (overlay && overlay.classList.contains('show') &&
+          typeof window.fecharPlayer === 'function') {
+        e.preventDefault();
+        window.fecharPlayer();
+      }
+    }
+  }, true);
+
+  // Elementos são criados dinamicamente no catálogo; prepara novamente sem interferir na página.
+  const observador = new MutationObserver(() => prepararElementos());
+  observador.observe(document.body, {childList:true, subtree:true});
+
+  window.addEventListener('load', () => {
+    prepararElementos();
+    const inicial = document.querySelector('.top-channel-card, .categoria-btn, .movie, .canal-item');
+    if (inicial && visivel(inicial)) inicial.focus({preventScroll:true});
+  });
+})();
 
 </script>
 </body>
