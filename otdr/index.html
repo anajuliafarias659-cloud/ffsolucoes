@@ -96,6 +96,19 @@ O sistema pesquisa as nomenclaturas existentes no próprio KMZ. Não é necessá
 <option value="m">Metros</option>
 </select>
 
+<div class="card" style="margin-top:12px;background:#101a2b">
+  <h2>🧵 Reservas técnicas (RTs)</h2>
+  <div class="small">Informe somente as RTs que ficam entre o ponto A e o rompimento estimado. Deixe em branco as linhas que não usar. O sistema soma as metragens e desconta esse total da leitura para posicionar o evento.</div>
+  <div class="row"><div><label>Quantidade de RTs</label></div><div><label>Metragem de cada RT (m)</label></div></div>
+  <div class="row"><input id="rtQtd1" type="number" min="0" step="1" placeholder="Ex.: 10"><input id="rtM1" type="number" min="0" step="0.1" placeholder="Ex.: 25"></div>
+  <div class="row"><input id="rtQtd2" type="number" min="0" step="1" placeholder="Ex.: 10"><input id="rtM2" type="number" min="0" step="0.1" placeholder="Ex.: 30"></div>
+  <div class="row"><input id="rtQtd3" type="number" min="0" step="1" placeholder="Quantidade (opcional)"><input id="rtM3" type="number" min="0" step="0.1" placeholder="Metros (opcional)"></div>
+  <div class="row"><input id="rtQtd4" type="number" min="0" step="1" placeholder="Quantidade (opcional)"><input id="rtM4" type="number" min="0" step="0.1" placeholder="Metros (opcional)"></div>
+  <div class="row"><input id="rtQtd5" type="number" min="0" step="1" placeholder="Quantidade (opcional)"><input id="rtM5" type="number" min="0" step="0.1" placeholder="Metros (opcional)"></div>
+  <div class="metric"><span>Total de RTs</span><b id="rtTotalQtd">0</b></div>
+  <div class="metric"><span>Metragem total a descontar</span><b id="rtTotalM">0 m</b></div>
+</div>
+
 <div id="advanced" style="margin-top:8px">
 <div class="row">
   <div>
@@ -119,7 +132,8 @@ O sistema pesquisa as nomenclaturas existentes no próprio KMZ. Não é necessá
 <div class="metric"><span>Ponto A</span><b id="rA">—</b></div>
 <div class="metric"><span>Ponto B</span><b id="rB">—</b></div>
 <div class="metric"><span>OTDR</span><b id="rOtdr">—</b></div>
-<div class="metric"><span>Distância da rota</span><b id="rRota">—</b></div>
+<div class="metric"><span>RTs descontadas</span><b id="rRT">—</b></div>
+<div class="metric"><span>Distância da rota (corrigida)</span><b id="rRota">—</b></div>
 <div class="metric"><span>Coordenada</span><b id="rCoord">—</b></div>
 <div class="metric"><span>Trecho</span><b id="rTrecho">—</b></div>
 <button class="success" onclick="copiarRelatorio()">📋 Copiar relatório</button>
@@ -374,6 +388,30 @@ function rotaEntrePontosPorProximidade(orig, dest){
   try { return buildRoute(ia,ib); } catch(e) { console.warn(e); return null; }
 }
 
+function calcularRTs(){
+ let qtdTotal=0, metrosTotal=0;
+ for(let i=1;i<=5;i++){
+   const qEl=document.getElementById(`rtQtd${i}`), mEl=document.getElementById(`rtM${i}`);
+   const q=qEl && qEl.value.trim()!=="" ? Number(qEl.value) : 0;
+   const m=mEl && mEl.value.trim()!=="" ? Number(mEl.value) : 0;
+   if(!Number.isFinite(q)||q<0||!Number.isInteger(q)||!Number.isFinite(m)||m<0){
+     throw new Error("Confira as quantidades e metragens das RTs. Use números positivos ou deixe em branco.");
+   }
+   if(q>0 && m===0) throw new Error(`Informe a metragem de cada RT na linha ${i}, ou deixe a linha toda em branco.`);
+   if(m>0 && q===0) throw new Error(`Informe a quantidade de RTs na linha ${i}, ou deixe a linha toda em branco.`);
+   qtdTotal+=q; metrosTotal+=q*m;
+ }
+ const qOut=document.getElementById("rtTotalQtd"), mOut=document.getElementById("rtTotalM");
+ if(qOut) qOut.textContent=String(qtdTotal);
+ if(mOut) mOut.textContent=`${metrosTotal.toFixed(1)} m`;
+ return {qtd:qtdTotal, metros:metrosTotal};
+}
+for(let i=1;i<=5;i++){
+ const q=document.getElementById(`rtQtd${i}`), m=document.getElementById(`rtM${i}`);
+ if(q) q.addEventListener("input",()=>{try{calcularRTs()}catch(e){}});
+ if(m) m.addEventListener("input",()=>{try{calcularRTs()}catch(e){}});
+}
+
 function localizarFTTH(){
   if(!ftthOrigem || !ftthDestino){
     alert("Selecione a origem e o destino nos resultados encontrados no KMZ.");
@@ -382,7 +420,10 @@ function localizarFTTH(){
   const raw=+document.getElementById("otdr").value;
   const unidade=document.getElementById("unidade").value;
   if(!Number.isFinite(raw)||raw<0){alert("Informe a leitura do OTDR.");return;}
-  const dist=unidade==="km"?raw*1000:raw;
+  const distBruta=unidade==="km"?raw*1000:raw;
+  let rt; try { rt=calcularRTs(); } catch(e) { alert(e.message); return; }
+  const dist=distBruta-rt.metros;
+  if(dist<0){alert(`A metragem das RTs (${rt.metros.toFixed(1)} m) é maior que a leitura do OTDR (${distBruta.toFixed(1)} m). Confira os valores.`);return;}
   const route=rotaEntrePontosPorProximidade(ftthOrigem,ftthDestino);
   if(!route || route.length<2){alert("Não foi possível montar a rota FTTH entre os pontos selecionados.");return;}
   const total=lineLength(route);
@@ -400,10 +441,11 @@ function localizarFTTH(){
   document.getElementById("rA").textContent=ftthOrigem.label;
   document.getElementById("rB").textContent=ftthDestino.label;
   document.getElementById("rOtdr").textContent=`${raw} ${unidade}`;
-  document.getElementById("rRota").textContent=`${dist.toFixed(1)} m`;
+  document.getElementById("rRT").textContent=`${rt.qtd} RTs • ${rt.metros.toFixed(1)} m`;
+  document.getElementById("rRota").textContent=`${dist.toFixed(1)} m (após RTs)`;
   document.getElementById("rCoord").textContent=`${pos.point[0].toFixed(7)}, ${pos.point[1].toFixed(7)}`;
   document.getElementById("rTrecho").textContent=`rota FTTH • segmento ${pos.segment}`;
-  currentResult={ia:0,ib:0,raw,unidade,dist,dFromStart:dist,total,point:pos.point,margem:20,
+  currentResult={ia:0,ib:0,raw,unidade,distBruta,dist,dFromStart:dist,total,point:pos.point,margem:20,rtQtd:rt.qtd,rtMetros:rt.metros,
                  ftthOrigem:ftthOrigem.label,ftthDestino:ftthDestino.label};
 }
 
@@ -422,11 +464,14 @@ function localizarRompimento(){
  const sentido=sentidoEl ? sentidoEl.value : "normal";
  if(!Number.isFinite(raw)||raw<0){alert("Informe a leitura do OTDR.");return;}
  if(ia===ib){alert("Escolha pontos A e B diferentes.");return;}
- const dist=unidade==="km"?raw*1000:raw;
+ const distBruta=unidade==="km"?raw*1000:raw;
+ let rt; try { rt=calcularRTs(); } catch(e) { alert(e.message); return; }
+ const dist=distBruta-rt.metros;
+ if(dist<0){alert(`A metragem das RTs (${rt.metros.toFixed(1)} m) é maior que a leitura do OTDR (${distBruta.toFixed(1)} m). Confira os valores.`);return;}
  try { currentRoute=buildRoute(ia,ib); } catch(err) { alert(err.message); return; }
  if(currentRoute.length<2){alert("Não foi possível montar a rota entre os pontos selecionados.");return;}
  const total=lineLength(currentRoute);
- if(dist>total){alert(`A leitura do OTDR (${dist.toFixed(1)} m) é maior que a rota selecionada (${total.toFixed(1)} m).`);return;}
+ if(dist>total){alert(`A leitura corrigida após descontar RTs (${dist.toFixed(1)} m) é maior que a rota selecionada (${total.toFixed(1)} m). Confira os pontos A/B e as RTs informadas.`);return;}
  const dFromStart=sentido==="normal"?dist:total-dist;
  const pos=pointAtDistance(currentRoute,dFromStart);
  routeLayer.clearLayers();
@@ -441,10 +486,11 @@ function localizarRompimento(){
  document.getElementById("rA").textContent=points[ia]?.name || "Ponto A";
  document.getElementById("rB").textContent=points[ib]?.name || "Ponto B";
  document.getElementById("rOtdr").textContent=`${raw} ${unidade}`;
- document.getElementById("rRota").textContent=`${dFromStart.toFixed(1)} m ${margemTxt}`;
+ document.getElementById("rRT").textContent=`${rt.qtd} RTs • ${rt.metros.toFixed(1)} m`;
+ document.getElementById("rRota").textContent=`${dFromStart.toFixed(1)} m após RTs ${margemTxt}`;
  document.getElementById("rCoord").textContent=`${pos.point[0].toFixed(7)}, ${pos.point[1].toFixed(7)}`;
  document.getElementById("rTrecho").textContent=`segmento ${pos.segment}`;
- currentResult={ia,ib,raw,unidade,dist,dFromStart,total,point:pos.point,margem,pontoA:points[ia]?.name,pontoB:points[ib]?.name};
+ currentResult={ia,ib,raw,unidade,distBruta,dist,dFromStart,total,point:pos.point,margem,rtQtd:rt.qtd,rtMetros:rt.metros,pontoA:points[ia]?.name,pontoB:points[ib]?.name};
 }
 
 function copiarRelatorio(){
@@ -455,7 +501,8 @@ REDE: ${tipoRede==="backbone" ? "BACKBONE" : "FTTH"} • KMZ
 PONTO A: ${r.ftthOrigem || r.pontoA || "Ponto A"}
 PONTO B: ${r.ftthDestino || r.pontoB || "Ponto B"}
 LEITURA OTDR: ${r.raw} ${r.unidade}
-DISTÂNCIA NA ROTA: ${r.dFromStart.toFixed(1)} m
+RESERVAS TÉCNICAS: ${r.rtQtd ?? 0} RTs • ${Number(r.rtMetros ?? 0).toFixed(1)} m descontados
+DISTÂNCIA CORRIGIDA NA ROTA: ${r.dFromStart.toFixed(1)} m
 MARGEM: ± ${r.margem} m
 COORDENADA ESTIMADA: ${r.point[0].toFixed(7)}, ${r.point[1].toFixed(7)}
 GOOGLE MAPS: https://www.google.com/maps?q=${r.point[0]},${r.point[1]}`;
