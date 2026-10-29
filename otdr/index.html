@@ -70,16 +70,12 @@ button.success{background:#16875b;border-color:#16875b}
 </div>
 <div id="tipoStatus" class="small" style="margin-top:8px">Tipo selecionado: BACKBONE</div>
 <div id="ftthFields" style="display:none">
-<label>Origem da leitura — pesquisar no KMZ</label>
-<input id="ftthOrigem" type="text" autocomplete="off" placeholder="Ex.: CEO VIA 3, CEO, CTO 176...">
-<div id="ftthOrigemResults" class="searchResults"></div>
-
-<label>Destino / Ponto B — pesquisar no KMZ</label>
-<input id="ftthDestino" type="text" autocomplete="off" placeholder="Ex.: CTO 176, CTO 180...">
-<div id="ftthDestinoResults" class="searchResults"></div>
-
+<label>Ponto A — origem da leitura do OTDR</label>
+<select id="ftthPontoA"><option value="">Carregue o KMZ para listar VIA, CEO, CTO e demais pontos</option></select>
+<label>Ponto B — destino da rota</label>
+<select id="ftthPontoB"><option value="">Selecione o ponto B</option></select>
 <div class="small" style="margin-top:7px">
-O sistema pesquisa as nomenclaturas existentes no próprio KMZ. Não é necessário cadastrar previamente VIA, CEO ou CTO.
+A lista é montada com os pontos existentes no KMZ. Quando houver essa informação, aparece também a pasta/VIA de origem, por exemplo: VIA 1 › CTO´s › CTO-734. Escolha A e B manualmente.
 </div>
 </div>
 
@@ -182,6 +178,19 @@ function lineLength(pts){
 }
 function interpolate(a,b,t){return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]}
 
+function caminhoPastasKML(el){
+ const nomes=[];
+ let pai=el.parentElement;
+ while(pai){
+   if((pai.localName||"").toLowerCase()==="folder"){
+     const nameEl=Array.from(pai.children||[]).find(ch=>(ch.localName||"").toLowerCase()==="name");
+     const n=nameEl?.textContent?.trim();
+     if(n) nomes.unshift(n);
+   }
+   pai=pai.parentElement;
+ }
+ return nomes;
+}
 function parseKML(text){
  const xml=new DOMParser().parseFromString(text,"text/xml");
  const pms=[...xml.getElementsByTagNameNS("http://www.opengis.net/kml/2.2","Placemark")];
@@ -189,15 +198,16 @@ function parseKML(text){
  pms.forEach(pm=>{
    const name=(pm.getElementsByTagNameNS("http://www.opengis.net/kml/2.2","name")[0]?.textContent||"").trim();
    const desc=(pm.getElementsByTagNameNS("http://www.opengis.net/kml/2.2","description")[0]?.textContent||"").trim();
+   const folderPath=caminhoPastasKML(pm);
    const ls=pm.getElementsByTagNameNS("http://www.opengis.net/kml/2.2","LineString")[0];
    const pt=pm.getElementsByTagNameNS("http://www.opengis.net/kml/2.2","Point")[0];
    if(ls){
      const c=ls.getElementsByTagNameNS("http://www.opengis.net/kml/2.2","coordinates")[0]?.textContent||"";
      const pts=c.trim().split(/\s+/).map(v=>v.split(",")).filter(v=>v.length>=2).map(v=>[+v[1],+v[0]]);
-     if(pts.length>=2) outC.push({name:name||"Cabo sem nome",desc,pts,length:lineLength(pts)});
+     if(pts.length>=2) outC.push({name:name||"Cabo sem nome",desc,folderPath,pts,length:lineLength(pts)});
    }else if(pt){
      const c=pt.getElementsByTagNameNS("http://www.opengis.net/kml/2.2","coordinates")[0]?.textContent||"";
-     const v=c.trim().split(","); if(v.length>=2) outP.push({name,desc,lat:+v[1],lon:+v[0]});
+     const v=c.trim().split(","); if(v.length>=2) outP.push({name,desc,folderPath,lat:+v[1],lon:+v[0]});
    }
  });
  return {cables:outC,points:outP};
@@ -205,7 +215,7 @@ function parseKML(text){
 
 function initMap(){
  map=L.map("map").setView([-8.90,-42.73],12);
- // Camadas de mapa: alteração restrita à visualização, sem mexer na lógica OTDR/KMZ.
+ // Camadas de mapa mantidas junto com a seleção FTTH dos pontos A e B.
  const mapaRuas = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
    maxZoom: 21, subdomains: "abcd", attribution: "© OpenStreetMap © CARTO"
  });
@@ -256,6 +266,35 @@ function render(){
 
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));}
 
+function preencherSelectsFTTH(){
+ const a=document.getElementById("ftthPontoA"), b=document.getElementById("ftthPontoB");
+ if(!a||!b)return;
+ a.innerHTML='<option value="">Selecione o ponto A</option>';
+ b.innerHTML='<option value="">Selecione o ponto B</option>';
+ const usable=points.map((p,i)=>({...p,index:i})).filter(p=>{
+   if(!p.name||!Number.isFinite(p.lat)||!Number.isFinite(p.lon))return false;
+   // Permitir qualquer ponto nomeado do KMZ, não apenas nomes que contenham VIA/CEO/CTO.
+   // Muitos KMZs identificam caixas e derivações por números ou códigos próprios.
+   return true;
+ });
+ usable.sort((x,y)=>{
+   const ax=[...(x.folderPath||[]),x.name].join(" ").toLocaleLowerCase();
+   const by=[...(y.folderPath||[]),y.name].join(" ").toLocaleLowerCase();
+   return ax.localeCompare(by,"pt-BR",{numeric:true,sensitivity:"base"});
+ });
+ usable.forEach(p=>{
+   const path=(p.folderPath||[]).slice(-3).join(" › ");
+   const label=(path?path+" › ":"")+p.name;
+   [a,b].forEach(sel=>{
+     const op=document.createElement("option");
+     op.value=String(p.index);
+     op.textContent=label;
+     op.title=label;
+     sel.appendChild(op);
+   });
+ });
+ a.value=""; b.value="";
+}
 function preencherSelects(){
  const a=document.getElementById("pontoA"), b=document.getElementById("pontoB");
  a.innerHTML='<option value="">Selecione o início (A)</option>';
@@ -267,40 +306,80 @@ function preencherSelects(){
  });
  // Nunca presumir que o primeiro e o último ponto do KML são o início/fim do teste.
  a.value=""; b.value="";
+ preencherSelectsFTTH();
  routeGraph=buildCableGraph();
 }
 
-function buildCableGraph(){
- // Build a graph from cable endpoints; join cable endpoints that are within 75 m to tolerate small gaps in FTTH KMZ drawings.
- const nodes=[], edges=[];
- const endpointNode=(coord)=>{
-   let best=-1,bd=Infinity;
-   nodes.forEach((n,i)=>{const d=hav(coord,n.coord);if(d<bd){bd=d;best=i;}});
-   if(best>=0 && bd<=75){return best;}
-   nodes.push({coord:[coord[0],coord[1]],edges:[]}); return nodes.length-1;
+function buildCableGraph(cableIndices=null){
+ // Grafo por segmentos reais: cada vértice do LineString vira nó e cada par
+ // consecutivo vira uma aresta. O KMZ FTTH desenha cabos como linhas longas,
+ // não apenas como ligações entre as duas pontas de cada cabo.
+ const nodes=[], edges=[], grid=new Map();
+ const cellSize=25; // metros aproximados para conectar vértices desenhados quase juntos
+ const key=(x,y)=>x+','+y;
+ const cellOf=coord=>{
+   const lat=coord[0], lon=coord[1];
+   const y=Math.floor(lat*111320/cellSize);
+   const x=Math.floor(lon*111320*Math.cos(lat*Math.PI/180)/cellSize);
+   return [x,y];
  };
- cables.forEach((c,ci)=>{
-   const u=endpointNode(c.pts[0]), v=endpointNode(c.pts[c.pts.length-1]);
-   const edge={u,v,cableIndex:ci,length:c.length,pts:c.pts};
-   const ei=edges.push(edge)-1;
-   nodes[u].edges.push(ei); nodes[v].edges.push(ei);
+ const getNode=coord=>{
+   const [gx,gy]=cellOf(coord);
+   let best=-1,bd=Infinity;
+   for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+     const ids=grid.get(key(gx+dx,gy+dy))||[];
+     for(const i of ids){const d=hav(coord,nodes[i].coord);if(d<bd){bd=d;best=i;}}
+   }
+   if(best>=0 && bd<=cellSize){
+     // Keep the first surveyed coordinate to avoid moving the cable geometry.
+     return best;
+   }
+   const id=nodes.push({coord:[coord[0],coord[1]],edges:[]})-1;
+   const k=key(gx,gy); if(!grid.has(k))grid.set(k,[]); grid.get(k).push(id);
+   return id;
+ };
+ const ids=cableIndices || cables.map((_,i)=>i);
+ ids.forEach(ci=>{
+   const c=cables[ci]; if(!c || !c.pts || c.pts.length<2)return;
+   for(let j=1;j<c.pts.length;j++){
+     const a=c.pts[j-1], b=c.pts[j];
+     if(!a||!b||!Number.isFinite(a[0])||!Number.isFinite(a[1])||!Number.isFinite(b[0])||!Number.isFinite(b[1]))continue;
+     const u=getNode(a), v=getNode(b);
+     if(u===v)continue;
+     const length=hav(a,b);
+     const edge={u,v,cableIndex:ci,length,pts:[a,b]};
+     const ei=edges.push(edge)-1;
+     nodes[u].edges.push(ei); nodes[v].edges.push(ei);
+   }
  });
  return {nodes,edges};
 }
-
-function nearestGraphNode(point){
- if(!routeGraph||!point)return null;
+function nearestGraphNode(point, graph=routeGraph){
+ if(!graph||!point)return null;
  let best=-1,bd=Infinity;
- routeGraph.nodes.forEach((n,i)=>{const d=hav([point.lat,point.lon],n.coord);if(d<bd){bd=d;best=i;}});
+ graph.nodes.forEach((n,i)=>{const d=hav([point.lat,point.lon],n.coord);if(d<bd){bd=d;best=i;}});
  return bd<=180?{index:best,distance:bd}:null;
 }
 
-function buildRoute(iA,iB){
+function caminhoPastasComum(a,b){
+ const pa=a?.folderPath||[], pb=b?.folderPath||[]; let i=0;
+ while(i<pa.length&&i<pb.length&&pa[i].toLocaleLowerCase()===pb[i].toLocaleLowerCase())i++;
+ return pa.slice(0,i);
+}
+function buildRouteFTTH(iA,iB){
+ if(!points[iA]||!points[iB])return [];
+ // Os pontos do KML frequentemente ficam numa pasta diferente da linha do cabo.
+ // Por isso não filtrar cabos pela pasta compartilhada dos pontos: usar o grafo
+ // de todos os segmentos importados e deixar a conectividade espacial definir a rota.
+ if(!routeGraph) routeGraph=buildCableGraph();
+ return buildRoute(iA,iB,routeGraph);
+}
+function buildRoute(iA,iB,graph=routeGraph){
  // iA/iB are indices of named KML points. Find the connected shortest cable path.
- if(!routeGraph || !points[iA] || !points[iB]) return [];
- const src=nearestGraphNode(points[iA]), dst=nearestGraphNode(points[iB]);
- if(!src||!dst) throw new Error("Um dos pontos selecionados não está conectado às extremidades dos cabos no KMZ (limite de aproximação 180 m).");
- const {nodes,edges}=routeGraph, dist=nodes.map(()=>Infinity), prev=nodes.map(()=>null), used=nodes.map(()=>false);
+ if(!graph || !points[iA] || !points[iB]) return [];
+ const src=nearestGraphNode(points[iA],graph), dst=nearestGraphNode(points[iB],graph);
+ if(!src||!dst) throw new Error("Um dos pontos selecionados está longe das extremidades dos cabos no KMZ (limite de aproximação 180 m).");
+ const {nodes,edges}=graph, dist=nodes.map(()=>Infinity), prev=nodes.map(()=>null), used=nodes.map(()=>false);
  dist[src.index]=0;
  for(let k=0;k<nodes.length;k++){
    let u=-1,bd=Infinity;
@@ -440,10 +519,23 @@ for(let i=1;i<=5;i++){
 }
 
 function localizarFTTH(){
-  if(!ftthOrigem || !ftthDestino){
-    alert("Selecione a origem e o destino nos resultados encontrados no KMZ.");
+  const aSel=document.getElementById("ftthPontoA");
+  const bSel=document.getElementById("ftthPontoB");
+  if(!aSel || !bSel || aSel.value==="" || bSel.value===""){
+    alert("Selecione o ponto A e o ponto B nas listas do KMZ.");
     return;
   }
+  const ia=Number(aSel.value), ib=Number(bSel.value);
+  if(!Number.isInteger(ia)||!Number.isInteger(ib)||ia===ib){
+    alert("Escolha dois pontos diferentes para A e B.");
+    return;
+  }
+  const makeItem=(index)=>{
+    const p=points[index];
+    const path=(p.folderPath||[]).slice(-3).join(" › ");
+    return {type:"ponto",index,label:(path?path+" › ":"")+p.name};
+  };
+  const origem=makeItem(ia), destino=makeItem(ib);
   const raw=+document.getElementById("otdr").value;
   const unidade=document.getElementById("unidade").value;
   if(!Number.isFinite(raw)||raw<0){alert("Informe a leitura do OTDR.");return;}
@@ -451,8 +543,10 @@ function localizarFTTH(){
   let rt; try { rt=calcularRTs(); } catch(e) { alert(e.message); return; }
   const dist=distBruta-rt.metros;
   if(dist<0){alert(`A metragem das RTs (${rt.metros.toFixed(1)} m) é maior que a leitura do OTDR (${distBruta.toFixed(1)} m). Confira os valores.`);return;}
-  const route=rotaEntrePontosPorProximidade(ftthOrigem,ftthDestino);
-  if(!route || route.length<2){alert("Não foi possível montar a rota FTTH entre os pontos selecionados.");return;}
+  let route;
+  try { route=buildRouteFTTH(ia,ib); }
+  catch(e) { alert(e.message || "Não foi possível montar a rota FTTH entre os pontos selecionados."); return; }
+  if(!route || route.length<2){alert("Não foi possível montar uma rota contínua FTTH dentro da pasta de rede comum dos pontos selecionados. Confira os cabos no KMZ.");return;}
   const total=lineLength(route);
   if(dist>total){alert(`A leitura (${dist.toFixed(1)} m) é maior que a rota encontrada (${total.toFixed(1)} m).`);return;}
   const pos=pointAtDistance(route,dist);
@@ -460,20 +554,20 @@ function localizarFTTH(){
   L.polyline(route,{color:"#00d4ff",weight:7,opacity:.8}).addTo(routeLayer);
   if(ruptureMarker) map.removeLayer(ruptureMarker);
   ruptureMarker=L.marker(pos.point,{title:"Rompimento provável"}).addTo(map);
-  ruptureMarker.bindPopup(`<strong>🔴 ROMPIMENTO PROVÁVEL</strong><br>Origem: ${escapeHtml(ftthOrigem.label)}<br>Destino: ${escapeHtml(ftthDestino.label)}<br>${pos.point[0].toFixed(7)}, ${pos.point[1].toFixed(7)}`).openPopup();
+  ruptureMarker.bindPopup(`<strong>🔴 ROMPIMENTO PROVÁVEL</strong><br>Origem: ${escapeHtml(origem.label)}<br>Destino: ${escapeHtml(destino.label)}<br>${pos.point[0].toFixed(7)}, ${pos.point[1].toFixed(7)}`).openPopup();
   map.setView(pos.point,17);
 
   document.getElementById("resultado").style.display="block";
   document.getElementById("rRede").textContent="FTTH • KMZ";
-  document.getElementById("rA").textContent=ftthOrigem.label;
-  document.getElementById("rB").textContent=ftthDestino.label;
+  document.getElementById("rA").textContent=origem.label;
+  document.getElementById("rB").textContent=destino.label;
   document.getElementById("rOtdr").textContent=`${raw} ${unidade}`;
   document.getElementById("rRT").textContent=`${rt.qtd} RTs • ${rt.metros.toFixed(1)} m`;
   document.getElementById("rRota").textContent=`${dist.toFixed(1)} m (após RTs)`;
   document.getElementById("rCoord").textContent=`${pos.point[0].toFixed(7)}, ${pos.point[1].toFixed(7)}`;
   document.getElementById("rTrecho").textContent=`rota FTTH • segmento ${pos.segment}`;
   currentResult={ia:0,ib:0,raw,unidade,distBruta,dist,dFromStart:dist,total,point:pos.point,margem:20,rtQtd:rt.qtd,rtMetros:rt.metros,
-                 ftthOrigem:ftthOrigem.label,ftthDestino:ftthDestino.label};
+                 ftthOrigem:origem.label,ftthDestino:destino.label};
 }
 
 function localizarRompimento(){
@@ -565,9 +659,6 @@ document.getElementById("kmzFile").addEventListener("change",async e=>{
  }catch(err){console.error(err);alert("Não foi possível ler o arquivo: "+err.message);document.getElementById("loading").style.display="none";}
 });
 
-
-document.getElementById("ftthOrigem").addEventListener("input",()=>pesquisarKMZ("ftthOrigem","ftthOrigemResults","origem"));
-document.getElementById("ftthDestino").addEventListener("input",()=>pesquisarKMZ("ftthDestino","ftthDestinoResults","destino"));
 
 initMap();
 (async()=>{
