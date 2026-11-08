@@ -1186,34 +1186,94 @@ if (dataLocal === hoje) {
 
 async function carregarUltimosPagamentos(){
 
-const { data, error } = await db
-    .from("hotspot_pagamentos")
-    .select("*")
-    .eq("app_id",APP_ID)
-    .order("created_at",{ascending:false})
-    .limit(10);
+    const tbody = document.getElementById("lista");
+    if(!tbody) return;
 
-    const tbody=document.getElementById("lista");
+    try{
+        const { data, error } = await db
+            .from("hotspot_pagamentos")
+            .select("*")
+            .eq("app_id", APP_ID)
+            .order("created_at", { ascending:false })
+            .limit(10);
 
-    tbody.innerHTML="";
+        if(error){
+            console.error("[PAGAMENTOS] Erro ao carregar últimos pagamentos:", error);
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" style="text-align:center;color:#c00;">
+                        Erro ao carregar pagamentos.
+                    </td>
+                </tr>`;
+            return;
+        }
 
-    data.forEach(p=>{
+        const pagamentos = data || [];
 
-        tbody.innerHTML+=`
-        <tr>
+        if(!pagamentos.length){
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" style="text-align:center;">
+                        Nenhum pagamento encontrado.
+                    </td>
+                </tr>`;
+            return;
+        }
 
-            <td>${p.usuario || "-"}</td>
+        const obterClientePagamento = p => {
+            const valor = p.usuario ||
+                p.nome_cliente ||
+                p.cliente_nome ||
+                p.nome_usuario ||
+                p.usuario_nome ||
+                p.nome ||
+                p.cliente ||
+                p.whatsapp ||
+                p.telefone ||
+                p.cliente_mac ||
+                p.mac ||
+                "-";
+            return escaparHtmlAdmin(valor);
+        };
 
-            <td>${p.plano_nome || "-"}</td>
+        const obterPlanoPagamento = p => {
+            const valor = p.plano_nome ||
+                p.nome_plano ||
+                p.plano ||
+                p.descricao_plano ||
+                p.produto ||
+                p.nome_produto ||
+                p.tipo_plano ||
+                "-";
+            return escaparHtmlAdmin(valor);
+        };
 
-            <td>R$ ${Number(p.valor).toFixed(2)}</td>
+        tbody.innerHTML = pagamentos.map(p => {
+            const valor = Number(p.valor ?? p.valor_pago ?? p.transaction_amount ?? 0);
+            const valorFormatado = Number.isFinite(valor)
+                ? valor.toLocaleString("pt-BR", { style:"currency", currency:"BRL" })
+                : "-";
 
-            <td>${p.status}</td>
+            return `
+                <tr>
+                    <td>${obterClientePagamento(p)}</td>
+                    <td>${obterPlanoPagamento(p)}</td>
+                    <td>${valorFormatado}</td>
+                    <td>${escaparHtmlAdmin(p.status || "-")}</td>
+                </tr>`;
+        }).join("");
 
-        </tr>`;
+        console.log("[PAGAMENTOS] Últimos pagamentos carregados:", pagamentos.length, pagamentos);
 
-    });
-
+    }catch(e){
+        console.error("[PAGAMENTOS] Falha inesperada:", e);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4" style="text-align:center;color:#c00;">
+                    Não foi possível carregar os pagamentos.
+                </td>
+            </tr>`;
+    }
 }
 
 async function buscarClientesOnlineMikrotik(){
