@@ -346,10 +346,7 @@ grid-template-columns:repeat(2,1fr);
 }
 
 </style>
-<link rel="manifest" href="/hotspot/manifest.json">
 <meta name="theme-color" content="#0d8db8">
-<link rel="apple-touch-icon" href="/hotspot/icons/icon-192.png">
-
 <style>
 /* AJUSTE FINAL CLIENTES E PATROCINADORES */
 @media (min-width: 769px){
@@ -728,6 +725,23 @@ body{
 }
 </style>
 
+
+<script>
+/* FF Hotspot sem PWA: remove somente o Service Worker deste painel. */
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations()
+        .then(registrations => Promise.all(
+            registrations
+                .filter(reg => {
+                    const sw = reg.active || reg.waiting || reg.installing;
+                    return sw && new URL(sw.scriptURL).pathname === "/hotspot/sw.js";
+                })
+                .map(reg => reg.unregister())
+        ))
+        .catch(err => console.warn("[FF Hotspot] Não foi possível remover o Service Worker antigo:", err));
+}
+</script>
+
 </head>
 
 <body>
@@ -761,20 +775,6 @@ body{
     </div>
 
 </div>
-
-<button id="btnInstalar" style="
-display:none;
-background:#16a34a;
-color:#fff;
-padding:12px 18px;
-border:none;
-border-radius:10px;
-cursor:pointer;
-margin:15px 0;
-font-size:16px;">
-📲 Instalar Aplicativo
-</button>
-
 <!-- PRIMEIRA LINHA -->
 <div class="cards">
 
@@ -1096,183 +1096,143 @@ async function carregarEmpresa(){
     }
 }
 
+function obterCampoPagamento(p, campos, padrao = '') {
+    for (const campo of campos) {
+        const valor = p && p[campo];
+        if (valor !== null && valor !== undefined && String(valor).trim() !== '') {
+            return valor;
+        }
+    }
+    return padrao;
+}
+
+function statusPagamentoAdmin(p) {
+    return String(obterCampoPagamento(p, [
+        'payment_status', 'status', 'status_pagamento', 'situacao'
+    ], '-')).trim();
+}
+
+function pagamentoAprovadoAdmin(p) {
+    return ['approved', 'paid', 'pago', 'aprovado', 'confirmado']
+        .includes(statusPagamentoAdmin(p).toLowerCase());
+}
+
+function dataPagamentoAdmin(p) {
+    return obterCampoPagamento(p, [
+        'created_at', 'data_pagamento', 'updated_at', 'approved_at'
+    ], '');
+}
+
 async function carregarDashboard() {
-
-    const { data, error } = await db
-        .from("hotspot_pagamentos")
-        .select("*")
-        .eq("app_id", APP_ID)
-        .order("created_at", { ascending: false });
-
-console.log("APP_ID:", APP_ID);
-console.log("ERRO:", error);
-console.log("PAGAMENTOS:", data);
-
-    if (error) {
-        console.error(error);
+    const el = id => document.getElementById(id);
+    if (!APP_ID) {
+        console.error('[DASHBOARD] APP_ID não foi carregado.');
         return;
     }
 
-    const agora = new Date();
+    // SELECT * evita falha quando a tabela usa nomes de colunas diferentes.
+    const { data, error } = await db
+        .from('hotspot_pagamentos')
+        .select('*')
+        .eq('app_id', APP_ID)
+        .order('created_at', { ascending: false })
+        .limit(1000);
 
-const hoje = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "America/Sao_Paulo"
-}).format(new Date());
+    console.log('[DASHBOARD] APP_ID:', APP_ID, 'ERRO:', error, 'REGISTROS:', data?.length);
+    if (error) {
+        console.error('[DASHBOARD] Erro ao consultar hotspot_pagamentos:', error);
+        return;
+    }
 
-    let pagosHoje = 0;
-    let pendentes = 0;
-    let faturamentoHoje = 0;
-    let receitaMes = 0;
-    let totalPagos = 0;
+    const pagamentos = data || [];
+    const formatadorData = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+    const hoje = formatadorData.format(new Date());
+    const mesAtual = hoje.slice(0, 7);
+    let pagosHoje = 0, pendentes = 0, faturamentoHoje = 0;
+    let receitaMes = 0, totalPagosMes = 0;
 
-    data.forEach(p => {
-
-console.table(p);
-console.log(
-    "STATUS:", p.status,
-    "CREATED_AT:", p.created_at,
-    "VALOR:", p.valor
-);
-        if (p.status == "approved") {
-
-            totalPagos++;
-
-            receitaMes += Number(p.valor || 0);
-const dataLocal = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "America/Sao_Paulo"
-}).format(new Date(p.created_at));
-
-if (dataLocal === hoje) {
-
-    pagosHoje++;
-
-    faturamentoHoje += Number(p.valor || 0);
-
-}
-
-        } else if (p.status == "pending") {
-
-            pendentes++;
-
+    pagamentos.forEach(p => {
+        const status = statusPagamentoAdmin(p).toLowerCase();
+        const aprovado = pagamentoAprovadoAdmin(p);
+        const pendente = ['pending', 'in_process', 'pendente', 'em análise'].includes(status);
+        const dataRef = dataPagamentoAdmin(p);
+        let diaRef = '';
+        if (dataRef) {
+            const d = new Date(dataRef);
+            if (!Number.isNaN(d.getTime())) diaRef = formatadorData.format(d);
         }
-
+        if (pendente) pendentes++;
+        if (aprovado) {
+            const valor = Number(obterCampoPagamento(p, ['valor', 'transaction_amount', 'preco'], 0)) || 0;
+            if (diaRef === hoje) {
+                pagosHoje++;
+                faturamentoHoje += valor;
+            }
+            if (diaRef.startsWith(mesAtual)) {
+                receitaMes += valor;
+                totalPagosMes++;
+            }
+        }
     });
 
+    if (el('pagos')) el('pagos').textContent = pagosHoje;
+    if (el('pendentes')) el('pendentes').textContent = pendentes;
+    if (el('valor')) el('valor').textContent = faturamentoHoje.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (el('receitaMes')) el('receitaMes').textContent = receitaMes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (el('clientesMes')) el('clientesMes').textContent = totalPagosMes;
+    if (el('ticketMedio')) el('ticketMedio').textContent = totalPagosMes ? (receitaMes / totalPagosMes).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00';
+    if (el('tempoMedio')) el('tempoMedio').textContent = '-';
 
-    document.getElementById("pagos").innerHTML = pagosHoje;
-    document.getElementById("pendentes").innerHTML = pendentes;
-
-    document.getElementById("valor").innerHTML =
-        "R$ " + faturamentoHoje.toFixed(2);
-
-    document.getElementById("receitaMes").innerHTML =
-        "R$ " + receitaMes.toFixed(2);
-
-    document.getElementById("clientesMes").innerHTML =
-        totalPagos;
-
-    document.getElementById("ticketMedio").innerHTML =
-        totalPagos == 0
-        ? "R$ 0,00"
-        : "R$ " + (receitaMes / totalPagos).toFixed(2);
-
-    document.getElementById("tempoMedio").innerHTML = "-";
-
+    console.log('[DASHBOARD] Hoje:', hoje, 'Pagos hoje:', pagosHoje, 'Faturamento hoje:', faturamentoHoje);
     carregarClientesOnline();
-
     carregarUltimosPagamentos();
-
 }
 
 async function carregarUltimosPagamentos(){
+    const tbody = document.getElementById('lista');
+    if (!tbody) return;
+    if (!APP_ID) {
+        tbody.innerHTML = '<tr><td colspan="4">Identificação do estabelecimento não carregada.</td></tr>';
+        return;
+    }
 
-    const tbody = document.getElementById("lista");
-    if(!tbody) return;
-
-    try{
+    try {
+        // Lê todas as colunas disponíveis e não depende de um campo de nome específico.
         const { data, error } = await db
-            .from("hotspot_pagamentos")
-            .select("*")
-            .eq("app_id", APP_ID)
-            .order("created_at", { ascending:false })
-            .limit(10);
+            .from('hotspot_pagamentos')
+            .select('*')
+            .eq('app_id', APP_ID)
+            .order('created_at', { ascending: false })
+            .limit(100);
 
-        if(error){
-            console.error("[PAGAMENTOS] Erro ao carregar últimos pagamentos:", error);
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="4" style="text-align:center;color:#c00;">
-                        Erro ao carregar pagamentos.
-                    </td>
-                </tr>`;
-            return;
-        }
-
+        console.log('[PAGAMENTOS] APP_ID:', APP_ID, 'ERRO:', error, 'RETORNADOS:', data?.length);
+        if (error) throw error;
         const pagamentos = data || [];
-
-        if(!pagamentos.length){
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="4" style="text-align:center;">
-                        Nenhum pagamento encontrado.
-                    </td>
-                </tr>`;
+        if (!pagamentos.length) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Nenhum pagamento encontrado para este estabelecimento.</td></tr>';
             return;
         }
-
-        const obterClientePagamento = p => {
-            const valor = p.usuario ||
-                p.nome_cliente ||
-                p.cliente_nome ||
-                p.nome_usuario ||
-                p.usuario_nome ||
-                p.nome ||
-                p.cliente ||
-                p.whatsapp ||
-                p.telefone ||
-                p.cliente_mac ||
-                p.mac ||
-                "-";
-            return escaparHtmlAdmin(valor);
-        };
-
-        const obterPlanoPagamento = p => {
-            const valor = p.plano_nome ||
-                p.nome_plano ||
-                p.plano ||
-                p.descricao_plano ||
-                p.produto ||
-                p.nome_produto ||
-                p.tipo_plano ||
-                "-";
-            return escaparHtmlAdmin(valor);
-        };
 
         tbody.innerHTML = pagamentos.map(p => {
-            const valor = Number(p.valor ?? p.valor_pago ?? p.transaction_amount ?? 0);
+            const clienteNome = obterCampoPagamento(p, [
+                'usuario', 'nome', 'nome_cliente', 'cliente_nome', 'nome_usuario',
+                'usuario_nome', 'cliente', 'whatsapp', 'telefone'
+            ], '-');
+            const planoNome = obterCampoPagamento(p, [
+                'plano_nome', 'nome_plano', 'plano', 'produto_nome', 'descricao_plano'
+            ], '-');
+            const valor = Number(obterCampoPagamento(p, ['valor', 'transaction_amount', 'preco'], NaN));
             const valorFormatado = Number.isFinite(valor)
-                ? valor.toLocaleString("pt-BR", { style:"currency", currency:"BRL" })
-                : "-";
-
-            return `
-                <tr>
-                    <td>${obterClientePagamento(p)}</td>
-                    <td>${obterPlanoPagamento(p)}</td>
-                    <td>${valorFormatado}</td>
-                    <td>${escaparHtmlAdmin(p.status || "-")}</td>
-                </tr>`;
-        }).join("");
-
-        console.log("[PAGAMENTOS] Últimos pagamentos carregados:", pagamentos.length, pagamentos);
-
-    }catch(e){
-        console.error("[PAGAMENTOS] Falha inesperada:", e);
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="4" style="text-align:center;color:#c00;">
-                    Não foi possível carregar os pagamentos.
-                </td>
-            </tr>`;
+                ? valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                : '-';
+            const status = statusPagamentoAdmin(p);
+            return `<tr><td>${escaparHtmlAdmin(clienteNome)}</td><td>${escaparHtmlAdmin(planoNome)}</td><td>${valorFormatado}</td><td>${escaparHtmlAdmin(status)}</td></tr>`;
+        }).join('');
+    } catch (e) {
+        console.error('[PAGAMENTOS] Erro ao carregar pagamentos:', e);
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#c00;">Erro ao consultar pagamentos: ${escaparHtmlAdmin(e.message || String(e))}</td></tr>`;
     }
 }
 
@@ -2506,31 +2466,8 @@ iniciar();
 </script>
 
 <script>
-// Atualização do PWA: força a verificação da versão nova do Service Worker.
 if ("serviceWorker" in navigator) {
-    window.addEventListener("load", async () => {
-        try {
-            const registro = await navigator.serviceWorker.register(
-                "/hotspot/sw.js?v=8",
-                { updateViaCache: "none" }
-            );
-
-            // Não deixa o navegador reutilizar uma cópia antiga do arquivo SW.
-            await registro.update();
-
-            // Quando a nova versão assumir o controle, atualiza a tela uma única vez.
-            let recarregou = false;
-            navigator.serviceWorker.addEventListener("controllerchange", () => {
-                if (recarregou) return;
-                recarregou = true;
-                window.location.reload();
-            });
-
-            console.log("[PWA] Service Worker registrado. Escopo:", registro.scope);
-        } catch (erro) {
-            console.error("[PWA] Falha ao atualizar Service Worker:", erro);
-        }
-    });
+    navigator.serviceWorker.register("/hotspot/sw.js?v=7");
 }
 
 let deferredPrompt = null;
