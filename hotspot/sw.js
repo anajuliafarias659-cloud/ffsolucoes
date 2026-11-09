@@ -1,52 +1,58 @@
 
-/* FF HOTSPOT - SEM CACHE */
+// FF Hotspot - Service Worker
+// Atualização de HTML e consultas sem utilizar cache antigo
 
-self.addEventListener("install", event => {
+const VERSAO_SW = 'ff-hotspot-v3';
+
+self.addEventListener('install', (event) => {
     self.skipWaiting();
 });
 
-self.addEventListener("activate", event => {
+self.addEventListener('activate', (event) => {
     event.waitUntil((async () => {
-        const nomes = await caches.keys();
+        // Remove caches antigos do FF Hotspot
+        const cachesAntigos = await caches.keys();
 
         await Promise.all(
-            nomes.map(nome => caches.delete(nome))
+            cachesAntigos
+                .filter(nome => nome.startsWith('ff-hotspot-'))
+                .map(nome => caches.delete(nome))
         );
 
+        // Assume o controle das páginas abertas
         await self.clients.claim();
     })());
 });
 
-self.addEventListener("fetch", event => {
+self.addEventListener('fetch', (event) => {
     const request = event.request;
 
-    if (request.method !== "GET") return;
+    // Não intercepta requisições que não sejam GET
+    if (request.method !== 'GET') return;
 
-    event.respondWith(
-        fetch(request, {
-            cache: "no-store"
-        }).then(resposta => {
-            const novaResposta = new Response(resposta.body, resposta);
+    event.respondWith((async () => {
+        try {
+            // Busca diretamente na rede, ignorando cache HTTP
+            const resposta = await fetch(request, {
+                cache: 'no-store'
+            });
 
-            novaResposta.headers.set(
-                "Cache-Control",
-                "no-store, no-cache, must-revalidate, max-age=0"
-            );
+            return resposta;
 
-            novaResposta.headers.set("Pragma", "no-cache");
-            novaResposta.headers.set("Expires", "0");
+        } catch (erro) {
+            console.error('[FF HOTSPOT] Falha na conexão:', erro);
 
-            return novaResposta;
-        }).catch(() => {
             return new Response(
-                "Sem conexão com a internet.",
+                'Sem conexão com a internet. Verifique sua conexão.',
                 {
                     status: 503,
+                    statusText: 'Offline',
                     headers: {
-                        "Cache-Control": "no-store"
+                        'Content-Type': 'text/plain; charset=utf-8',
+                        'Cache-Control': 'no-store'
                     }
                 }
             );
-        })
-    );
+        }
+    })());
 });
