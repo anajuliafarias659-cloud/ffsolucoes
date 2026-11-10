@@ -207,126 +207,206 @@ Painel de Monitoramento da Infraestrutura
 </div>
 
 </div>
-  <script type="module">
+ 
+<script type="module">
 
 import { supabase } from "../js/supabase-login.js";
 
 let app_id = null;
+let intervalo = null;
 
-async function iniciar(){
+async function iniciar() {
 
-    const { data:{ session } } = await supabase.auth.getSession();
+    try {
 
-    if(!session){
+        // 1. Verifica se existe sessão
+        const { data: { session }, error: erroSessao } =
+            await supabase.auth.getSession();
 
-        location.href="/auth/login.html";
-        return;
+        if (erroSessao) {
+            console.error("Erro ao verificar sessão:", erroSessao);
+            location.href = "/auth/login.html";
+            return false;
+        }
 
+        if (!session) {
+            location.href = "/auth/login.html";
+            return false;
+        }
+
+        // 2. Busca os dados do usuário
+        const { data: usuario, error: erroUsuario } = await supabase
+            .from("usuarios")
+            .select("nome, app_id")
+            .eq("id", session.user.id)
+            .maybeSingle();
+
+        if (erroUsuario) {
+            console.error("Erro ao buscar usuário:", erroUsuario);
+            alert("Erro ao carregar os dados do usuário.");
+            return false;
+        }
+
+        if (!usuario) {
+            alert("Usuário não encontrado.");
+            await supabase.auth.signOut();
+            location.href = "/auth/login.html";
+            return false;
+        }
+
+        if (!usuario.app_id) {
+            alert("Este usuário não possui uma empresa vinculada.");
+            return false;
+        }
+
+        // 3. Guarda o app_id
+        app_id = usuario.app_id;
+        sessionStorage.setItem("app_id", app_id);
+
+        console.log("USUÁRIO:", usuario.nome);
+        console.log("APP_ID:", app_id);
+
+        // 4. Carrega a empresa
+        await carregarEmpresa();
+
+        return true;
+
+    } catch (erro) {
+
+        console.error("Erro ao iniciar painel:", erro);
+        alert("Não foi possível iniciar o painel.");
+
+        return false;
     }
-
-    const { data:usuario } = await supabase
-        .from("usuarios")
-        .select("nome,app_id")
-        .eq("id",session.user.id)
-        .single();
-
-    if(!usuario){
-
-        alert("Usuário não encontrado.");
-        return;
-
-    }
-
-app_id = usuario.app_id;
-
-sessionStorage.setItem("app_id", app_id);
-
-
-console.log("APP_ID USUARIO:", usuario.app_id);
-console.log("APP_ID UTILIZADO:", app_id);
-
-carregarEmpresa();
 }
 
-async function carregarEmpresa(){
 
-    const { data } = await supabase
+async function carregarEmpresa() {
+
+    const { data, error } = await supabase
         .from("monitor_config")
-        .select("*")
-        .eq("app_id",app_id)
-        .single();
+        .select("nome_empresa")
+        .eq("app_id", app_id)
+        .maybeSingle();
 
-    if(data){
-
-        document.getElementById("empresa").innerHTML =
-        "🖥️ " + data.nome_empresa;
-
-    }else{
-
-        document.getElementById("empresa").innerHTML =
-        "FF Infra";
-
+    if (error) {
+        console.error("Erro ao carregar empresa:", error);
     }
 
+    document.getElementById("empresa").textContent =
+        data?.nome_empresa || "FF Infra";
 }
 
-async function carregarResumo(){
 
-    const { count: gateways, error } = await supabase
-    .from("monitor_gateways")
-    .select("*", { count: "exact", head: true })
-    .eq("app_id", app_id);
+async function carregarResumo() {
 
-    console.log("Gateways:", gateways);
-    console.log("Erro:", error);
+    // Impede consultas sem empresa
+    if (!app_id) return;
 
-    document.getElementById("totalGateways").innerHTML = gateways ?? 0;
+    try {
 
-    const { count: equipamentos } = await supabase
-        .from("monitor_equipamentos")
-        .select("*", { count: "exact", head: true })
-        .eq("app_id", app_id);
+        // Gateways
+        const { count: gateways, error: erroGateways } =
+            await supabase
+                .from("monitor_gateways")
+                .select("*", { count: "exact", head: true })
+                .eq("app_id", app_id);
 
-    document.getElementById("totalEquipamentos").innerHTML = equipamentos || 0;
+        if (erroGateways) throw erroGateways;
 
-  // Busca os gateways da empresa
-const { data: gatewaysData } = await supabase
-    .from("monitor_gateways")
-    .select("id")
-    .eq("app_id", app_id);
+        document.getElementById("totalGateways").textContent =
+            gateways ?? 0;
 
-const gatewayIds = (gatewaysData || []).map(g => g.id);
 
-// Conta apenas alertas desses gateways
-const { count: alertas } = await supabase
-    .from("monitor_alertas")
-    .select("*", { count: "exact", head: true })
-    .in("gateway_id", gatewayIds)
-    .eq("lido", false);
+        // Equipamentos
+        const { count: equipamentos, error: erroEquipamentos } =
+            await supabase
+                .from("monitor_equipamentos")
+                .select("*", { count: "exact", head: true })
+                .eq("app_id", app_id);
 
-document.getElementById("totalAlertas").innerHTML = alertas || 0;
+        if (erroEquipamentos) throw erroEquipamentos;
 
-   const { count: clientes } = await supabase
-    .from("monitor_pppoe")
-    .select("*", { count: "exact", head: true })
-    .in("gateway_id", gatewayIds);
+        document.getElementById("totalEquipamentos").textContent =
+            equipamentos ?? 0;
 
-document.getElementById("totalClientes").innerHTML = clientes || 0;
 
-    document.getElementById("totalClientes").innerHTML = clientes || 0;
+        // Busca os gateways da empresa
+        const { data: gatewaysData, error: erroLista } =
+            await supabase
+                .from("monitor_gateways")
+                .select("id")
+                .eq("app_id", app_id);
+
+        if (erroLista) throw erroLista;
+
+        const gatewayIds = (gatewaysData || []).map(g => g.id);
+
+
+        // Alertas e clientes
+        let alertas = 0;
+        let clientes = 0;
+
+        if (gatewayIds.length > 0) {
+
+            const { count: totalAlertas, error: erroAlertas } =
+                await supabase
+                    .from("monitor_alertas")
+                    .select("*", { count: "exact", head: true })
+                    .in("gateway_id", gatewayIds)
+                    .eq("lido", false);
+
+            if (erroAlertas) throw erroAlertas;
+
+            alertas = totalAlertas ?? 0;
+
+
+            const { count: totalClientes, error: erroClientes } =
+                await supabase
+                    .from("monitor_pppoe")
+                    .select("*", { count: "exact", head: true })
+                    .in("gateway_id", gatewayIds);
+
+            if (erroClientes) throw erroClientes;
+
+            clientes = totalClientes ?? 0;
+        }
+
+        document.getElementById("totalAlertas").textContent = alertas;
+        document.getElementById("totalClientes").textContent = clientes;
+
+    } catch (erro) {
+
+        console.error("Erro ao carregar resumo:", erro);
+    }
 }
-window.logout = async function(){
+
+
+// Sair do sistema
+window.logout = async function () {
+
+    if (intervalo) {
+        clearInterval(intervalo);
+    }
 
     await supabase.auth.signOut();
 
-    location.href="/auth/login.html";
+    sessionStorage.removeItem("app_id");
+
+    location.href = "/auth/login.html";
+};
+
+
+// INICIALIZAÇÃO
+const autenticado = await iniciar();
+
+if (autenticado) {
+
+    await carregarResumo();
+
+    intervalo = setInterval(carregarResumo, 10000);
 
 }
-
-await iniciar();
-await carregarResumo();
-
-setInterval(carregarResumo,10000);
 
 </script>
 
