@@ -442,12 +442,16 @@ async function getAcceptedFriendContacts(userId){
  if(sent.error)throw sent.error;
  if(received.error)throw received.error;
  // O UUID requester_id/addressee_id é a identidade real; nomes são apenas rótulos.
+ const ownId=String(userId||'').trim().toLowerCase();
  const unique=new Map();
  for(const r of [...(sent.data||[]),...(received.data||[])]){
-  const isRequester=r.requester_id===userId;
-  const id=isRequester?r.addressee_id:r.requester_id;
-  if(!id||id===userId)continue;
-  if(!unique.has(id))unique.set(id,{id,name:isRequester?r.addressee_name:r.requester_name});
+  const requester=String(r.requester_id||'').trim().toLowerCase();
+  const addressee=String(r.addressee_id||'').trim().toLowerCase();
+  const id=requester===ownId?addressee:requester;
+  if(!id||id===ownId)continue;
+  if(!unique.has(id)){
+   unique.set(id,{id,name:requester===ownId?r.addressee_name:r.requester_name});
+  }
  }
  return [...unique.values()];
 }
@@ -695,10 +699,25 @@ async function loadFeed(){
 async function _loadFeedImpl(){const box=document.getElementById('feedList');if(!box||!currentUser)return;box.textContent='Carregando...';const {data,error}=await sb.from('ff_social_posts').select('id,author_id,body,media_path,media_type,external_url,external_platform,status,created_at').order('created_at',{ascending:false}).limit(40);if(error){box.textContent='Erro ao carregar feed: '+error.message+' — confira se executou o SQL de atualização do feed.';return}const rawVisible=(data||[]).filter(p=>p.status==='approved'||p.author_id===currentUser.id);const seenPostIds=new Set();const visible=rawVisible.filter(p=>{if(seenPostIds.has(p.id))return false;seenPostIds.add(p.id);return true});box.innerHTML='';if(!visible.length){box.innerHTML='<div class="feed-empty"><strong>Seu feed está esperando a primeira publicação!</strong><p>Compartilhe uma foto, vídeo ou link do YouTube/Instagram.</p></div>';renderReels([]);return}for(const post of visible){const {data:prof}=await sb.from('ff_social_profiles').select('display_name,avatar_path,show_online_status').eq('user_id',post.author_id).maybeSingle();const name=prof?.display_name||'Usuário';const card=document.createElement('article');card.className='post-card';card.id='post-'+post.id;const head=document.createElement('div');head.className='post-head';const av=document.createElement('div');av.className='avatar-preview';av.textContent=name.slice(0,1).toUpperCase();if(prof?.avatar_path){const u=await avatarUrl(prof.avatar_path);if(u){const img=document.createElement('img');img.className='avatar-preview';img.src=u;img.alt='';av.replaceWith(img)}}const meta=document.createElement('div');const strong=document.createElement('strong');strong.textContent=name;const small=document.createElement('small');small.className='muted';small.textContent=new Date(post.created_at).toLocaleString('pt-BR');meta.append(strong,small);if(prof?.show_online_status!==false){try{const {data:presence}=await sb.from('ff_social_presence').select('last_seen').eq('user_id',post.author_id).maybeSingle();const isOnline=presence?.last_seen&&(Date.now()-new Date(presence.last_seen).getTime()<120000);const badge=document.createElement('span');badge.className=isOnline?'ff-online-dot':'ff-offline-label';badge.textContent=isOnline?'Online':'Offline';meta.append(badge)}catch(e){}}head.append(av,meta);card.append(head);if(post.status==='pending'){const tag=document.createElement('p');tag.innerHTML='<span class="pill">Aguardando aprovação — somente você e a moderação veem</span>';card.append(tag)}if(post.body){const body=document.createElement('p');body.style.whiteSpace='pre-wrap';body.textContent=post.body;card.append(body)}if(post.media_path){const url=await signedPostImage(post.media_path);if(url){if(post.media_type==='video'){const video=document.createElement('video');video.className='post-video';video.src=url;video.controls=true;video.playsInline=true;video.preload='metadata';video.muted=true;video.loop=true;video.autoplay=true;card.append(video)}else{const img=document.createElement('img');img.className='post-media';img.src=url;img.alt='Imagem da publicação';card.append(img)}}}if(post.external_url){const embed=buildExternalEmbed(post.external_url);if(embed)card.append(embed);else{const link=document.createElement('a');link.href=post.external_url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Abrir conteúdo compartilhado';card.append(link)}}if(post.status==='approved'){const actions=document.createElement('div');actions.className='post-actions';const like=document.createElement('button');const {count}=await sb.from('ff_social_post_likes').select('*',{count:'exact',head:true}).eq('post_id',post.id);const {data:mine}=await sb.from('ff_social_post_likes').select('post_id').eq('post_id',post.id).eq('user_id',currentUser.id).maybeSingle();like.textContent=(mine?'♥':'♡')+' Curtir ('+(count||0)+')';like.onclick=()=>toggleLike(post.id,!!mine);const comments=document.createElement('button');comments.textContent='Comentários';comments.onclick=()=>showComments(post.id,card);const share=document.createElement('button');share.textContent='↗ Compartilhar';share.onclick=async()=>{const shareUrl=post.external_url||location.href.split('#')[0]+'#post-'+post.id;try{if(navigator.share)await navigator.share({title:'FF Social',text:post.body||'Veja esta publicação na FF Social',url:shareUrl});else{await navigator.clipboard.writeText(shareUrl);alert('Link copiado!')}}catch(err){if(err.name!=='AbortError')alert('Não foi possível compartilhar: '+err.message)}};actions.append(like,comments,share);card.append(actions)}box.append(card)}renderReels(visible.filter(p=>p.status==='approved'&&(p.media_type==='video'||p.external_url||p.media_path)).slice(0,12));enableVisibleVideoPlayback(box)}
 
 let ffStoriesCache=[];
+let ffStoriesLoadPromise=null;
+let ffStoriesReloadRequested=false;
+async function loadStoriesAndOnline(){
+ if(ffStoriesLoadPromise){
+  ffStoriesReloadRequested=true;
+  return ffStoriesLoadPromise;
+ }
+ ffStoriesLoadPromise=(async()=>{
+  do{
+   ffStoriesReloadRequested=false;
+   await _loadStoriesAndOnlineImpl();
+  }while(ffStoriesReloadRequested);
+ })().finally(()=>{ffStoriesLoadPromise=null});
+ return ffStoriesLoadPromise;
+}
 function openStoryComposer(){document.getElementById('ffStoryComposer')?.classList.remove('hidden')}
 function closeStoryComposer(){document.getElementById('ffStoryComposer')?.classList.add('hidden')}
 function closeStoryViewer(){document.getElementById('ffStoryViewer')?.classList.add('hidden');const c=document.getElementById('ffStoryViewerContent');if(c)c.innerHTML=''}
-async function loadStoriesAndOnline(){
+async function _loadStoriesAndOnlineImpl(){
  const track=document.getElementById('ffStoriesTrack');
  if(!track||!currentUser)return;
  track.innerHTML='<button class="ff-story-add" type="button" onclick="openStoryComposer()"><span class="ff-story-avatar"><b>＋</b></span><span>Adicionar status</span></button>';
@@ -719,10 +738,11 @@ async function loadStoriesAndOnline(){
  let contacts=[];
  try{contacts=await getAcceptedFriendContacts(currentUser.id)}catch(e){console.warn('Não foi possível carregar amigos:',e)}
  // Deduplica contatos antes de consultar perfis: cada pessoa deve aparecer uma única vez.
+ const ownId=String(currentUser.id||'').trim().toLowerCase();
  const ids=[...new Set((contacts||[])
   .map(x=>String(x.id||'').trim().toLowerCase())
-  .filter(id=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))
-  .filter(id=>id!==String(currentUser.id).toLowerCase()))];
+  .filter(id=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))
+  .filter(id=>id!==ownId))];
  let profiles=[],presences=[],stories=[];
  if(ids.length){
   const [pr,ps,st]=await Promise.all([
@@ -736,22 +756,29 @@ async function loadStoriesAndOnline(){
  // Identidade é exclusivamente o UUID do Supabase. Nome e foto nunca deduplicam usuários.
  const profileMap=new Map();
  for(const p of profiles){
-  if(!p?.user_id)continue;
-  if(!profileMap.has(p.user_id))profileMap.set(p.user_id,p);
+  const id=String(p?.user_id||'').trim().toLowerCase();
+  if(!id||profileMap.has(id))continue;
+  profileMap.set(id,p);
  }
  const presenceMap=new Map();
- for(const p of presences){if(p?.user_id){const old=presenceMap.get(p.user_id);if(!old||new Date(p.last_seen||0)>new Date(old.last_seen||0))presenceMap.set(p.user_id,p)}}
+ for(const p of presences){
+  const id=String(p?.user_id||'').trim().toLowerCase();
+  if(!id)continue;
+  const old=presenceMap.get(id);
+  if(!old||new Date(p.last_seen||0)>new Date(old.last_seen||0))presenceMap.set(id,p);
+ }
  const storyMap=new Map();
  for(const s of stories){
-  if(!s?.user_id||!s?.id||!s?.media_path)continue;
-  if(!storyMap.has(s.user_id))storyMap.set(s.user_id,[]);
-  const list=storyMap.get(s.user_id);
-  if(!list.some(x=>x.id===s.id))list.push(s);
+  const id=String(s?.user_id||'').trim().toLowerCase();
+  if(!id||!s?.id||!s?.media_path)continue;
+  if(!storyMap.has(id))storyMap.set(id,[]);
+  const list=storyMap.get(id);
+  if(!list.some(x=>String(x.id)===String(s.id)))list.push(s);
  }
- const ordered=[...profileMap.values()].map(p=>({
+ const ordered=[...profileMap.entries()].map(([id,p])=>({
   profile:p,
-  stories:(storyMap.get(p.user_id)||[]).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)),
-  presence:presenceMap.get(p.user_id)
+  stories:(storyMap.get(id)||[]).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)),
+  presence:presenceMap.get(id)
  })).sort((a,b)=>{
   const at=a.stories.length?new Date(a.stories[a.stories.length-1].created_at).getTime():0;
   const bt=b.stories.length?new Date(b.stories[b.stories.length-1].created_at).getTime():0;
@@ -769,12 +796,6 @@ async function loadStoriesAndOnline(){
    '<span class="muted" style="font-size:10px">'+(hasUpdates?(userStories.length===1?'1 status':userStories.length+' status'):online?'Online agora':'Ver perfil')+'</span>';
   btn.onclick=()=>hasUpdates?openStorySequence(userStories,p):openPublicProfile(p.user_id);
   track.append(btn);
- }
- const visit=document.getElementById('ffProfileVisitsSummary');
- if(visit){
-  const {count,error}=await sb.from('ff_social_profile_visits').select('*',{count:'exact',head:true})
-   .eq('profile_user_id',currentUser.id).gte('created_at',new Date(Date.now()-30*86400000).toISOString());
-  visit.textContent=error?'Visitas ao seu perfil: configure o SQL de visitas.':'Visitas ao seu perfil nos últimos 30 dias: '+(count||0);
  }
 }
 function isOnline(p,show=true){return show!==false&&!!p?.last_seen&&(Date.now()-new Date(p.last_seen).getTime()<120000)}
