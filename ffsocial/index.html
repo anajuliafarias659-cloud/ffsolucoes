@@ -295,7 +295,11 @@ body.ff-logged-in main.wrap,body.ff-logged-in #ffFloatingChat{position:relative;
   .hero-mark.hero-logo-image img{border-radius:16px}
 }
 
-</style></head>
+</style>
+<style id="ff-story-audio-clean-style">
+.ff-video-result{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;align-items:start;padding:10px;margin:8px 0;border:1px solid #dbe4f2;border-radius:14px;background:#fff;box-sizing:border-box}.ff-video-result>img{width:92px;height:72px;object-fit:cover;border-radius:9px}.ff-video-result-body{min-width:0}.ff-video-result-title{font-size:13px;font-weight:700;line-height:1.35;margin:2px 0 9px;overflow-wrap:anywhere}.ff-video-result-actions{display:flex;flex-wrap:wrap;gap:7px}.ff-video-result-actions button{font-size:12px;padding:8px 10px}.ff-video-result.is-selected{border-color:#2474df;background:#f1f6ff}.ff-video-select-button.is-selected{background:#16834a!important;color:#fff!important}.ff-video-preview-button.is-playing{background:#27364d!important;color:#fff!important}.ff-video-player{grid-column:1/-1;margin-top:8px;width:100%}.ff-video-player iframe,.ff-story-selected-player iframe{display:block;width:100%;height:170px;border:0;border-radius:10px;background:#111}.ff-story-selected-player{width:100%;margin-top:8px}
+</style>
+</head>
 <body><main class="wrap">
 <header class="brand"><div class="logo" id="brandAvatarWrap"><span id="brandAvatarFallback">FF</span></div><div class="brand-copy"><h1 id="brandGreeting">Olá!</h1><p id="brandBio">Conectando pessoas. Compartilhando momentos.</p></div></header>
 <section id="authView" class="card">
@@ -884,17 +888,33 @@ async function _loadStoriesAndOnlineImpl(){
 }
 function isOnline(p,show=true){return show!==false&&!!p?.last_seen&&(Date.now()-new Date(p.last_seen).getTime()<120000)}
 let ffStorySelectedMusic=null;
+let ffStoryActivePreview=null;
+function stopStoryMusicPreview(){
+ if(ffStoryActivePreview){
+  try{ffStoryActivePreview.frame.src='about:blank'}catch(e){}
+  if(ffStoryActivePreview.box){ffStoryActivePreview.box.hidden=true;ffStoryActivePreview.box.innerHTML=''}
+  if(ffStoryActivePreview.button){ffStoryActivePreview.button.textContent='▶ Ouvir prévia';ffStoryActivePreview.button.classList.remove('is-playing')}
+  ffStoryActivePreview=null;
+ }
+ document.querySelectorAll('.ff-video-preview-button').forEach(b=>{b.textContent='▶ Ouvir prévia';b.classList.remove('is-playing')});
+ const selectedPreview=document.getElementById('ffStoryMusicPreview');
+ if(selectedPreview){const frame=selectedPreview.querySelector('iframe');if(frame)frame.src='about:blank'}
+}
 function clearStoryMusic(){
- ffStorySelectedMusic=null;
+ stopStoryMusicPreview();ffStorySelectedMusic=null;
  const box=document.getElementById('ffStoryMusicSelected');
- if(box)box.textContent='Nenhuma música selecionada.';const preview=document.getElementById('ffStoryMusicPreview');if(preview)preview.innerHTML='<span>Prévia da música aparecerá aqui após selecionar.</span>';
+ if(box)box.textContent='Nenhuma música selecionada.';
+ const preview=document.getElementById('ffStoryMusicPreview');
+ if(preview)preview.innerHTML='<span>Selecione uma música e use Ouvir prévia para escutar.</span>';
+ document.querySelectorAll('.ff-video-result').forEach(c=>c.classList.remove('is-selected'));
+ document.querySelectorAll('.ff-video-result .ff-video-select-button').forEach(b=>{b.textContent='＋ Adicionar ao status';b.classList.remove('is-selected')});
 }
 async function searchStoryMusic(){
  const input=document.getElementById('ffStoryMusicSearch');
  const box=document.getElementById('ffStoryMusicResults');
  const term=input?.value.trim();
  if(!term){box.textContent='Digite o nome da música ou artista.';return}
- box.textContent='Pesquisando músicas...';
+ stopStoryMusicPreview();box.textContent='Pesquisando músicas...';
  try{
   const url='https://www.googleapis.com/youtube/v3/search?part=snippet&q='+encodeURIComponent(term+' música')+'&type=video&videoCategoryId=10&maxResults=10&safeSearch=moderate&key='+FF_SOCIAL_YOUTUBE_API_KEY;
   const res=await fetch(url);const data=await res.json();
@@ -904,56 +924,45 @@ async function searchStoryMusic(){
   if(!items.length){box.textContent='Nenhuma música encontrada.';return}
   for(const item of items){
    const id=item.id.videoId,title=item.snippet?.title||'Música';
-   const card=document.createElement('article');card.className='ff-video-result';
+   const card=document.createElement('article');card.className='ff-video-result';card.dataset.videoId=id;
    const thumb=document.createElement('img');thumb.loading='lazy';thumb.alt='';thumb.src=item.snippet?.thumbnails?.medium?.url||'';
    const body=document.createElement('div');body.className='ff-video-result-body';
    const name=document.createElement('div');name.className='ff-video-result-title';name.textContent=title;
    const actions=document.createElement('div');actions.className='ff-video-result-actions';
-   const previewBtn=document.createElement('button');previewBtn.type='button';previewBtn.className='secondary';previewBtn.textContent='▶ Ouvir prévia';
-   const choose=document.createElement('button');choose.type='button';choose.className='primary';choose.textContent='＋ Adicionar ao status';
+   const previewBtn=document.createElement('button');previewBtn.type='button';previewBtn.className='secondary ff-video-preview-button';previewBtn.textContent='▶ Ouvir prévia';
+   const choose=document.createElement('button');choose.type='button';choose.className='primary ff-video-select-button';choose.textContent='＋ Adicionar ao status';
    const previewBox=document.createElement('div');previewBox.className='ff-video-player';previewBox.hidden=true;
-   const stopPreview=()=>{const frame=previewBox.querySelector('iframe');if(frame)frame.src='about:blank';previewBox.hidden=true;previewBox.innerHTML='';previewBtn.textContent='▶ Ouvir prévia';previewBtn.onclick=startPreview};
-   const startPreview=()=>{
-    document.querySelectorAll('.ff-video-player').forEach(player=>{player.hidden=true;player.innerHTML=''});
-    document.querySelectorAll('.ff-video-preview-button').forEach(btn=>{btn.textContent='▶ Ouvir prévia'});
+   previewBtn.onclick=()=>{
+    if(ffStoryActivePreview?.id===id){stopStoryMusicPreview();return}
+    stopStoryMusicPreview();
     const frame=document.createElement('iframe');
     frame.src='https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&controls=1&playsinline=1&rel=0';
     frame.title='Prévia: '+title;frame.allow='autoplay; encrypted-media; picture-in-picture';
     frame.referrerPolicy='strict-origin-when-cross-origin';
     previewBox.innerHTML='';previewBox.append(frame);previewBox.hidden=false;
-    previewBtn.textContent='■ Parar prévia';
+    previewBtn.textContent='■ Parar prévia';previewBtn.classList.add('is-playing');
+    ffStoryActivePreview={id,frame,box:previewBox,button:previewBtn};
    };
-   previewBtn.className='secondary ff-video-preview-button';
-   previewBtn.onclick=startPreview;
    choose.onclick=()=>{
-    ffStorySelectedMusic={id,title};
+    stopStoryMusicPreview();ffStorySelectedMusic={id,title};
     const selected=document.getElementById('ffStoryMusicSelected');
-    selected.textContent='Áudio escolhido: '+title;
+    if(selected)selected.textContent='Áudio escolhido: '+title;
+    document.querySelectorAll('.ff-video-result').forEach(c=>{
+      const isSelected=c.dataset.videoId===id;c.classList.toggle('is-selected',isSelected);
+      const b=c.querySelector('.ff-video-select-button');if(b){b.textContent=isSelected?'✓ Selecionado':'＋ Adicionar ao status';b.classList.toggle('is-selected',isSelected)}
+    });
     const preview=document.getElementById('ffStoryMusicPreview');
-    if(preview){
-      preview.innerHTML='';
-      const panel=document.createElement('div');panel.className='ff-story-audio-preview-card';
-      const info=document.createElement('div');info.className='ff-story-audio-preview-info';
-      const titleEl=document.createElement('strong');titleEl.textContent=title;
-      const hint=document.createElement('small');hint.textContent='Prévia da música';info.append(titleEl,hint);
+    if(preview){preview.innerHTML='';const panel=document.createElement('div');panel.className='ff-story-audio-preview-card';
+      const info=document.createElement('div');info.className='ff-story-audio-preview-info';const titleEl=document.createElement('strong');titleEl.textContent=title;
+      const hint=document.createElement('small');hint.textContent='Música selecionada — toque para ouvir';info.append(titleEl,hint);
       const play=document.createElement('button');play.type='button';play.className='primary ff-story-preview-play';play.textContent='▶ Ouvir prévia';
-      play.onclick=()=>{
-        panel.innerHTML='';
-        const frame=document.createElement('iframe');
-        frame.src='https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&controls=1&playsinline=1&rel=0';
-        frame.title='Prévia: '+title;frame.allow='autoplay; encrypted-media; picture-in-picture';
-        frame.referrerPolicy='strict-origin-when-cross-origin';
-        panel.append(frame);
-        const stop=document.createElement('button');stop.type='button';stop.className='secondary';stop.textContent='Parar prévia';
-        stop.onclick=()=>{frame.src='about:blank';panel.innerHTML='';panel.append(info,play)};
-        panel.append(stop);
-      };
-      panel.append(info,play);preview.append(panel);
+      const player=document.createElement('div');player.className='ff-story-selected-player';player.hidden=true;
+      play.onclick=()=>{stopStoryMusicPreview();const frame=document.createElement('iframe');frame.src='https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&controls=1&playsinline=1&rel=0';frame.title='Prévia: '+title;frame.allow='autoplay; encrypted-media; picture-in-picture';frame.referrerPolicy='strict-origin-when-cross-origin';player.innerHTML='';player.append(frame);player.hidden=false;play.textContent='■ Parar prévia';ffStoryActivePreview={id,frame,box:player,button:play};};
+      panel.append(info,play,player);preview.append(panel);
     }
-    box.querySelectorAll('button').forEach(b=>b.disabled=true);
-    choose.disabled=false;choose.textContent='✓ Selecionado';
    };
    actions.append(previewBtn,choose);body.append(name,actions,previewBox);card.append(thumb,body);box.append(card);
+   if(ffStorySelectedMusic?.id===id){card.classList.add('is-selected');choose.textContent='✓ Selecionado';choose.classList.add('is-selected')}
   }
  }catch(e){box.textContent='Erro ao pesquisar áudio: '+(e.message||e)}
 }
