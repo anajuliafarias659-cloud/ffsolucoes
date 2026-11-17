@@ -1,5 +1,5 @@
 /* HÃ? SMART CACHE v2 — evita falso aviso a cada F5. */
-const CACHE_NAME='ha-social-shell-v9';
+const CACHE_NAME='ha-social-shell-v10';
 const APP_SHELL='./';
 self.addEventListener('install',event=>{
  event.waitUntil((async()=>{
