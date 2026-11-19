@@ -12496,49 +12496,66 @@ html.ff-video-lightbox-open::after{content:"";position:fixed;inset:0;background:
 <script id="ha-reels-integrated-controller-swipe-v2">
 (()=>{
  if(window.__haReelsIntegratedV2)return;window.__haReelsIntegratedV2=true;
- let viewer,stage,card=null,placeholder=null,index=0,items=[],hideTimer=null,audioUnlocked=false,savedScrollY=0;
+ let viewer,stage,card=null,placeholder=null,index=0,items=[],hideTimer=null,audioUnlocked=false,savedScrollY=0,gesture=null,lastGestureAt=0;
  const $=(q,r=document)=>r.querySelector(q);
  function ensure(){
   if(viewer)return;
   viewer=document.createElement('div');viewer.id='haReelsViewer';
-  viewer.innerHTML='<div class="ha-r-stage"></div><button class="ha-r-close" type="button" aria-label="Fechar">×</button><button class="ha-r-prev" type="button" aria-label="Anterior">‹</button><button class="ha-r-next" type="button" aria-label="Próximo">›</button><button class="ha-r-sound" type="button">🔇 Ativar som</button>';
+  viewer.innerHTML='<div class="ha-r-stage"></div><div class="ha-r-swipe-zone ha-r-swipe-left" aria-hidden="true"></div><div class="ha-r-swipe-zone ha-r-swipe-right" aria-hidden="true"></div><button class="ha-r-close" type="button" aria-label="Fechar">×</button><button class="ha-r-prev" type="button" aria-label="Anterior">‹</button><button class="ha-r-next" type="button" aria-label="Próximo">›</button><button class="ha-r-sound" type="button">🔇 Ativar som</button>';
   stage=$('.ha-r-stage',viewer);document.body.append(viewer);
-  $('.ha-r-close',viewer).onclick=close;$('.ha-r-prev',viewer).onclick=()=>move(-1);$('.ha-r-next',viewer).onclick=()=>move(1);$('.ha-r-sound',viewer).onclick=()=>sound(true);
-  // Gesto vertical para avançar/voltar: funciona com toque, mouse/trackpad e caneta.
-  // Em players externos, inicie o arrasto fora do iframe para não bloquear seus controles.
-  let gesture=null,lastGestureAt=0;
-  const gestureIgnored='button,a,input,textarea,select,.post-actions,.ha-r-sound,.ha-r-close,.ha-r-prev,.ha-r-next';
-  viewer.addEventListener('pointerdown',e=>{
-   if(!e.isPrimary||e.button!==0||e.target.closest(gestureIgnored))return;
-   if(e.target.closest('iframe')||e.target.closest('.external-frame-wrap'))return;
+  $('.ha-r-close',viewer).onclick=close;$('.ha-r-prev',viewer).onclick=()=>move(-1);$('.ha-r-next',viewer).onclick=()=>move(1);$('.ha-r-sound',viewer).onclick=()=>sound();
+  const ignored='button,a,input,textarea,select,.post-actions,.ha-r-sound,.ha-r-close,.ha-r-prev,.ha-r-next';
+  function startGesture(e){
+   if(e.button!==undefined&&e.button!==0)return;
+   if(e.target.closest(ignored))return;
    gesture={x:e.clientX,y:e.clientY,id:e.pointerId};
-  },{passive:true});
-  viewer.addEventListener('pointerup',e=>{
-   if(!gesture||gesture.id!==e.pointerId)return;
+  }
+  function endGesture(e){
+   if(!gesture)return;
+   if(gesture.id!==undefined&&e.pointerId!==undefined&&gesture.id!==e.pointerId)return;
    const dx=e.clientX-gesture.x,dy=e.clientY-gesture.y;gesture=null;
-   if(Math.abs(dy)>55&&Math.abs(dy)>Math.abs(dx)*1.15){move(dy<0?1:-1);showControls();lastGestureAt=Date.now();return;}
-   showControls();
-  },{passive:true});
-  viewer.addEventListener('pointercancel',()=>{gesture=null},{passive:true});
-  viewer.addEventListener('wheel',e=>{
-   if(!viewer.classList.contains('open')||Date.now()-lastGestureAt<500)return;
-   if(Math.abs(e.deltaY)>25){move(e.deltaY>0?1:-1);showControls();lastGestureAt=Date.now();}
-  },{passive:true});
-  // Fallback para navegadores móveis sem Pointer Events.
-  let touchStart=null,touchOnEmbed=false;
-  viewer.addEventListener('touchstart',e=>{touchStart={x:e.touches[0]?.clientX||0,y:e.touches[0]?.clientY||0};touchOnEmbed=!!e.target.closest('iframe,.external-frame-wrap')},{passive:true});
-  viewer.addEventListener('touchend',e=>{
-   if(!touchStart)return;const end=e.changedTouches[0],dx=(end?.clientX||0)-touchStart.x,dy=(end?.clientY||0)-touchStart.y;touchStart=null;
-   if(touchOnEmbed){touchOnEmbed=false;return;}
-   if(Math.abs(dy)>65&&Math.abs(dy)>Math.abs(dx)*1.15){move(dy<0?1:-1);showControls();lastGestureAt=Date.now();}
-  },{passive:true});
+   if(Math.abs(dy)>48&&Math.abs(dy)>Math.abs(dx)*1.12){move(dy<0?1:-1);showControls();lastGestureAt=Date.now();}
+   else showControls();
+  }
+  // Zonas laterais ficam acima dos iframes compartilhados: permitem avançar sem roubar os controles centrais do player.
+  viewer.querySelectorAll('.ha-r-swipe-zone').forEach(z=>{
+   z.addEventListener('pointerdown',startGesture,{passive:true});
+   z.addEventListener('pointerup',endGesture,{passive:true});
+   z.addEventListener('pointercancel',()=>gesture=null,{passive:true});
+   z.addEventListener('touchstart',e=>{const t=e.touches[0];gesture={x:t.clientX,y:t.clientY,id:undefined}},{passive:true});
+   z.addEventListener('touchend',e=>{const t=e.changedTouches[0];if(t)endGesture({clientX:t.clientX,clientY:t.clientY})},{passive:true});
+  });
+  viewer.addEventListener('pointerdown',e=>{if(e.target.closest('.ha-r-stage'))startGesture(e)},{passive:true});
+  viewer.addEventListener('pointerup',endGesture,{passive:true});
+  viewer.addEventListener('pointercancel',()=>gesture=null,{passive:true});
+  viewer.addEventListener('wheel',e=>{if(!viewer.classList.contains('open')||Date.now()-lastGestureAt<450)return;if(Math.abs(e.deltaY)>25){move(e.deltaY>0?1:-1);showControls();lastGestureAt=Date.now()}},{passive:true});
   document.addEventListener('keydown',e=>{if(!viewer.classList.contains('open'))return;if(e.key==='Escape')close();if(e.key==='ArrowDown')move(1);if(e.key==='ArrowUp')move(-1)});
  }
  function list(){return [...document.querySelectorAll('#reelsTrack .reel-tile[data-post-id]')].filter(t=>document.getElementById('post-'+t.dataset.postId));}
  function restore(){if(card&&placeholder?.parentNode){placeholder.parentNode.insertBefore(card,placeholder);placeholder.remove()}card=null;placeholder=null;}
  function hideLater(){clearTimeout(hideTimer);hideTimer=setTimeout(()=>viewer?.classList.add('controls-hidden'),2000)}
  function showControls(){viewer.classList.remove('controls-hidden');hideLater()}
- async function sound(){audioUnlocked=true;if(!card)return;const v=$('video.post-video',card);if(v){v.muted=false;v.defaultMuted=false;v.volume=1;try{await v.play();$('.ha-r-sound',viewer).textContent='🔊 Som ativado'}catch(e){$('.ha-r-sound',viewer).textContent='Toque novamente para ativar som'}}else{$('.ha-r-sound',viewer).textContent='🔊 Som: use o player incorporado'}showControls()}
+ async function applyAudio(v){
+  if(!v||!audioUnlocked)return;
+  v.muted=false;v.defaultMuted=false;v.removeAttribute('muted');v.volume=1;v.dataset.audioOn='1';
+  if(typeof ffVideoAudioEnabled!=='undefined')ffVideoAudioEnabled=true;
+  if(typeof ffActiveVisibleVideo!=='undefined')ffActiveVisibleVideo=v;
+  try{
+   if(typeof activateVideoSound==='function')await activateVideoSound(v);
+   else await v.play();
+   v.muted=false;v.defaultMuted=false;v.volume=1;
+   $('.ha-r-sound',viewer).textContent='🔊 Som ativado';
+  }catch(_){$('.ha-r-sound',viewer).textContent='🔊 Toque para retomar';}
+ }
+ async function sound(){
+  audioUnlocked=true;
+  if(typeof ffVideoAudioEnabled!=='undefined')ffVideoAudioEnabled=true;
+  if(!card)return;
+  const v=$('video.post-video',card);
+  if(v)await applyAudio(v);
+  else $('.ha-r-sound',viewer).textContent='🔊 Áudio controlado pelo player compartilhado';
+  showControls();
+ }
  function open(tile){
   ensure();const post=document.getElementById('post-'+tile.dataset.postId);if(!post)return;
   restore();items=list();index=items.indexOf(tile);if(index<0)index=0;
@@ -12546,23 +12563,30 @@ html.ff-video-lightbox-open::after{content:"";position:fixed;inset:0;background:
   placeholder=document.createComment('ha-reels-original-position');post.parentNode.insertBefore(placeholder,post);card=post;card.classList.add('ha-r-card');stage.replaceChildren(card);
   viewer.classList.add('open');document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';
   const v=$('video.post-video',card);$('.ha-r-sound',viewer).textContent=audioUnlocked?'🔊 Som ativado':'🔇 Ativar som';
-  if(v){v.loop=true;v.playsInline=true;v.volume=1;v.muted=!audioUnlocked;v.defaultMuted=!audioUnlocked;
-   const setOrientation=()=>{const shell=v.closest('.ff-video-shell');if(shell){const ratio=(v.videoWidth||0)/(v.videoHeight||1);shell.classList.toggle('ha-r-portrait',ratio>0&&ratio<1)}};
-   v.addEventListener('loadedmetadata',setOrientation,{once:true});setOrientation();
-   const play=v.play();if(play?.catch)play.catch(()=>{v.muted=true;v.defaultMuted=true;$('.ha-r-sound',viewer).textContent='Toque para ativar som';});
+  if(v){
+   v.loop=true;v.playsInline=true;v.setAttribute('playsinline','');v.volume=1;
+   if(audioUnlocked){applyAudio(v)}else{v.muted=true;v.defaultMuted=true;v.play().catch(()=>{});}
+   const orient=()=>{const sh=v.closest('.ff-video-shell');if(sh){const r=(v.videoWidth||0)/(v.videoHeight||1);sh.classList.toggle('ha-r-portrait',r>0&&r<1)}};
+   v.addEventListener('loadedmetadata',orient,{once:true});orient();
   }else{
-   // Players incorporados têm política de áudio própria; não bloquear navegação/swipe sobre o iframe.
-   const frame=$('iframe',card);if(frame){frame.setAttribute('allow','autoplay; encrypted-media; picture-in-picture; fullscreen');}
+   const frame=$('iframe',card);
+   if(frame){frame.setAttribute('allow','autoplay; encrypted-media; picture-in-picture; fullscreen');}
   }
   showControls();
  }
  function close(){if(!viewer)return;clearTimeout(hideTimer);restore();viewer.classList.remove('open','controls-hidden');stage.replaceChildren();document.documentElement.style.overflow='';document.body.style.overflow='';window.scrollTo(0,savedScrollY);if(typeof enableVisibleVideoPlayback==='function')enableVisibleVideoPlayback(document.getElementById('feedList')||document)}
- function move(d){let n=index+d;if(n<0||n>=items.length)return;open(items[n])}
+ function move(d){const n=index+d;if(n<0||n>=items.length)return;open(items[n])}
  document.addEventListener('click',e=>{const t=e.target.closest?.('#reelsTrack .reel-tile[data-post-id]');if(t){e.preventDefault();e.stopImmediatePropagation();open(t)}},true);
  window.openHaReels=()=>{const first=list()[0];if(first)open(first);else document.getElementById('haReelsPanel')?.scrollIntoView({behavior:'smooth'})};
  const btn=$('#haOpenReelsButton');if(btn)btn.addEventListener('click',()=>window.openHaReels());
 })();
-</script>
+</script><style id="ha-reels-swipe-audio-final">
+#haReelsViewer .ha-r-swipe-zone{position:absolute;z-index:25;top:12%;bottom:12%;width:22%;max-width:105px;min-width:54px;background:transparent;touch-action:none;pointer-events:auto}
+#haReelsViewer .ha-r-swipe-left{left:0}
+#haReelsViewer .ha-r-swipe-right{right:0}
+#haReelsViewer .ha-r-stage{z-index:1}
+#haReelsViewer .ha-r-swipe-zone{cursor:ns-resize}
+</style>
 
 </body></html>
 
