@@ -4673,6 +4673,34 @@ body.ff-logged-in .ff-message-bubble{
 #ffShareVideoModal #ffShareVideoStatus{white-space:pre-line;overflow-wrap:anywhere}
 </style>
 
+
+<style id="ha-v36-share-caption-note">
+#ffShareVideoModal #ffShareVideoStatus{white-space:pre-line;overflow-wrap:anywhere;line-height:1.45}
+</style>
+
+
+<style id="ha-v37-share-caption-fallback">
+#ffShareVideoModal #ffShareVideoStatus{
+ display:block!important;
+ padding:8px 10px!important;
+ border-radius:9px!important;
+ background:rgba(13,38,63,.08)!important;
+ color:inherit!important;
+ white-space:pre-line!important;
+ overflow-wrap:anywhere!important;
+ line-height:1.45!important;
+}
+</style>
+
+
+<style id="ha-v38-explicit-copy-link-after-video">
+#ffShareVideoModal #ffShareVideoStatus{
+ display:block!important;white-space:pre-line!important;
+ overflow-wrap:anywhere!important;line-height:1.45!important;
+}
+#ffShareCaptionCopyAfterVideo:focus{outline:3px solid #7cc4ff!important;outline-offset:2px!important}
+</style>
+
 </head>
 <body>
 <div id="ffHaStartupLoader" role="status" aria-live="polite" aria-label="Carregando Hã?">
@@ -6541,49 +6569,97 @@ function ffBuildBrandedShareText(title,url){
   ?'Publicado originalmente por '+originalAuthor+' na Hã?'
   :'Vídeo publicado originalmente na Hã?';
  return '🎬 '+(title||'Veja este vídeo')+
-  '\\n'+originalLine+
-  '\\nCompartilhado a partir da publicação original.'+
-  '\\nVeja mais vídeos como este na Hã?!'+
-  '\\nCadastre-se grátis e descubra a comunidade: '+safeUrl;
+  '\n'+originalLine+
+  '\nCompartilhado a partir da publicação original.'+
+  '\nVeja mais vídeos como este na Hã?!'+
+  '\nCadastre-se grátis e descubra a comunidade:'+
+  '\n'+safeUrl;
 }
-async function ffTryNativeVideoFileShare(title,text,status){
+
+function ffShowPostShareCaptionButton(caption,status){
+ if(!status)return;
+ status.textContent='O aplicativo recebeu somente o vídeo. Para enviar também o link da Hã?, toque no botão abaixo e cole a mensagem na conversa.';
+ let btn=document.getElementById('ffShareCaptionCopyAfterVideo');
+ if(!btn){
+  btn=document.createElement('button');
+  btn.id='ffShareCaptionCopyAfterVideo';
+  btn.type='button';
+  btn.textContent='📋 Copiar link + crédito + convite';
+  btn.style.cssText='display:block;width:100%;margin-top:9px;padding:12px 14px;border:1px solid #168cff;border-radius:11px;background:#0878df;color:#fff;font-weight:800;font-size:13px;cursor:pointer';
+  status.insertAdjacentElement('afterend',btn);
+ }
+ btn.onclick=async()=>{
+  try{
+   if(navigator.clipboard?.writeText){
+    await navigator.clipboard.writeText(caption);
+    btn.textContent='✓ Mensagem copiada — cole no chat';
+   }else{
+    const area=document.createElement('textarea');
+    area.value=caption;area.style.position='fixed';area.style.opacity='0';
+    document.body.appendChild(area);area.focus();area.select();
+    const ok=document.execCommand('copy');area.remove();
+    if(!ok)throw new Error('Cópia automática indisponível');
+    btn.textContent='✓ Mensagem copiada — cole no chat';
+   }
+  }catch(err){
+   window.prompt('Copie a mensagem completa e cole na conversa:',caption);
+  }
+ };
+}
+
+async function ffTryNativeVideoFileShare(title,status){
  if(!navigator.share||!navigator.canShare)return false;
  const file=await ffGetPendingVideoFile();
  if(!file||!navigator.canShare({files:[file]}))return false;
- if(status)status.textContent='Abrindo compartilhamento do vídeo com o convite da Hã?...';
+ if(status)status.textContent='Enviando vídeo. Alguns aplicativos podem separar a legenda do arquivo...';
+ const oldCopy=document.getElementById('ffShareCaptionCopyAfterVideo');
+ if(oldCopy)oldCopy.remove();
  const url=ffVideoPendingShare?.url||'';
- const brandedText=ffBuildBrandedShareText(title,url);
- // Envia arquivo e convite juntos. Alguns destinos podem ignorar o texto
- // quando recebem arquivo; por isso a alternativa abaixo também oferece link.
- await navigator.share({files:[file],title:'Hã? — '+title+' · '+(ffVideoPendingShare?.authorName||'Vídeo original'),text:brandedText,url});
+ const caption=ffBuildBrandedShareText(title,url);
+ // O arquivo e a legenda são enviados no mesmo payload do compartilhador do aparelho.
+ // O aplicativo de destino decide se mantém o texto como legenda ou mensagem separada.
+ await navigator.share({
+  files:[file],
+  title:'Hã? — '+title+' · '+(ffVideoPendingShare?.authorName||'Vídeo original'),
+  text:caption
+ });
+ // Muitos destinos descartam "text" quando recebem "files". Não afirmamos
+ // que o texto foi enviado: mostramos um botão de cópia acionado pelo usuário.
+ ffShowPostShareCaptionButton(caption,status);
  return true;
 }
 async function shareVideoExternal(destination){
  if(!ffVideoPendingShare)return;
  const title=ffVideoPendingShare.title||'Vídeo na Hã?';
- const url=ffVideoPendingShare.url||location.href.split('#')[0];
- const text=ffBuildBrandedShareText(title,url);
+ let url=ffVideoPendingShare.url||location.href.split('#')[0];
  const status=document.getElementById('ffShareVideoStatus');
  try{
-  if(destination==='whatsapp'){
+  if(destination==='whatsapp'||destination==='native'){
    if(ffVideoPendingShare.mediaPath&&ffVideoPendingShare.mediaType==='video'){
     try{
-     const shared=await ffTryNativeVideoFileShare(title,text,status);
+     const shared=await ffTryNativeVideoFileShare(title,status);
      if(shared)return;
     }catch(fileError){
      if(fileError?.name==='AbortError')return;
-     console.warn('Não foi possível anexar o vídeo; será enviado o link:',fileError);
+     console.warn('Compartilhamento de arquivo com legenda não disponível; usando link:',fileError);
     }
-   }else if(ffVideoPendingShare.externalUrl){
-    url=ffVideoPendingShare.externalUrl;
    }
-   window.open('https://wa.me/?text='+encodeURIComponent(text+'\\n'+url),'_blank','noopener');
+   if(ffVideoPendingShare.externalUrl&&!ffVideoPendingShare.mediaPath)url=ffVideoPendingShare.externalUrl;
+   const text=ffBuildBrandedShareText(title,url);
+   if(destination==='whatsapp'){
+    window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank','noopener');
+   }else if(navigator.share){
+    await navigator.share({title:'Hã? — '+title,text,url});
+   }else if(navigator.clipboard?.writeText){
+    await navigator.clipboard.writeText(text);
+    if(status)status.textContent='Legenda e link copiados!';
+   }else{
+    window.prompt('Copie a mensagem e o link:',text);
+   }
   }else if(destination==='facebook'){
-   // O endpoint web do Facebook aceita URL, não upload binário. Em aparelhos
-   // compatíveis, abre primeiro a folha nativa para anexar o arquivo.
    if(ffVideoPendingShare.mediaPath&&ffVideoPendingShare.mediaType==='video'){
     try{
-     const shared=await ffTryNativeVideoFileShare(title,text,status);
+     const shared=await ffTryNativeVideoFileShare(title,status);
      if(shared)return;
     }catch(fileError){
      if(fileError?.name==='AbortError')return;
@@ -6591,19 +6667,16 @@ async function shareVideoExternal(destination){
     }
    }
    window.open('https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(url),'_blank','noopener');
-  }else if(destination==='native'){
-   if(ffVideoPendingShare.mediaPath&&ffVideoPendingShare.mediaType==='video'){
-    const shared=await ffTryNativeVideoFileShare(title,text,status);
-    if(shared)return;
-   }
-   if(navigator.share)await navigator.share({title:'Hã? — '+title,text,url});
-   else if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(url);if(status)status.textContent='Link copiado. Agora você pode colar em outro aplicativo.'}
-   else window.prompt('Copie o link do vídeo:',url);
   }else if(destination==='copy'){
-   if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);if(status)status.textContent='Convite da Hã? e link copiados!'}
-   else window.prompt('Copie o link do vídeo:',url);
+   const text=ffBuildBrandedShareText(title,url);
+   if(navigator.clipboard?.writeText){
+    await navigator.clipboard.writeText(text);
+    if(status)status.textContent='Mensagem completa copiada: crédito do autor + link original da Hã? + convite.';
+   }else window.prompt('Copie a mensagem e o link:',text);
   }
- }catch(err){if(err?.name!=='AbortError'&&status)status.textContent='Não foi possível compartilhar: '+(err.message||err)}
+ }catch(err){
+  if(err?.name!=='AbortError'&&status)status.textContent='Não foi possível compartilhar: '+(err.message||err);
+ }
 }
 async function showShareVideoFriends(){
  const area=document.getElementById('ffShareFriendsArea'),select=document.getElementById('ffShareFriendSelect'),status=document.getElementById('ffShareVideoStatus');
